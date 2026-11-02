@@ -311,7 +311,7 @@ export const setupJobResultSchema = z.discriminatedUnion('kind', [
   ]),
   z.object({ kind: z.literal('check_repo'), signedIn: z.boolean(), found: z.boolean(), canPush: z.boolean(), defaultBranch: z.string().nullable(), cloned: z.boolean(), error: z.string().nullable() }),
   z.object({ kind: z.literal('detect_clis'), clis: z.array(z.object({ id: z.enum(['claude', 'codex']), version: z.string().nullable(), signedIn: z.boolean() })) }),
-  z.object({ kind: z.literal('github'), status: z.number(), body: z.unknown() }),
+  z.object({ kind: z.literal('github'), status: z.number(), body: z.unknown(), failureLines: z.array(z.string()).optional() }),
   z.object({ kind: z.literal('cleanup_worktrees'), removed: z.array(z.string()), kept: z.array(z.string()) }),
   z.object({ kind: z.literal('integration_prepare'), status: z.enum(['prepared', 'integrated', 'moved', 'conflict', 'empty', 'failed']), targetSha: z.string(), commitSha: z.string().nullable(), files: z.array(z.string()), error: z.string().nullable().optional() }),
   z.object({ kind: z.literal('integration_push'), pushed: z.boolean(), error: z.string().nullable() }),

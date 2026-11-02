@@ -8,6 +8,8 @@ import { inspectEpicRebase, prepareEpicRebase, pushEpicRebase } from '../../runn
 import { exec } from '../../runner/src/exec.ts'
 import { inspectIntegration, prepareIntegration, pushIntegration } from '../../runner/src/integration.ts'
 import { createTestDataDir, TEST_REPOSITORY } from '../../runner/src/test-repo.ts'
+import { readAudit } from './audit.ts'
+import { epicEventText } from './epic-prs.ts'
 import { approvalFate } from './epic-rebase-approval.ts'
 import { EpicSynchronizer } from './epic-sync.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
@@ -1385,6 +1387,9 @@ describe('developer runs on the epic', () => {
       expect((await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id)))).toHaveLength(3)
       expect((await t.request('POST', `/api/epics/${epic.id}/sync/retry`)).status).toBe(200)
       expect((await fixJob(epic.id)).taskId).toBeNull()
+      const history = await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.action, 'epic.pr'))
+      const stops = history.filter(row => (row.detail as { epicId?: string }).epicId === epic.id).map(row => readAudit(row.detail)).filter(detail => detail.event?.startsWith('sync_')).map(epicEventText)
+      expect(stops).toEqual([expect.stringMatching(/^Epic fix stopped: 3 fixes for CI failure/), 'You retried the epic fix'])
     })
   })
 

@@ -1,0 +1,93 @@
+import { describe, expect, it } from 'vitest'
+import { CiLogScanner, logLine } from './ci-log.ts'
+
+const stamp = '2026-10-30T12:00:00.1234567Z '
+const lines = (...text: string[]) => text.map(line => `${stamp}${line}\n`).join('')
+const noise = (label: string, n: number) => Array.from({ length: n }, (_, i) => `${label} ok ${i}`)
+
+const scan = (log: string, chunk = 1024) => {
+  const scanner = new CiLogScanner(256_000)
+  for (let i = 0; i < log.length; i += chunk) scanner.write(log.slice(i, i + chunk))
+  return scanner.finish()
+}
+
+// The shape of a real CI log: turbo groups each package's output, the failing
+// package's long before the end, then tens of megabytes of the next package's
+const turboLog = lines(
+  '##[group]Run pnpm run test', 'pnpm run test', '##[endgroup]',
+  '##[group]@corral/web:test',
+  ...noise('web', 50),
+  '\u001B[41m\u001B[1m FAIL \u001B[22m\u001B[49m  app/utils/labels.test.ts > labels > says which fix stopped',
+  'AssertionError: expected \'Fix stopped\' to be \'Rebase stopped\'',
+  ' - Expected', ' + Received', '',
+  ...noise('web after', 20),
+  ' Test Files  1 failed | 80 passed (81)',
+  '##[endgroup]',
+  '##[group]@corral/server:test',
+  ...noise('server', 2000),
+  '##[endgroup]'
+) + lines(...noise('server', 20_000)) + lines(
+  ' Tasks:    3 successful, 4 total',
+  ' Failed:    @corral/web#test',
+  '##[error]Process completed with exit code 1.'
+)
+
+describe('CiLogScanner', () => {
+  it('finds the failing test in a package printed long before the end, past the tail', () => {
+    const scanner = new CiLogScanner(2000)
+    scanner.write(turboLog)
+    const { tail, failureLines } = scanner.finish()
+    expect(tail).not.toContain('FAIL')
+    expect(failureLines).toEqual(expect.arrayContaining([
+      ' FAIL   app/utils/labels.test.ts > labels > says which fix stopped',
+      'AssertionError: expected \'Fix stopped\' to be \'Rebase stopped\'',
+      ' Test Files  1 failed | 80 passed (81)',
+      ' Failed:    @corral/web#test',
+      '##[error]Process completed with exit code 1.'
+    ]))
+    expect(failureLines.join('\n')).not.toContain('server ok')
+  })
+
+  it('leaves passing tests and the next group out of what it keeps', () => {
+    const { failureLines } = scan(lines('##[group]a:test', ' ✓ passed 1ms', 'FAIL a.test.ts', '##[endgroup]', '##[group]b:test', 'unrelated', '##[endgroup]', ' Failed:    a:x#test', ' Failed:    a#test'))
+    expect(failureLines.join('\n')).not.toMatch(/passed|unrelated/)
+  })
+
+  it('reads a line split across chunks', () => {
+    expect(scan(turboLog, 7).failureLines).toEqual(scan(turboLog).failureLines)
+  })
+
+  it('takes the Failed: package from line prefixes when turbo doesn\'t group', () => {
+    const { failureLines } = scan(lines('@corral/web:test: something went wrong', '@corral/web:test: exited', '@corral/server:test: fine', ' Failed:    @corral/web#test'))
+    expect(failureLines).toEqual([' Failed:    @corral/web#test', '@corral/web:test: something went wrong', '@corral/web:test: exited'])
+  })
+
+  it('recognises vitest, tsc and eslint failures, not lines that only mention one', () => {
+    const { failureLines } = scan(lines(
+      '@corral/web:test:  × app/a.test.ts > a 12ms',
+      'src/a.ts(1,2): error TS2322: Type string is not number.',
+      '  12:3  error  Unexpected any  no-explicit-any',
+      'this test should FAIL loudly but passed',
+      'Error handling ok'
+    ))
+    expect(failureLines).toEqual([
+      '@corral/web:test:  × app/a.test.ts > a 12ms',
+      'src/a.ts(1,2): error TS2322: Type string is not number.',
+      '  12:3  error  Unexpected any  no-explicit-any'
+    ])
+  })
+
+  it('stays bounded however many tests fail, keeping the first', () => {
+    const { failureLines } = scan(lines(...Array.from({ length: 5000 }, (_, i) => `FAIL test ${i} ${'y'.repeat(1000)}`)))
+    expect(failureLines[0]).toContain('FAIL test 0')
+    expect(failureLines.join('\n').length).toBeLessThanOrEqual(6000)
+  })
+
+  it('finds no failures in a clean log', () => {
+    expect(scan(lines(...noise('a', 100))).failureLines).toEqual([])
+  })
+})
+
+it('strips colours and the timestamp from a log line', () => {
+  expect(logLine(`${stamp}\u001B[31mred\u001B[0m\r`)).toBe('red')
+})

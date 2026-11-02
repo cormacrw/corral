@@ -287,7 +287,11 @@ export class EpicPullRequests {
 // How each epic PR event reads, in the Inbox and on the epic's history
 export const EPIC_EVENT_LABELS: Record<string, string> = { opened: 'Epic PR opened', review_started: 'Epic integration review started', approved: 'Epic PR approved by reviewer', changes_requested: 'Epic integration changes requested', human_approved: 'You approved the epic PR', human_changes_requested: 'You requested changes on the epic PR', rebase_requested: 'Rebasing the epic PR onto the target branch', rebased: 'Epic PR rebased; CI runs again', conflict: 'Epic PR conflict', rebase_handed_off: 'You handed the epic PR rebase to a developer', rebase_resolving: 'Epic rebase conflict sent to a developer', rebase_failed: 'Epic rebase attempt failed', sync_failed: 'Epic rebase stopped', sync_retried: 'You retried the epic rebase', ci_failed: 'CI failed on the epic PR', merge_refused: 'GitHub refused the epic PR merge', review_failed: 'Epic integration review stopped retrying', closed: 'Epic PR closed on GitHub', merged: 'Epic PR merged', approval_retained: 'Approval kept across the rebase', approval_invalidated: 'Approval no longer applies; review starts again', decision_requested: 'An epic rebase needs your decision', decision_answered: 'You decided on the epic rebase', fix_started: 'A developer was asked to fix the epic', fix_reported: 'The developer reported an epic fix', fix_refused: 'Corral refused the epic fix and sent it back', fix_published: 'The epic fix reached the epic branch; CI runs again' }
 
-export const epicEventText = (detail: AuditView) => [EPIC_EVENT_LABELS[detail.event ?? ''] ?? detail.event, detail.summary].filter(Boolean).join(': ')
+// A CI or review fix stops and retries through the same events as a rebase
+const EPIC_FIX_EVENT_LABELS: Record<string, string> = { sync_failed: 'Epic fix stopped', sync_retried: 'You retried the epic fix' }
+const epicEventLabel = ({ event, fix }: AuditView) => ((fix === 'ci' || fix === 'review') && EPIC_FIX_EVENT_LABELS[event ?? '']) || EPIC_EVENT_LABELS[event ?? ''] || event
+
+export const epicEventText = (detail: AuditView) => [epicEventLabel(detail), detail.summary].filter(Boolean).join(': ')
 
 export async function epicHistory(db: Executor, epicId: string): Promise<EpicHistoryEntry[]> {
   const rows = await db.select().from(auditLog).where(and(eq(auditLog.action, 'epic.pr'), sql`${auditText('epic.pr', 'epicId')} = ${epicId}`)).orderBy(asc(auditLog.createdAt), asc(auditLog.id))

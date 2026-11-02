@@ -60,8 +60,10 @@ export type EpicPrDetail =
   | { event: 'conflict', summary: string, files: string[] }
   | { event: 'merge_refused', summary: string }
   | { event: 'rebase_resolving', summary: string, files: string[] }
-  | { event: 'rebase_failed' | 'sync_failed', summary: string }
-  | { event: 'sync_retried' }
+  | { event: 'rebase_failed', summary: string }
+  // `fix` names the CI or review fix this stopped, when it wasn't a rebase
+  | { event: 'sync_failed', summary: string, fix?: EpicFixKind }
+  | { event: 'sync_retried', fix?: EpicFixKind }
   | { event: 'fix_started', fix: EpicFixKind, operationId: string, summary: string, files?: string[] }
   | { event: 'fix_reported', fix: EpicFixKind, operationId: string, runId: string, headSha: string, behaviourChanged: boolean, files: string[], summary: string }
   | { event: 'fix_refused', fix: EpicFixKind, operationId: string, summary: string }
@@ -154,6 +156,7 @@ export interface AuditView {
   summary?: string
   feedback?: string
   integratedCommitSha?: string
+  fix?: string
 }
 
 // Reads a stored detail, whatever its age. `event` was written as a name by

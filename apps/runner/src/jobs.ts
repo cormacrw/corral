@@ -1,5 +1,6 @@
 import { tmpdir } from 'node:os'
 import type { RepoSummary, SetupJob, SetupJobResult } from '@corral/contracts'
+import { CiLogScanner } from './ci-log.ts'
 import type { RunnerConfig } from './config.ts'
 import { exec, gh } from './exec.ts'
 import { inspectEpicRebase, prepareEpicRebase, pushEpicRebase } from './epic-rebase.ts'
@@ -40,7 +41,7 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob, pmTurnRun
       return { kind: 'detect_clis', clis: await detectClis(config) }
 
     case 'github':
-      return githubRequest(job.method, job.path, job.body, job.tailChars)
+      return job.tailChars ? githubLog(job.path, job.tailChars) : githubRequest(job.method, job.path, job.body)
 
     case 'cleanup_worktrees': {
       // Keeps any worktree with uncommitted changes (PRD §7.4)
@@ -171,16 +172,49 @@ async function ghSignedIn(): Promise<boolean> {
   return (await gh(['auth', 'status'], { timeoutMs: 15_000 })).code === 0
 }
 
+type GitHubResult = Extract<SetupJobResult, { kind: 'github' }>
+
 // One GitHub REST call through `gh api`, returning the status and JSON body.
 // gh exits non-zero on 4xx/5xx but still prints the response.
-export async function githubRequest(method: string, path: string, body?: unknown, tailChars?: number): Promise<Extract<SetupJobResult, { kind: 'github' }>> {
+export async function githubRequest(method: string, path: string, body?: unknown): Promise<GitHubResult> {
   const args = ['api', '--include', '-X', method, path, '-H', 'Accept: application/vnd.github+json']
   if (body !== undefined) args.push('--input', '-')
   const result = await gh(args, { input: body === undefined ? '' : JSON.stringify(body), timeoutMs: 60_000 })
   const parsed = parseIncludedResponse(result.stdout)
   if (!parsed) throw new Error(result.stderr.trim() || `gh api ${method} ${path} failed`)
-  // A CI log can run to megabytes, and only its end reaches anyone
-  return { kind: 'github', ...parsed, body: tailChars && typeof parsed.body === 'string' ? parsed.body.slice(-tailChars) : parsed.body }
+  return { kind: 'github', ...parsed }
+}
+
+// A CI log is full of terminal colours, which newer `gh` won't print unasked,
+// and can run to tens of megabytes. It's read as it arrives, keeping the end
+// and any failure lines from the whole of it. The colours go no further than
+// the server, which strips them before a prompt sees the log.
+export async function githubLog(path: string, tailChars: number): Promise<GitHubResult> {
+  const args = ['api', '--include', '-X', 'GET', path, '-H', 'Accept: application/vnd.github+json']
+  const read = async (flags: string[]) => {
+    let head = ''
+    let scanner: CiLogScanner | null = null
+    const result = await gh([...args, ...flags], {
+      timeoutMs: 60_000,
+      onStdout: (chunk) => {
+        if (scanner) return scanner.write(chunk)
+        head += chunk
+        const separator = /\r?\n\r?\n/.exec(head)
+        if (!separator) return
+        scanner = new CiLogScanner(tailChars)
+        scanner.write(head.slice(separator.index + separator[0].length))
+        head = head.slice(0, separator.index)
+      }
+    })
+    return { result, head, log: (scanner as CiLogScanner | null)?.finish() ?? null }
+  }
+  // Older `gh` prints the colours anyway, and refuses a flag it doesn't know
+  let attempt = await read(['--allow-escape-sequences'])
+  if (/unknown flag/.test(attempt.result.stderr)) attempt = await read([])
+  const { result, head, log } = attempt
+  const parsed = result.code === null ? null : parseIncludedResponse(`${head}\n\n${log?.tail ?? ''}`)
+  if (!parsed) throw new Error(result.stderr.trim() || `gh api GET ${path} failed`)
+  return { kind: 'github', ...parsed, failureLines: log?.failureLines ?? [] }
 }
 
 export function parseIncludedResponse(output: string): { status: number, body: unknown } | null {

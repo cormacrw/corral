@@ -50,3 +50,9 @@ Human approval requires `human_review`, so it returns 409 while changes are
 outstanding.
 
 A stopped epic is a Needs you item (D11): `waitingEpics` selects on `syncError`, so the Inbox and its count agree with the epic, and `sync_failed` is its arrival. It's an `epic_conflict` item with `stopped` set, and its Retry is the same `rebase` action as the epic page's.
+
+## CI output
+
+`githubLog` (`apps/runner/src/jobs.ts`) streams the job log through `CiLogScanner` (`apps/runner/src/ci-log.ts`) rather than holding it: `exec`'s `onStdout` skips `MAX_OUTPUT_CHARS`, so only the last `tailChars`, the bounded `failureLines` and a tail per package stay in memory. CI logs run past 30M characters.
+
+In CI, turbo groups each package's output under `##[group]pkg:task` and prints it when that package finishes, so a failure can sit far ahead of the log's end. `Failed:    pkg#task` near the end names which section to keep; locally turbo prefixes lines with `pkg:task: ` instead, and the scanner reads both. `--allow-escape-sequences` goes on this request only, with one retry without it for a `gh` too old to know the flag. `ciExcerpt` strips the colours on the server.

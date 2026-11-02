@@ -64,9 +64,10 @@ export interface GitHubClient {
   getPullRequest(repository: string, number: number): Promise<PullRequest>
   getPullRequestDiff(repository: string, number: number, fileLimit: number): Promise<PullRequestDiff>
   checks(repository: string, sha: string): Promise<CheckResult[]>
-  // A failed check's failed step and raw log, the end of it when long. Throws
-  // when GitHub has neither to give.
-  ciFailure(repository: string, check: { name: string, url: string | null }): Promise<{ step: string | null, log: string }>
+  // A failed check's failed step and raw log, the end of it when long, with
+  // the failure lines the runner found in the whole of it. Throws when GitHub
+  // has neither step nor log to give.
+  ciFailure(repository: string, check: { name: string, url: string | null }): Promise<{ step: string | null, log: string, failureLines?: string[] }>
   // How many commits on `base` the commit `head` doesn't have
   behindBy(repository: string, base: string, head: string): Promise<number>
   // Three-dot compare: the changes from the merge base of the two commits to
@@ -302,7 +303,7 @@ export class RunnerGitHub implements GitHubClient {
     const job = (await this.#call('GET', `/repos/${repository}/actions/jobs/${jobId}`)).body as { steps?: { name: string, conclusion: string | null }[] }
     const log = await this.#runner.request({ kind: 'github', method: 'GET', path: `/repos/${repository}/actions/jobs/${jobId}/logs`, tailChars: MAX_LOG_CHARS })
     if (log.status !== 200 || typeof log.body !== 'string') throw new GitHubError(log.status, `The log of job ${jobId} isn't available`)
-    return { step: job.steps?.find(step => step.conclusion === 'failure')?.name ?? null, log: log.body }
+    return { step: job.steps?.find(step => step.conclusion === 'failure')?.name ?? null, log: log.body, failureLines: log.failureLines ?? [] }
   }
 
   async behindBy(repository: string, base: string, head: string) {

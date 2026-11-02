@@ -398,6 +398,6 @@ describe('outcomesFor', () => {
 })
 
 it('gives a developer on an epic no task tools', () => {
-  expect(toolsFor({ role: 'developer', taskId: null })).toEqual(['get_task', 'get_attachment', 'report_outcome'])
+  expect(toolsFor({ role: 'developer', taskId: null })).toEqual(['get_task', 'report_outcome'])
   expect(toolsFor({ role: 'developer', taskId: 'task' })).toContain('attach_evidence')
 })

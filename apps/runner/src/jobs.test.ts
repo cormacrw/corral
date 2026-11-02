@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { loadConfig, type RunnerConfig } from './config.ts'
-import { codexSignedIn, parseIncludedResponse, runSetupJob, signedInRuntimes, toRepoSummary } from './jobs.ts'
+import { MAX_OUTPUT_CHARS } from './exec.ts'
+import { codexSignedIn, githubLog, githubRequest, parseIncludedResponse, runSetupJob, signedInRuntimes, toRepoSummary } from './jobs.ts'
 
 describe('detect_clis', () => {
   let root: string
@@ -92,6 +93,71 @@ describe('codexSignedIn', () => {
     expect(codexSignedIn('')).toBe(false)
     expect(codexSignedIn('Error checking login status: permission denied')).toBe(false)
     expect(codexSignedIn('error: unrecognized subcommand \'login\'')).toBe(false)
+  })
+})
+
+describe('githubLog', () => {
+  let root: string
+  const path = process.env.PATH
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'corral-github-log-'))
+    process.env.PATH = `${root}:${path}`
+  })
+
+  afterEach(async () => {
+    process.env.PATH = path
+    await rm(root, { recursive: true, force: true })
+  })
+
+  async function fakeGh(script: string): Promise<void> {
+    await writeFile(join(root, 'gh'), `#!/bin/sh\n${script}\n`)
+    await chmod(join(root, 'gh'), 0o755)
+  }
+
+  // gh 2.103 prints the headers, then refuses the body unless it's told not to
+  const REFUSES = `printf 'HTTP/2.0 200 OK\\r\\nContent-Type: text/plain\\r\\n\\r\\n'
+case "$*" in *--allow-escape-sequences*) ;; *)
+  echo 'the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway' >&2
+  exit 1 ;;
+esac
+cat '\${LOG}'`
+
+  it('reads a log that gh refuses to print unless told to, and only a log', async () => {
+    const log = join(root, 'log')
+    await writeFile(log, '\u001B[31mFAIL\u001B[0m a.test.ts\n##[error]Process completed with exit code 1.\n')
+    await fakeGh(REFUSES.replace('${LOG}', log))
+    expect(await githubRequest('GET', '/repos/a/b/actions/jobs/1/logs')).toEqual({ kind: 'github', status: 200, body: null })
+    expect(await githubLog('/repos/a/b/actions/jobs/1/logs', 1000)).toEqual({
+      kind: 'github',
+      status: 200,
+      body: '\u001B[31mFAIL\u001B[0m a.test.ts\n##[error]Process completed with exit code 1.',
+      failureLines: ['FAIL a.test.ts', '##[error]Process completed with exit code 1.']
+    })
+  })
+
+  it('keeps the end of a log past the limit on held output, and failures from its start', async () => {
+    await fakeGh(`printf 'HTTP/2.0 200 OK\\n\\n'
+echo 'FAIL early.test.ts'
+head -c ${MAX_OUTPUT_CHARS + 1_000_000} /dev/zero | tr '\\0' 'x'
+printf '\\nthe very end\\n'`)
+    const result = await githubLog('/repos/a/b/actions/jobs/1/logs', 100)
+    expect(result.status).toBe(200)
+    expect(result.body).toMatch(/x+\nthe very end$/)
+    expect(result.failureLines![0]).toBe('FAIL early.test.ts')
+  }, 60_000)
+
+  it('asks again without the flag when an older gh doesn\'t know it', async () => {
+    await fakeGh(`case "$*" in *--allow-escape-sequences*) echo 'unknown flag: --allow-escape-sequences' >&2; exit 1 ;; esac
+printf 'HTTP/2.0 200 OK\\n\\nthe log\\n'`)
+    expect(await githubLog('/repos/a/b/actions/jobs/1/logs', 100)).toMatchObject({ status: 200, body: 'the log' })
+  })
+
+  it('keeps an error response, and throws when gh gives none', async () => {
+    await fakeGh(`printf 'HTTP/2.0 404 Not Found\\n\\n{"message":"Not Found"}'; exit 1`)
+    expect(await githubLog('/x', 100)).toMatchObject({ status: 404, body: { message: 'Not Found' } })
+    await fakeGh(`echo 'no login' >&2; exit 1`)
+    await expect(githubLog('/x', 100)).rejects.toThrow('no login')
   })
 })
 

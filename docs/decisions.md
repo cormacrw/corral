@@ -880,7 +880,7 @@ The developer reports `behaviourChanged` at the end of every fix. It means one t
 
 ### CI output
 
-Developers still never run `gh` (D8). The server reads the failed job's step name and log through `GitHubClient.ciFailure`, which goes through the runner's `gh`, and puts them in the prompt of every developer round started by a CI failure, on a task or an epic. The excerpt is cut after the last `##[error]` line and keeps at most the final 8,000 characters, so the failing lines survive. It's marked as untrusted output, not instructions. If the logs can't be fetched, the prompt says the output is unavailable and gives the CI run's URL, and the round still starts.
+Developers still never run `gh` (D8). The server reads the failed job's step name and log through `GitHubClient.ciFailure`, which goes through the runner's `gh`, and puts them in the prompt of every developer round started by a CI failure, on a task or an epic. The runner reads the log as it arrives, passing `--allow-escape-sequences` on this request only because `gh` otherwise refuses a log with terminal colours, so a log of any length keeps its end. It also picks failure lines out of the whole log (`FAIL`, `×`, compiler and lint errors, and the end of each package turbo names under `Failed:`), since turbo prints a failing package's output long before the end. The excerpt is at most 8,000 characters: those lines first, then the end of the log, cut after its last `##[error]` line. It's marked as untrusted output, not instructions. If the logs can't be fetched, the prompt says the output is unavailable and gives the CI run's URL, and the round still starts.
 
 ### Epic review scope
 

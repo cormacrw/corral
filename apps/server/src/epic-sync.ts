@@ -81,7 +81,8 @@ export async function targetFileChanges(runner: RunnerHub, input: { repository: 
 // the epic and a Needs you item until Retry or the merge (D11, D29).
 export async function recordSyncFailure(db: Executor, project: ProjectRow, epicId: string, error: string, now: Date): Promise<void> {
   await db.update(epics).set({ syncError: error, updatedAt: now }).where(eq(epics.id, epicId))
-  await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId, event: 'sync_failed', summary: error }))
+  const fix = (await activeRebase(db, epicId))?.fix ?? undefined
+  await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId, event: 'sync_failed', summary: error, ...(fix && { fix }) }))
 }
 
 // A human asks for another go, which counts failures afresh. A resolution or
@@ -94,7 +95,8 @@ export async function retrySync(db: Database, epicId: string, actor: Actor, now:
     if (!epic.syncError && epic.reviewState !== 'conflict') throw new ApiFailure(409, { code: 'conflict', constraint: 'epic_sync_not_failed' })
     await tx.update(epics).set({ syncError: null, syncRetriedAt: now, updatedAt: now }).where(eq(epics.id, epicId))
     await tx.update(operations).set({ pushAttempts: 0, fixAttempts: 0 }).where(and(eq(operations.epicId, epicId), inArray(operations.state, [...ACTIVE])))
-    await appendAudit(tx, { projectId: epic.projectId, actor }, auditEvent('epic.pr', { epicId, event: 'sync_retried' }))
+    const fix = (await activeRebase(tx, epicId))?.fix ?? undefined
+    await appendAudit(tx, { projectId: epic.projectId, actor }, auditEvent('epic.pr', { epicId, event: 'sync_retried', ...(fix && { fix }) }))
   })
 }
 

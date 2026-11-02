@@ -196,6 +196,21 @@ describe('the CI excerpt', () => {
   it('strips terminal colours', () => {
     expect(ciExcerpt('\u001B[31mred\u001B[0m')).toBe('red')
   })
+
+  it('puts failure lines from earlier in the log ahead of its end, within its bound', () => {
+    const tail = `${'server test ok\n'.repeat(5_000)}Failed:    @corral/web#test\n##[error]Process completed with exit code 1.\n`
+    const lines = ['FAIL app/x.test.ts > x', 'AssertionError: expected 1 to be 2', 'y'.repeat(9000)]
+    const excerpt = ciExcerpt(tail, lines)
+    expect(excerpt.length).toBeLessThanOrEqual(MAX_EXCERPT_CHARS)
+    expect(excerpt.indexOf('FAIL app/x.test.ts > x')).toBeLessThan(excerpt.indexOf('Failed:    @corral/web#test'))
+    expect(excerpt).toContain('AssertionError: expected 1 to be 2')
+    expect(excerpt.endsWith('##[error]Process completed with exit code 1.')).toBe(true)
+  })
+
+  it('doesn\'t repeat failure lines the end of the log already shows', () => {
+    const log = 'FAIL a.test.ts\n##[error]Process completed with exit code 1.\n'
+    expect(ciExcerpt(log, ['FAIL a.test.ts'])).toBe(log.trimEnd())
+  })
 })
 
 describe('rework metrics', () => {
