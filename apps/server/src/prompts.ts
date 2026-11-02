@@ -123,7 +123,7 @@ export interface ReviewTask extends PromptTask {
   // The D24 conditions the server check found broken, when it ran
   rebaseCheckFailures?: RebaseCheckFailure[]
   // The epic rebase this task resolves a conflict for, from its journal
-  epicResolution?: { oldHead: string, ontoSha: string, conflictFiles: string[], approvedHeadSha: string | null, decisions: { question: string, answer: string }[] } | null
+  epicResolution?: { oldHead: string, ontoSha: string, conflictFiles: string[], approvedHeadSha: string | null, decisions: { question: string, answer: string }[], targetFiles: TargetFileChange[] } | null
 }
 
 export interface TaskSubmission {
@@ -133,6 +133,8 @@ export interface TaskSubmission {
   targetBranch: string
   createdAt: Date
 }
+
+export type TargetFileChange = { path: string, diff: string, truncated: boolean }
 
 // The design version under review (D20)
 export interface DesignUnderReview {
@@ -210,7 +212,26 @@ ${r.decisions.length ? `The human already decided:\n${r.decisions.map(d => `- ${
 - Read any change to \`CORRAL.md\`, \`CLAUDE.md\`, \`docs/\` or \`.corral/wiki/\` in that range: a binding decision may have moved under the epic.
 - If the two sides' intended behaviours can't both hold, or a changed binding decision affects the epic, don't pick a side: report outcome "blocked" with \`decision\`: one focused question, its alternatives and the changes affected.
 - Otherwise approve with \`preservesApproval: true\` only if every behaviour that was approved is unchanged. Approve with \`preservesApproval: false\` if the resolution is sound but behaviour changed: the epic then returns to integration review and the human.
-- Request changes if the resolution is wrong.`)
+- Request changes if the resolution is wrong.${targetFilesNote(r.targetFiles)}`) + '\n' + targetFilesSection(r.ontoSha, r.targetFiles, task.defaultBranch)
+}
+
+function targetFilesNote(files: TargetFileChange[]): string {
+  return files.length ? '\n- The candidate changes files the epic never touched. Judge each one under "Files only the target changed".' : ''
+}
+
+// Corral refuses these changes on any candidate no reviewer approved, so this
+// section is the whole of their review (COR-434). They edit code the human never
+// saw in this epic, which is why approval can't carry across them.
+function targetFilesSection(ontoSha: string, files: TargetFileChange[], target: string): string {
+  if (files.length === 0) return ''
+  const fence = '`'.repeat(1 + Math.max(2, ...files.flatMap(f => (f.diff.match(/`+/g) ?? []).map(run => run.length))))
+  const diffs = files.map(f => `### \`${f.path}\`\n\n${fence}diff\n${f.diff}\n${fence}${f.truncated ? `\n\nThis diff is cut short. Read the rest with \`git diff ${ontoSha} HEAD -- ${f.path}\`.` : ''}`)
+  return section('Files only the target changed', `Only \`${target}\` changed these files, and the epic never touched them, yet this candidate does:
+${files.map(f => `- \`${f.path}\``).join('\n')}
+
+Approve only if each change is an adaptation the epic's changes require, such as a test following a type the epic changed, and drops none of the target's work. Otherwise request changes. Approving any of these means \`preservesApproval: false\`, because the human never approved these edits.
+
+${diffs.join('\n\n')}`)
 }
 
 function rebaseReviewerPrompt(task: ReviewTask, agentName: string): string {

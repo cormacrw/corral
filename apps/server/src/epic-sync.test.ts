@@ -4,7 +4,7 @@ import { eq, inArray, isNotNull } from 'drizzle-orm'
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterAll, beforeAll, beforeEach, expect, it, onTestFinished, vi } from 'vitest'
-import { prepareEpicRebase, pushEpicRebase } from '../../runner/src/epic-rebase.ts'
+import { inspectEpicRebase, prepareEpicRebase, pushEpicRebase } from '../../runner/src/epic-rebase.ts'
 import { exec } from '../../runner/src/exec.ts'
 import { inspectIntegration, prepareIntegration, pushIntegration } from '../../runner/src/integration.ts'
 import { createTestDataDir, TEST_REPOSITORY } from '../../runner/src/test-repo.ts'
@@ -76,6 +76,7 @@ beforeAll(async () => {
         case 'integration_inspect': return inspectIntegration(dataDir, job)
         case 'epic_rebase_prepare': return prepareEpicRebase(dataDir, null, job)
         case 'epic_rebase_push': return pushEpicRebase(dataDir, job)
+        case 'epic_rebase_inspect': return inspectEpicRebase(dataDir, job)
         default: return fallback(job)
       }
     }
@@ -553,7 +554,7 @@ it('keeps a reviewed resolution through failed pushes, and pushes it again on re
   expect(await isAncestor(resolved, await git('rev-parse', epic.branch))).toBe(true)
 })
 
-it('sends back a resolution that undoes target work, and leaves the epic branch alone', async () => {
+it('sends back a resolution no reviewer approved that changes target work, and leaves the epic branch alone', async () => {
   const epic = await conflicted()
   const onto = await commitOn('main', 'landed.txt', 'landed\n')
   await tick()
@@ -566,8 +567,9 @@ it('sends back a resolution that undoes target work, and leaves the epic branch 
   await git('commit', '--quiet', '-m', 'Remove the file that got in the way')
   const bad = await git('rev-parse', 'HEAD')
   await git('checkout', '--quiet', 'main')
-  const { criteria } = await developerSubmits(fix.id, bad)
-  await reviewerApproves(fix.id, bad, criteria)
+  await developerSubmits(fix.id, bad)
+  // At Ready to merge with no approved review on record for this commit
+  await t.db.update(schema.tasks).set({ status: 'ready_to_merge', headSha: bad, leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null }).where(eq(schema.tasks.id, fix.id))
   await tick()
 
   expect(await git('rev-parse', epic.branch)).toBe(epic.head)
@@ -577,7 +579,7 @@ it('sends back a resolution that undoes target work, and leaves the epic branch 
   expect((await ops(epic.id))[0]).toMatchObject({ state: 'running', resultHeadSha: null })
   expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'resolving' })
   expect(await readFile(join(origin, 'landed.txt'), 'utf8')).toBe('landed\n')
-  await capture('target-work-protected.json', { scenario: 'A reviewed candidate deleted landed.txt, which only the target changed.', epicBranchHeadUnchanged: await git('rev-parse', epic.branch) === epic.head, taskStatus: (await taskRow(fix.id)).status, commentToDeveloper: notes.map(n => n.body).filter(b => b.includes('landed.txt')) })
+  await capture('target-work-protected.json', { scenario: 'A candidate no reviewer approved deleted landed.txt, which only the target changed.', epicBranchHeadUnchanged: await git('rev-parse', epic.branch) === epic.head, taskStatus: (await taskRow(fix.id)).status, commentToDeveloper: notes.map(n => n.body).filter(b => b.includes('landed.txt')) })
 })
 
 // ── Approval across rebases (COR-291) ───────────────────────────────────────
