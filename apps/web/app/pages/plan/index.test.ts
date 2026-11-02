@@ -52,6 +52,8 @@ async function render(url: string) {
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(true) }))
   vi.stubGlobal('useTaskFlyout', useTaskFlyout)
   vi.stubGlobal('useSeoMeta', vi.fn())
+  vi.stubGlobal('useState', (_key: string, init: () => unknown) => vue.ref(init()))
+  vi.stubGlobal('onBeforeRouteLeave', vi.fn())
   vi.stubGlobal('useLocalStorage', (_key: string, value: unknown) => vue.ref(value))
   vi.stubGlobal('useShell', () => ({ loaded: true, runner: { online: false }, agents: [], projects: [] }))
   vi.stubGlobal('useProjectLists', () => ({ tasks: vue.ref([]) }))
