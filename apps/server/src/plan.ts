@@ -12,6 +12,7 @@ import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { pmFallbackPrompt, pmPrompt, questionText, sessionTitlePrompt } from './prompts.ts'
 import type { RunnerHub } from './runner-hub.ts'
+import { answerRecovery } from './retry-recovery.ts'
 import { requireRuntimeCli } from './setup.ts'
 import { addComment, createTask, deleteTaskRows, draftSessions, findTaskByRef, loadTask, loadTasks, patchTask, pinStaleness, setDesignPin, transitionTask, type ProjectRow } from './tasks.ts'
 
@@ -66,6 +67,7 @@ export interface PlanDeps {
   db: Database
   events: EventBus
   runner: RunnerHub
+  recoveryReady?(taskIds: string[]): void
   stopRun(runId: string, actor: Actor): Promise<void>
   // Starts a PM run for a session; the orchestrator owns runs. The job
   // carries the session's runtime, not the PM agent's (D18).
@@ -342,6 +344,8 @@ export class PlanService {
     await db.update(planSessions).set({ updatedAt: new Date(), unread: false, closedAt: null }).where(eq(planSessions.id, sessionId))
     await appendAudit(db, { projectId: project.id, actor }, auditEvent('plan.message', { sessionId, messageId: message!.id }))
     this.#d.events.publish({ type: 'plan.message', message: toMessage(message!) })
+    const recovered = await answerRecovery(db, this.#d.events, sessionId, text, actor)
+    if (recovered.length) this.#d.recoveryReady?.(recovered)
 
     await this.#turn(session, project, {
       prompt: pmPrompt({ text, attachedTask: attached, projectName: project.name, prefix: project.prefix, fresh: session.agentSessionId === null }),

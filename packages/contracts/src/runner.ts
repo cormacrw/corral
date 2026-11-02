@@ -376,7 +376,7 @@ export const runnerMessageSchema = z.discriminatedUnion('type', [
     z.object({ type: z.literal('job.result'), jobId: z.string(), ok: z.literal(true), result: setupJobResultSchema }),
     z.object({ type: z.literal('job.result'), jobId: z.string(), ok: z.literal(false), error: z.string() })
   ]),
-  z.object({ type: z.literal('run.started'), sentAt: z.number().optional(), runId: z.string(), leaseEpoch: z.number(), agentSessionId: z.union([z.string(), z.null()]) }),
+  z.object({ type: z.literal('run.started'), initialHeadSha: z.string().nullish(), sentAt: z.number().optional(), runId: z.string(), leaseEpoch: z.number(), agentSessionId: z.union([z.string(), z.null()]) }),
   z.object({ type: z.literal('run.events'), runId: z.string(), leaseEpoch: z.number(), events: z.array(runEventSchema) }),
   // wipSha: the commit that saved a stopped developer run's work, once pushed
   z.object({ type: z.literal('run.ended'), runId: z.string(), leaseEpoch: z.number(), exit: runExitSchema, headSha: z.union([z.string(), z.null()]), lastActivityAt: z.union([z.string(), z.null()]).optional(), wipSha: z.union([z.string(), z.null()]).optional(), timings: runTimingsSchema.optional() }),

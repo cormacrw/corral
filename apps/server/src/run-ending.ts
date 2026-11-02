@@ -4,6 +4,7 @@ import { schema, type Executor } from '@corral/db'
 import { and, count, eq, inArray, isNotNull } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import { publishDependents } from './dependent-tasks.ts'
+import { retryContext, stopRepeated } from './retry-recovery.ts'
 import { runEndValues, type RunEnd } from './run-lifecycle.ts'
 import { getRun } from './runs.ts'
 import { addComment, applyTransition, loadTask, lockTask } from './tasks.ts'
@@ -32,6 +33,14 @@ export class RunEnding {
 
   // A failed run counts towards the failed-run cap (D10); at the cap the task fails
   async failRun(ctx: RunContext, error: string, fields: Partial<typeof runs.$inferInsert> = {}, note?: string): Promise<void> {
+    // New input while the agent was running breaks the repetition streak.
+    if (ctx.task && ctx.run.retryContext) {
+      const current = await retryContext(this.#c, ctx).catch(() => null)
+      if (!current || current.target !== ctx.run.retryContext.target || current.human !== ctx.run.retryContext.human) {
+        ctx.run.retryContext = null
+        fields.retryContext = null
+      }
+    }
     let reviewHandedOver = false
     const comment = await this.#c.d.db.transaction(async (tx) => {
       const comment = note && ctx.task ? await this.postNote(tx, ctx, note) : null
@@ -39,6 +48,8 @@ export class RunEnding {
         const { task, project } = await lockTask(tx, ctx.task.id)
         if (task.leaseRunId === ctx.run.id && ['in_progress', 'agent_review'].includes(task.status)) {
           await applyTransition(tx, task, project, { type: 'run_failed' }, server, { event: 'run_failed', runId: ctx.run.id, error })
+          const [failed] = await tx.select().from(tasks).where(eq(tasks.id, task.id))
+          await stopRepeated(tx, ctx, failed!, fields.headSha ?? null)
         }
       }
       if (ctx.run.epicId && ctx.run.role === 'reviewer') reviewHandedOver = await this.#c.epicPrs.reviewFailed(tx, ctx.run, error)

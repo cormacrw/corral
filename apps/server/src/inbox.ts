@@ -200,7 +200,7 @@ function threadAttention(attention: Exclude<SessionAttention, { status: 'none' }
 }
 
 function openTaskFilter(taskId?: string) {
-  return and(inArray(tasks.status, ['human_review', 'blocked', 'failed']), isNull(tasks.deletedAt), taskId ? eq(tasks.id, taskId) : undefined)
+  return and(isNull(tasks.retryStop), inArray(tasks.status, ['human_review', 'blocked', 'failed']), isNull(tasks.deletedAt), taskId ? eq(tasks.id, taskId) : undefined)
 }
 
 type OpenTask = typeof tasks.$inferSelect

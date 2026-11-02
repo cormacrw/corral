@@ -778,7 +778,10 @@ it('asks the newest question after an earlier one was closed from the board', as
   await t.orchestrator.schedule()
   const again = (await runner.next('run.assign', m => m.job.role === 'developer' && m.job.taskId === fix.id)).job
   await runner.call(again.runId, again.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Another decision', summary: 'Which sort?', decision: second })
-  expect((await inbox()).needsYou.filter(i => i.id === fix.id)).toMatchObject([{ decision: { question: second.question } }])
+  // PM triage owns the stop before any human decision is shown.
+  await t.orchestrator.schedule()
+  expect((await taskRow(fix.id)).retryStop?.sessionId).toEqual(expect.any(String))
+  expect((await inbox()).needsYou.filter(i => i.id === fix.id)).toEqual([])
   expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'deciding', question: second.question })
 
   expect((await t.request('POST', `/api/inbox/${fix.id}/actions`, { action: 'decide', alternative: 0 })).status).toBe(200)
@@ -800,8 +803,11 @@ it('asks one focused question for a changed binding decision, and resumes the sa
 
   expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Needs a decision', summary: 'Which side?', decision })).toMatchObject({ ok: true })
 
+  // The decision journal remains intact, but PM triage goes first.
+  await t.orchestrator.schedule()
   const items = (await inbox()).needsYou.filter(i => i.id === fix.id)
-  expect(items).toMatchObject([{ type: 'question', body: decision.question, decision: { question: decision.question, bindingDecision: decision.bindingDecision, alternatives: decision.alternatives, affectedChanges: decision.affectedChanges } }])
+  expect((await taskRow(fix.id)).retryStop?.sessionId).toEqual(expect.any(String))
+  expect(items).toEqual([])
   expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'deciding', question: decision.question, taskId: fix.id })
   expect(await git('rev-parse', epic.branch)).toBe(epic.head)
   await capture('decision-question.json', { scenario: 'A resolution developer finds the target changed a binding decision.', inboxItem: items[0], epicSync: (await epicApi(epic.id)).sync })
@@ -859,7 +865,9 @@ it('sends a behaviour-changing decision back through review and the human, on th
   await t.orchestrator.schedule()
   const review = (await runner.next('run.assign', m => m.job.role === 'reviewer' && m.job.taskId === fix.id)).job
   expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'blocked', summary: 'Which side?', decision })).toMatchObject({ ok: true })
-  expect((await inbox()).needsYou.filter(i => i.id === fix.id)).toMatchObject([{ type: 'question' }])
+  await t.orchestrator.schedule()
+  expect((await taskRow(fix.id)).retryStop?.sessionId).toEqual(expect.any(String))
+  expect((await inbox()).needsYou.filter(i => i.id === fix.id)).toEqual([])
 
   expect((await t.request('POST', `/api/inbox/${fix.id}/actions`, { action: 'decide', alternative: 1 })).status).toBe(200)
   await developerSubmits(fix.id, resolved)

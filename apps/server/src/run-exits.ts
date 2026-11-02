@@ -58,7 +58,8 @@ export class RunExits {
       // Only from before it started: a replay must not move a run back or
       // restart its clock. Still active: the server may have ended the run
       // since it was fenced.
-      await db.update(runs).set({ state: 'running', startedAt: this.#c.now(), agentSessionId: message.agentSessionId })
+      await db.update(runs).set({ state: 'running', startedAt: this.#c.now(), agentSessionId: message.agentSessionId,
+        ...(message.initialHeadSha && ctx.run.retryContext ? { retryContext: { ...ctx.run.retryContext, head: message.initialHeadSha } } : {}) })
         .where(and(eq(runs.id, ctx.run.id), inArray(runs.state, ['queued', 'starting'])))
       this.#c.leases.confirmLease(ctx, message.sentAt)
       if (ctx.run.role === 'pm' && ctx.run.planSessionId) await this.#c.plans?.onRunStarted(ctx.run.planSessionId, message.agentSessionId)
@@ -71,7 +72,7 @@ export class RunExits {
     if (!ctx) return
     const live = isActiveRun(ctx.run.state) && ctx.run.leaseEpoch === message.leaseEpoch
     if (live && ctx.run.role === 'pm') await this.#pmExited(ctx, message.exit, message.lastActivityAt)
-    else if (live) await this.#runExited(ctx, message.exit, message.lastActivityAt, message.wipSha ?? null)
+    else if (live) await this.#runExited(ctx, message.exit, message.lastActivityAt, message.wipSha ?? message.headSha ?? null)
     else if (reconciled(ctx.run, message.leaseEpoch)) await this.#restoreExit(ctx, message.exit, message.lastActivityAt)
     // The server already ended a run it stopped; only the runner knows the agent's last activity
     else if (ctx.run.state === 'interrupted' && ctx.run.error && ctx.run.leaseEpoch === message.leaseEpoch && !ctx.run.error.includes(LAST_ACTIVITY)) {
@@ -125,7 +126,7 @@ export class RunExits {
           if (locked && !locked.task.leaseRunId && locked.task.leaseEpoch === ctx.run.leaseEpoch && ['in_progress', 'agent_review'].includes(locked.task.status)) {
             await applyTransition(tx, locked.task, locked.project, { type: 'run_failed' }, server, { event: 'run_failed', runId: ctx.run.id, error })
           }
-          await tx.update(runs).set(runEndValues({ state: 'failed', outcome: 'failed', error }, ended)).where(reconciledRun)
+          await tx.update(runs).set({ ...runEndValues({ state: 'failed', outcome: 'failed', error }, ended), retryContext: null }).where(reconciledRun)
         })
       }
     }
@@ -202,7 +203,12 @@ export class RunExits {
         await this.#c.ending.endRun(ctx, { state: 'interrupted', error: runExitError(exit, lastActivityAt), headSha })
         return
       default:
-        // An epic review keeps the head it was claimed for: failures count per head
+        // No accepted outcome means the attempt may have been cut off (even
+        // a CLI network failure can exit with code 1). Keep D10's failure
+        // count, but require a reported failure to establish repetition.
+        ctx.run.retryContext = null
+        await this.#c.d.db.update(runs).set({ retryContext: null }).where(eq(runs.id, ctx.run.id))
+        // An epic review keeps the head it was claimed for: caps count per head.
         await this.#c.ending.failRun(ctx, runExitError(exit, lastActivityAt), { headSha: headSha ?? ctx.run.headSha })
     }
   }

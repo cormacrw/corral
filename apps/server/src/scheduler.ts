@@ -3,6 +3,7 @@ import { ACTIVE_RUN_STATES } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, count, desc, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { claimNextTask, type Claim, type Place } from './claim.ts'
+import { reconcileRecovery, retryContext } from './retry-recovery.ts'
 import { Backoff } from './retries.ts'
 import { EpicBranchError } from './task-base.ts'
 import { isTransient } from './github.ts'
@@ -107,7 +108,7 @@ export class Scheduler {
     if (!urgent.length) return
     const open = await this.#c.d.db.select({ id: tasks.id }).from(tasks)
       .innerJoin(projects, eq(projects.id, tasks.projectId))
-      .where(and(inArray(tasks.id, urgent), inArray(tasks.status, ['ready', 'in_progress', 'agent_review']), isNull(tasks.leaseRunId), isNull(tasks.deletedAt), eq(tasks.paused, false), eq(projects.paused, false)))
+      .where(and(inArray(tasks.id, urgent), inArray(tasks.status, ['ready', 'in_progress', 'agent_review']), isNull(tasks.leaseRunId), isNull(tasks.retryStop), isNull(tasks.deletedAt), eq(tasks.paused, false), eq(projects.paused, false)))
     for (const id of urgent) {
       if (!open.some(t => t.id === id)) this.#urgent.delete(id)
     }
@@ -115,7 +116,9 @@ export class Scheduler {
 
   async #schedulePass(urgent: readonly string[]): Promise<void> {
     const { db, runner } = this.#c.d
-    if (!runner.online || this.#c.stopped) return
+    if (this.#c.stopped) return
+    await reconcileRecovery(this.#c)
+    if (!runner.online) return
     // PM turns aren't claimed; they run when the human writes (D9), and
     // only wait here while the PM was paused or the runner was away
     await this.#c.pm.startPmTurns()
@@ -219,6 +222,9 @@ export class Scheduler {
     if (!ctx?.task) return false
     try {
       const job = ctx.run.role === 'reviewer' ? await this.#c.jobs.reviewerJob(ctx) : ctx.run.role === 'designer' ? await this.#c.jobs.designerJob(ctx) : await this.#c.jobs.developerJob(ctx)
+      const context = await retryContext(this.#c, ctx).catch(() => null)
+      await this.#c.d.db.update(runs).set({ retryContext: context }).where(eq(runs.id, ctx.run.id))
+      ctx.run.retryContext = context
       const sent = await this.dispatch(ctx, job, RUNNER_WENT_OFFLINE)
       if (sent) this.#assignRetry.clear(claim.taskId)
       return sent

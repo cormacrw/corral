@@ -47,7 +47,7 @@ export function createServices(options: ServiceOptions): Services {
     ...(options.now && { now: options.now })
   })
   runner.setHandlers(orchestrator)
-  const plans = new PlanService({ db, events, runner, stopRun: (runId, actor) => orchestrator.stopRun(runId, actor), startRun: (session, job) => orchestrator.startPmRun(session, job) })
+  const plans = new PlanService({ db, events, runner, recoveryReady: taskIds => void orchestrator.schedule(taskIds), stopRun: (runId, actor) => orchestrator.stopRun(runId, actor), startRun: (session, job) => orchestrator.startPmRun(session, job) })
   orchestrator.plans = plans
   new InboxMessages(db, events, runner)
   const releaseNotes = new ReleaseNotes({ db, events, runner })

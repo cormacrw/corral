@@ -78,6 +78,7 @@ interface ActiveRun {
   // Null when the runner has no adapter for job.runtime; the run ends at once
   runtime: AgentRuntime | null
   worktree: string | null
+  initialHeadSha: string | null
   scratchDir: string
   process: AgentProcess | null
   sessionId: string | null
@@ -228,6 +229,7 @@ export class RunManager {
       job,
       runtime: this.#runtimes.get(job.runtime) ?? null,
       worktree: null,
+      initialHeadSha: null,
       // A warm process's system prompt names its scratch dir, so it can't be per run
       scratchDir: join(this.#config.dataDir, 'scratch', this.#keepsWarm(job) ? `pm-${job.projectId}-${job.planSessionId}` : job.runId),
       process: null,
@@ -403,6 +405,7 @@ export class RunManager {
       return
     }
     run.worktree = prepared.workspace.path
+    if (job.role !== 'pm') run.initialHeadSha = await headSha(run.worktree)
     if (run.stopping) {
       this.#end(run, this.#stopExit(run))
       return
@@ -696,7 +699,7 @@ export class RunManager {
 
   #started(run: ActiveRun): void {
     run.started = true
-    this.#post(run, { type: 'run.started', sentAt: Date.now(), runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, agentSessionId: run.sessionId })
+    this.#post(run, { type: 'run.started', initialHeadSha: run.initialHeadSha, sentAt: Date.now(), runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, agentSessionId: run.sessionId })
   }
 
   #note(run: ActiveRun, text: string): void {
@@ -891,6 +894,8 @@ export class RunManager {
         if (!baseSha) return { ok: false, error: `Corral could not find where your branch forked from ${run.job.baseBranch ?? run.job.defaultBranch}. Rebase onto it and try again.` }
         payload = { ...payload, baseSha }
       }
+    } else if (outcome === 'failed' && run.worktree) {
+      payload = { ...input, headSha: await headSha(run.worktree) ?? undefined }
     } else if (run.job.role === 'reviewer' && run.job.headSha) {
       // What the verdict actually judged, so the server can refuse a moved head
       payload = { ...input, headSha: await headSha(run.worktree!) ?? 'unknown' }
