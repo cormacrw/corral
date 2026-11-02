@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { provide } from 'vue'
 import type { Plan, PlanThreadItem } from '@corral/contracts'
+import { FLYOUT_SHEETS } from '~/composables/useTaskFlyout'
 import { usePlanThread } from '~/composables/usePlanThread'
 import { usePlanThreadScroll } from '~/composables/usePlanThreadScroll'
 import { approvePlan } from '~/utils/plan-approval'
@@ -11,6 +13,8 @@ import TimeAgo from '~/components/TimeAgo.vue'
 const props = defineProps<{ item: PlanThreadItem }>()
 const router = useRouter()
 const deleting = usePlanThreadDelete()
+// Task links in the summary and reply open in PlanSheets, not on the task's page
+provide(FLYOUT_SHEETS, true)
 const flyout = useTaskFlyout()
 const toast = useToast()
 const { approval, detail, plan: latest, previous, counts, text, busy, offline, working, cantSend, send: sendMessage } = usePlanThread(() => props.item)

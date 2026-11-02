@@ -86,7 +86,10 @@ function act(action: 'approve' | 'request_changes') {
               name="i-lucide-chevron-right"
               class="size-4 shrink-0 text-muted transition-transform group-open:rotate-90"
             />
-            <span class="min-w-0 break-words"><span class="font-mono text-xs text-muted">{{ entry.task.ref }}</span> {{ entry.task.title }}</span>
+            <span class="min-w-0 break-words"><TaskLink
+              :task-ref="entry.task.ref"
+              class="font-mono text-xs"
+            /> {{ entry.task.title }}</span>
           </summary>
           <div class="min-w-0 space-y-2 border-t border-default p-3">
             <p class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">

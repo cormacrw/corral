@@ -216,11 +216,12 @@ function startEditDescription() {
   descriptionDraft.value = structuredClone(toRaw(task.value?.description ?? { type: 'doc', content: [] })) as { type: 'doc' }
   editingDescription.value = true
 }
+// Following a link or selecting text to copy shouldn't open an editor
+function wantsEdit(event: MouseEvent) {
+  return !(event.target as HTMLElement).closest('a, button') && !window.getSelection()?.toString()
+}
 function onDescriptionClick(event: MouseEvent) {
-  // Following a link or selecting text to copy shouldn't open the editor
-  if ((event.target as HTMLElement).closest('a')) return
-  if (window.getSelection()?.toString()) return
-  startEditDescription()
+  if (wantsEdit(event)) startEditDescription()
 }
 const uploadingImages = ref(0)
 async function saveDescription() {
@@ -235,6 +236,7 @@ async function saveDescription() {
 // A Draft from a plan: the task itself, without the work around it. It's
 // placed only with the whole plan, from the plan flyout
 const isDraft = computed(() => task.value?.status === 'draft')
+const editingCriterion = ref<string | null>(null)
 // Merged is final (D10): the task reads as it shipped; only comments change
 const readonly = computed(() => task.value?.status === 'merged')
 async function place() {
@@ -579,10 +581,10 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
               :key="ref"
               class="flex items-center gap-2 text-sm"
             >
-              <NuxtLink
-                :to="props.mode === 'flyout' ? { query: { ...$route.query, task: ref } } : `/tasks/${ref}`"
-                class="font-mono text-muted"
-              >{{ ref }}</NuxtLink>
+              <TaskLink
+                :task-ref="ref"
+                class="font-mono"
+              />
               <span class="truncate">{{ dependencyTask(ref)?.title ?? '' }}</span>
               <StatusBadge
                 v-if="dependencyTask(ref)"
@@ -630,7 +632,6 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
               v-model:uploading="uploadingImages"
               :doc="descriptionDraft"
               :slug="slug"
-              editing
               @update:doc="descriptionDraft = $event"
               @cancel="editingDescription = false"
             />
@@ -661,7 +662,10 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
             @keydown.enter.self.prevent="!readonly && startEditDescription()"
             @keydown.space.self.prevent="!readonly && startEditDescription()"
           >
-            <AsyncTaskDescription :doc="task.description" />
+            <RichTextText
+              :doc="task.description"
+              class="text-sm"
+            />
           </div>
           <p
             v-if="agentHolds && task.lease"
@@ -689,14 +693,21 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
                 :aria-label="criterion.met ? 'Met' : criterion.met === false ? 'Not met' : 'Open'"
               />
               <div class="min-w-0 flex-1">
-                <MarkdownText
-                  v-if="readonly"
-                  :text="criterion.text"
-                  class="px-1"
-                />
+                <div
+                  v-if="readonly || editingCriterion !== criterion.id"
+                  :role="readonly ? undefined : 'button'"
+                  :tabindex="readonly ? undefined : 0"
+                  :aria-label="readonly ? undefined : `Edit criterion: ${criterion.text}`"
+                  class="rounded px-1 py-0.5 hover:bg-elevated"
+                  @click="!readonly && wantsEdit($event) && (editingCriterion = criterion.id)"
+                  @keydown.enter.self.prevent="!readonly && (editingCriterion = criterion.id)"
+                >
+                  <MarkdownText :text="criterion.text" />
+                </div>
                 <UTextarea
                   v-else
                   :model-value="criterion.text"
+                  autofocus
                   autoresize
                   :rows="1"
                   variant="none"
@@ -705,6 +716,7 @@ const workingAgent = computed(() => task.value?.lease ? shell.agents.find(a => a
                   :ui="{ base: 'px-1 py-0 text-sm/6 hover:bg-elevated focus:ring-2 focus:ring-primary' }"
                   :aria-label="`Criterion: ${criterion.text}`"
                   @change="saveCriterion(criterion.id, ($event.target as HTMLTextAreaElement).value)"
+                  @blur="editingCriterion = null"
                 />
                 <label class="mt-1 flex items-center gap-1 px-1 text-xs text-muted">
                   <input

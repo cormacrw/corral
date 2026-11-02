@@ -8,8 +8,6 @@ const props = defineProps<{ item: ReleaseNotesItem }>()
 const read = useMutation(readDeployment)
 const dismiss = useMutation(dismissDeployment)
 const error = computed(() => (dismiss.error.value ?? read.error.value)?.message ?? null)
-const shell = useShell()
-const taskPrefixes = computed(() => shell.projects.map(p => p.prefix))
 // By deployment, not its unread flag: a failed read restores the flag, and
 // must not try again in a loop
 watch(() => props.item.deploymentId, (id) => {
@@ -63,7 +61,6 @@ watch(() => props.item.deploymentId, (id) => {
       <MarkdownText
         v-else
         :text="item.notes ?? ''"
-        :task-refs="taskPrefixes"
         class="text-sm"
       />
       <UAlert

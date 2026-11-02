@@ -66,6 +66,7 @@ const runLines = (agent: Agent) => runs.value
     return {
       id: run.id,
       ref: run.taskRef ?? (run.epicId ? 'Epic' : null),
+      taskRef: run.taskRef,
       title: liveRunTitle(run, session?.title ?? null),
       project: projectOf(run.projectId),
       status: task ? STATUS[task.status].label : null,
@@ -238,9 +239,9 @@ const agents = computed(() => shell.agents
             v-for="{ agent, lines, working } in agents"
             :key="agent.id"
           >
-            <NuxtLink
-              :to="`/agents/${agent.name.toLowerCase()}`"
-              :class="['flex flex-col gap-2 rounded-lg border p-3', working ? 'border-primary/60 ring-2 ring-primary/15' : 'border-default']"
+            <!-- The agent link covers the card, so task links can sit beside it, not inside it -->
+            <div
+              :class="['relative flex flex-col gap-2 rounded-lg border p-3', working ? 'border-primary/60 ring-2 ring-primary/15' : 'border-default']"
               :data-testid="`home-agent-${agent.name.toLowerCase()}`"
             >
               <div class="flex items-center gap-2">
@@ -261,8 +262,13 @@ const agents = computed(() => shell.agents
                 class="ps-10"
               >
                 <p class="truncate">
+                  <TaskLink
+                    v-if="line.taskRef"
+                    :task-ref="line.taskRef"
+                    class="relative z-10 me-1 font-mono text-xs"
+                  />
                   <span
-                    v-if="line.ref"
+                    v-else-if="line.ref"
                     class="me-1 font-mono text-xs text-muted"
                   >{{ line.ref }}</span>
                   <span class="font-medium text-highlighted">{{ line.title }}</span>
@@ -277,7 +283,12 @@ const agents = computed(() => shell.agents
                   {{ [line.project?.name, line.status, line.link, line.elapsed].filter(Boolean).join(' · ') }}
                 </p>
               </div>
-            </NuxtLink>
+              <NuxtLink
+                :to="`/agents/${agent.name.toLowerCase()}`"
+                :aria-label="agent.name"
+                class="absolute inset-0 rounded-lg"
+              />
+            </div>
           </li>
         </ul>
         <p
