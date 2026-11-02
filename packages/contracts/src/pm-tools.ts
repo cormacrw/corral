@@ -25,12 +25,12 @@ const version = z.number().int().positive()
 export const pmActionTools = {
   create_task: {
     confirmRequired: false,
-    description: 'Create a single Backlog task in the selected project, outside a plan.',
+    description: 'Create a single Backlog task in the selected project, outside a plan. Setting humanReview to false where the project reviews by default takes a confirm card.',
     input: createTaskInput.shape
   },
   update_task: {
     confirmRequired: false,
-    description: 'Edit task metadata before it is Merged. A change that lowers a gate takes a confirm card instead of acting: turning off humanReview, removing or clearing a human check, or setting paused to false on a paused task. Epic membership is fixed once a PR opens or the task merges. Type is fixed once a task is approved or awaiting merge; a spike or design type is fixed once the task leaves Draft or Backlog. Criteria and dependencies replace the lists; preserve criterion IDs. paused pauses unleased tasks or resumes work; use stop_run with human confirmation for a leased task.',
+    description: 'Edit task metadata before it is Merged. A change that lowers a gate takes a confirm card instead of acting: turning off humanReview, moving it somewhere with less human review, rewording, removing or clearing a human check, or setting paused to false on a paused task. Epic membership is fixed once a PR opens or the task merges. Type is fixed once a task is approved or awaiting merge; a spike or design type is fixed once the task leaves Draft or Backlog. Criteria and dependencies replace the lists; preserve criterion IDs. paused pauses unleased tasks or resumes work; use stop_run with human confirmation for a leased task.',
     input: { taskRef: z.string().trim().min(1), ...patchTaskInput.shape, paused: z.boolean().optional() }
   },
   move_task: {
@@ -140,7 +140,7 @@ export const pmDirectTools = {
   },
   update_project: {
     confirmRequired: false,
-    description: 'Change a project\'s settings. A change that lowers a gate takes a confirm card instead of acting: removing a required check, turning off humanReviewDefault, a default review mode with less human review, or raising reviewRoundCap or failedRunCap. defaultBranch is its target branch, humanReviewDefault and epicReviewModeDefault its default review modes, reviewRoundCap and failedRunCap its round caps, and paused stops new work starting. Pass only what changes.',
+    description: 'Change a project\'s settings. A change that lowers a gate takes a confirm card instead of acting: removing a required check, turning off humanReviewDefault, a default review mode with less human review, raising reviewRoundCap or failedRunCap, or setting paused to false on a paused project. defaultBranch is its target branch, humanReviewDefault and epicReviewModeDefault its default review modes, reviewRoundCap and failedRunCap its round caps, and paused stops new work starting. Pass only what changes.',
     input: { project: projectSlug, ...patchProjectInput.shape }
   },
   create_project: {
@@ -219,7 +219,7 @@ export function requiresPmConfirmation(tool: string, input: unknown): tool is ke
 
 // Direct unless the call lowers a gate, which only the server can tell from the
 // current state. Then it takes a confirm card like the tools above (D30).
-export const PM_GATED_TOOLS = ['update_task', 'update_epic', 'update_project'] as const
+export const PM_GATED_TOOLS = ['create_task', 'update_task', 'update_epic', 'update_project'] as const
 export type PmGatedTool = typeof PM_GATED_TOOLS[number]
 
 export function isPmGatedTool(tool: string): tool is PmGatedTool {

@@ -135,7 +135,7 @@ describe('PM tools for the Inbox, designs and agents', () => {
     it('takes a card to turn off human review, and acts as the human on Confirm', async () => {
       const gated = await task({ humanReview: true })
       const card = await lowered('update_task', { taskRef: gated.ref, humanReview: false, title: 'Renamed' }, 'turn off human review')
-      expect(card.summary).toContain('Also changes title')
+      expect(card.summary).toContain('Also changes title to "Renamed"')
       expect(await statusOf(gated.id)).toMatchObject({ humanReview: true })
       await resolve(card.actionId, 'confirm')
       expect(await statusOf(gated.id)).toMatchObject({ humanReview: false, title: 'Renamed' })
@@ -184,6 +184,69 @@ describe('PM tools for the Inbox, designs and agents', () => {
       expect(await call('update_project', { project: slug, reviewRoundCap: 2, requiredChecks: ['ci', 'lint', 'test'] })).toMatchObject({ ok: true, result: { reviewRoundCap: 2 } })
     })
 
+    it('refuses a criterion id twice, the route around the human check', async () => {
+      const checked = await t.createTask(slug, { acceptanceCriteria: [{ text: 'A person checks it', checkedByHuman: true }] })
+      const [human] = await t.db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, checked.id))
+      const same = { id: human!.id, text: human!.text }
+      expect(await call('update_task', { taskRef: checked.ref, acceptanceCriteria: [{ ...same, checkedByHuman: true }, { ...same, checkedByHuman: false }] })).toMatchObject({ ok: false })
+      expect(await statusOf(checked.id)).toBeTruthy()
+      expect((await t.db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, checked.id)))[0]).toMatchObject({ checkedByHuman: true })
+    })
+
+    it('takes a card to reword a human check', async () => {
+      const checked = await t.createTask(slug, { acceptanceCriteria: [{ text: 'A person checks it', checkedByHuman: true }] })
+      const [human] = await t.db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, checked.id))
+      await lowered('update_task', { taskRef: checked.ref, acceptanceCriteria: [{ id: human!.id, text: 'n/a' }, { text: 'A person checks it' }] }, 'reword the human check "A person checks it" to "n/a"')
+    })
+
+    it('takes a card to move a task somewhere with less human review', async () => {
+      const { id: projectId } = await (await t.request('GET', `/api/projects/${slug}`)).json() as { id: string }
+      const epicOf = async (reviewMode: 'each_task' | 'epic' | 'direct') => (await t.db.insert(schema.epics).values({ projectId, title: reviewMode, reviewMode, createdBy: t.actor }).returning())[0]!
+      const [strict, plain, direct] = [await epicOf('each_task'), await epicOf('epic'), await epicOf('direct')]
+      const inStrict = await task({ humanReview: false, epicId: strict.id })
+      await lowered('update_task', { taskRef: inStrict.ref, epicId: null }, 'move it somewhere with less human review')
+      await lowered('update_task', { taskRef: inStrict.ref, epicId: direct.id }, 'move it somewhere with less human review')
+      expect(await statusOf(inStrict.id)).toMatchObject({ epicId: strict.id })
+      const loose = await task({ humanReview: false, epicId: direct.id })
+      expect(await call('update_task', { taskRef: loose.ref, epicId: plain.id })).toMatchObject({ ok: true, result: { ref: loose.ref } })
+      // Its own flag keeps a human on it wherever it goes
+      const flagged = await task({ humanReview: true, epicId: strict.id })
+      expect(await call('update_task', { taskRef: flagged.ref, epicId: null })).toMatchObject({ ok: true, result: { ref: flagged.ref } })
+    })
+
+    it('takes a card to retype a spike into work with no human review', async () => {
+      const spike = await task({ humanReview: false, type: 'spike', status: 'backlog' })
+      await lowered('update_task', { taskRef: spike.ref, type: 'task' }, 'turn off human review')
+    })
+
+    it('takes a card to resume a paused project', async () => {
+      await t.request('PATCH', `/api/projects/${slug}`, { paused: true })
+      const card = await lowered('update_project', { project: slug, paused: false }, 'resume the paused project')
+      expect(await (await t.request('GET', `/api/projects/${slug}`)).json()).toMatchObject({ paused: true })
+      await resolve(card.actionId, 'confirm')
+      expect(await (await t.request('GET', `/api/projects/${slug}`)).json()).toMatchObject({ paused: false })
+      await t.request('PATCH', `/api/projects/${slug}`, { paused: true })
+    })
+
+    it('takes a card to create a task below the project\'s review default', async () => {
+      await t.request('PATCH', `/api/projects/${slug}`, { humanReviewDefault: true })
+      const card = await lowered('create_task', { title: 'Unreviewed', type: 'task', humanReview: false }, 'without human review')
+      await resolve(card.actionId, 'confirm')
+      const [created] = await t.db.select().from(tasks).where(eq(tasks.title, 'Unreviewed'))
+      expect(created).toMatchObject({ humanReview: false })
+      expect(await call('create_task', { title: 'Reviewed', type: 'task', humanReview: true })).toMatchObject({ ok: true })
+    })
+
+    it('names what a deletion drops, and what a resolve resets', async () => {
+      const checked = await t.createTask(slug, { humanReview: true, acceptanceCriteria: [{ text: 'A person checks it', checkedByHuman: true }] })
+      const card = await propose('delete_task', { taskRef: checked.ref })
+      expect(card.summary).toContain('This drops its human review, the human check "A person checks it"')
+      const failed = await task({ status: 'failed', statusReason: 'Three failed runs', failedRuns: 3 })
+      expect((await propose('act_on_inbox', { taskRef: failed.ref, action: 'resolve', to: 'ready' })).summary).toContain('resets its failed run count from 3 to 0')
+      const capped = await task({ status: 'blocked', statusReason: 'Review cap', reviewRounds: 4 })
+      expect((await propose('act_on_inbox', { taskRef: capped.ref, action: 'resolve', to: 'ready' })).summary).toContain('resets its review round count from 4 to 0')
+    })
+
     it('fails a card whose gate was lowered meanwhile', async () => {
       const gated = await task({ humanReview: true })
       const card = await propose('update_task', { taskRef: gated.ref, humanReview: false })
@@ -203,6 +266,51 @@ describe('PM tools for the Inbox, designs and agents', () => {
     expect(details.filter(d => d.tool === 'update_task' && d.ok)).not.toHaveLength(0)
     expect(details.filter(d => d.tool === 'update_task' && !d.ok)).not.toHaveLength(0)
     expect((await inbox()).activity).toContainEqual(expect.objectContaining({ taskRef: created.result.ref, sender: { name: 'PM', role: 'pm' } }))
+  })
+
+  describe('plans', () => {
+    const plan = (over: Record<string, unknown>, epics: unknown[] = []) => ({ title: 'Revision', summary: 'x', epics, tasks: [{ key: 'a', title: 'A', description: 'd', type: 'task', acceptanceCriteria: ['c'], ...over }] })
+    const refused = async (input: unknown, words: string) => {
+      const reply = await call('propose_plan', input) as { ok: false, error: string }
+      expect(reply).toMatchObject({ ok: false })
+      expect(reply.error).toContain(words)
+    }
+
+    it('refuses a revision that lowers a gate on an existing task', async () => {
+      const gated = await t.createTask(slug, { humanReview: true, acceptanceCriteria: [{ text: 'A person checks it', checkedByHuman: true }, 'Tests pass'] })
+      await t.db.update(tasks).set({ status: 'backlog' }).where(eq(tasks.id, gated.id))
+      const kept = { ref: gated.ref, acceptanceCriteria: [{ text: 'A person checks it' }, { text: 'Tests pass' }] }
+      await refused(plan({ ...kept, humanReview: false }), 'update_task')
+      await refused(plan({ ...kept, humanReview: true, acceptanceCriteria: ['Tests pass'] }), 'update_task')
+    })
+
+    it('keeps the task\'s flag when a revision leaves it out', async () => {
+      const gated = await t.createTask(slug, { humanReview: true })
+      await t.db.update(tasks).set({ status: 'backlog' }).where(eq(tasks.id, gated.id))
+      const saved = await call('propose_plan', plan({ ref: gated.ref, title: 'Reworded' }))
+      expect(saved).toMatchObject({ ok: true })
+      const [row] = await t.db.select().from(schema.planTasks).where(eq(schema.planTasks.taskId, gated.id))
+      expect(row!.revision).toMatchObject({ humanReview: true })
+    })
+
+    it('checks again at approval, as the task may have gained a gate since', async () => {
+      const open = await t.createTask(slug, { humanReview: false })
+      await t.db.update(tasks).set({ status: 'backlog' }).where(eq(tasks.id, open.id))
+      expect(await call('propose_plan', plan({ ref: open.ref, humanReview: false }))).toMatchObject({ ok: true })
+      await t.db.update(tasks).set({ humanReview: true }).where(eq(tasks.id, open.id))
+      const [row] = await t.db.select({ planId: schema.planTasks.planId }).from(schema.planTasks).where(eq(schema.planTasks.taskId, open.id))
+      const approved = await t.request('POST', `/api/plan/plans/${row!.planId}/approve`, { to: 'backlog' })
+      expect(approved.status).toBe(409)
+      expect(await approved.json()).toMatchObject({ error: { code: 'plan_not_approvable', problems: [{ code: 'lowers_gate' }] } })
+      expect(await statusOf(open.id)).toMatchObject({ humanReview: true })
+    })
+
+    it('refuses a lower review mode on an epic with live work', async () => {
+      const live = { key: 'live', title: 'Live task', epic: 'e' }
+      expect(await call('propose_plan', plan(live, [{ key: 'e', title: 'Live', summary: 's', reviewMode: 'epic' }]))).toMatchObject({ ok: true })
+      await t.db.update(tasks).set({ status: 'backlog' }).where(and(eq(tasks.title, 'Live task'), eq(tasks.status, 'draft')))
+      await refused(plan(live, [{ key: 'e', title: 'Live', summary: 's', reviewMode: 'direct' }]), 'update_epic')
+    })
   })
 
   it('refuses a plan for another project in a project conversation', async () => {

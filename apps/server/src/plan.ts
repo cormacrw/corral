@@ -1,5 +1,5 @@
 import { askQuestionInput, planMessageFields, type NewPlanMessageFields, listTasksInput, normalizeProposedPlan, proposedPlanInput, type AgentRuntime, type DraftSession, type Plan, type PlanMessage, type PlanSession, type PlanSessionDetail, type PmRunJob } from '@corral/contracts'
-import { approvedPlanSummary, checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, revisionProblem, richTextToMarkdown, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PmAction, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
+import { approvedPlanSummary, checkPlan, checkPlanEpicDependencies, designPinKey, diffPlans, isDesignPinStale, markdownToRichText, requiresHumanReview, revisionProblem, richTextToMarkdown, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PmAction, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision } from '@corral/db'
 import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm'
 import { z } from 'zod'
@@ -8,6 +8,7 @@ import { agentActivity, UnknownAgent } from './agent-activity.ts'
 import { listTaskAttachments } from './attachments.ts'
 import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-state.ts'
 import { listEpics, replaceEpicDependencies, reviewModeLocked } from './epics.ts'
+import { lostHumanChecks, lowersMode, matchCriteria, taskReview } from './review-gates.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { pmFallbackPrompt, pmPrompt, questionText, sessionTitlePrompt } from './prompts.ts'
@@ -592,7 +593,8 @@ export class PlanService {
         const parsed = proposedPlanInput.safeParse(input)
         if (!parsed.success) throw new ToolError(`The plan was not saved: ${z.prettifyError(parsed.error)}`)
         if (session.projectId && project!.id !== session.projectId) throw new ToolError(`The plan was not saved: this conversation belongs to another project, so it can't plan for ${project!.slug}. Start a thread in ${project!.slug} with start_thread and propose it there.`)
-        return this.#propose(session, project!, runId, normalizeProposedPlan(parsed.data), actor)
+        const keepsReview = new Set(parsed.data.tasks.filter(t => t.humanReview === undefined).map(t => t.key))
+        return this.#propose(session, project!, runId, normalizeProposedPlan(parsed.data), actor, keepsReview)
       }
 
       // The human's approval, given in chat and carried out by the PM. It's
@@ -638,9 +640,16 @@ export class PlanService {
   // the ones still in Draft by key. A task with a `ref` revises an existing
   // Backlog or unclaimed Ready task instead: its edits are staged on the plan
   // and written only when the human approves.
-  async #propose(session: SessionRow, project: ProjectRow, runId: string, proposed: ProposedPlan, actor: Actor) {
+  async #propose(session: SessionRow, project: ProjectRow, runId: string, proposed: ProposedPlan, actor: Actor, keepsReview: ReadonlySet<string> = new Set()) {
     const { db } = this.#d
     const { found, targets } = await this.#lookupRefs(project, proposed)
+    // A revision that leaves the flag out keeps the task's
+    for (const task of proposed.tasks) {
+      const target = task.ref ? targets.get(task.ref) : undefined
+      if (!target || !keepsReview.has(task.key)) continue
+      const [row] = await db.select({ humanReview: tasks.humanReview }).from(tasks).where(eq(tasks.id, target.id))
+      task.humanReview = requiresHumanReview(task.type, row?.humanReview ?? false)
+    }
     const { found: designs, versionIds } = await this.#lookupDesigns(project, proposed)
 
     const [latest] = await db.select().from(plans).where(eq(plans.sessionId, session.id)).orderBy(desc(plans.version)).limit(1)
@@ -679,6 +688,9 @@ export class PlanService {
           if (epic.reviewMode && epic.reviewMode !== row!.reviewMode) {
             const taskRows = await tx.select({ status: tasks.status, prNumber: tasks.prNumber, integrationProtocol: tasks.integrationProtocol }).from(tasks).where(eq(tasks.epicId, current))
             if (reviewModeLocked(row!, taskRows)) throw new ToolError('The plan was not saved: the review mode can\'t change once a task in the epic has submitted work or opened a PR.')
+            // Only an epic still being planned is the plan's to set: its tasks are all Drafts
+            const live = previous?.status === 'approved' || taskRows.some(t => t.status !== 'draft')
+            if (live && lowersMode(row!.reviewMode, epic.reviewMode)) throw new ToolError(`The plan was not saved: it would lower ${row!.title} from ${row!.reviewMode} to ${epic.reviewMode} review. Use update_epic, which asks the human.`)
           }
           await tx.update(epics).set({ title: epic.title, description: epic.summary, ...(epic.reviewMode && { reviewMode: epic.reviewMode }), updatedAt: new Date() }).where(eq(epics.id, current))
           epicIds.set(epic.key, current)
@@ -773,6 +785,8 @@ export class PlanService {
             dependsOn,
             design: pinOf(task)
           })
+          const lowered = await revisionLowers(tx, ids.get(task.key)!, revisions.get(task.key)!)
+          if (lowered) throw new ToolError(`The plan was not saved: for ${task.ref}, ${lowered}`)
           continue
         }
         const [row] = await tx.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, ids.get(task.key)!))
@@ -853,6 +867,8 @@ export class PlanService {
         const found: PlanRef = row && !row.deletedAt ? { kind: 'task', status: row.status, pickedUp: await pickedUp(tx, item.taskId, row.leaseRunId) } : { kind: 'deleted' }
         const problem = revisionProblem(item.key, ref, found)
         if (problem) refused.push({ code: problem.code, key: item.key, ref, message: 'message' in problem ? problem.message : `${ref} can't be revised.` })
+        const lowered = !problem && await revisionLowers(tx, item.taskId, item.revision)
+        if (lowered) refused.push({ code: 'lowers_gate', key: item.key, ref, message: `For ${ref}, ${lowered}` })
       }
       if (refused.length) throw new ApiFailure(409, { code: 'plan_not_approvable', problems: refused })
       const problems = checkPlanEpicDependencies(proposed, await this.#dependencyContext(project, proposed, plan, tx))
@@ -1286,17 +1302,23 @@ async function reviseTask(tx: Executor, project: ProjectRow, taskId: string, rev
   await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.revised', { ...plan, fields: ['title', 'description', 'type', 'priority', 'humanReview', 'acceptanceCriteria', 'epicId', 'dependsOn', ...(revision.design !== undefined ? ['design'] : [])] }))
 }
 
-// A task's new criteria, each with the ID of an existing one that has the
-// same text, so evidence and verdicts stay attached to it
-async function keepCriterionIds(tx: Executor, taskId: string, texts: (string | { text: string, checkedByHuman?: boolean | undefined })[]): Promise<{ id?: string, text: string, checkedByHuman?: boolean | undefined }[]> {
-  const unused = await tx.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId)).orderBy(asc(acceptanceCriteria.position))
-  return texts.map((criterion) => {
-    const { text, checkedByHuman } = typeof criterion === 'string' ? { text: criterion } : criterion
-    const index = unused.findIndex(c => c.text === text)
-    if (index === -1) return { text, checkedByHuman: checkedByHuman ?? false }
-    const matched = unused.splice(index, 1)[0]!
-    return { id: matched.id, text, checkedByHuman: checkedByHuman ?? matched.checkedByHuman }
-  })
+async function keepCriterionIds(tx: Executor, taskId: string, texts: (string | { text: string, checkedByHuman?: boolean | undefined })[]) {
+  return matchCriteria(await tx.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId)).orderBy(asc(acceptanceCriteria.position)), texts)
+}
+
+// How a revision would lower a gate on the task it revises, or null. A plan
+// can raise a gate but never lower one on existing work: that takes
+// update_task's confirm card, which names it (D30).
+async function revisionLowers(tx: Executor, taskId: string, revision: PlanRevision): Promise<string | null> {
+  const [row] = await tx.select({ task: tasks, mode: epics.reviewMode }).from(tasks).leftJoin(epics, eq(epics.id, tasks.epicId)).where(eq(tasks.id, taskId))
+  if (!row) return null
+  const next = { type: revision.type, humanReview: revision.humanReview }
+  const [epic] = revision.epicId ? await tx.select({ mode: epics.reviewMode }).from(epics).where(eq(epics.id, revision.epicId)) : []
+  const asks = 'Use update_task, which asks the human.'
+  if (requiresHumanReview(row.task.type, row.task.humanReview) && !requiresHumanReview(next.type, next.humanReview)) return `the plan would turn off human review. ${asks}`
+  if (revision.epicId !== row.task.epicId && taskReview(next, epic?.mode ?? null) < taskReview(row.task, row.mode)) return `the plan would move it somewhere with less human review. ${asks}`
+  const lost = lostHumanChecks(await tx.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, taskId)), await keepCriterionIds(tx, taskId, revision.acceptanceCriteria))
+  return lost.length ? `the plan would drop the human check "${lost[0]!.text}". ${asks}` : null
 }
 
 interface MessageLinks {
