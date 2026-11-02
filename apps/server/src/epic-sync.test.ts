@@ -1,6 +1,6 @@
 import { TASK_INTEGRATION_PROTOCOL } from '@corral/contracts'
 import { schema } from '@corral/db'
-import { eq, inArray, isNotNull } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull } from 'drizzle-orm'
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
@@ -510,7 +510,8 @@ it('retires a resolution whose epic branch moved, and starts again without a hum
   faults = async (job, real) => {
     if (job.kind === 'epic_rebase_push') {
       faults = null
-      await commitOn(epic.branch, `outside-${++branches}.txt`, 'x\n')
+      const moved = await commitOn(epic.branch, `outside-${++branches}.txt`, 'x\n')
+      await t.db.update(schema.epics).set({ prHeadSha: moved }).where(eq(schema.epics.id, epic.id))
     }
     return real()
   }
@@ -1094,6 +1095,64 @@ describe('developer runs on the epic', () => {
     runner.close()
     runner = await FakeRunner.connect(t.server!.url, [], 'r1', { taskIntegrationProtocols: [TASK_INTEGRATION_PROTOCOL], taskIntegrationExecutor: true, epicRebaseExecutor: true, epicFixExecutor: true })
     runner.onJob = jobs
+  })
+
+  describe('at and before the final checkpoint (COR-445)', () => {
+    async function underReview(epic: Awaited<ReturnType<typeof conflicted>>, values: Partial<typeof schema.epics.$inferInsert> = {}) {
+      await humanApproved(epic)
+      await t.db.update(schema.epics).set({ reviewState: 'human_review', approvedHeadSha: null, approvedBaseSha: null, ...values }).where(eq(schema.epics.id, epic.id))
+      return epic
+    }
+    const rebases = async (id: string) => (await ops(id)).filter(o => o.kind === 'rebase')
+    const developerRuns = (id: string) => t.db.select().from(schema.runs).where(and(eq(schema.runs.epicId, id), eq(schema.runs.role, 'developer')))
+
+    it('defers an each_task epic until it is approved, then resolves it', async () => {
+      const epic = await underReview(await conflicted(), { reviewMode: 'each_task' })
+      await pass()
+      expect((await fixEpic(epic.id)).sync).toEqual({ state: 'conflict_pending', files: [epic.file] })
+      expect(await needsYou(epic.id)).toEqual([])
+      expect(await developerRuns(epic.id)).toEqual([])
+
+      await t.db.update(schema.epics).set({ reviewState: 'ready_to_merge', approvedHeadSha: epic.head }).where(eq(schema.epics.id, epic.id))
+      await t.mergePass()
+      expect((await rebases(epic.id)).at(-1)).toMatchObject({ state: 'running', fix: 'conflict' })
+      await fixJob(epic.id)
+    })
+
+    it('resolves an epic left in the old conflict state at once', async () => {
+      const epic = await underReview(await conflicted(), { reviewState: 'conflict' })
+      await pass()
+      expect((await rebases(epic.id)).at(-1)).toMatchObject({ state: 'running', fix: 'conflict' })
+    })
+
+    it('starts no developer on an approved epic whose head moved outside Corral', async () => {
+      const epic = await humanApproved(await conflicted())
+      await t.db.update(schema.epics).set({ prHeadSha: 'a-foreign-head' }).where(eq(schema.epics.id, epic.id))
+      await pass()
+      expect(await rebases(epic.id)).toMatchObject([{ state: 'failed', fix: null }])
+    })
+
+    it('holds review back when the target has moved since the conflict was found', async () => {
+      const epic = await underReview(await conflicted())
+      await pass()
+      expect((await reload(epic.id)).reviewState).toBe('human_review')
+      await t.db.update(schema.epics).set({ reviewState: 'open' }).where(eq(schema.epics.id, epic.id))
+      await commitOn('main', 'unrelated.txt', 'moved\n')
+      await t.orchestrator.epicPrs.reconcile()
+      expect((await reload(epic.id)).reviewState).toBe('open')
+    })
+
+    it('clears a pending conflict when the branch reaches the target outside Corral', async () => {
+      const epic = await underReview(await conflicted())
+      await pass()
+      expect((await fixEpic(epic.id)).sync).toMatchObject({ state: 'conflict_pending' })
+
+      const handMade = await resolve(epic.branch, epic.onto, epic.file, 'target version\nepic version\n')
+      await t.db.update(schema.epics).set({ prHeadSha: handMade }).where(eq(schema.epics.id, epic.id))
+      await t.mergePass()
+      expect((await fixEpic(epic.id)).sync).toBeNull()
+      expect(await rebases(epic.id)).toHaveLength(1)
+    })
   })
 
   it('resolves a conflict on the epic with no task, keeping approval when behaviour is unchanged and only the conflicted files differ', async () => {

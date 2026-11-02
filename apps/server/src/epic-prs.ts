@@ -111,9 +111,13 @@ export class EpicPullRequests {
     // a CI fix is on top of the target, so the behind check below can't tell
     if (candidate.prHeadSha && candidate.prHeadSha !== pr.headSha && APPROVED_STATES.includes(candidate.reviewState) && await github.branchHead(project.repository, candidate.branch!) === candidate.prHeadSha) return
     // Review starts from a head on top of the target branch: the
-    // synchronizer's pass rebases it, and this one comes back. A conflict on
-    // this head is resolved once approved, so review doesn't wait for it.
-    if (await github.behindBy(project.repository, project.defaultBranch, pr.headSha) > 0 && (await deferredConflicts(db, [candidate.id])).get(candidate.id)?.expectedTargetSha !== pr.headSha) return
+    // synchronizer's pass rebases it, and this one comes back. A conflict
+    // between these same commits is resolved once approved, so review doesn't
+    // wait for it; a moved target may have removed it, so that gets a rebase.
+    if (await github.behindBy(project.repository, project.defaultBranch, pr.headSha) > 0) {
+      const deferred = (await deferredConflicts(db, [candidate.id])).get(candidate.id)
+      if (deferred?.expectedTargetSha !== pr.headSha || deferred.ontoSha !== await github.branchHead(project.repository, project.defaultBranch)) return
+    }
     await github.updatePullRequest(project.repository, pr.number, { body: await this.body(db, candidate, board, project) })
     const changed = await db.transaction(async (tx) => {
       const [epic] = await tx.select().from(epics).where(eq(epics.id, candidate.id)).for('update')

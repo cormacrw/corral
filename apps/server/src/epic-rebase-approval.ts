@@ -184,6 +184,8 @@ export async function resolutionContext(db: Executor, taskId: string, epicId: st
 // (COR-445). It's pending while nothing newer has rebased or fixed the epic, so
 // the journal alone says so, and any later rebase clears it.
 export const CONFLICT_DEFERRED = 'Conflict left for the final checkpoint'
+// The branch reached the target some other way, with no rebase of ours to be newer
+export const CONFLICT_GONE = 'The epic branch no longer conflicts'
 
 export async function deferredConflicts(db: Executor, epicIds: string[]) {
   if (epicIds.length === 0) return new Map<string, typeof operations.$inferSelect>()

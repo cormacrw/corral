@@ -693,6 +693,29 @@ describe('a conflict before approval (COR-445)', () => {
     expect((await inbox()).needsYou).toEqual([])
   })
 
+  it('waits for a rebase when the target moves during the merge, and counts no refused merge', async () => {
+    runner = await connectRunner('r1', FIXES)
+    const epic = await humanApprovedEpic()
+    passCi(epic.head)
+    const { merge } = t.github
+    let merges = 0
+    t.github.merge = async (...args) => {
+      merges++
+      return merge.apply(t.github, args)
+    }
+    const { checks } = t.github
+    t.github.checks = async (...args) => {
+      await commitOn('main', `moved-${merges}.txt`, 'moved\n')
+      t.github.checks = checks
+      return checks.apply(t.github, args)
+    }
+    await t.mergePass()
+    t.github.merge = merge
+    expect(merges).toBe(0)
+    expect(await events(epic.id)).not.toContain('merge_refused')
+    expect((await epicRow(epic.id)).reviewState).toBe('ready_to_merge')
+  })
+
   it('clears the pending conflict when a later checkpoint rebases cleanly', async () => {
     runner = await connectRunner('r1', FIXES)
     const epic = await heldEpic('shared.txt', 'epic\n')
@@ -702,7 +725,6 @@ describe('a conflict before approval (COR-445)', () => {
 
     await git('rm', '--quiet', 'shared.txt')
     await git('commit', '--quiet', '-m', 'Target drops its version')
-    await integrationReview(epic.id)
     await mergePasses(2)
 
     expect((await rebases(epic.id)).at(-1)).toMatchObject({ state: 'succeeded' })

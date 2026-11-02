@@ -25,10 +25,19 @@ way. Approval is refused during an active rebase, so the state `#prepare` reads
 can't go stale in the unsafe direction: an approval just after `#defer` is seen by
 the next `begin`.
 
-`startReview` normally waits for a head on top of the target. It lets one through
-when the deferred row's head is that head, or review would wait on a rebase that
-waits on review. `EpicMerger` keeps its behind check, which is what stops a
-conflicted epic merging. A checkpoint needs a waiting task or a complete epic, and
+`startReview` normally waits for a head on top of the target. It lets a deferred
+head through when the row is for that head and the current target, or review
+would wait on a rebase that waits on review. A moved target goes back to a
+checkpoint first, since it may have removed the conflict. `finalCheckpoint` also
+needs the approved head, because any other head is about to lose approval.
+
+A hand rebase or GitHub's update branch leaves no row of ours, so `begin` marks
+the deferred row `CONFLICT_GONE` when the head is no longer behind.
+
+`EpicMerger` is what stops a conflicted epic merging: it checks the head isn't
+behind in `#advance`, and again in `#merge` just before asking GitHub, because the
+target can move in between. Being behind there isn't a refused merge, so it costs
+no attempt. A checkpoint needs a waiting task or a complete epic, and
 `due()` goes through the `Backoff`, so a test expecting one uses `t.mergePass()`.
 
 While a conflict is being resolved the operation stays `running` with `fix` set

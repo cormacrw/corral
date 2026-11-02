@@ -166,6 +166,8 @@ export class EpicMerger {
         const [locked] = await tx.select().from(epics).where(eq(epics.id, epic.id)).for('update')
         const [current] = await tx.select({ paused: projects.paused }).from(projects).where(eq(projects.id, project.id))
         if (this.#stopped() || current?.paused !== false || locked?.reviewState !== 'ready_to_merge' || locked.prHeadSha !== pr.headSha || await activeRebase(tx, epic.id) || !complete(await epicBoard(tx, epic.id))) return null
+        // CI passed on an older target. The next pass waits for the rebase.
+        if (await github.behindBy(project.repository, project.defaultBranch, pr.headSha) > 0) return null
         const result = await github.merge(project.repository, pr.number, 'squash', pr.headSha)
         return result.merged ? null : result.message
       })

@@ -3,7 +3,7 @@ import { schema, type Database, type Executor } from '@corral/db'
 import { and, desc, eq, gte, inArray, isNotNull, isNull, ne, notInArray, or } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import { complete, epicBoard } from './epic-prs.ts'
-import { ACTIVE_OPERATION as ACTIVE, APPROVED_STATES, approvalChange, approvalFate, CONFLICT_DEFERRED, deferredConflicts } from './epic-rebase-approval.ts'
+import { ACTIVE_OPERATION as ACTIVE, APPROVED_STATES, approvalChange, approvalFate, CONFLICT_DEFERRED, CONFLICT_GONE, deferredConflicts } from './epic-rebase-approval.ts'
 import { loadEpic } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
@@ -28,7 +28,7 @@ const EPIC_MOVED = 'The epic branch moved'
 const INTERRUPTED = 'Interrupted before a candidate was ready'
 const EPIC_MERGED = 'The epic PR merged'
 const RETRY_AT_ONCE = [EPIC_MOVED, INTERRUPTED, EPIC_MERGED]
-const NOT_FAILURES = [...RETRY_AT_ONCE, CONFLICT_DEFERRED]
+const NOT_FAILURES = [...RETRY_AT_ONCE, CONFLICT_DEFERRED, CONFLICT_GONE]
 const RESOLUTION_FAILED = 'The conflict resolution failed and the target has moved on'
 // Failures on the same commits before it takes a human to retry. Each waits a
 // little longer, so one bad minute doesn't use them all.
@@ -159,11 +159,15 @@ export class EpicSynchronizer {
     this.#poll.later(epicId)
     const head = await github.branchHead(project.repository, epic.branch!)
     const onto = await github.branchHead(project.repository, project.defaultBranch)
-    if (!head || !onto || await github.behindBy(project.repository, project.defaultBranch, head) === 0) return null
+    if (!head || !onto) return null
+    if (await github.behindBy(project.repository, project.defaultBranch, head) === 0) {
+      await this.#clearDeferred(epicId)
+      return null
+    }
     if (await this.#prShut(epic, project)) return null
     // The same commits would conflict the same way. Approval is what changes that.
     const deferred = (await deferredConflicts(db, [epicId])).get(epicId)
-    if (deferred?.expectedTargetSha === head && deferred.ontoSha === onto && !finalCheckpoint(epic)) return null
+    if (deferred?.expectedTargetSha === head && deferred.ontoSha === onto && !finalCheckpoint(epic, head)) return null
     const failures = await this.#failures(db, epic, head, onto)
     const last = failures[0]
     if (last && this.#now().getTime() - last.updatedAt.getTime() < RETRY_DELAY_MS * failures.length) return null
@@ -247,7 +251,7 @@ export class EpicSynchronizer {
           return false
         }
         // Approval waits for the writer lock, so this read can't go stale
-        if (!finalCheckpoint(await this.#current(ctx.epic))) return this.#defer(operation, ctx, prepared.files)
+        if (!finalCheckpoint(await this.#current(ctx.epic), operation.expectedTargetSha)) return this.#defer(operation, ctx, prepared.files)
         await this.#startFix(operation, ctx, prepared.files)
         return false
       case 'rebased': {
@@ -274,6 +278,14 @@ export class EpicSynchronizer {
     })
     await this.#publishEpic(epic.id)
     return true
+  }
+
+  // A hand rebase or GitHub's update branch writes no operation of ours
+  async #clearDeferred(epicId: string): Promise<void> {
+    const deferred = (await deferredConflicts(this.#d.db, [epicId])).get(epicId)
+    if (!deferred) return
+    await this.#d.db.update(operations).set({ error: CONFLICT_GONE, updatedAt: this.#now() }).where(eq(operations.id, deferred.id))
+    await this.#publishEpic(epicId)
   }
 
   // The developer starts from the epic head on a branch of its own, and the
@@ -557,8 +569,9 @@ export class EpicSynchronizer {
   }
 }
 
-// Cleared to merge: the last rebase this epic needs, so a conflict is worth a
-// developer's run now. `conflict` is an epic left there from before COR-290.
-const finalCheckpoint = (epic: EpicRow) => epic.reviewState === 'ready_to_merge' || epic.reviewState === 'conflict'
+// Cleared to merge, on the head that was cleared: the last rebase this epic
+// needs, so a conflict is worth a developer's run now. Any other head is about
+// to lose approval. `conflict` is an epic left there from before COR-290.
+const finalCheckpoint = (epic: EpicRow, head: string) => (epic.reviewState === 'ready_to_merge' || epic.reviewState === 'conflict') && epic.prHeadSha === head
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
