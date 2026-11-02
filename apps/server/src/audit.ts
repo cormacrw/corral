@@ -1,5 +1,5 @@
 import type { HumanTransitionInput, SetupJobResult } from '@corral/contracts'
-import type { Actor, RebaseReview, ReviewVerdict, TaskStatus } from '@corral/core'
+import type { Actor, EpicFixKind, RebaseReview, ReviewVerdict, TaskStatus } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { sql, type SQL } from 'drizzle-orm'
 
@@ -62,6 +62,10 @@ export type EpicPrDetail =
   | { event: 'rebase_resolving', summary: string, files: string[] }
   | { event: 'rebase_failed' | 'sync_failed', summary: string }
   | { event: 'sync_retried' }
+  | { event: 'fix_started', fix: EpicFixKind, operationId: string, summary: string, files?: string[] }
+  | { event: 'fix_reported', fix: EpicFixKind, operationId: string, runId: string, headSha: string, behaviourChanged: boolean, files: string[], summary: string }
+  | { event: 'fix_refused', fix: EpicFixKind, operationId: string, summary: string }
+  | { event: 'fix_published', fix: EpicFixKind, operationId: string, from: string, to: string }
   | ApprovalChange
   | { event: 'decision_requested', operationId: string, decisionId: string, summary: string, bindingDecision: string | null, alternatives: string[], affectedChanges: string[] }
   | { event: 'decision_answered', operationId: string, decisionId: string, summary: string, changesBehaviour: boolean }
@@ -102,7 +106,7 @@ export interface AuditDetails {
   'project.updated': Changed
   'rebase.verified': { runId: string, pr: number | null, approvedHeadSha: string | null, headSha: string | undefined, conflictedFiles: string[] | undefined }
   'review.recorded': { runId: string, verdict: ReviewVerdict, headSha: string, round: number, met: number, of: number, similarity?: number, carriedFrom?: string | null }
-  'run.ended': { runId: string, runNumber: number, state: string, outcome: string | null, error: string | null, review?: RebaseReview | undefined, conflictedFiles?: string[] | undefined }
+  'run.ended': { runId: string, runNumber: number, state: string, outcome: string | null, error: string | null, behaviourChanged?: boolean | undefined, review?: RebaseReview | undefined, conflictedFiles?: string[] | undefined }
   'run.message_sent': RunComment & { attachments: string[] }
   'run.stopped': { runId: string }
   'task.claimed': StatusChange & { runId: string, agentId: string, leaseEpoch: number }

@@ -71,9 +71,17 @@ export const epicReviewerRunJobSchema = z.object({
   baseBranch: z.string().optional(), planSessionId: z.null(),
   taskType: z.never().optional(), designPinned: z.never().optional(), continueFrom: z.never().optional()
 })
+// D29 a developer keeping an epic PR healthy works on a candidate branch of the
+// operation that holds the epic's writer lock, with no task.
+export const epicDeveloperRunJobSchema = z.object({
+  ...runJobCommon, role: z.literal('developer'), taskId: z.null(), taskRef: z.null(),
+  epicId: z.string().min(1), branch: z.string().min(1), headSha: z.string().min(1),
+  baseBranch: z.string().optional(), planSessionId: z.null(),
+  taskType: z.never().optional(), designPinned: z.never().optional(), continueFrom: z.never().optional()
+})
 export const runJobSchema = z.union([
   z.discriminatedUnion('role', [pmRunJobSchema, developerRunJobSchema, designerRunJobSchema, reviewerRunJobSchema]),
-  epicReviewerRunJobSchema
+  epicReviewerRunJobSchema, epicDeveloperRunJobSchema
 ])
 export type RunJob = z.infer<typeof runJobSchema>
 export type PmRunJob = z.infer<typeof pmRunJobSchema>
@@ -137,6 +145,7 @@ export const reportOutcomeInput = z.object({
   summary: z.string().trim().min(1, 'Add a summary').describe('Plain-English summary of what you did, or your question when stuck'),
   review: z.enum(REBASE_REVIEWS).optional().describe('Required for pr_rebased: trivial only for combining both sides with no new logic, renames or behaviour changes; otherwise needs_review'),
   conflictedFiles: z.array(z.string().trim().min(1)).min(1, 'conflictedFiles must contain at least one file').optional().describe('Required for pr_rebased: every file in which you resolved a conflict'),
+  behaviourChanged: z.boolean().optional().describe('Required for pr_rebased, for a round started by a CI failure, and on an epic fix: true if this changes what the code does; false only if approved behaviour is unchanged, so no reviewer looks at it again'),
   note: z.string().trim().optional().describe('Developer only, required: one line of at most 200 characters saying what this run did, posted as a comment on the task, e.g. "Addressed review: dropped idle-thread fixture"'),
   criteria: z.array(criterionVerdict).optional().describe('Reviewer only: a verdict per acceptance criterion'),
   preservesApproval: z.boolean().optional().describe('Reviewer of an epic rebase resolution only, when approving: true only if the approved behaviour is unchanged; false restarts the epic\'s normal review'),
@@ -146,7 +155,7 @@ export const reportOutcomeInput = z.object({
 // Set by the runner, never the agent. headSha: the commit a developer's run
 // pushed, or the one a reviewer's checkout is at. baseSha: where a submitted
 // commit forked from its epic branch.
-const reportFields = { summary: reportOutcomeInput.shape.summary, note: reportOutcomeInput.shape.note, review: reportOutcomeInput.shape.review, conflictedFiles: reportOutcomeInput.shape.conflictedFiles, preservesApproval: reportOutcomeInput.shape.preservesApproval, decision: reportOutcomeInput.shape.decision, headSha: z.string().optional(), baseSha: z.string().optional() }
+const reportFields = { summary: reportOutcomeInput.shape.summary, note: reportOutcomeInput.shape.note, review: reportOutcomeInput.shape.review, conflictedFiles: reportOutcomeInput.shape.conflictedFiles, behaviourChanged: reportOutcomeInput.shape.behaviourChanged, preservesApproval: reportOutcomeInput.shape.preservesApproval, decision: reportOutcomeInput.shape.decision, headSha: z.string().optional(), baseSha: z.string().optional() }
 const taskReview = <Outcome extends z.ZodType<ReviewVerdict>>(outcome: Outcome) => z.object({ ...reportFields, outcome, criteria: z.array(criterionVerdict, { error: missingCriteria }) })
 const nonReview = z.object({ ...reportFields, outcome: NON_REVIEW_OUTCOMES })
 
@@ -215,6 +224,8 @@ export interface RunnerInfo extends RunnerCapacity {
   taskIntegrationExecutor?: boolean
   // Runs epic_rebase jobs
   epicRebaseExecutor?: boolean
+  // Takes developer runs on an epic, with no task (D29)
+  epicFixExecutor?: boolean
   integrationCompatibilityReason?: string | null
   activeRunCount?: number
   updateState?: string
@@ -256,7 +267,7 @@ export const setupJobSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('list_repos') }),
   z.object({ kind: z.literal('check_repo'), repository: z.string() }),
   z.object({ kind: z.literal('detect_clis') }),
-  z.object({ kind: z.literal('github'), method: z.union([z.literal('GET'), z.literal('POST'), z.literal('PUT'), z.literal('PATCH'), z.literal('DELETE')]), path: z.string(), body: z.unknown().optional() }),
+  z.object({ kind: z.literal('github'), method: z.union([z.literal('GET'), z.literal('POST'), z.literal('PUT'), z.literal('PATCH'), z.literal('DELETE')]), path: z.string(), body: z.unknown().optional(), tailChars: z.number().int().positive().optional() }),
   z.object({ kind: z.literal('cleanup_worktrees'), repository: z.string(), taskId: z.string() }),
   // PR-free integration (D27). Prepare builds one commit from a reviewed
   // submission on top of the expected epic head, touching no shared ref; push
@@ -336,7 +347,7 @@ export const slotSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('derived'), cpus: z.number(), memoryBytes: z.number(), slotCpus: z.number(), slotMemoryBytes: z.number() })
 ])
 
-export const runnerHelloSchema = z.object({ type: z.literal('hello'), protocol: z.number(), taskIntegrationProtocols: z.array(z.number().int().positive()).optional(), taskIntegrationExecutor: z.boolean().optional(), epicRebaseExecutor: z.boolean().optional(), commit: z.string().default('unknown'), updateTarget: z.string().optional(), updateState: z.string().optional(), updateError: z.string().optional(), draining: z.boolean().optional(), updateRequested: z.boolean().optional(), autoUpdate: z.boolean().optional(), runnerId: z.string(), name: z.string(), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })), slotSource: slotSourceSchema.optional().catch(undefined), slots: z.number().optional(), runtimes: z.array(z.string()).optional(), roles: z.array(z.enum(RUNNER_ROLES)).optional() })
+export const runnerHelloSchema = z.object({ type: z.literal('hello'), protocol: z.number(), taskIntegrationProtocols: z.array(z.number().int().positive()).optional(), taskIntegrationExecutor: z.boolean().optional(), epicRebaseExecutor: z.boolean().optional(), epicFixExecutor: z.boolean().optional(), commit: z.string().default('unknown'), updateTarget: z.string().optional(), updateState: z.string().optional(), updateError: z.string().optional(), draining: z.boolean().optional(), updateRequested: z.boolean().optional(), autoUpdate: z.boolean().optional(), runnerId: z.string(), name: z.string(), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })), slotSource: slotSourceSchema.optional().catch(undefined), slots: z.number().optional(), runtimes: z.array(z.string()).optional(), roles: z.array(z.enum(RUNNER_ROLES)).optional() })
 
 // Pre-capacity/build hello packets must still get the protocol-version refusal.
 // This schema is used only for rejecting a different version, never admission.

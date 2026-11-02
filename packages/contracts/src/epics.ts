@@ -1,4 +1,4 @@
-import { EPIC_REVIEW_MODES, type EpicReviewMode, type EpicReviewState } from '@corral/core'
+import { EPIC_REVIEW_MODES, type EpicFixKind, type EpicReviewMode, type EpicReviewState } from '@corral/core'
 import { z } from 'zod'
 import type { Task } from './tasks.ts'
 
@@ -9,8 +9,33 @@ import type { Task } from './tasks.ts'
 export type EpicSync =
   | { state: 'rebasing' }
   | { state: 'resolving', files: string[], taskId: string | null, taskRef: string | null }
+  | { state: 'fixing', fix: EpicFixKind, reason: string, files: string[], developer: EpicFixDeveloper | null, attempts: number }
   | { state: 'deciding', question: string, taskId: string | null, taskRef: string | null }
-  | { state: 'failed', error: string }
+  | { state: 'failed', error: string, fix?: EpicFixKind | null }
+
+// A developer run on an epic, with no task (D29)
+export interface EpicFixDeveloper {
+  agentId: string
+  name: string
+  runId: string
+  runNumber: number
+}
+
+// A developer run on the epic that has ended: `behaviourChanged` is null when
+// it never reported, and `reReviewed` when no review was at stake
+export interface EpicFixRun {
+  runId: string
+  runNumber: number
+  fix: EpicFixKind
+  developer: string
+  reason: string
+  state: string
+  outcome: string | null
+  summary: string | null
+  behaviourChanged: boolean | null
+  reReviewed: boolean | null
+  at: string
+}
 
 // One line of an epic's own history: what happened, by whom, on which commits
 export interface EpicHistoryEntry {
@@ -56,6 +81,8 @@ export interface Epic {
 // The epic with every task in it, Drafts included, for the dependency canvas
 export interface EpicDetail extends Epic {
   tasks: Task[]
+  // Newest first
+  fixes: EpicFixRun[]
 }
 
 export const setEpicDependenciesInput = z.object({ dependsOn: z.array(z.uuid()) })

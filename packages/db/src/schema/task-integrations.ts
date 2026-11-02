@@ -1,4 +1,4 @@
-import type { EpicRebaseDecision, ResolutionReview } from '@corral/core'
+import type { EpicFixCheck, EpicFixKind, EpicFixReport, EpicRebaseDecision, ResolutionReview } from '@corral/core'
 import { sql } from 'drizzle-orm'
 import { check, index, integer, jsonb, pgTable, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 import { createdAt, updatedAt } from './columns.ts'
@@ -53,6 +53,15 @@ export const taskIntegrationOperations = pgTable('task_integration_operations', 
   decisions: jsonb().$type<EpicRebaseDecision[]>().notNull().default([]),
   // Pushes of a reviewed resolution, which stays active between them
   pushAttempts: integer().notNull().default(0),
+  // A developer run on the epic with no task (D29): why it was started, the
+  // failed checks of a CI fix, what the developer reported for this candidate,
+  // and the runs that came to nothing. Null on a clean rebase and on a
+  // resolution task's operation.
+  fix: text({ enum: ['conflict', 'ci', 'review'] }).$type<EpicFixKind>(),
+  fixBrief: text(),
+  fixChecks: jsonb().$type<EpicFixCheck[]>(),
+  fixReport: jsonb().$type<EpicFixReport>(),
+  fixAttempts: integer().notNull().default(0),
   runnerId: text(),
   leaseEpoch: integer().notNull(),
   error: text(),

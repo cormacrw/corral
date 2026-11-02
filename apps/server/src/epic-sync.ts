@@ -1,4 +1,4 @@
-import { ACTIVE_RUN_STATES, type Actor } from '@corral/core'
+import { ACTIVE_RUN_STATES, type Actor, type EpicFixReport } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
 import { and, desc, eq, gte, inArray, isNotNull, isNull, ne, notInArray, or } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
@@ -13,7 +13,7 @@ import { checkTrivialRebase } from './rebase-review.ts'
 import { Backoff } from './retries.ts'
 import { epicResolutionBranch } from './task-base.ts'
 import { runEndValues } from './run-lifecycle.ts'
-import { applyTransition, createTask, deleteTaskRows, loadTask, lockTask, type ProjectRow } from './tasks.ts'
+import { applyTransition, deleteTaskRows, lockTask, type ProjectRow } from './tasks.ts'
 
 const { comments, epics, projects, runs, taskIntegrationOperations: operations, tasks } = schema
 type OperationRow = typeof operations.$inferSelect
@@ -68,15 +68,16 @@ export async function recordSyncFailure(db: Executor, project: ProjectRow, epicI
   await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId, event: 'sync_failed', summary: error }))
 }
 
-// A human asks for another go, which counts failures afresh. A resolution that
-// failed to publish keeps its reviewed candidate and just pushes again.
+// A human asks for another go, which counts failures afresh. A resolution or
+// fix that failed to publish keeps its candidate and just pushes again; a fix
+// with no report left starts another developer run.
 export async function retrySync(db: Database, epicId: string, actor: Actor, now: Date): Promise<void> {
   await db.transaction(async (tx) => {
     const [epic] = await tx.select().from(epics).where(eq(epics.id, epicId)).for('update')
     if (!epic) throw notFound()
     if (!epic.syncError && epic.reviewState !== 'conflict') throw new ApiFailure(409, { code: 'conflict', constraint: 'epic_sync_not_failed' })
     await tx.update(epics).set({ syncError: null, syncRetriedAt: now, updatedAt: now }).where(eq(epics.id, epicId))
-    await tx.update(operations).set({ pushAttempts: 0 }).where(and(eq(operations.epicId, epicId), inArray(operations.state, [...ACTIVE])))
+    await tx.update(operations).set({ pushAttempts: 0, fixAttempts: 0 }).where(and(eq(operations.epicId, epicId), inArray(operations.state, [...ACTIVE])))
     await appendAudit(tx, { projectId: epic.projectId, actor }, auditEvent('epic.pr', { epicId, event: 'sync_retried' }))
   })
 }
@@ -89,10 +90,11 @@ export async function retrySync(db: Database, epicId: string, actor: Actor, now:
 //
 // A clean rebase is mechanical and keeps approval. A conflict stays on an
 // isolated candidate branch: the operation holds the lock while a developer
-// and a reviewer work on it as a task on the board, and only the approved
-// candidate is pushed to the epic branch. Approval crosses it only when
-// approvalFate says the review validated it; a question goes to the human on
-// the same operation.
+// run on the epic, with no task, works on it (D29). CI and integration review
+// fixes take the same path. Only a reported candidate is pushed to the epic
+// branch, and approval crosses it only when approvalFate says so; a question
+// goes to the human on the same operation. A resolution task from before D29
+// finishes as it started.
 export class EpicSynchronizer {
   #d: EpicSyncDeps
   #settled: (taskId: string) => Promise<void>
@@ -183,6 +185,7 @@ export class EpicSynchronizer {
     if (operation.state === 'pending') return this.#prepare(operation, row!, stopped)
     if (operation.state === 'reconciling') return this.#reconcile(operation, row!)
     if (operation.resolutionTaskId) return this.#awaitResolution(operation, row!, stopped)
+    if (operation.fix) return this.#awaitFix(operation, row!, stopped)
     // Running with a clean candidate, unless it was cut off before it had one
     const candidate = operation.resultHeadSha
     if (candidate && this.#d.runner.isOnline(operation.runnerId)) return this.#publish(operation, row!, candidate, operation.runnerId!, stopped)
@@ -219,11 +222,7 @@ export class EpicSynchronizer {
           await db.update(operations).set({ state: 'pending', updatedAt: this.#now() }).where(and(eq(operations.id, operation.id), eq(operations.state, 'running')))
           return false
         }
-        try {
-          await this.#startResolution(operation, ctx, prepared.files)
-        } catch (error) {
-          return this.#fail(operation, ctx, `Could not start the conflict resolution: ${message(error)}`)
-        }
+        await this.#startFix(operation, ctx, prepared.files)
         return false
       case 'rebased': {
         const [ready] = await db.update(operations).set({ resultHeadSha: prepared.commitSha, updatedAt: this.#now() }).where(eq(operations.id, operation.id)).returning()
@@ -234,26 +233,35 @@ export class EpicSynchronizer {
 
   // The developer starts from the epic head on a branch of its own, and the
   // operation keeps the writer lock so that head stays good for the final push.
-  // A new board task holds the epic PR back, like any other task in the epic.
-  async #startResolution(operation: OperationRow, { epic, project }: Context, files: string[]): Promise<void> {
-    const { db, events, github } = this.#d
-    const branch = epicResolutionBranch(operation.id)
-    await github.createBranch(project.repository, branch, operation.expectedTargetSha)
-    const target = project.defaultBranch
-    const taskId = await db.transaction(async (tx) => {
-      const id = await createTask(tx, project, {
-        type: 'task', title: `Rebase epic: ${epic.title}`.slice(0, 200), description: resolutionBrief(branch, target, operation.ontoSha!, files), epicId: epic.id,
-        acceptanceCriteria: [`${branch} is rebased onto ${operation.ontoSha} of ${target} with no merge commits, and the conflicts in ${files.join(', ') || 'the rebase'} are resolved keeping both sides' intent`, `Nothing newly landed on ${target} is removed or reverted, and the rebase adds no feature changes`]
-        // The epic's approval stands until the publish step has judged the result
-      }, server, { epicFix: true, keepEpicReview: true })
-      await tx.update(tasks).set({ branch }).where(eq(tasks.id, id))
-      await tx.update(operations).set({ resolutionTaskId: id, conflictFiles: files, updatedAt: this.#now() }).where(eq(operations.id, operation.id))
-      await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'rebase_resolving', summary: files.join(', '), files }))
-      return id
+  // The epic's approval stands until the publish step has judged the result.
+  async #startFix(operation: OperationRow, { epic, project }: Context, files: string[]): Promise<void> {
+    const { db } = this.#d
+    const brief = `The rebase onto ${project.defaultBranch} conflicts${files.length ? ` in ${files.join(', ')}` : ''}.`
+    await db.transaction(async (tx) => {
+      await tx.update(operations).set({ fix: 'conflict', fixBrief: brief, conflictFiles: files, updatedAt: this.#now() }).where(eq(operations.id, operation.id))
+      await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'fix_started', fix: 'conflict', operationId: operation.id, summary: brief, files }))
     })
-    events.publish({ type: 'task.created', task: await loadTask(db, taskId) })
     await this.#publishEpic(epic.id)
-    this.#d.wake?.([taskId])
+    this.#d.wake?.([])
+  }
+
+  // A reported candidate moves on; until then the claim keeps a developer on it
+  async #awaitFix(operation: OperationRow, ctx: Context, stopped: Stopped): Promise<boolean> {
+    const report = operation.fixReport
+    if (!report || ctx.epic.syncError) return false
+    const runnerId = this.#d.runner.epicRebaseRunner()
+    if (!runnerId || await this.#held(ctx)) return false
+    await this.#checkFix(operation, ctx, report)
+    return this.#push(operation, ctx, report.headSha, runnerId, stopped)
+  }
+
+  // Before the push: afterwards the old head is unreachable. Only a conflict
+  // reported as unchanged on an approved head has anything riding on this.
+  async #checkFix(operation: OperationRow, { epic, project }: Context, report: EpicFixReport): Promise<void> {
+    if (operation.fix !== 'conflict' || report.behaviourChanged || !APPROVED_STATES.includes(epic.reviewState)) return
+    const check = await checkTrivialRebase(this.#d.github, project.repository, { baseBranch: project.defaultBranch, approvedHeadSha: operation.expectedTargetSha, newHeadSha: report.headSha, conflictedFiles: report.conflictedFiles })
+    const outsideConflicts = check.failures.find(f => f.condition === 'changes_outside_conflicts')?.files ?? []
+    await this.#d.db.update(operations).set({ fixReport: { ...report, outsideConflicts, checkError: check.error ?? null } }).where(eq(operations.id, operation.id))
   }
 
   // Only an approved resolution moves on. Anything else is the task's own
@@ -338,6 +346,7 @@ export class EpicSynchronizer {
   async #reject(operation: OperationRow, ctx: Context, reason: string): Promise<void> {
     const { db } = this.#d
     await db.update(operations).set({ state: 'running', resultHeadSha: null, pushAttempts: 0, updatedAt: this.#now() }).where(eq(operations.id, operation.id))
+    if (operation.fix) return this.#refuseFix(operation, ctx, reason)
     if (!operation.resolutionTaskId) {
       await this.#fail({ ...operation, state: 'running' }, ctx, `Corral's own rebase was rejected: ${reason}`)
       return
@@ -348,6 +357,19 @@ export class EpicSynchronizer {
       await tx.insert(comments).values({ taskId: task.id, author: server, body: `The rebased branch can't go onto the epic branch. ${reason} Fix that and report pr_updated.` })
     })
     await this.#settled(operation.resolutionTaskId)
+  }
+
+  // Back to a developer with the reason, on the same candidate, within a bound
+  async #refuseFix(operation: OperationRow, { epic, project }: Context, reason: string): Promise<void> {
+    const { db } = this.#d
+    const attempts = operation.fixAttempts + 1
+    await db.transaction(async (tx) => {
+      await tx.update(operations).set({ fixReport: null, fixAttempts: attempts, fixBrief: `${operation.fixBrief}\n\nCorral refused your last candidate, and the epic branch didn't move: ${reason}`, updatedAt: this.#now() }).where(eq(operations.id, operation.id))
+      await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'fix_refused', fix: operation.fix!, operationId: operation.id, summary: reason }))
+      if (attempts >= MAX_FAILED_ATTEMPTS) await recordSyncFailure(tx, project, epic.id, `Corral refused the candidate ${attempts} times: ${reason}`, this.#now())
+    })
+    await this.#publishEpic(epic.id)
+    this.#d.wake?.([])
   }
 
   // The epic branch says what happened. A failed read leaves it for a later pass.
@@ -367,8 +389,8 @@ export class EpicSynchronizer {
     }
     if (head !== operation.expectedTargetSha) return this.#fail(operation, ctx, EPIC_MOVED)
     const error = operation.error ?? 'The push did not reach the epic branch'
-    if (!operation.resolutionTaskId) return this.#fail(operation, ctx, error)
-    // A reviewed resolution is worth keeping: push it again, within a bound
+    if (!operation.resolutionTaskId && !operation.fix) return this.#fail(operation, ctx, error)
+    // A reviewed resolution or a reported fix is worth keeping: push it again, within a bound
     await db.update(operations).set({ state: 'running', updatedAt: this.#now() }).where(eq(operations.id, operation.id))
     if (operation.pushAttempts < MAX_FAILED_ATTEMPTS) return false
     await recordSyncFailure(db, project, epic.id, error, this.#now())
@@ -395,6 +417,14 @@ export class EpicSynchronizer {
     await github.deleteBranch(project.repository, epicResolutionBranch(operation.id)).catch(error => console.error(`Could not delete the rebase candidate of ${epic.id}`, error))
   }
 
+  // Nothing else could publish a fix's candidate. The next checkpoint, or the
+  // next look at CI, starts again from the branch as it is.
+  async #retireFix(operation: OperationRow, { epic, project }: Context, reason: string): Promise<void> {
+    const { db, github } = this.#d
+    await db.update(runs).set(runEndValues({ state: 'interrupted', error: reason }, this.#now())).where(and(eq(runs.operationId, operation.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
+    await github.deleteBranch(project.repository, epicResolutionBranch(operation.id)).catch(error => console.error(`Could not delete the fix candidate of ${epic.id}`, error))
+  }
+
   async #complete(operation: OperationRow, { epic, project }: Context, commitSha: string): Promise<void> {
     const { db, github } = this.#d
     const taskId = operation.resolutionTaskId
@@ -406,11 +436,17 @@ export class EpicSynchronizer {
       // Checks and the merge gate read the new head, so keeping approval never
       // skips them. Losing it sends the epic back through the reconcile pass.
       const fate = approvalFate(done, locked!, commitSha)
+      // A CI or review fix doesn't move the epic on the target
+      const onto = done.fix && done.fix !== 'conflict' ? locked!.approvedBaseSha : operation.ontoSha
+      const reviewFix = done.fix === 'review'
       const approval = fate?.kept
-        ? { prHeadSha: commitSha, approvedBaseSha: operation.ontoSha, reviewState: locked!.reviewState === 'conflict' ? 'ready_to_merge' as const : locked!.reviewState }
-        : fate ? { reviewState: 'open' as const, approvedHeadSha: null, approvedBaseSha: null } : {}
+        ? { prHeadSha: commitSha, approvedBaseSha: onto, reviewState: locked!.reviewState === 'conflict' ? 'ready_to_merge' as const : locked!.reviewState }
+        : fate || reviewFix ? { reviewState: 'open' as const, approvedHeadSha: null, approvedBaseSha: null } : {}
       await tx.update(epics).set({ syncError: null, conflictFiles: null, ...approval, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
-      await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'rebased', from: operation.expectedTargetSha, to: commitSha }))
+      await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', done.fix && done.fix !== 'conflict'
+        ? { epicId: epic.id, event: 'fix_published', fix: done.fix, operationId: done.id, from: operation.expectedTargetSha, to: commitSha }
+        : { epicId: epic.id, event: 'rebased', from: operation.expectedTargetSha, to: commitSha }))
+      if (done.fixReport && commitSha !== operation.expectedTargetSha) await tx.update(runs).set({ reReviewed: reviewFix || (fate ? !fate.kept : null) }).where(eq(runs.id, done.fixReport.runId))
       if (fate) await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, ...approvalChange(done, locked!, commitSha, fate) }))
       if (!taskId) return
       const { task } = await lockTask(tx, taskId)
@@ -419,9 +455,8 @@ export class EpicSynchronizer {
       await tx.update(tasks).set({ mergeCommitSha: commitSha, mergedAt: this.#now(), updatedAt: this.#now() }).where(eq(tasks.id, taskId))
     })
     await this.#publishEpic(epic.id)
-    if (!taskId) return
-    await this.#settled(taskId)
-    await github.deleteBranch(project.repository, epicResolutionBranch(operation.id)).catch(error => console.error(`Could not delete the rebase candidate of ${epic.id}`, error))
+    if (taskId) await this.#settled(taskId)
+    if (taskId || operation.fix) await github.deleteBranch(project.repository, epicResolutionBranch(operation.id)).catch(error => console.error(`Could not delete the rebase candidate of ${epic.id}`, error))
   }
 
   // True: look at the epic again now. Other endings wait for a later pass, and
@@ -432,6 +467,7 @@ export class EpicSynchronizer {
       .where(and(eq(operations.id, operation.id), inArray(operations.state, [...ACTIVE]), eq(operations.leaseEpoch, operation.leaseEpoch)))
     await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'rebase_failed', summary: error }))
     if (operation.resolutionTaskId) await this.#retireResolution(operation, { epic, project }, error)
+    if (operation.fix) await this.#retireFix(operation, { epic, project }, error)
     const failures = RETRY_AT_ONCE.includes(error) ? [] : await this.#failures(db, epic, operation.expectedTargetSha, operation.ontoSha!)
     if (failures.length >= MAX_FAILED_ATTEMPTS) await recordSyncFailure(db, project, epic.id, `Rebasing onto ${project.defaultBranch} failed ${failures.length} times: ${error}`, this.#now())
     await this.#publishEpic(epic.id)
@@ -441,17 +477,6 @@ export class EpicSynchronizer {
   async #publishEpic(epicId: string): Promise<void> {
     this.#d.events.publish({ type: 'epic.updated', epic: await loadEpic(this.#d.db, epicId) })
   }
-}
-
-function resolutionBrief(branch: string, target: string, ontoSha: string, files: string[]) {
-  const conflicts = files.length ? files.join(', ') : 'the files git reports'
-  const paragraph = (text: string) => ({ type: 'paragraph', content: [{ type: 'text', text }] })
-  return { type: 'doc' as const, content: [
-    paragraph(`Corral could not rebase this epic onto ${target} cleanly. ${branch} is a private candidate holding the epic's commits; the epic branch itself stays untouched until this task is approved, and Corral then publishes your commit with a compare-and-swap. No PR is opened.`),
-    paragraph(`Run git fetch origin && git rebase ${ontoSha}. Never merge ${target} in. Resolve the conflicts in ${conflicts}, then run the project's gates and report pr_updated.`),
-    paragraph(`Keep both sides' intent. What landed on ${target} stands: never remove or revert it to make the old epic work, and adapt the epic's change around it instead. Make no feature changes. If the two sides can't both be kept, or the target changed a binding decision this work relies on, report stuck with \`decision\`: one focused question, its alternatives, and the changes affected. The human's answer brings this same task back to you.`),
-    paragraph(`Reviewer: use git range-diff against the old epic commits and check each resolved hunk against the ${target} commit that caused it. Request changes if ${target}'s work was dropped or the rebase adds anything new that nobody decided.`)
-  ] }
 }
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)

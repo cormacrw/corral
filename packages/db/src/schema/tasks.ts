@@ -14,6 +14,7 @@ import {
   uuid,
   type AnyPgColumn
 } from 'drizzle-orm/pg-core'
+import type { EpicFixCheck } from '@corral/core'
 import { actor, createdAt, updatedAt } from './columns.ts'
 import { agentRole, taskPriority, taskStatus, taskType } from './enums.ts'
 import { epics } from './epics.ts'
@@ -39,6 +40,8 @@ export const tasks = pgTable('tasks', {
   humanReview: boolean().notNull().default(false),
   rebaseOnly: boolean().notNull().default(false),
   approvedHeadSha: text(),
+  // The failed checks that started this developer round, until it submits (D29)
+  ciFix: jsonb().$type<EpicFixCheck[]>(),
   reviewRounds: integer().notNull().default(0),
   failedRuns: integer().notNull().default(0),
   // Why the task is Blocked or Failed (D10, D11)

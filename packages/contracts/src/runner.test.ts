@@ -66,6 +66,7 @@ describe('runner protocol schemas', () => {
   })
   it('preserves explicit D23 epic reviews, but rejects an incomplete epic target', () => {
     const epic = { ...developer, role: 'reviewer', taskId: null, taskRef: null, epicId: 'epic', branch: 'corral/epic', headSha: 'sha' }
+    expect(runJobSchema.safeParse({ ...epic, role: 'developer' }).success).toBe(true)
     expect(runJobSchema.parse(epic)).toEqual(epic)
     expect(runJobSchema.safeParse({ ...epic, headSha: null }).success).toBe(false)
   })

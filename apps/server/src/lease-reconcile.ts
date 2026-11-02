@@ -39,7 +39,7 @@ export class LeaseReconcile {
     for (const id of [...expiredRuns.map(r => r.id), ...expired.map(r => r.runId!)]) {
       const ctx = await this.#c.runs.load(id)
       if (!ctx) continue
-      await this.#c.ending.stop(ctx, ctx.run.epicId ? 'Epic review lease expired' : ctx.run.role === 'pm' ? 'PM turn lease expired: no heartbeat from the runner' : 'Lease expired: no heartbeat from the runner', { reason: 'Lease expired' })
+      await this.#c.ending.stop(ctx, ctx.run.epicId ? ctx.run.role === 'developer' ? 'Epic fix lease expired' : 'Epic review lease expired' : ctx.run.role === 'pm' ? 'PM turn lease expired: no heartbeat from the runner' : 'Lease expired: no heartbeat from the runner', { reason: 'Lease expired' })
     }
   }
 

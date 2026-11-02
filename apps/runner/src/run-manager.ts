@@ -390,7 +390,7 @@ export class RunManager {
       return
     }
     // The worktree is shared: a stopped run on this task saves its work first
-    await Promise.all([...this.#runs.values()].filter(other => other !== run && other.keepWork && (other.job.role === 'developer' || other.job.role === 'designer') && other.job.taskId === job.taskId).map(other => other.closed.promise))
+    await Promise.all([...this.#runs.values()].filter(other => other !== run && other.keepWork && (other.job.role === 'developer' || other.job.role === 'designer') && (other.job.taskId ?? other.job.epicId) === (job.taskId ?? job.epicId)).map(other => other.closed.promise))
     await mkdir(join(this.#config.dataDir, 'spool'), { recursive: true })
     await mkdir(run.scratchDir, { recursive: true })
     this.#openSpool(run)
@@ -1008,7 +1008,7 @@ function wipMessage(job: RunJob, exit: RunExit, stopDetail: string): string {
     : exit.kind === 'runner_shutdown'
       ? 'The runner shut down'
       : exit.kind === 'signalled' ? exit.signal : stopDetail
-  return `WIP: ${job.taskRef} run #${job.runNumber} stopped: ${reason}\n\nCorral saved this unfinished work when the run stopped. It may not build.`
+  return `WIP: ${job.taskRef ?? 'Epic fix'} run #${job.runNumber} stopped: ${reason}\n\nCorral saved this unfinished work when the run stopped. It may not build.`
 }
 
 // Machine-specific details the agent needs, kept out of RunJob (PRD §8.5)

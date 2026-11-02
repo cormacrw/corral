@@ -56,6 +56,26 @@ describe('prepareWorkspace for PM turns', () => {
 })
 
 describe('epic task workspaces', () => {
+  it('gives a developer on an epic the operation\'s candidate, and a fresh worktree for the next operation', async () => {
+    const dataDir = await createTestDataDir()
+    const origin = join(dirname(dataDir), 'origin')
+    try {
+      const sha = (await git(['rev-parse', 'HEAD'], { cwd: origin })).stdout.trim()
+      await git(['branch', 'corral/epic-rebase/one', sha], { cwd: origin })
+      await git(['branch', 'corral/epic-rebase/two', sha], { cwd: origin })
+      const job = { role: 'developer', taskId: null, epicId: 'epic-one', headSha: sha } as const
+      const first = await prepareWorkspace(dataDir, pmJob({ ...job, branch: 'corral/epic-rebase/one' }))
+      expect(first.error).toBeNull()
+      expect(first.workspace!.path).toBe(join(dataDir, 'worktrees', 'epic-epic-one'))
+      expect((await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: first.workspace!.path })).stdout.trim()).toBe('corral/epic-rebase/one')
+      const second = await prepareWorkspace(dataDir, pmJob({ ...job, branch: 'corral/epic-rebase/two' }))
+      expect(second.error).toBeNull()
+      expect((await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: second.workspace!.path })).stdout.trim()).toBe('corral/epic-rebase/two')
+    } finally {
+      await rm(dirname(dataDir), { recursive: true, force: true })
+    }
+  })
+
   it('checks out an epic integration review at its exact head without a task ID', async () => {
     const dataDir = await createTestDataDir()
     const origin = join(dirname(dataDir), 'origin')

@@ -41,7 +41,7 @@ export class RunEnding {
           await applyTransition(tx, task, project, { type: 'run_failed' }, server, { event: 'run_failed', runId: ctx.run.id, error })
         }
       }
-      if (ctx.run.epicId) reviewHandedOver = await this.#c.epicPrs.reviewFailed(tx, ctx.run, error)
+      if (ctx.run.epicId) reviewHandedOver = ctx.run.role === 'developer' ? await this.#c.fixes.runFailed(tx, ctx.run, error) : await this.#c.epicPrs.reviewFailed(tx, ctx.run, error)
       await this.endRunIn(tx, ctx, { ...fields, state: 'failed', outcome: 'failed', error })
       return comment
     })
@@ -69,7 +69,7 @@ export class RunEnding {
       await tx.update(tasks).set({ leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null, updatedAt: this.#c.now() })
         .where(and(eq(tasks.id, ctx.task.id), eq(tasks.leaseRunId, ctx.run.id)))
     }
-    if (ended) await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor: server }, auditEvent('run.ended', { runId: ctx.run.id, runNumber: ctx.run.number, state: end.state, outcome: end.outcome ?? null, error: 'error' in end ? end.error : null, ...(end.outcome === 'pr_rebased' ? { review: end.review, conflictedFiles: end.conflictedFiles } : {}) }))
+    if (ended) await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor: server }, auditEvent('run.ended', { runId: ctx.run.id, runNumber: ctx.run.number, state: end.state, outcome: end.outcome ?? null, error: 'error' in end ? end.error : null, ...(end.outcome === 'pr_rebased' ? { review: end.review, conflictedFiles: end.conflictedFiles } : {}), ...('behaviourChanged' in end && end.behaviourChanged !== undefined && { behaviourChanged: end.behaviourChanged }) }))
     return ended !== undefined
   }
 

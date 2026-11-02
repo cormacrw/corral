@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 import type { AgentTools } from './agent-tools.ts'
 import type { BlobStore } from './blob-store.ts'
 import type { ReleaseNotes } from './deployments.ts'
+import type { EpicFixes } from './epic-fixes.ts'
 import type { EpicPullRequests } from './epic-prs.ts'
 import type { EventBus } from './events.ts'
 import type { GitHubClient } from './github.ts'
@@ -61,6 +62,7 @@ export interface RunCore {
   plans: PlanService | null
   releaseNotes: ReleaseNotes | null
   epicPrs: EpicPullRequests
+  fixes: EpicFixes
   pmTools: PmTools
   merges: MergeOrchestrator
   sweep: WorktreeSweep
