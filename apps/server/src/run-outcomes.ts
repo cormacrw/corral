@@ -85,6 +85,7 @@ export class RunOutcomes {
       switch (report.outcome) {
         case 'commit_submitted':
           if (!prFree) throw new ToolError(`Not submitted. Only an epic task without a PR submits a commit; this task reports ${ctx.task!.rebaseOnly ? 'pr_rebased' : expected}.`)
+          this.#requireBehaviour(ctx, report)
           return this.#submitCommit(ctx, { ...report, outcome: report.outcome })
         case 'pr_opened':
         case 'pr_updated':
@@ -98,6 +99,7 @@ export class RunOutcomes {
             if (!report.review) throw new ToolError('Not submitted. Add review: trivial or needs_review.')
             if (!report.conflictedFiles?.length) throw new ToolError('Not submitted. Add conflictedFiles: every file in which you resolved a conflict.')
           }
+          this.#requireBehaviour(ctx, report)
           return this.#submit(ctx, { ...report, outcome: report.outcome })
         case 'findings_reported':
           if (!spike) throw new ToolError(`Not submitted. Only a spike reports findings; this task reports ${expected}.`)
@@ -117,6 +119,20 @@ export class RunOutcomes {
         : design ? 'A design task’s designer reports design_submitted, stuck or failed' : prFree ? 'A developer reports commit_submitted, stuck or failed' : 'A developer reports pr_opened, pr_updated, pr_rebased (rebase-only rounds), stuck or failed')
     }
     throw new ToolError(`Outcomes for ${ctx.run.role} runs aren't supported yet`)
+  }
+
+  // D29: the developer says what a round keeping a PR healthy did
+  #requireBehaviour(ctx: RunContext, report: OutcomeReport) {
+    if (report.behaviourChanged !== undefined || report.outcome === 'pr_opened') return
+    if (ctx.task!.ciFix || report.outcome === 'pr_rebased') throw new ToolError('Not submitted. Add behaviourChanged: true if this changes what the code does, false if approved behaviour is unchanged.')
+  }
+
+  // The developer's report, in the task's activity. Only a round with a
+  // say in it gets one. Call before the task's lease ends.
+  async #behaviourComment(tx: Executor, ctx: RunContext, report: OutcomeReport, reviewed: boolean): Promise<Comment | null> {
+    if (report.behaviourChanged === undefined) return null
+    const said = report.behaviourChanged ? 'The developer reported that behaviour changed.' : 'The developer reported that behaviour did not change.'
+    return addComment(tx, ctx.task!.id, { body: `${said} ${reviewed ? 'It goes to Agent review.' : 'No reviewer looks at it again; CI runs on the new head.'}`, pinned: false }, server)
   }
 
   // flows.md steps 6–7: record the verdict for this commit. Changes
@@ -298,19 +314,29 @@ export class RunOutcomes {
     if (!headSha || !baseSha || headSha === baseSha) throw new ToolError('There is no commit to submit. Commit your work on this branch, then report again.')
     await this.#checkSubmission(ctx, headSha)
 
-    const comment = await db.transaction(async (tx) => {
+    const posted = await db.transaction(async (tx) => {
       const locked = await this.#c.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
-      await applyTransition(tx, locked.task, locked.project, {
-        type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
-      }, server, { event: 'commit_submitted', runId: ctx.run.id, headSha, pr: null })
-      await recordTaskSubmission(tx, { taskId: task.id, submittedHeadSha: headSha, baseSha }).catch((error: unknown) => {
+      const ciFix = locked.task.ciFix !== null
+      // D29: a CI fix that changes nothing keeps its approval on the new commit
+      const carried = ciFix && report.behaviourChanged === false && locked.task.approvedHeadSha
+        ? await this.#carryCiFix(tx, ctx, { task: { ...locked.task, headSha }, project: locked.project }, report)
+        : false
+      if (!carried) {
+        await applyTransition(tx, locked.task, locked.project, {
+          type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
+        }, server, { event: 'commit_submitted', runId: ctx.run.id, headSha, pr: null })
+      }
+      const submission = await recordTaskSubmission(tx, { taskId: task.id, submittedHeadSha: headSha, baseSha }).catch((error: unknown) => {
         throw new ToolError(`Not submitted. ${error instanceof Error ? error.message : String(error)}`)
       })
+      if (carried) await tx.update(taskSubmissions).set({ agentApprovedHeadSha: headSha }).where(eq(taskSubmissions.id, submission.id))
+      await tx.update(tasks).set({ ciFix: null, ...(carried && { headSha }) }).where(eq(tasks.id, task.id))
       const comment = await this.#c.ending.postNote(tx, ctx, report.note!)
-      await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'commit_submitted', summary: report.summary, headSha })
-      return comment
+      const said = await this.#behaviourComment(tx, ctx, report, !carried)
+      await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'commit_submitted', summary: report.summary, headSha, behaviourChanged: report.behaviourChanged, ...(ciFix && { fixKind: 'ci' as const, reReviewed: !carried }), ...(locked.task.rebaseOnly && { fixKind: 'conflict' as const, reReviewed: true }) })
+      return said ? [comment, said] : [comment]
     })
-    this.#c.d.events.publish({ type: 'comment.created', comment })
+    for (const comment of posted) this.#c.d.events.publish({ type: 'comment.created', comment })
     this.#c.ending.finished(ctx, 'Outcome accepted', { handoff: true })
     return { ok: true, commit: headSha, message: `Commit ${headSha.slice(0, 10)} on ${task.branch} is ready for review. You can stop now.` }
   }
@@ -338,7 +364,7 @@ export class RunOutcomes {
 
     // D24: a trivial rebase goes to the reviewer unless the server can confirm
     // it. GitHub failing proves nothing, so that also means a review.
-    const rebaseCheck = report.outcome === 'pr_rebased' && report.review === 'trivial'
+    const rebaseCheck = report.outcome === 'pr_rebased' && report.review === 'trivial' && report.behaviourChanged === false
       ? await checkTrivialRebase(github, ctx.project.repository, {
           baseBranch: await taskBase(db, task, ctx.project, github),
           approvedHeadSha: task.approvedHeadSha!,
@@ -347,13 +373,18 @@ export class RunOutcomes {
         })
       : null
 
-    const { posted, verified } = await db.transaction(async (tx) => {
+    const { posted, verified, ciCarried } = await db.transaction(async (tx) => {
       const locked = await this.#c.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
       await tx.update(tasks).set({ headSha: report.headSha, ...(pr && { prNumber: pr.number, prUrl: pr.url }) }).where(eq(tasks.id, task.id))
       const carried = rebaseCheck && !rebaseCheck.error && rebaseCheck.failures.length === 0
         ? await this.#carryVerifiedRebase(tx, ctx, { task: { ...locked.task, headSha: report.headSha!, prNumber: pr?.number ?? locked.task.prNumber }, project: locked.project }, report)
         : null
-      if (!carried?.comment) {
+      const ciFix = locked.task.ciFix !== null && !task.rebaseOnly
+      const ciCarried = ciFix && report.behaviourChanged === false && locked.task.approvedHeadSha
+        ? await this.#carryCiFix(tx, ctx, { task: { ...locked.task, headSha: report.headSha!, prNumber: pr?.number ?? locked.task.prNumber }, project: locked.project }, report)
+        : false
+      await tx.update(tasks).set({ ciFix: null }).where(eq(tasks.id, task.id))
+      if (!carried?.comment && !ciCarried) {
         const checkError = carried?.problem ?? rebaseCheck?.error
         const checkResult = rebaseCheck && { checkFailures: rebaseCheck.failures, ...(checkError && { checkError }) }
         await applyTransition(tx, locked.task, locked.project, {
@@ -361,14 +392,25 @@ export class RunOutcomes {
         }, server, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr?.number ?? null, ...checkResult })
       }
       const note = await this.#c.ending.postNote(tx, ctx, report.note!)
-      await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome, summary: report.summary, headSha: report.headSha, ...(report.outcome === 'pr_rebased' ? { review: report.review, conflictedFiles: report.conflictedFiles } : {}) })
-      return { posted: carried?.comment ? [note, carried.comment] : [note], verified: Boolean(carried?.comment) }
+      const skipped = Boolean(carried?.comment) || ciCarried
+      const said = await this.#behaviourComment(tx, ctx, report, !skipped)
+      await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome, summary: report.summary, headSha: report.headSha, behaviourChanged: report.behaviourChanged, ...(report.outcome === 'pr_rebased' ? { review: report.review, conflictedFiles: report.conflictedFiles, fixKind: 'conflict' as const, reReviewed: !skipped } : {}), ...(ciFix && { fixKind: 'ci' as const, reReviewed: !skipped }) })
+      return { posted: [note, ...said ? [said] : [], ...carried?.comment ? [carried.comment] : []], verified: Boolean(carried?.comment), ciCarried }
     })
     for (const comment of posted) this.#c.d.events.publish({ type: 'comment.created', comment })
     this.#c.ending.finished(ctx, 'Outcome accepted', { handoff: true })
     if (!pr) return { ok: true, message: 'The rebased epic branch is ready for review. You can stop now.' }
+    if (ciCarried) return { ok: true, pr: pr.url, message: 'The approval carried over. CI runs on your new head, and Corral merges once it passes. You can stop now.' }
     if (verified) return { ok: true, pr: pr.url, message: 'The server verified your trivial rebase, so the approval carried over. Corral handles any human check, CI and the merge from here. You can stop now.' }
     return { ok: true, pr: pr.url, message: `PR #${pr.number} is ready for review. You can stop now.` }
+  }
+
+  // D29: the developer reports a CI fix changes nothing, so the approval and
+  // verdicts carry to the new head, which CI still has to pass. False when
+  // they can't: the round then goes to Agent review.
+  async #carryCiFix(tx: Executor, ctx: RunContext, locked: { task: TaskRow, project: ProjectRow }, report: OutcomeReport): Promise<boolean> {
+    const carried = await carryOverApproval(tx, locked, { actor: server, runId: ctx.run.id, via: 'a CI fix reported as not changing behaviour', note: report.summary })
+    return carried.ok
   }
 
   // D24: the server check passed, so no reviewer is needed. The comment is the
