@@ -9,6 +9,9 @@ import type {
   Comment,
   DesignVersion,
   Epic,
+  EpicActivityItem,
+  EpicReview,
+  EpicReviewTaskRow,
   Evidence,
   GlobalStatus,
   EpicFixRun,
@@ -233,6 +236,11 @@ export const epics: Epic[] = [
   epicInReview('e-themes', 'Project themes', 'changes_requested', 217),
   epicInReview('e-digest', 'Weekly digest', 'ready_to_merge', 218),
   epicInReview('e-tags', 'Task tags', 'merged', 219),
+  // Epic review in the Inbox: a later round, checks owed and a head that moved
+  epicInReview('e-history', 'Run history export', 'human_review', 223),
+  epicInReview('e-checklist', 'Release checklist', 'human_review', 224),
+  epicInReview('e-moved', 'Keyboard shortcuts', 'human_review', 225),
+  epicInReview('e-capped', 'Bulk task moves', 'human_review', 226),
   // A developer on the epic, with no task (D29), and two that are stopped or waiting
   { ...epicInReview('e-search', 'Saved searches', 'ready_to_merge', 220), sync: { state: 'fixing', fix: 'conflict', reason: 'The rebase onto main conflicts in apps/server/src/search.ts.', files: ['apps/server/src/search.ts'], developer: { agentId: 'a-dev', name: 'Victor', runId: 'run-fix-1', runNumber: 3901 }, attempts: 0 } },
   { ...epicInReview('e-feeds', 'Activity feeds', 'ready_to_merge', 221), sync: { state: 'fixing', fix: 'ci', reason: 'CI failed on the epic PR. ci: failed', files: [], developer: null, attempts: 1 } },
@@ -274,6 +282,7 @@ export function task(project: Project, number: number, fields: Partial<Task> & P
     description: doc(`${fields.title}.`),
     priority: 'medium',
     type: 'task',
+    kind: 'normal',
     epicId: null,
     humanReview: project.humanReviewDefault,
     reviewRounds: 0,
@@ -388,8 +397,7 @@ export const tasks: Task[] = [
   task(corral, 22, { title: 'Export run history as CSV', status: 'ready', epicId: 'e-exports', dependsOn: ['COR-21'] }),
   ...epicTasks('e-alerts', 23, ['Alert when a run fails', 'Alert when a runner disconnects']).map((t, i) => ({
     ...t,
-    prNumber: null,
-    prUrl: null,
+    pr: null,
     humanReview: i === 0,
     acceptanceCriteria: i === 0
       ? [{ id: 'c-alert-sent', position: 0, text: 'A failed run sends one alert', checkedByHuman: false, met: true }]
@@ -405,6 +413,17 @@ export const tasks: Task[] = [
   task(corral, 31, { title: 'Fix: theme contrast on the board header', status: 'in_progress', epicId: 'e-themes' }),
   ...epicTasks('e-digest', 32, ['Collect the week\'s merges', 'Send the digest']),
   ...epicTasks('e-tags', 34, ['Add tags to tasks', 'Filter the Board by tag'], 60),
+  ...epicTasks('e-history', 340, ['Export runs as CSV', 'Link the export from a task']),
+  { ...task(corral, 342, { title: 'Fix integration: name the export after the project', status: 'merged', epicId: 'e-history', mergedAt: ago(60) }), kind: 'fix' },
+  ...epicTasks('e-checklist', 343, ['Add the release checklist', 'Block a release on it']).map((t, i) => ({
+    ...t,
+    pr: null,
+    humanReview: i === 0,
+    submission: { sequence: 1, targetBranch: 'corral/epic-e-checklist', submitted: commitOf('7c1d2e3f4a50'), approved: commitOf('7c1d2e3f4a50'), integrated: commitOf('9e8d7c6b5a40'), integratedAt: ago(90) },
+    acceptanceCriteria: i === 1 ? [{ id: 'crit-checklist', position: 0, text: 'A release on a real phone stops at the checklist', checkedByHuman: true, met: null }] : t.acceptanceCriteria
+  })),
+  ...epicTasks('e-moved', 345, ['Add a shortcut sheet']),
+  ...epicTasks('e-capped', 346, ['Move tasks in bulk']),
   task(corral, 39, {
     title: 'Spike: resilient SSE reconnects', type: 'spike', status: 'human_review',
     headSha: 'findings-spike-39',
@@ -714,6 +733,82 @@ export const pullRequestDetails: PullRequestDetail[] = [
   prDetail('COR-7', '## What\n\nThe PM drafts tasks from an approved design.', { totalFiles: 34, truncated: true })
 ]
 
+// What the real epic review reads live from GitHub and the audit log
+const epicReviewExtras: Record<string, Partial<EpicReview>> = {
+  'e-history': {
+    rounds: [
+      {
+        round: 2, verdict: 'approved', reviewer: { id: 'a-rita', name: 'Rita' }, headSha: '223c2ab94d',
+        summary: 'The export now takes its name from the project.', findings: [], at: ago(30)
+      },
+      {
+        round: 1, verdict: 'approved', reviewer: { id: 'a-rita', name: 'Rita' }, headSha: 'b2c3d4e5f6',
+        summary: 'The CSV and the link agree on the columns.',
+        findings: [{ level: 'non_blocking', text: 'COR-340 and COR-341 could share a header row', taskRefs: ['COR-340', 'COR-341'] }], at: ago(60 * 5)
+      }
+    ],
+    lastFeedback: {
+      text: 'Name the file after the project, not the epic.', at: ago(60 * 3), headSha: 'b2c3d4e5f6',
+      fixTasks: [{ id: 't-cor-342', ref: 'COR-342', title: 'Fix integration: name the export after the project' }],
+      files: approveFiles, totalFiles: approveFiles.length, truncated: false,
+      diffUrl: 'https://github.com/cormacrw/corral/compare/b2c3d4e5f6...223c2ab94d'
+    }
+  },
+  'e-themes': { conflictTaskRef: 'COR-31' },
+  // Approved on an older head, and the review of this one stopped retrying
+  'e-capped': {
+    rounds: [{ round: 1, verdict: 'approved', reviewer: { id: 'a-rita', name: 'Rita' }, headSha: 'older-head', summary: 'Moves work on the old board.', findings: [], at: ago(60 * 8) }]
+  },
+  'e-moved': { conflictPending: true, targetMovedBy: 2 },
+  'e-tags': { mergeCommitSha: '5d4c3b2a1f0e9d8c7b6a' },
+  'e-alerts': {
+    targetMovedBy: 3,
+    rounds: [{
+      round: 1, verdict: 'approved', reviewer: { id: 'a-rita', name: 'Rita' }, headSha: '214c2ab94d',
+      summary: 'Failed runs and runner disconnects share one alert path.',
+      findings: [{ level: 'non_blocking', text: 'Both alerts could share one title format', taskRefs: ['COR-23', 'COR-24'] }], at: ago(45)
+    }]
+  },
+  'e-webhooks': {
+    lastFeedback: {
+      text: 'Back off for longer after the third failure.', at: ago(120), headSha: 'a1b2c3d4e5',
+      fixTasks: [{ id: 't-cor-25', ref: 'COR-25', title: 'Queue failed webhooks' }],
+      files: approveFiles, totalFiles: approveFiles.length, truncated: false,
+      diffUrl: 'https://github.com/cormacrw/corral/compare/a1b2c3d4e5...215c2ab94d'
+    }
+  }
+}
+
+// Same shape as the server's: one row per board task. Null for an unknown epic.
+export function epicReview(id: string): EpicReview | null {
+  const epic = epics.find(e => e.id === id)
+  if (!epic) return null
+  const board = tasks.filter(t => t.epicId === id && t.status !== 'draft' && t.status !== 'backlog')
+  const rows = board.map((t): EpicReviewTaskRow => {
+    const human = t.humanReview && t.submission === null && t.status === 'merged'
+    return {
+      id: t.id, ref: t.ref, title: t.title, kind: t.kind, merged: t.status === 'merged',
+      prNumber: t.pr?.number ?? null, prUrl: t.pr?.url ?? null, integratedCommit: t.submission?.integrated ?? null,
+      reviewedBy: human ? 'human' : t.status === 'merged' || t.status === 'ready_to_merge' ? 'reviewer' : null,
+      criteria: t.acceptanceCriteria,
+      criteriaMet: t.acceptanceCriteria.filter(c => c.met === true || (human && c.checkedByHuman)).length,
+      criteriaTotal: t.acceptanceCriteria.length,
+      evidence: evidence[t.id] ?? [],
+      humanReview: t.submission !== null && t.humanReview,
+      humanChecks: t.submission ? t.acceptanceCriteria.filter(c => c.checkedByHuman).map(c => c.id) : []
+    }
+  })
+  return {
+    epicId: id, title: epic.title, goal: epic.description, reviewMode: epic.reviewMode, state: epic.reviewState,
+    targetBranch: 'main', headSha: id === 'e-moved' && epic.reviewState === 'human_review' ? 'stale-head' : epic.prHeadSha,
+    pr: epic.prNumber === null ? null : { number: epic.prNumber, url: epic.prUrl!, title: epic.title, body: `## What\n\n${epic.description}`, baseBranch: 'main', headBranch: epic.branch!, files: approveFiles, totalFiles: approveFiles.length, truncated: false },
+    gateChecks: [{ name: 'lint', conclusion: 'success', url: null }, { name: 'test', conclusion: 'success', url: null }],
+    targetMovedBy: 0, rounds: [], tasks: rows, seenByHuman: rows.filter(r => r.reviewedBy === 'human').length,
+    lastFeedback: null, conflictTaskRef: board.find(t => t.kind === 'conflict' && t.status !== 'merged')?.ref ?? null, conflictPending: false,
+    mergeCommitSha: null, ...epicReviewExtras[id]
+  }
+}
+
 const eligible = { eligible: true, failingGate: null, failedGates: [] }
 
 export const pullRequests: PullRequestStatus[] = [
@@ -977,15 +1072,16 @@ export function inbox(): Inbox {
       activeRunId: session.activeRunId
     })
   }
-  const review = epics.find(e => e.reviewState === 'human_review')
-  if (review) {
+  for (const review of epics.filter(e => e.reviewState === 'human_review')) {
     const project = projects.find(p => p.id === review.projectId)!
-    const body = 'The combined diff matches the epic\'s goal. Failed runs and runner disconnects share one alert path, and the tasks agree on its payload.'
+    const stopped = review.id === 'e-capped'
+    const body = stopped ? 'The integration review failed 3 times on this head. Review it yourself, or request changes.' : 'The combined diff matches the epic\'s goal. Failed runs and runner disconnects share one alert path, and the tasks agree on its payload.'
     needsYou.push({
-      id: review.id, type: 'epic_review', epicId: review.id, taskId: null, taskRef: null, subject: review.title,
+      id: review.id, type: 'epic_review', findings: [], reviewRounds: [], epicId: review.id, taskId: null, taskRef: null, subject: review.title,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
-      preview: body, body, message: body, sender: { name: 'Rita', role: 'reviewer' }, at: review.updatedAt,
-      prUrl: review.prUrl!, resolution: null, headSha: review.prHeadSha!,
+      preview: body, body, message: body, sender: stopped ? { name: 'Corral', role: 'system' } : { name: 'Rita', role: 'reviewer' }, at: review.updatedAt,
+      // The head moved after this was read, so the mock refuses any action on it
+      prUrl: review.prUrl!, resolution: null, headSha: review.id === 'e-moved' ? 'stale-head' : review.prHeadSha!,
       tasks: tasks.filter(t => t.epicId === review.id).map(task => ({ task, evidence: evidence[task.id] ?? [], humanReview: task.humanReview, humanChecks: task.submission ? task.acceptanceCriteria.filter(c => c.checkedByHuman).map(c => c.id) : [] })),
       since: null, newArtifacts: []
     })
@@ -1017,7 +1113,22 @@ export function inbox(): Inbox {
   activity.push(...releaseNotes.filter(r => !r.resolution))
   activity.sort((a, b) => b.at.localeCompare(a.at))
   const approved = { ...merged, id: 'activity-approved', body: 'You approved and merged it', preview: 'You approved and merged it', resolution: 'You approved and merged it', sender: { name: 'Rita', role: 'reviewer' as const } }
-  return { needsYou, activity, resolved: [...resolvedInbox, approved, ...releaseNotes.filter(r => r.resolution)], count: needsYou.length }
+  const epicMoment = (id: string, epicId: string, event: string, body: string, resolution: string | null): EpicActivityItem => {
+    const epic = epics.find(e => e.id === epicId)!
+    const project = projects.find(p => p.id === epic.projectId)!
+    return {
+      id, type: 'epic_activity', event, epicId, taskId: null, taskRef: null, subject: epic.title, preview: body, body,
+      project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
+      sender: resolution ? { name: 'You', role: 'system' } : { name: 'Corral', role: 'system' }, at: ago(40), prUrl: epic.prUrl, resolution
+    }
+  }
+  activity.push(
+    epicMoment('audit-e-audit', 'e-audit', 'opened', 'Epic PR opened', null),
+    epicMoment('audit-e-themes', 'e-themes', 'conflict', 'Epic PR conflict: apps/web/app/pages/board.vue', null),
+    epicMoment('audit-e-tags', 'e-tags', 'merged', 'Epic PR merged', null)
+  )
+  const approvedEpic = epicMoment('audit-e-digest', 'e-digest', 'human_approved', 'You approved the epic PR', 'You approved the epic PR')
+  return { needsYou, activity, resolved: [...resolvedInbox, approved, approvedEpic, ...releaseNotes.filter(r => r.resolution)], count: needsYou.length }
 }
 
 // Different cohorts make every window visibly distinct. Marketing site has no

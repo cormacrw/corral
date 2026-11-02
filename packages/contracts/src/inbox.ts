@@ -1,14 +1,16 @@
-import type { AgentRole, EpicFixKind, EpicRebaseDecision } from '@corral/core'
+import type { AgentRole, EpicFixKind, EpicRebaseDecision, EpicReviewMode, EpicReviewState, TaskKind } from '@corral/core'
 import { z } from 'zod'
+import type { EpicReviewFinding } from './runner.ts'
 import type { AgentRuntime } from './agent-runtimes.ts'
 import type { Deployment } from './deployments.ts'
 import type { Plan, PlanQuestion } from './plans.ts'
-import type { Evidence, Task } from './tasks.ts'
+import type { PullRequestDetail, PullRequestFile, PullRequestStatus } from './pull-requests.ts'
+import type { Evidence, Task, TaskCommit } from './tasks.ts'
 
 // ── Inbox (D11, design/inbox.md) ───────────────────────────────────────────
 
 export type TaskInboxItemType = 'human_review' | 'question' | 'blocked' | 'failed' | 'stopped' | 'activity'
-export type InboxItemType = TaskInboxItemType | 'plan_thread' | 'epic_review' | 'release_notes' | 'epic_conflict' | 'runner_update'
+export type InboxItemType = TaskInboxItemType | 'plan_thread' | 'epic_review' | 'release_notes' | 'epic_conflict' | 'runner_update' | 'epic_activity'
 
 interface InboxItemBase {
   project: { id: string, slug: string, name: string, thumbnailColor: string | null, thumbnailUrl: string | null }
@@ -62,8 +64,7 @@ interface ReviewChanges {
 // An item raised by a developer or reviewer run, about a task. Needs-you
 // items carry the review changes; Activity and Resolved ones don't.
 export interface TaskInboxItem extends InboxItemBase, Partial<ReviewChanges> {
-  // Epic PR activity links to the epic while retaining task context.
-  epicId?: string
+  epicId?: undefined
   body: string
   // The task ID for Needs-you items; the audit entry for Activity and Resolved
   id: string
@@ -88,6 +89,20 @@ export interface PmActivityItem extends InboxItemBase {
   taskRef: null
   prUrl: null
   resolution: null
+}
+
+// Read-only history of an epic PR, independent of the epic's tasks.
+export interface EpicActivityItem extends InboxItemBase {
+  id: string
+  type: 'epic_activity'
+  epicId: string
+  // Keep the stored event name, including events added by newer servers.
+  event: string
+  taskId: null
+  taskRef: null
+  prUrl: string | null
+  body: string
+  resolution: string | null
 }
 
 // An open Plan session waiting on a human decision (D11): a question, a plan
@@ -135,6 +150,16 @@ export const epicReviewActionInput = z.object({
   .refine(input => input.action !== 'decide' || input.alternative !== undefined || Boolean(input.text), { message: 'Pick an alternative or write an answer', path: ['text'] })
 export type EpicReviewActionInput = z.input<typeof epicReviewActionInput>
 
+export interface EpicReviewRound {
+  round: number
+  verdict: 'approved' | 'changes_requested'
+  reviewer: { id: string, name: string }
+  headSha: string
+  summary: string
+  findings: EpicReviewFinding[]
+  at: string
+}
+
 export interface EpicReviewItem extends InboxItemBase, ReviewChanges {
   id: string
   type: 'epic_review'
@@ -145,6 +170,8 @@ export interface EpicReviewItem extends InboxItemBase, ReviewChanges {
   body: string
   resolution: null
   headSha: string
+  reviewRounds: EpicReviewRound[]
+  findings: EpicReviewFinding[]
   tasks: EpicReviewTask[]
 }
 
@@ -156,6 +183,70 @@ export interface EpicReviewTask {
   evidence: Evidence[]
   humanReview: boolean
   humanChecks: string[]
+}
+
+// One board task on an epic's review. Exactly one of its PR and integrated
+// commit is set once its work reached the epic branch. `humanChecks` are
+// criterion IDs, with their text in `criteria`.
+export interface EpicReviewTaskRow extends Omit<EpicReviewTask, 'task'> {
+  id: string
+  ref: string
+  title: string
+  kind: TaskKind
+  merged: boolean
+  prNumber: number | null
+  prUrl: string | null
+  integratedCommit: TaskCommit | null
+  // Who passed it: `human` when it had its own human review, which is what
+  // the review's You saw counts. Null until someone has.
+  reviewedBy: 'human' | 'reviewer' | null
+  criteria: Task['acceptanceCriteria']
+  criteriaMet: number
+  criteriaTotal: number
+}
+
+// The human's last request for changes, and what moved since that head.
+// `files` is capped as `PullRequestDetail.files` is; the rest is at `diffUrl`.
+// A diff GitHub can't give leaves `files` empty and `truncated` true. After a
+// rebase a file's patch is its whole change on the epic, not the change since.
+export interface EpicReviewFeedback {
+  text: string
+  at: string
+  headSha: string | null
+  // A snapshot from the request, so renaming or removing a task keeps the link
+  fixTasks: InboxSince['fixTasks']
+  files: PullRequestFile[]
+  totalFiles: number
+  truncated: boolean
+  diffUrl: string | null
+}
+
+// GET /epics/:id/review. Actions go to POST on the same path, with `headSha`.
+export interface EpicReview {
+  epicId: string
+  title: string
+  goal: string
+  reviewMode: EpicReviewMode
+  state: EpicReviewState | null
+  targetBranch: string
+  headSha: string | null
+  // Null until the epic has a PR
+  pr: PullRequestDetail | null
+  gateChecks: PullRequestStatus['ci']['checks']
+  // Commits on the target branch that the epic branch doesn't have; null if
+  // GitHub couldn't say
+  targetMovedBy: number | null
+  // Newest first
+  rounds: EpicReviewRound[]
+  tasks: EpicReviewTaskRow[]
+  // How many of `tasks` had their own human review
+  seenByHuman: number
+  lastFeedback: EpicReviewFeedback | null
+  // The unfinished task resolving a rebase conflict, from before fixes ran with no task
+  conflictTaskRef: string | null
+  // A rebase conflict is waiting for the final checkpoint (D27)
+  conflictPending: boolean
+  mergeCommitSha: string | null
 }
 
 export interface ReleaseNotesItem extends InboxItemBase {
@@ -211,18 +302,18 @@ export interface RunnerUpdateItem extends Omit<InboxItemBase, 'project'> {
   resolution: null
 }
 
-export type InboxItem = TaskInboxItem | PmActivityItem | PlanThreadItem | EpicReviewItem | ReleaseNotesItem | EpicConflictItem | RunnerUpdateItem
+export type InboxItem = TaskInboxItem | PmActivityItem | PlanThreadItem | EpicReviewItem | ReleaseNotesItem | EpicConflictItem | RunnerUpdateItem | EpicActivityItem
 
 // What the human owes a decision on (D11). Everything here counts.
-export type ActionableInboxItem = Exclude<InboxItem, ReleaseNotesItem | PmActivityItem>
+export type ActionableInboxItem = Exclude<InboxItem, ReleaseNotesItem | PmActivityItem | EpicActivityItem>
 
 export interface Inbox {
   // Newest first by when each began waiting
   needsYou: ActionableInboxItem[]
   // Informational, newest first: what agents and the PM did, and release notes
   // until they're dismissed
-  activity: (TaskInboxItem | PmActivityItem | ReleaseNotesItem)[]
-  resolved: (TaskInboxItem | ReleaseNotesItem)[]
+  activity: (TaskInboxItem | PmActivityItem | EpicActivityItem | ReleaseNotesItem)[]
+  resolved: (TaskInboxItem | EpicActivityItem | ReleaseNotesItem)[]
   // needsYou's length; every Inbox badge is this or its per-project share
   count: number
 }

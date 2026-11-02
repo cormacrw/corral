@@ -158,16 +158,12 @@ describe.each(['pglite', 'postgres'] as const)('the data layer on %s', (driver) 
     await t.db.update(tasks).set({ status: 'merged', statusReason: null }).where(eq(tasks.id, task.id))
   })
 
-  it('links an epic\'s activity to its first task', async () => {
+  it('lists an epic\'s activity as its own, with no task', async () => {
     const [epic] = await t.db.insert(epics).values({ projectId: project.id, title: 'Linked', description: '', createdBy: t.actor }).returning()
-    const first = await t.createTask(project.slug, { epicId: epic!.id })
-    const second = await t.createTask(project.slug, { epicId: epic!.id })
-    // Rewriting the first row moves it behind the second in the heap
-    await t.db.update(tasks).set({ title: 'Moved' }).where(eq(tasks.id, first.id))
+    await t.createTask(project.slug, { epicId: epic!.id })
     await appendAudit(t.db, { projectId: project.id, actor: system }, auditEvent('epic.pr', { epicId: epic!.id, event: 'opened', prNumber: 1 }))
     const item = (await inbox()).activity.find(i => i.epicId === epic!.id)
-    expect(second.number).toBeGreaterThan(first.number)
-    expect(item?.taskId).toBe(first.id)
+    expect(item).toMatchObject({ type: 'epic_activity', event: 'opened', taskId: null, taskRef: null, body: 'Epic PR opened' })
   })
 
   it('publishes an epic without its tasks', async () => {

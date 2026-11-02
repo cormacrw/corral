@@ -17,7 +17,7 @@ Epic names replace the old "Epic 1", "Epic 2" labels everywhere.
 1. **Header.** Flyout: a back arrow when the epic was opened from a task's Epic property, an "Epic" badge, the project name, "✓ Saved", copy link, open full page, close. Page: a breadcrumb (project › epic).
 2. **Title.** Inline-editable, saved on change.
 3. **Description.** Markdown, rendered. Click anywhere on it to edit in a textarea; **Save** / **Cancel**, Esc cancels.
-4. **Review (D27).** The review mode in a select, saved on change. It can change until a task of the epic submits a commit, opens a PR or merges without one, as a spike does; after that the select is disabled, with "Locked because a task in this epic has submitted work." The epic PR link and a badge for its review state follow; before the PR exists an `epic` or `each_task` epic says it opens once every task is complete (Merged, or Approved for designs), and that human checks are confirmed there. The task list links each PR-free task's integrated and approved commits under its row.
+4. **Review (D27).** The review mode in a select, saved on change. It can change until a task of the epic submits a commit, opens a PR or merges without one, as a spike does; after that the select is disabled, with "Locked because a task in this epic has submitted work." Before the PR exists an `epic` or `each_task` epic says it opens once every task is complete (Merged, or Approved for designs), and that human checks are confirmed there. Once it exists, the **Epic PR** block (`EpicPrBlock`) replaces the select: the PR's link, a badge for its state and the review mode, with **Review in the Inbox** opening its item while it waits on the human. An epic with no PR, or a `direct` epic, has no block. The task list links each PR-free task's integrated and approved commits under its row.
 5. **Progress.** "N of M done" (Drafts aren't counted; they're noted as "· 2 drafts"), a progress bar, a status badge with a count for each status present, and the review status, such as "All tasks complete, awaiting your review".
 6. **Tabs: Tasks, Graph and Activity.** The last tab used is remembered.
    - **Tasks:** every task in the epic as a list: ref, title, "after TES-3" for its dependencies, priority when High or Urgent, and its status. Clicking a row opens the task.
@@ -33,6 +33,7 @@ The tree is read-only: dependencies are edited on the tasks themselves. It follo
 
 - `GET /api/projects/:slug/epics`: the project's epics with task and merged counts (Drafts excluded), `prUrl` and `reviewModeLocked`.
 - `GET /api/epics/:id`: the epic and all its tasks, Drafts included.
+- `GET /api/epics/:id/review`: the `EpicReview` the human approves from, read live from GitHub: goal, state, PR, required checks, commits the target has moved, integration rounds, one row per board task and the last feedback. Unknown is 404; a `direct` epic is 409, because it has no epic review. Actions stay on `POST /api/epics/:id/review`.
 - `PATCH /api/epics/:id`: title, description and/or review mode. Changing the mode once `reviewModeLocked` is true answers 409. Publishes `epic.updated`.
 
 ## Epic prerequisites (D22)

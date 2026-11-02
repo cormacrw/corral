@@ -160,14 +160,21 @@ On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its 
 
 ### Epic items (D27)
 
-An epic PR in human review lists every task on the epic branch with **Open task**, its integrated and approved commits (or legacy task PR), criteria and evidence. A PR-free task's **Needs human check** criteria have checkboxes, a task marked for human review has **I reviewed this task**, and those tasks stay expanded on a phone. The footer counts them; **Approve** needs them all (D27, COR-289), and the server checks too. Ticks are local to the item. Requesting changes doesn't need them.
-
 An epic rebase's question (D27, COR-291) is a task question whose Overview leads with the question, any binding decision, each alternative with its effect and a **Choose** button, and the affected changes. Choosing resumes the rebase; **Answer** writes a free-form answer, which counts as a behaviour change.
 
-An epic PR in human review and an epic PR rebase conflict have their own layout on desktop and mobile, `InboxEpicReview` and `InboxEpicConflict`, with the action bar pinned at the bottom. Both share `InboxEpicHeader`: the badge, the epic's name linking to it, and a button to the epic PR, which goes full width under the title on a phone.
+Every epic item uses `InboxEpicPanel`, Option D for an epic, on desktop and mobile: an epic PR waiting on the human, what stopped an epic, and the read-only moments in Activity and Resolved. It reads `GET /api/epics/:id/review`. The top block shows at once, from the item, with skeletons in the tab body until the review arrives.
 
-- **Review:** the integration review's verdict, then one collapsible row per task with its evidence, open on desktop and closed on a phone. Request changes needs the feedback box filled in. Approve and Request changes sit side by side on a phone.
-- **Conflict:** a bordered list of the conflicting files, wrapped rather than scrolled, or a note that Corral couldn't work them out. Only an epic left in `conflict` from before automatic rebasing shows this (D27, COR-290), and a conflict now goes to a developer without an Inbox item. **Hand the rebase to a developer**, which sends it round the automatic rebase, is full width on a phone.
+- **Up front:** the kind, project, sender and time, the epic's name linking to it, and `InboxMessage` with its **New** row (a TL;DR with no message). On a review the verdict reads **Rita approved the epic · lint, test passed · 3 of 3 tasks merged · You saw 1 of 3**, or says there's no reviewer approval on this head when the review stopped or a merge was refused. *You saw* counts tasks that had their own human review. Then the actions and the epic PR's link. A line under the actions names the target branch, how many commits it has moved when it has, and that approving runs CI and squash-merges; with a pending conflict (D27) it says approving sends the conflict to a developer first.
+- **Tabs:** Overview · Tasks n/m · Review · PR description · Code diff N · Message.
+- **Overview:** a later round leads with **Since your last review**, quoting the human's feedback and naming its fix tasks, with **See only these changes**. Then non-blocking notes, screenshots labelled by task, then the review mode and size. With no screenshots, only the notes and the size. A first review has no such block.
+- **Tasks:** one row per task with who passed it, criteria met, its PR or, for a PR-free task, its commit, and whether it's a **Fix task** or **Conflict task**. A row opens the task. Owed human checks are ticked here. Conflict and CI fixes have no task (D29), so these labels come from a human's Request changes, or from before D29.
+- **Review:** the integration findings first, then the reviewer's summary, for every round, newest first.
+- **Code diff:** switches between **Since your last review** and **Whole epic** in a later round. After a rebase a file's patch is its whole change on the epic, not the change since.
+- **Approve epic:** one click when nothing is owed, and the Inbox moves on. A non-blocking note doesn't ask for confirmation. With checks owed it opens Tasks, says what's left, and sends only once all are ticked.
+- **Request changes:** opens the composer, and its text becomes a fix task in Ready in the epic, titled by `feedbackFixTitle`. Epic items have no Reply.
+- **The head moved while open:** the action carries the head the human was looking at, so it fails with a message, the feedback text is kept and the panel refreshes. If the item leaves the Inbox while open, the panel stays on it with the message and nothing can be sent.
+- **What stopped an epic:** an `epic_conflict` item shows the failure, the conflicting files or the rebase's question. **Retry** goes round the automatic path again; a question is answered with a **Choose** button or in the composer.
+- **Read-only:** opened, conflict, approved and merged items show *For your information. Nothing to do.* in place of the actions, and Resolved items show the resolution. A merged epic shows its squash commit, and an approved one says what happens next. The Activity record of a conflict links its task and shows tasks merged, such as 2 of 3, only when a task exists.
 
 ## What each action does (D10)
 

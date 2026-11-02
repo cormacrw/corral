@@ -37,6 +37,7 @@ export const keys = {
     details: () => [...keys.epics.all(), 'detail'] as const,
     detail: (id: string) => [...keys.epics.details(), id] as const,
     activity: (id: string) => [...keys.epics.detail(id), 'activity'] as const,
+    review: (id: string) => [...keys.epics.detail(id), 'review'] as const,
     history: (id: string) => [...keys.epics.detail(id), 'history'] as const
   },
   agents: {

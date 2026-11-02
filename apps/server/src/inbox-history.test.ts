@@ -1,10 +1,11 @@
 import type { Inbox } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { asc, eq } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { readAudit } from './audit.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
-const { auditLog, tasks } = schema
+const { auditLog, tasks, epics, deployments } = schema
 
 // Audit rows as past versions stored them, inserted raw on purpose: the Inbox
 // has to keep reading them the same way, and reading must leave them alone.
@@ -14,11 +15,11 @@ describe('inbox over stored audit rows', () => {
   const at = (minutes: number) => new Date(now - minutes * 60_000)
   const system = { kind: 'system', component: 'server' } as const
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     t = await createTestApp('pglite')
   })
 
-  afterAll(async () => {
+  afterEach(async () => {
     await t?.close()
   })
 
@@ -118,5 +119,52 @@ describe('inbox over stored audit rows', () => {
     ])
 
     expect(await t.db.select().from(auditLog).orderBy(asc(auditLog.id))).toEqual(stored)
+  })
+
+  it('reads every epic PR event without borrowing a task, preserving mixed history and live conflicts', async () => {
+    const project = await t.createProject({ name: 'Epic history', prefix: 'EPH', repository: 'cormacrw/test-app', defaultBranch: 'main' })
+    await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
+    const [epic] = await t.db.insert(epics).values({ projectId: project.id, title: 'Epic without tasks', createdBy: t.actor, prNumber: 12, prHeadSha: 'head', reviewState: 'conflict', conflictFiles: ['shared.ts'] }).returning()
+    const events = ['opened', 'review_started', 'approved', 'changes_requested', 'rebase_requested', 'rebased', 'conflict', 'ci_failed', 'merge_refused', 'closed', 'merged', 'future_event']
+    const actions = ['human_approved', 'human_changes_requested', 'rebase_handed_off']
+    const inserted = await t.db.insert(auditLog).values([
+      ...events.map((event, i) => ({ projectId: project.id, actor: system, action: 'epic.pr', detail: { epicId: epic!.id, event, summary: `Details for ${event}` }, createdAt: at(30 - i) })),
+      ...actions.map((event, i) => ({ projectId: project.id, actor: t.actor, action: 'epic.pr', detail: { epicId: epic!.id, event, summary: `Human note for ${event}` }, createdAt: at(10 - i) }))
+    ]).returning()
+    const task = await t.createTask(project.slug, { title: 'Old task history' })
+    const oldRows = await t.db.insert(auditLog).values([
+      { projectId: project.id, taskId: task.id, actor: system, action: 'task.transition', detail: { event: { type: 'pr_opened' } }, createdAt: at(25.5) },
+      { projectId: project.id, taskId: task.id, actor: t.actor, action: 'task.transition', detail: { event: { type: 'human_approve' } }, createdAt: at(9.5) }
+    ]).returning()
+    await t.db.insert(deployments).values({ projectId: project.id, toSha: 'abc123', notesStatus: 'ready', notes: 'Old release notes', dismissedAt: at(9.7), createdAt: at(9.7) })
+    const stored = await t.db.select().from(auditLog).orderBy(asc(auditLog.id))
+    const result = await inbox()
+    const activity = result.activity.filter(i => i.project.id === project.id)
+    const resolved = result.resolved.filter(i => i.project.id === project.id)
+    const history = [...activity, ...resolved].filter(i => i.type === 'epic_activity')
+    expect(history).toHaveLength(events.length + actions.length)
+    for (const item of history) {
+      const entry = inserted.find(e => `epic-${e.id}` === item.id)!
+      const detail = readAudit(entry.detail)
+      expect(item).toMatchObject({ epicId: epic!.id, event: detail.event, taskId: null, taskRef: null, subject: epic!.title, at: entry.createdAt.toISOString(), prUrl: 'https://github.com/cormacrw/test-app/pull/12' })
+      expect(item.body).toContain(detail.summary)
+      expect(item.resolution).toBe(entry.actor.kind === 'human' ? item.body : null)
+    }
+    expect(resolved.filter(i => i.type === 'epic_activity').map(i => i.resolution)).toEqual([
+      'You handed the epic PR rebase to a developer: Human note for rebase_handed_off',
+      'You requested changes on the epic PR: Human note for human_changes_requested',
+      'You approved the epic PR: Human note for human_approved'
+    ])
+    expect(activity.find(i => i.id === String(oldRows[0]!.id))).toMatchObject({ type: 'activity', taskId: task.id, body: 'Opened the PR' })
+    expect(resolved.find(i => i.id === String(oldRows[1]!.id))).toMatchObject({ type: 'activity', taskId: task.id, resolution: 'You approved the merge' })
+    expect(resolved.some(i => i.type === 'release_notes' && i.notes === 'Old release notes')).toBe(true)
+    for (const list of [activity, resolved]) expect(list.map(i => i.at)).toEqual(list.map(i => i.at).sort().reverse())
+    expect(result.needsYou.find(i => 'epicId' in i && i.epicId === epic!.id)).toMatchObject({ type: 'epic_conflict', taskId: null, taskRef: null, files: ['shared.ts'] })
+    expect(await t.db.select().from(auditLog).orderBy(asc(auditLog.id))).toEqual(stored)
+
+    // Deleting the last task cannot hide the epic's history either.
+    await t.db.update(tasks).set({ epicId: epic!.id, deletedAt: at(0) }).where(eq(tasks.id, task.id))
+    const again = await inbox()
+    expect([...again.activity, ...again.resolved].filter(i => i.type === 'epic_activity' && i.epicId === epic!.id)).toEqual(history)
   })
 })

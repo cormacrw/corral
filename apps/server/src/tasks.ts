@@ -17,6 +17,7 @@ import {
   upgradePlainMarkdown,
   type Actor,
   type TaskEvent,
+  type TaskKind,
   type TaskState,
   type TaskStatus
 } from '@corral/core'
@@ -209,6 +210,7 @@ function toTask(
     ...taskStatus(row, session),
     priority: row.priority,
     type: row.type,
+    kind: row.kind,
     epicId: row.epicId,
     humanReview: row.humanReview,
     reviewRounds: row.reviewRounds,
@@ -315,7 +317,7 @@ export async function listTasks(db: Executor, project: ProjectRow, view: TaskVie
 
 // New tasks start in Backlog, or as Drafts for the PM's plans (D10).
 // Returns the new task's ID.
-export async function createTask(db: Executor, project: ProjectRow, rawInput: CreateTaskInput, actor: Actor, options: { draft?: boolean, epicFix?: boolean, keepEpicReview?: boolean, invalidatedEpics?: InvalidatedEpics } = {}): Promise<string> {
+export async function createTask(db: Executor, project: ProjectRow, rawInput: CreateTaskInput, actor: Actor, options: { draft?: boolean, epicFix?: boolean, kind?: TaskKind, keepEpicReview?: boolean, invalidatedEpics?: InvalidatedEpics } = {}): Promise<string> {
   const input = createTaskInput.parse(rawInput)
   // D27 integration feedback creates Ready work without a separate plan approval.
   const created: ReturnType<typeof createTaskState> = options.epicFix
@@ -361,6 +363,7 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
       title: input.title,
       description: input.description,
       type: input.type,
+      kind: options.kind,
       priority: input.priority,
       epicId: input.epicId,
       status: state.status,

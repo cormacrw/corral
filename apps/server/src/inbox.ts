@@ -1,10 +1,10 @@
-import type { InboxArtifact, InboxSince, ReleaseNotesItem, RunnerInfo, RunnerUpdateItem } from '@corral/contracts'
+import type { EpicActivityItem, InboxArtifact, InboxSince, ReleaseNotesItem, RunnerInfo, RunnerUpdateItem } from '@corral/contracts'
 import { runnerItemId, runnerUpdateProblem } from '@corral/contracts/client'
 import { auditText, readAudit, type AuditView } from './audit.ts'
 import { epicEventText, epicInboxItems } from './epic-prs.ts'
 import { waitingDecisions } from './epic-rebase-approval.ts'
 import { fileArtifacts, isNew, workNotes } from './inbox-changes.ts'
-import type { ActionableInboxItem, Comment, Evidence, Inbox, PlanThreadAttention, PlanThreadItem, PmActivityItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
+import type { ActionableInboxItem, Comment, Evidence, Inbox, PlanThreadAttention, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { arrivalKey, storedMessages, withMessages, type PreparedItem } from './inbox-message.ts'
 import { ACTIVE_RUN_STATES, designPreviewUrl, humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
@@ -60,8 +60,8 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     .limit(limit * 3)
 
   // Undismissed release notes are informational: Activity, until dismissed
-  const activity: (TaskInboxItem | PmActivityItem | ReleaseNotesItem)[] = releases.filter(d => !d.resolution)
-  const resolved: (TaskInboxItem | ReleaseNotesItem)[] = []
+  const activity: Inbox['activity'] = releases.filter(d => !d.resolution)
+  const resolved: Inbox['resolved'] = []
   for (const { entry, task, project } of entries) {
     const detail = readAudit(entry.detail)
     const { event } = detail
@@ -84,19 +84,10 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     .innerJoin(epics, sql`${auditText('epic.pr', 'epicId')} = ${epics.id}::text`)
     .innerJoin(projects, eq(projects.id, epics.projectId))
     .where(eq(auditLog.action, 'epic.pr')).orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit)
-  // An epic event links to the epic's first task
-  const firstTasks = epicEvents.length > 0
-    ? await db.selectDistinctOn([tasks.epicId], { id: tasks.id, epicId: tasks.epicId, number: tasks.number }).from(tasks)
-        .where(and(inArray(tasks.epicId, [...new Set(epicEvents.map(e => e.epic.id))]), isNull(tasks.deletedAt)))
-        .orderBy(tasks.epicId, tasks.number)
-    : []
-  const firstTask = new Map(firstTasks.map(t => [t.epicId, t]))
   for (const { entry, epic, project } of epicEvents) {
     const detail = readAudit(entry.detail)
-    const task = firstTask.get(epic.id)
-    if (!task) continue
     const body = epicEventText(detail)
-    const item: TaskInboxItem = { id: `epic-${entry.id}`, type: 'activity', epicId: epic.id, project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: epic.title, preview: body, body, sender: senderOf(entry.actor), at: entry.createdAt.toISOString(), prUrl: epic.prNumber ? `https://github.com/${project.repository}/pull/${epic.prNumber}` : null, resolution: entry.actor.kind === 'human' ? body : null }
+    const item: EpicActivityItem = { id: `epic-${entry.id}`, type: 'epic_activity', event: detail.event ?? '', epicId: epic.id, project: projectTag(project), taskId: null, taskRef: null, subject: epic.title, preview: body, body, sender: senderOf(entry.actor), at: entry.createdAt.toISOString(), prUrl: epic.prNumber ? `https://github.com/${project.repository}/pull/${epic.prNumber}` : null, resolution: entry.actor.kind === 'human' ? body : null }
     if (entry.actor.kind === 'human') resolved.push(item)
     else activity.push(item)
   }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EpicConflictItem, EpicReviewItem, Inbox, PlanThreadItem, PmActivityItem, RunnerUpdateItem, TaskInboxItem, ReleaseNotesItem } from '@corral/contracts'
+import type { EpicActivityItem, EpicConflictItem, EpicReviewItem, Inbox, PlanThreadItem, PmActivityItem, RunnerUpdateItem, TaskInboxItem, ReleaseNotesItem } from '@corral/contracts'
 import type { InboxPanelContext } from '~/composables/useInboxPanel'
 import { inboxItemLink } from '~/utils/labels'
 
@@ -8,7 +8,8 @@ import { inboxItemLink } from '~/utils/labels'
 // the Option D panel under the focused header.
 const props = defineProps<{
   planThread: PlanThreadItem | null
-  epicItem: EpicReviewItem | EpicConflictItem | null
+  epicItem: EpicReviewItem | EpicConflictItem | EpicActivityItem | null
+  epicGone?: boolean
   runnerItem: RunnerUpdateItem | null
   inbox: Inbox | null
   error: string | null
@@ -36,14 +37,11 @@ const taskLink = computed(() => {
     class="flex h-full min-h-0 flex-col"
   >
     <MobilePageHeader compact />
-    <InboxEpicReview
-      v-if="epicItem.type === 'epic_review'"
+    <InboxEpicPanel
+      :key="epicItem.id"
       :item="epicItem"
-      @resolved="onResolved"
-    />
-    <InboxEpicConflict
-      v-else
-      :item="epicItem"
+      :gone="epicGone"
+      mobile
       @resolved="onResolved"
     />
   </div>

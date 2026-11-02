@@ -101,7 +101,7 @@ async function epicSyncs(db: Executor, project: ProjectRow, rows: EpicRow[]): Pr
   return syncs
 }
 
-async function findEpic(db: Executor, epicId: string): Promise<{ row: EpicRow, project: ProjectRow }> {
+export async function findEpic(db: Executor, epicId: string): Promise<{ row: EpicRow, project: ProjectRow }> {
   // IDs come from URLs; a malformed one is simply unknown
   if (!/^[0-9a-f-]{36}$/i.test(epicId)) throw notFound()
   const [found] = await db.select({ row: epics, project: projects }).from(epics)

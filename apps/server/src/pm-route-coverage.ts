@@ -69,6 +69,7 @@ export const pmRouteExclusions: Record<string, string> = {
   'POST /api/perf/client': 'The browser reports its own page timings here; there is nothing for the PM to report.',
   'GET /api/perf/summary': 'Settings charts of request timings for the operator; no PM decision depends on them.',
   'GET /api/epics/:id/activity': 'Human Activity audit view; no PM epic audit-history reader currently exists.',
+  'GET /api/epics/:id/review': 'What the human reads in the Inbox panel to review an epic PR. The PM sees epic items through list_inbox and tasks through get_task.',
   'GET /api/epics/:id/history': 'Human epic rebase and approval history; no PM epic history reader currently exists.',
   'GET /api/epics/:id': 'Detailed human epic view; list_tasks exposes epic identity and dependencies, but no PM tool reads the full epic detail.',
   'GET /api/projects/:slug/pull-requests': 'Human GitHub PR overview; PM reads task PR links via list_tasks and cannot merge PRs.',

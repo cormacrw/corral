@@ -34,10 +34,44 @@ async function migrationsBefore(tag: string): Promise<string> {
   return dir
 }
 
+// The migration that adds tasks.kind and epic_review_rounds
+const TASK_KIND_MIGRATION = '0062_gorgeous_expediter'
+
 describe('migrations', () => {
   const cleanup: (() => Promise<unknown>)[] = []
   afterEach(async () => {
     for (const fn of cleanup.splice(0)) await fn()
+  })
+
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('classifies existing tasks by kind on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore(TASK_KIND_MIGRATION)
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db, migrate } = await open(driver)
+    await migrate(before)
+    await db.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+    await db.execute(sql`insert into epics (project_id, title, created_by) select id, 'Epic', '{"kind":"human","userId":"u"}' from projects`)
+    await db.execute(sql`update epics set branch = 'corral/epic-a'`)
+    await db.execute(sql`insert into tasks (project_id, number, title, type, created_by, epic_id, branch)
+      select p.id, n, t, 'task', '{"kind":"human","userId":"u"}', case when e then ep.id end, b
+      from projects p, epics ep, (values
+        (1, 'Existing task', true, null),
+        (2, 'Rebase epic: Search', true, 'corral/epic-a'),
+        (7, 'Rebase epic: my own title', true, 'somewhere-else'),
+        (3, 'Resolve the conflict', true, 'corral/epic-rebase/abc'),
+        (4, 'Fix integration: rename', true, null),
+        (5, 'CI failed: lint', true, null),
+        (6, 'Fix integration: not in an epic', false, null)
+      ) as v(n, t, e, b)`)
+    await migrate(migrationsFolder)
+    expect((await db.execute(sql`select number, kind from tasks order by number`)).rows).toEqual([
+      { number: 1, kind: 'normal' }, { number: 2, kind: 'conflict' }, { number: 3, kind: 'conflict' },
+      { number: 4, kind: 'fix' }, { number: 5, kind: 'fix' }, { number: 6, kind: 'normal' }, { number: 7, kind: 'normal' }
+    ])
+    await expect(db.execute(sql`update tasks set kind = 'unknown'`)).rejects.toThrow()
   })
 
   it.for([
