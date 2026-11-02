@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { ciExcerpt, MAX_EXCERPT_CHARS } from './ci-output.ts'
 import { flowMetrics } from './flow-metrics.ts'
+import { ciFixesInARow } from './task-base.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 
@@ -141,6 +142,36 @@ describe('a round started by a CI failure', () => {
     expect(await taskRow(task.id)).toMatchObject({ status: 'failed', statusReason: expect.stringContaining('after 3 fixes in a row: lint') })
     await t.orchestrator.schedule()
     expect((await t.db.select().from(schema.runs).where(eq(schema.runs.taskId, task.id))).filter(r => r.role === 'developer')).toHaveLength(3)
+  })
+
+  it('counts afresh after a human\'s Retry', { timeout: 20_000 }, async () => {
+    const { dev: first, task, branch } = await ciRound()
+    const fail = async (dev: RunJob, n: number) => {
+      const head = `retried-${task.number}-${n}`
+      t.github.setBranch(project.repository, branch, head)
+      t.github.pulls.get((await taskRow(task.id)).prNumber!)!.headSha = head
+      t.github.setChecks(head, [{ name: 'lint', conclusion: 'failure', url: null }])
+      expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', behaviourChanged: false, note: 'Fixed the lint rule', summary: 'Fixed lint', headSha: head })).toMatchObject({ ok: true })
+      await t.mergePass()
+      await t.orchestrator.schedule()
+    }
+    const next = async (seen: Set<string>) => {
+      const { job } = await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer' && !seen.has(m.job.runId))
+      seen.add(job.runId)
+      return job
+    }
+    const seen = new Set([first.runId])
+    await fail(first, 1)
+    await fail(await next(seen), 2)
+    await fail(await next(seen), 3)
+    expect(await taskRow(task.id)).toMatchObject({ status: 'failed' })
+
+    expect((await t.request('POST', `/api/inbox/${task.id}/actions`, { action: 'resolve', to: 'ready' })).status).toBe(200)
+    await t.orchestrator.schedule()
+    const retry = await next(seen)
+    await fail(retry, 4)
+    expect(await ciFixesInARow(t.db, task.id)).toBe(0)
+    expect(await taskRow(task.id)).not.toMatchObject({ status: 'failed' })
   })
 
   it('goes to Agent review when behaviour changed', async () => {
