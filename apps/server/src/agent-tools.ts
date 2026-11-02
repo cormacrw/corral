@@ -109,7 +109,7 @@ export class AgentTools {
     if (ctx.run.epicId) {
       if (tool === 'get_task') {
         const [epic] = await this.#c.d.db.select().from(schema.epics).where(eq(schema.epics.id, ctx.run.epicId))
-        if (!epic) throw new ToolError('Epic no longer exists')
+        if (!epic) throw new ToolError('Parent no longer exists')
         const context = await epicReviewContext(this.#c.d.db, epic, ctx.project!)
         return ctx.run.role === 'developer' ? { ...context, fix: ctx.run.fixKind, branch: `corral/epic-rebase/${ctx.run.operationId}` } : context
       }
@@ -117,10 +117,10 @@ export class AgentTools {
       if (tool === 'report_outcome' && ctx.run.role === 'developer') return this.#c.fixes.report(ctx, parseReport(outcomeReportSchema, { criteria: [], ...(input as object) }))
       if (tool === 'report_outcome') {
         await this.#c.epicPrs.report(ctx.run, parseReport(epicReviewReportSchema, input))
-        this.#c.ending.finished(ctx, 'Epic integration review recorded')
+        this.#c.ending.finished(ctx, 'Parent integration review recorded')
         return { ok: true }
       }
-      throw new ToolError('Runs on an epic use get_task and report_outcome, and an integration review get_evidence too')
+      throw new ToolError('Runs on a parent task use get_task and report_outcome, and an integration review get_evidence too')
     }
     switch (tool) {
       case 'get_task':

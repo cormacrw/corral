@@ -21,7 +21,7 @@ const ACTIVE = ['pending', 'running', 'reconciling'] as const
 
 // Why an operation ended, when that says nothing against the submission: these
 // retry at once, and anything else counts towards MAX_FAILED_OPERATIONS
-const TARGET_MOVED = 'The epic branch moved'
+const TARGET_MOVED = 'The parent branch moved'
 const INTERRUPTED = 'Interrupted before a candidate was ready'
 const CANCELLED = 'The task left Ready to merge'
 // Starts the error of a job the runner couldn't answer: a network blip or a lost
@@ -131,7 +131,7 @@ export class TaskIntegrator {
     for (const { task, project, epic } of await this.#waiting(epicId)) {
       const expected = epic.branch ? await github.branchHead(project.repository, epic.branch) : null
       if (!expected) {
-        await this.#transition(task.id, { type: 'block', reason: `Epic branch ${epic.branch ?? '(none)'} doesn't exist, so this task can't be integrated` }, { event: 'merge_failed' })
+        await this.#transition(task.id, { type: 'block', reason: `Parent branch ${epic.branch ?? '(none)'} doesn't exist, so this task can't be integrated` }, { event: 'merge_failed' })
         continue
       }
       const operation = await db.transaction(async (tx) => {
@@ -208,14 +208,14 @@ export class TaskIntegrator {
       case 'failed':
         return this.#fail(operation, ctx, `Could not build a candidate: ${prepared.error ?? 'unknown error'}`)
       case 'conflict':
-        await this.#fail(operation, ctx, `Conflicts with the epic branch: ${prepared.files.join(', ')}`)
+        await this.#fail(operation, ctx, `Conflicts with the parent branch: ${prepared.files.join(', ')}`)
         await this.#transition(task.id, { type: 'base_conflict', approvedHeadSha: task.headSha! }, { event: 'base_conflict' },
-          `The epic branch \`${epic.branch}\` has moved and this work no longer applies to it cleanly${prepared.files.length ? `: ${prepared.files.map(f => `\`${f}\``).join(', ')}` : ''}. Rebase onto \`origin/${epic.branch}\`, resolve the conflicts, and report commit_submitted.`)
+          `The parent branch \`${epic.branch}\` has moved and this work no longer applies to it cleanly${prepared.files.length ? `: ${prepared.files.map(f => `\`${f}\``).join(', ')}` : ''}. Rebase onto \`origin/${epic.branch}\`, resolve the conflicts, and report commit_submitted.`)
         return true
       case 'empty':
-        await this.#fail(operation, ctx, 'The change is already on the epic branch')
+        await this.#fail(operation, ctx, 'The change is already on the parent branch')
         await this.#transition(task.id, { type: 'ci_failed' }, { event: 'ci_failed', checks: [] },
-          `Applied to the epic branch \`${epic.branch}\`, this submission changes nothing, so there is nothing to integrate. Check it against \`origin/${epic.branch}\` and report commit_submitted.`)
+          `Applied to the parent branch \`${epic.branch}\`, this submission changes nothing, so there is nothing to integrate. Check it against \`origin/${epic.branch}\` and report commit_submitted.`)
         return true
       case 'prepared': {
         const [ready] = await db.update(operations).set({ resultHeadSha: prepared.commitSha, updatedAt: this.#now() }).where(eq(operations.id, operation.id)).returning()
@@ -254,7 +254,7 @@ export class TaskIntegrator {
         return true
       }
       await this.#transition(task.id, { type: 'ci_failed' }, { event: 'ci_failed', checks: verdict.checks.map(c => c.name) },
-        ['CI failed on this task\'s work applied to the epic branch, which has not moved. Fix it and report commit_submitted.', '', ...verdict.checks.map(c => `- ${c.name}: failed${c.url ? ` (${c.url})` : ''}`)].join('\n'), { ciFix: verdict.checks.map(c => ({ name: c.name, url: c.url })), approvedHeadSha: task.headSha })
+        ['CI failed on this task\'s work applied to the parent branch, which has not moved. Fix it and report commit_submitted.', '', ...verdict.checks.map(c => `- ${c.name}: failed${c.url ? ` (${c.url})` : ''}`)].join('\n'), { ciFix: verdict.checks.map(c => ({ name: c.name, url: c.url })), approvedHeadSha: task.headSha })
       return true
     }
     if (verdict.state === 'timed_out') {
@@ -321,7 +321,7 @@ export class TaskIntegrator {
       return true
     }
     if (remote.targetSha !== operation.expectedTargetSha) return this.#fail(operation, ctx, TARGET_MOVED)
-    if (operation.state === 'reconciling') return this.#fail(operation, ctx, operation.error ?? 'The push did not reach the epic branch')
+    if (operation.state === 'reconciling') return this.#fail(operation, ctx, operation.error ?? 'The push did not reach the parent branch')
     // Found running after a restart, with the branch where it was left
     if (operation.resultHeadSha && operation.runnerId && runner.isOnline(operation.runnerId)) return this.#gate(operation, ctx, stopped)
     return this.#fail(operation, ctx, INTERRUPTED)
@@ -344,7 +344,7 @@ export class TaskIntegrator {
         await tx.update(tasks).set({ mergeCommitSha: commitSha, mergedAt: this.#now(), updatedAt: this.#now() }).where(eq(tasks.id, task.id))
       } else {
         // Sent back while its push was landing: the commit stands, and the task stays open
-        await tx.insert(comments).values({ taskId: task.id, author: server, body: `This submission reached the epic branch as ${commitSha} just as the task left Ready to merge. The task stays open; base any further work on \`origin/${submission.targetBranch}\`.` })
+        await tx.insert(comments).values({ taskId: task.id, author: server, body: `This submission reached the parent branch as ${commitSha} just as the task left Ready to merge. The task stays open; base any further work on \`origin/${submission.targetBranch}\`.` })
       }
     })
     await this.#finish(operation, ctx)

@@ -97,7 +97,7 @@ const ops = (epicId: string) => t.db.select().from(schema.taskIntegrationOperati
 const trailers = async (branch: string, id: string) => (await git('log', '--format=%H', '--fixed-strings', `--grep=Corral-Submission: ${id}`, branch)).split('\n').filter(Boolean)
 const tick = () => t.orchestrator.merges.tick()
 
-it('puts two concurrently approved tasks on the epic branch once each, neither overwriting the other', async () => {
+it('puts two concurrently approved tasks on the parent branch once each, neither overwriting the other', async () => {
   const epic = await createEpic()
   const [a, b] = [await approved(epic, 'a.txt'), await approved(epic, 'b.txt')]
   await Promise.all([tick(), tick()])
@@ -120,7 +120,7 @@ it('puts two concurrently approved tasks on the epic branch once each, neither o
   expect(second!.expectedTargetSha).toBe(first!.resultHeadSha)
 })
 
-it('allows only one active operation per epic', async () => {
+it('allows only one active operation per parent', async () => {
   const epic = await createEpic()
   const [a, b] = [await approved(epic, 'a.txt'), await approved(epic, 'b.txt')]
   const values = (id: string) => ({ submissionId: id, epicId: epic.id, kind: 'integrate' as const, expectedTargetSha: epic.base, leaseEpoch: 1 })
@@ -141,7 +141,7 @@ it('stays in Ready to merge until a read of the remote shows the integrated comm
   await tick()
   // A runner claiming success changes nothing: the operation failed on the
   // remote's say-so, and only the retry's commit counts
-  expect(await ops(epic.id)).toMatchObject([{ state: 'failed', error: 'The push did not reach the epic branch' }])
+  expect(await ops(epic.id)).toMatchObject([{ state: 'failed', error: 'The push did not reach the parent branch' }])
   expect(await row(task)).toMatchObject({ status: 'ready_to_merge', mergedAt: null })
   await tick()
   const [, second] = await ops(epic.id)
@@ -191,7 +191,7 @@ it('recovers an operation whose answer was lost before it reached reconciling', 
   expect(await trailers(epic.branch, task.submissionId)).toHaveLength(1)
 })
 
-it('refreshes and retries when the epic branch moves between candidate and push', async () => {
+it('refreshes and retries when the parent branch moves between candidate and push', async () => {
   const epic = await createEpic()
   const task = await approved(epic, 'a.txt')
   let newer = ''
@@ -200,7 +200,7 @@ it('refreshes and retries when the epic branch moves between candidate and push'
       await git('checkout', '--quiet', '-b', `newer-${epic.id}`, epic.branch)
       await writeFile(join(origin, 'newer.txt'), 'newer\n')
       await git('add', '.')
-      await git('commit', '--quiet', '-m', 'Newer epic work')
+      await git('commit', '--quiet', '-m', 'Newer parent work')
       newer = await git('rev-parse', 'HEAD')
       await git('checkout', '--quiet', 'main')
       await git('update-ref', `refs/heads/${epic.branch}`, newer)
@@ -209,7 +209,7 @@ it('refreshes and retries when the epic branch moves between candidate and push'
   }
   await tick()
   const [first, second] = await ops(epic.id)
-  expect(first).toMatchObject({ state: 'failed', error: 'The epic branch moved', expectedTargetSha: epic.base })
+  expect(first).toMatchObject({ state: 'failed', error: 'The parent branch moved', expectedTargetSha: epic.base })
   expect(second).toMatchObject({ state: 'succeeded', expectedTargetSha: newer })
   expect(second!.leaseEpoch).toBeGreaterThan(first!.leaseEpoch)
   expect(await git('merge-base', '--is-ancestor', newer, epic.branch).then(() => true)).toBe(true)
@@ -272,7 +272,7 @@ it('integrates once CI passes the candidate', async () => {
   expect(await git('rev-parse', epic.branch)).toBe(candidate)
 })
 
-it('needs no task PR when CI only runs on the epic PR, and leaves those checks to its merge', async () => {
+it('needs no task PR when CI only runs on the parent PR, and leaves those checks to its merge', async () => {
   await t.db.update(schema.projects).set({ requiredChecks: ['pr-only'] }).where(eq(schema.projects.id, project.id))
   const epic = await createEpic()
   const task = await approved(epic, 'a.txt')
@@ -497,10 +497,10 @@ it('reads the remote once at most while paused, and still finds a moved branch o
   await fresh.tick(never)
   expect(reads).toEqual(['integration_inspect'])
 
-  await git('update-ref', `refs/heads/${epic.branch}`, await git('commit-tree', `${epic.base}^{tree}`, '-p', epic.base, '-m', 'Newer epic work'))
+  await git('update-ref', `refs/heads/${epic.branch}`, await git('commit-tree', `${epic.base}^{tree}`, '-p', epic.base, '-m', 'Newer parent work'))
   await t.db.update(schema.tasks).set({ paused: false }).where(eq(schema.tasks.id, task.id))
   await fresh.tick(never)
-  expect((await ops(epic.id))[0]).toMatchObject({ id: op!.id, state: 'failed', error: 'The epic branch moved' })
+  expect((await ops(epic.id))[0]).toMatchObject({ id: op!.id, state: 'failed', error: 'The parent branch moved' })
   expect(await row(task)).toMatchObject({ status: 'ready_to_merge' })
   expect(await trailers(epic.branch, task.submissionId)).toHaveLength(0)
 })
@@ -530,7 +530,7 @@ it('drops an operation whose task was sent back before the push', async () => {
   expect(await git('rev-parse', epic.branch)).toBe(epic.base)
 })
 
-it('wakes same-epic dependents on integration, and others only when the epic reaches the target branch', async () => {
+it('wakes same-epic dependents on integration, and others only when the parent reaches the target branch', async () => {
   const epic = await createEpic()
   const other = await createEpic()
   const task = await approved(epic, 'a.txt')

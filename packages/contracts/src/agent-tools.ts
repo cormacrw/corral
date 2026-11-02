@@ -74,7 +74,7 @@ export const toolDefinitions = {
     input: reportOutcomeInput.shape
   },
   list_tasks: {
-    description: 'The live board: one compact row per task (ref, title, status, type, priority, epicId, dependsOn refs), and every epic with its dependsOn epic ids. Merged tasks are left out unless you set includeMerged or ask for that status. Filters combine. Read a task’s description and acceptance criteria with get_task.',
+    description: 'The live board: one compact row per task (ref, title, status, type, priority, parent ref, dependsOn refs). A parent shows status parent, its stage and how many sub-tasks are done. Parents are also listed with their delivery id (epicId), review mode and dependencies. Merged tasks are left out unless you set includeMerged or ask for that status. Filters combine. Read a task’s description and acceptance criteria with get_task.',
     input: listTasksInput.shape
   },
   get_run_outcomes: {
@@ -82,7 +82,7 @@ export const toolDefinitions = {
     input: { taskRef: z.string().describe('e.g. COR-12') }
   },
   get_agent_activity: {
-    description: 'What the team is doing, across every project: each agent with its role, runtime, status, paused state and pausedUntil, its active runs and a few recent ones. Each run has its state, outcome, project, task or epic, runner, summary, error and times. Long summaries and errors are shortened. Pass `agent` for one agent with more of its run history.',
+    description: 'What the team is doing, across every project: each agent with its role, runtime, status, paused state and pausedUntil, its active runs and a few recent ones. Each run has its state, outcome, project, task or parent, runner, summary, error and times. Long summaries and errors are shortened. Pass `agent` for one agent with more of its run history.',
     input: { agent: z.string().min(1).optional().describe('An agent\'s name, e.g. Jack; leave out for the whole team') }
   },
   ask_question: {
@@ -90,7 +90,7 @@ export const toolDefinitions = {
     input: askQuestionInput.shape
   },
   propose_plan: {
-    description: 'Propose a plan: epics and tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval. Use `epics` to group the tasks of a feature, and put each of those tasks in one with `epic`. A task without `epic` gets no epic, and a plan without `epics` creates none: leave them out for an independent fix. A big feature always gets an epic, even with a single task. Split a feature into tasks only when the parts can run in parallel on different code; work that would run in sequence or change the same files is one task. A revision keeps the epic and task keys it reuses. To refine an existing Backlog task or an unclaimed Ready task (one no developer has picked up), read it with get_task and include it in the plan with its `ref`: the plan then revises that task instead of creating a new one, and the edits are applied when the human approves; a revised Ready task stays in Ready. Set each epic’s dependsOn to epic keys in this plan or existing epic ids from list_tasks; omit it on revision to preserve dependencies, or use [] to clear them. Pin a task that builds part of an approved design with `design`; only an approved version can be pinned.',
+    description: 'Propose a plan: tasks with acceptance criteria and dependencies. Corral validates it and shows it to the human for approval. A feature with parts that can run in parallel on different code is a parent with sub-tasks: list it in `parents` and put each sub-task in it with `parent`. A parent needs at least two sub-tasks. A single unit of work is one task with no parent, and work that would run in sequence or change the same files is one task. To add to an existing parent, give its ref; to turn a Draft, Backlog or unclaimed Ready task with no runs into a parent, give that task\'s ref in `parents`: it keeps its ref and comments, and its criteria and dependencies move to its first sub-task when the human approves. A revision keeps the parent and task keys it reuses. To refine an existing Backlog task or an unclaimed Ready task (one no developer has picked up), read it with get_task and include it in the plan with its `ref`: the plan then revises that task instead of creating a new one, and the edits are applied when the human approves; a revised Ready task stays in Ready. Set each parent\'s dependsOn to parent keys in this plan or refs of existing parents; omit it on revision to preserve dependencies, or use [] to clear them. Pin a task that builds part of an approved design with `design`; only an approved version can be pinned.',
     input: proposedPlanInput.shape
   },
   approve_plan: {
@@ -115,7 +115,7 @@ export const roleToolDefinitions: Record<AgentRole, Partial<Record<AgentTool, To
       input: { ...toolDefinitions.attach_evidence.input, taskRef: z.string().optional().describe('Task ref, e.g. COR-12; omit to attach to this chat') }
     },
     get_task: {
-      description: 'Read any task in this project by ref: title, description, acceptance criteria with their IDs, status, epic, dependencies and comments.',
+      description: 'Read any task in this project by ref: title, description, acceptance criteria with their IDs, status, parent, dependencies and comments.',
       input: { taskRef: z.string().describe('e.g. COR-12') }
     },
     add_comment: {

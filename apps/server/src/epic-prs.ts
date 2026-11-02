@@ -127,13 +127,13 @@ export class EpicPullRequests {
       // any other new head loses it. After the behind check: a PR read just
       // after Corral's own push can still show the old head, which is behind.
       if (epic.prNumber && epic.prHeadSha !== pr.headSha && APPROVED_STATES.includes(epic.reviewState)) {
-        const reason = 'The epic head moved without a reviewed rebase.'
+        const reason = 'The parent head moved without a reviewed rebase.'
         await tx.update(epics).set({ reviewState: 'open', approvedHeadSha: null, approvedBaseSha: null, updatedAt: this.now() }).where(eq(epics.id, epic.id))
         await appendAudit(tx, { projectId: project.id, actor: system }, auditEvent('epic.pr', { epicId: epic.id, event: 'approval_invalidated', approvedHeadSha: epic.approvedHeadSha, from: epic.prHeadSha!, to: pr.headSha, ontoSha: null, operationId: null, resolutionTaskId: null, resolutionReview: null, reason, summary: `Approved ${shortSha(epic.approvedHeadSha)}, head moved ${shortSha(epic.prHeadSha)} to ${shortSha(pr.headSha)}. ${reason}` }))
       }
       // A moved epic head invalidates approval, even if board membership
       // didn't change. Active runs on the old head are fenced by state.
-      await tx.update(runs).set(runEndValues({ state: 'interrupted', error: 'Epic PR changed' }, this.now()))
+      await tx.update(runs).set(runEndValues({ state: 'interrupted', error: 'Parent PR changed' }, this.now()))
         .where(and(eq(runs.epicId, epic.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
       await tx.update(epics).set({ prNumber: pr.number, prHeadSha: pr.headSha, approvedHeadSha: null, approvedBaseSha: null, reviewState: 'in_review', conflictFiles: null, updatedAt: this.now() }).where(eq(epics.id, epic.id))
       await appendAudit(tx, { projectId: project.id, actor: system }, auditEvent('epic.pr', { epicId: epic.id, event: epic.prNumber ? 'review_started' : 'opened', prNumber: pr.number }))
@@ -152,7 +152,7 @@ export class EpicPullRequests {
     return [epic.description, '## Tasks and evidence', ...board.map((t) => {
       const ref = taskRef(project.prefix, t.number)
       return `- ${ref}: ${t.title}${t.prUrl ? ` ([PR](${t.prUrl}))` : t.mergeCommitSha ? ` ([${t.mergeCommitSha.slice(0, 10)}](${commitUrl(project, t.mergeCommitSha)}))` : ''} — [criteria and evidence](${this.d.publicUrl}/tasks/${ref})`
-    }), ...obligations.length ? ['## Human checks for epic approval', 'Confirmed in Corral when approving the epic, not on this list.', obligations.join('\n')] : []].join('\n\n')
+    }), ...obligations.length ? ['## Human checks for parent approval', 'Confirmed in Corral when approving the parent, not on this list.', obligations.join('\n')] : []].join('\n\n')
   }
 
   async claim(agentId: string, place: (tx: Executor) => Promise<string | null>): Promise<RunJob | null> {
@@ -319,10 +319,10 @@ export class EpicPullRequests {
 }
 
 // How each epic PR event reads, in the Inbox and on the epic's history
-export const EPIC_EVENT_LABELS: Record<string, string> = { opened: 'Epic PR opened', review_started: 'Epic integration review started', approved: 'Epic PR approved by reviewer', changes_requested: 'Epic integration changes requested', human_approved: 'You approved the epic PR', human_changes_requested: 'You requested changes on the epic PR', rebase_requested: 'Rebasing the epic PR onto the target branch', rebased: 'Epic PR rebased; CI runs again', conflict: 'Epic PR conflict', rebase_handed_off: 'You handed the epic PR rebase to a developer', rebase_resolving: 'Epic rebase conflict sent to a developer', rebase_failed: 'Epic rebase attempt failed', conflict_deferred: 'Rebase conflict left until the epic is about to land', sync_failed: 'Epic rebase stopped', sync_retried: 'You retried the epic rebase', ci_failed: 'CI failed on the epic PR', merge_refused: 'GitHub refused the epic PR merge', review_failed: 'Epic integration review stopped retrying', closed: 'Epic PR closed on GitHub', merged: 'Epic PR merged', approval_retained: 'Approval kept across the rebase', approval_invalidated: 'Approval no longer applies; review starts again', decision_requested: 'An epic rebase needs your decision', decision_answered: 'You decided on the epic rebase', fix_started: 'A developer was asked to fix the epic', fix_reported: 'The developer reported an epic fix', fix_refused: 'Corral refused the epic fix and sent it back', fix_published: 'The epic fix reached the epic branch; CI runs again' }
+export const EPIC_EVENT_LABELS: Record<string, string> = { opened: 'Parent PR opened', review_started: 'Parent integration review started', approved: 'Parent PR approved by reviewer', changes_requested: 'Parent integration changes requested', human_approved: 'You approved the parent PR', human_changes_requested: 'You requested changes on the parent PR', rebase_requested: 'Rebasing the parent PR onto the target branch', rebased: 'Parent PR rebased; CI runs again', conflict: 'Parent PR conflict', rebase_handed_off: 'You handed the parent PR rebase to a developer', rebase_resolving: 'Parent rebase conflict sent to a developer', rebase_failed: 'Parent rebase attempt failed', conflict_deferred: 'Rebase conflict left until the parent is about to land', sync_failed: 'Parent rebase stopped', sync_retried: 'You retried the parent rebase', ci_failed: 'CI failed on the parent PR', merge_refused: 'GitHub refused the parent PR merge', review_failed: 'Parent integration review stopped retrying', closed: 'Parent PR closed on GitHub', merged: 'Parent PR merged', approval_retained: 'Approval kept across the rebase', approval_invalidated: 'Approval no longer applies; review starts again', decision_requested: 'A parent task rebase needs your decision', decision_answered: 'You decided on the parent rebase', fix_started: 'A developer was asked to fix the parent', fix_reported: 'The developer reported a parent task fix', fix_refused: 'Corral refused the parent fix and sent it back', fix_published: 'The parent fix reached the parent branch; CI runs again' }
 
 // A CI or review fix stops and retries through the same events as a rebase
-const EPIC_FIX_EVENT_LABELS: Record<string, string> = { sync_failed: 'Epic fix stopped', sync_retried: 'You retried the epic fix' }
+const EPIC_FIX_EVENT_LABELS: Record<string, string> = { sync_failed: 'Parent fix stopped', sync_retried: 'You retried the parent fix' }
 const epicEventLabel = ({ event, fix }: AuditView) => ((fix === 'ci' || fix === 'review') && EPIC_FIX_EVENT_LABELS[event ?? '']) || EPIC_EVENT_LABELS[event ?? ''] || event
 
 export const epicEventText = (detail: AuditView) => [epicEventLabel(detail), detail.summary].filter(Boolean).join(': ')
@@ -502,10 +502,10 @@ async function prepareEpicItems(db: Executor, epicId?: string): Promise<Prepared
       return { item: { ...shared, type, preview: decision.question, body: decision.question, sender: { name: 'Corral', role: 'system' }, targetBranch: project.defaultBranch, files: epic.conflictFiles ?? [], decision }, arrival: arrivalKey({ id: epic.id, type, at }, arrivals) }
     }
     if (stopped) {
-      const body = `Automatic recovery on this epic has stopped. ${stopped.error} Retry starts it again; nothing moves until then.`
+      const body = `Automatic recovery on this parent has stopped. ${stopped.error} Retry starts it again; nothing moves until then.`
       return { item: { ...shared, type, preview: stopped.error, body, sender: { name: 'Corral', role: 'system' }, targetBranch: project.defaultBranch, files, stopped }, arrival: arrivalKey({ id: epic.id, type, at }, arrivals) }
     }
-    const body = `The epic PR can't rebase onto ${project.defaultBranch}. ${files.length ? `Conflicting files: ${files.join(', ')}.` : 'Corral couldn\'t work out which files conflict; the PR on GitHub shows them.'}`
+    const body = `The parent PR can't rebase onto ${project.defaultBranch}. ${files.length ? `Conflicting files: ${files.join(', ')}.` : 'Corral couldn\'t work out which files conflict; the PR on GitHub shows them.'}`
     return { item: { ...shared, type, preview: body, body, sender: { name: 'Corral', role: 'system' }, targetBranch: project.defaultBranch, files }, arrival: arrivalKey({ id: epic.id, type, at }, arrivals) }
   })
   // Reviews first, then conflicts

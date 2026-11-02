@@ -96,7 +96,7 @@ describe('inbox over stored audit rows', () => {
       ['PR #8 conflicts with the base branch; back to the developer', at(2.4).toISOString()],
       ['CI failed on PR #8; back to the developer', at(2.5).toISOString()],
       ['New commits on the task branch; back to the reviewer', at(2.6).toISOString()],
-      ['The commit conflicts with the epic branch; back to the developer', at(2.7).toISOString()],
+      ['The commit conflicts with the parent branch; back to the developer', at(2.7).toISOString()],
       ['CI failed on the commit; back to the developer', at(2.8).toISOString()],
       ['New commits on the task branch; back to the reviewer', at(5).toISOString()],
       ['Requested changes on PR #7 (1 of 3 criteria met)', at(13).toISOString()],
@@ -121,10 +121,10 @@ describe('inbox over stored audit rows', () => {
     expect(await t.db.select().from(auditLog).orderBy(asc(auditLog.id))).toEqual(stored)
   })
 
-  it('reads every epic PR event without borrowing a task, preserving mixed history and live conflicts', async () => {
-    const project = await t.createProject({ name: 'Epic history', prefix: 'EPH', repository: 'cormacrw/test-app', defaultBranch: 'main' })
+  it('reads every parent PR event without borrowing a task, preserving mixed history and live conflicts', async () => {
+    const project = await t.createProject({ name: 'Parent history', prefix: 'EPH', repository: 'cormacrw/test-app', defaultBranch: 'main' })
     await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
-    const [epic] = await t.db.insert(epics).values({ projectId: project.id, title: 'Epic without tasks', createdBy: t.actor, prNumber: 12, prHeadSha: 'head', reviewState: 'conflict', conflictFiles: ['shared.ts'] }).returning()
+    const [epic] = await t.db.insert(epics).values({ projectId: project.id, title: 'Parent without tasks', createdBy: t.actor, prNumber: 12, prHeadSha: 'head', reviewState: 'conflict', conflictFiles: ['shared.ts'] }).returning()
     const events = ['opened', 'review_started', 'approved', 'changes_requested', 'rebase_requested', 'rebased', 'conflict', 'ci_failed', 'merge_refused', 'closed', 'merged', 'future_event']
     const actions = ['human_approved', 'human_changes_requested', 'rebase_handed_off']
     const inserted = await t.db.insert(auditLog).values([
@@ -151,9 +151,9 @@ describe('inbox over stored audit rows', () => {
       expect(item.resolution).toBe(entry.actor.kind === 'human' ? item.body : null)
     }
     expect(resolved.filter(i => i.type === 'epic_activity').map(i => i.resolution)).toEqual([
-      'You handed the epic PR rebase to a developer: Human note for rebase_handed_off',
-      'You requested changes on the epic PR: Human note for human_changes_requested',
-      'You approved the epic PR: Human note for human_approved'
+      'You handed the parent PR rebase to a developer: Human note for rebase_handed_off',
+      'You requested changes on the parent PR: Human note for human_changes_requested',
+      'You approved the parent PR: Human note for human_approved'
     ])
     expect(activity.find(i => i.id === String(oldRows[0]!.id))).toMatchObject({ type: 'activity', taskId: task.id, body: 'Opened the PR' })
     expect(resolved.find(i => i.id === String(oldRows[1]!.id))).toMatchObject({ type: 'activity', taskId: task.id, resolution: 'You approved the merge' })

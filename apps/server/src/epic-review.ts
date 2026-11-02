@@ -87,7 +87,7 @@ async function agentApproved(db: Executor, taskIds: string[]): Promise<Set<strin
 export async function getEpicReview(db: Executor, github: GitHubClient, epicId: string): Promise<EpicReview> {
   const { row: epic, project } = await findEpic(db, epicId)
   if (epic.reviewMode === 'direct') {
-    throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'This epic merges its tasks straight to the target branch, so it has no epic review' }] })
+    throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'This parent merges its tasks straight to the target branch, so it has no parent review' }] })
   }
   const { tasks: board } = await epicReviewContext(db, epic, project)
   const ids = board.map(({ task }) => task.id)

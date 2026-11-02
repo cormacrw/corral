@@ -231,7 +231,7 @@ export const TASK_INTEGRATION_PROTOCOL = 1
 export function integrationCompatibilityReason(required: number, supported: readonly number[] = []): string | null {
   return required === 0 || supported.includes(required)
     ? null
-    : `Task requires integration protocol ${required}. Update the runner to a build supporting PR-free epic task integration; legacy PR work remains available.`
+    : `Task requires integration protocol ${required}. Update the runner to a build supporting PR-free sub-task integration; legacy PR work remains available.`
 }
 
 // Why a runner gets no new runs because its agent tools aren't the server's, or

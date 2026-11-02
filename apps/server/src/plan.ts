@@ -694,7 +694,7 @@ export class PlanService {
           const [row] = await tx.select().from(epics).where(eq(epics.id, current)).for('update')
           if (epic.reviewMode && epic.reviewMode !== row!.reviewMode) {
             const taskRows = await tx.select({ status: tasks.status, prNumber: tasks.prNumber, integrationProtocol: tasks.integrationProtocol }).from(tasks).where(eq(tasks.epicId, current))
-            if (reviewModeLocked(row!, taskRows)) throw new ToolError('The plan was not saved: the review mode can\'t change once a task in the epic has submitted work or opened a PR.')
+            if (reviewModeLocked(row!, taskRows)) throw new ToolError('The plan was not saved: the review mode can\'t change once a task in the parent has submitted work or opened a PR.')
             // Only an epic still being planned is the plan's to set: its tasks are all Drafts
             const live = previous?.status === 'approved' || taskRows.some(t => t.status !== 'draft')
             if (live && lowersMode(row!.reviewMode, epic.reviewMode)) throw new ToolError(`The plan was not saved: it would lower ${row!.title} from ${row!.reviewMode} to ${epic.reviewMode} review. Use update_epic, which asks the human.`)

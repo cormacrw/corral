@@ -114,7 +114,7 @@ export class PmCalls {
     if (tool === 'update_epic') {
       const { epicId, dependsOn, summary, ...fields } = z.object(pmActionTools.update_epic.input).strict().parse(scopedInput)
       const current = await getEpic(db, epicId)
-      if (current.projectId !== project.id) throw new ToolError('Use an epic from this conversation’s project')
+      if (current.projectId !== project.id) throw new ToolError('Use a parent task from this conversation’s project')
       await db.transaction(async (tx) => {
         await patchEpic(tx, epicId, { ...fields, ...(summary !== undefined && { description: summary }) }, actor)
         if (dependsOn !== undefined) await setEpicDependencies(tx, epicId, dependsOn, actor)
@@ -123,7 +123,7 @@ export class PmCalls {
       events.publish({ type: 'epic.updated', epic })
       for (const task of epic.tasks) events.publish({ type: 'task.updated', task })
       this.#c.scheduler.poke(epic.tasks.map(t => t.id))
-      return { result: epic, projectId: project.id, summary: `Updated epic ${epic.title}` }
+      return { result: epic, projectId: project.id, summary: `Updated parent ${epic.title}` }
     }
     if (tool === 'create_task') {
       const parsed = z.object(pmActionTools.create_task.input).strict().parse(scopedInput)
@@ -183,7 +183,7 @@ export class PmCalls {
       const removed = changes.requiredChecks ? project.requiredChecks.filter(check => !changes.requiredChecks!.includes(check)) : []
       if (removed.length) lowered.push(`stop requiring ${removed.join(', ')}`)
       if (changes.humanReviewDefault === false && project.humanReviewDefault) lowered.push('turn off human review by default')
-      if (lowersMode(project.epicReviewModeDefault, changes.epicReviewModeDefault)) lowered.push(`change the default epic review mode from ${project.epicReviewModeDefault} to ${changes.epicReviewModeDefault}`)
+      if (lowersMode(project.epicReviewModeDefault, changes.epicReviewModeDefault)) lowered.push(`change the default parent review mode from ${project.epicReviewModeDefault} to ${changes.epicReviewModeDefault}`)
       if (changes.reviewRoundCap !== undefined && changes.reviewRoundCap > project.reviewRoundCap) lowered.push(`raise the review round cap from ${project.reviewRoundCap} to ${changes.reviewRoundCap}`)
       if (changes.failedRunCap !== undefined && changes.failedRunCap > project.failedRunCap) lowered.push(`raise the failed run cap from ${project.failedRunCap} to ${changes.failedRunCap}`)
       if (changes.paused === false && project.paused) lowered.push('resume the paused project, which restarts its runs and merges')
@@ -204,7 +204,7 @@ export class PmCalls {
       const epic = await getEpic(db, epicId)
       if (epic.projectId !== project.id) return null
       if (!epic.reviewModeLocked && lowersMode(epic.reviewMode, changes.reviewMode)) lowered.push(`change its review mode from ${epic.reviewMode} to ${changes.reviewMode}`)
-      return card(`epic ${epic.title}`, others(changes, ['reviewMode']), { id: epic.id, taskId: null, projectId: project.id })
+      return card(`parent ${epic.title}`, others(changes, ['reviewMode']), { id: epic.id, taskId: null, projectId: project.id })
     }
 
     const { taskRef: ref, paused, ...changes } = z.object(pmActionTools.update_task.input).strict().parse(scoped)

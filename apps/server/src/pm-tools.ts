@@ -55,7 +55,7 @@ const TOOL_GOALS: Record<PmToolName, string> = {
   act_on_inbox: 'answer an Inbox item',
   create_task: 'create a task',
   update_task: 'change a task',
-  update_epic: 'change an epic'
+  update_epic: 'change a parent task'
 }
 
 interface Deps {

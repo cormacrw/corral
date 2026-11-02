@@ -103,7 +103,7 @@ export class PmDecisions {
 function parseInboxAction(input: unknown): PmInboxAction {
   const parsed = inboxActionInput.safeParse(input)
   if (!parsed.success) throw new ToolError(`Not done: ${z.prettifyError(parsed.error)}`)
-  if (parsed.data.action === 'decide') throw new ToolError('Epic rebase decisions must be answered by the human in the Inbox')
+  if (parsed.data.action === 'decide') throw new ToolError('Parent rebase decisions must be answered by the human in the Inbox')
   return parsed.data
 }
 
