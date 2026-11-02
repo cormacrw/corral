@@ -25,6 +25,7 @@ import { schema, type Executor } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, max, ne, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { ApiFailure, notFound } from './errors.ts'
+import { ensureParent, parentFacts, parentHolds, refuseOnParent, syncDeliveryContent } from './parents.ts'
 import { toReview } from './runs.ts'
 
 const { acceptanceCriteria, agents, auditLog, comments, designVersions, epicDependencies, epics, planSessions, planTasks, plans, projects, reviews, runs, taskDependencies, taskDesignPins, taskSubmissions, tasks } = schema
@@ -58,7 +59,8 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
   // A Merged dependency still holds its dependents until its epic is done (the
   // claim's rule). One that isn't Merged is its own, more exact, reason to wait.
   const dependency = alias(tasks, 'dependency')
-  const [leasedRuns, criteriaRows, dependencies, waitingEpics, dependencyEpics, latestReviews, latestSubmissions, pinned, owners, runAgents] = await Promise.all([
+  const parents = await parentFacts(db, project, rows)
+  const [leasedRuns, criteriaRows, dependencies, waitingEpics, dependencyEpics, waitingParents, latestReviews, latestSubmissions, pinned, owners, runAgents] = await Promise.all([
     leaseRunIds.length > 0
       ? db.select({ id: runs.id, agentId: runs.agentId }).from(runs).where(inArray(runs.id, leaseRunIds))
       : [],
@@ -85,6 +87,13 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
       .innerJoin(epics, eq(epics.id, dependency.epicId))
       .where(and(inArray(taskDependencies.taskId, ids), eq(dependency.status, 'merged'), holdsAcrossEpics(dependency, epics, tasks.epicId)))
       .orderBy(asc(epics.title), asc(epics.id)),
+    // A dependency on a parent waits for the parent's work to land
+    db.selectDistinct({ taskId: taskDependencies.taskId, id: epics.id, title: epics.title })
+      .from(taskDependencies)
+      .innerJoin(dependency, eq(dependency.id, taskDependencies.dependsOnId))
+      .innerJoin(epics, eq(epics.taskId, dependency.id))
+      .where(and(inArray(taskDependencies.taskId, ids), parentHolds(db, dependency)))
+      .orderBy(asc(epics.title), asc(epics.id)),
     db.selectDistinctOn([reviews.taskId]).from(reviews).where(inArray(reviews.taskId, ids)).orderBy(reviews.taskId, desc(reviews.createdAt)),
     db.selectDistinctOn([taskSubmissions.taskId]).from(taskSubmissions).where(inArray(taskSubmissions.taskId, ids)).orderBy(taskSubmissions.taskId, desc(taskSubmissions.sequence)),
     designPins(db, ids),
@@ -101,7 +110,7 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
   const criteria = Map.groupBy(criteriaRows, c => c.taskId)
   const dependenciesOf = Map.groupBy(dependencies, d => d.taskId)
   const epicWaits = Map.groupBy(waitingEpics, e => e.epicId)
-  const dependencyWaits = Map.groupBy(dependencyEpics, e => e.taskId)
+  const dependencyWaits = Map.groupBy([...dependencyEpics, ...waitingParents], e => e.taskId)
   const waitingOn = (row: TaskRow) => [...new Map([
     ...(row.epicId ? epicWaits.get(row.epicId) ?? [] : []),
     ...dependencyWaits.get(row.id) ?? []
@@ -125,6 +134,9 @@ export async function toTasks(db: Executor, project: ProjectRow, rows: TaskRow[]
     const design = pin ? { taskRef: taskRef(project.prefix, pin.number), version: pin.version, screens: pin.screens, newerVersion: stale ? newest : null } : null
     return {
       ...toTask(project, row, criteria.get(row.id) ?? [], dependenciesOf.get(row.id) ?? [], latest, current, design, owners.get(row.id) ?? null, row.leaseRunId ? leaseAgents.get(row.leaseRunId) ?? null : null, submissionSummary(project, submissionOf.get(row.id))),
+      ...parents.delivery.get(row.id),
+      parentTask: row.epicId ? parents.parents.get(row.epicId) ?? null : null,
+      rollup: parents.rollups.get(row.id) ?? null,
       waitingOnEpics: waitingOn(row),
       developer: agentOf(row.id, row.type === 'design' ? 'designer' : 'developer'),
       reviewer: agentOf(row.id, 'reviewer')
@@ -164,7 +176,7 @@ export async function draftSessions(db: Executor, taskIds: string[]): Promise<Ma
 }
 
 type OmitFromUnion<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
-type TaskWithoutAgents = OmitFromUnion<Task, 'developer' | 'reviewer' | 'waitingOnEpics'>
+type TaskWithoutAgents = OmitFromUnion<Task, 'developer' | 'reviewer' | 'waitingOnEpics' | 'parentTask' | 'rollup'>
 
 function taskStatus(row: TaskRow, session: { id: string, title: string } | null) {
   const state = toTaskState(row)
@@ -309,10 +321,19 @@ export async function listTasks(db: Executor, project: ProjectRow, view: TaskVie
       isNull(tasks.deletedAt),
       // Drafts are seen only in the plan that proposed them
       ne(tasks.status, 'draft'),
-      view === 'board' ? ne(tasks.status, 'backlog') : view === 'backlog' ? eq(tasks.status, 'backlog') : undefined
+      view === 'board' ? ne(tasks.status, 'backlog') : view === 'backlog' ? inArray(tasks.status, ['backlog', 'parent']) : undefined
     ))
     .orderBy(asc(tasks.number))
-  return toTasks(db, project, rows)
+  const listed = await toTasks(db, project, rows)
+  // A parent is seen where its sub-tasks are: only Drafts keeps it in its plan,
+  // and only Backlog keeps it off the Board
+  return listed.filter((task) => {
+    if (!task.rollup) return true
+    if (task.rollup.drafting) return false
+    if (view === 'board') return task.rollup.planned
+    if (view === 'backlog') return !task.rollup.planned && task.rollup.total > 0
+    return true
+  })
 }
 
 // New tasks start in Backlog, or as Drafts for the PM's plans (D10).
@@ -381,7 +402,57 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
       await tx.insert(taskDependencies).values(dependencies.map(d => ({ projectId: project.id, taskId, dependsOnId: d.id })))
     }
     await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.created', { number: row!.number }))
+    if (input.epicId) await ensureParent(tx, input.epicId, actor)
     return taskId
+  })
+}
+
+// Why a task can't gain sub-tasks, or null when it can (D31): nobody has
+// started it, and nothing else depends on it staying a single task
+export async function promotionRefusal(db: Executor, task: TaskRow): Promise<string | null> {
+  if (task.status === 'parent') return null
+  if (task.epicId) return 'A sub-task can\'t have sub-tasks; they go one level deep. Add a separate follow-up task instead.'
+  if (!['draft', 'backlog', 'ready'].includes(task.status) || task.leaseRunId) return `${task.status === 'merged' ? 'Merged' : 'Started'} work can\'t gain sub-tasks. Add a separate follow-up task instead.`
+  if (task.type !== 'task' && task.type !== 'bug') return 'Only a task or a bug can gain sub-tasks.'
+  const [run] = await db.select({ id: runs.id }).from(runs).where(eq(runs.taskId, task.id)).limit(1)
+  const [submission] = await db.select({ id: taskSubmissions.id }).from(taskSubmissions).where(eq(taskSubmissions.taskId, task.id)).limit(1)
+  if (run || submission || task.prNumber !== null) return 'This task has already had a run. Add a separate follow-up task instead.'
+  const [pin] = await db.select({ taskId: taskDesignPins.taskId }).from(taskDesignPins).where(eq(taskDesignPins.taskId, task.id)).limit(1)
+  if (pin) return 'A task pinned to a design can\'t gain sub-tasks.'
+  return null
+}
+
+// Moves a task's work onto `firstSub` and makes it a parent. It keeps its ref,
+// comments and attachments; its criteria, dependencies and human review move.
+export async function promoteToParent(tx: Executor, task: TaskRow, firstSub: string, actor: Actor): Promise<void> {
+  const refusal = await promotionRefusal(tx, task)
+  if (refusal) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: refusal }] })
+  const [{ moved } = { moved: 0 }] = await tx.select({ moved: max(acceptanceCriteria.position) }).from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, firstSub))
+  await tx.update(acceptanceCriteria).set({ taskId: firstSub, position: sql`${acceptanceCriteria.position} + ${(moved ?? -1) + 1}`, updatedAt: new Date() }).where(eq(acceptanceCriteria.taskId, task.id))
+  await tx.update(taskDependencies).set({ taskId: firstSub }).where(eq(taskDependencies.taskId, task.id))
+  if (task.humanReview) await tx.update(tasks).set({ humanReview: true }).where(eq(tasks.id, firstSub))
+  await tx.update(tasks).set({ status: 'parent', humanReview: false, statusReason: null, updatedAt: new Date() }).where(eq(tasks.id, task.id))
+  await appendAudit(tx, { projectId: task.projectId, taskId: task.id, actor }, auditEvent('task.promoted', { firstSub, from: task.status }))
+}
+
+// Adds a sub-task, making a parent of the task if it isn't one yet
+export async function addSubtask(db: Executor, project: ProjectRow, taskId: string, input: CreateTaskInput, actor: Actor): Promise<string> {
+  return db.transaction(async (tx) => {
+    const { task } = await lockTask(tx, taskId)
+    if (task.status === 'parent') {
+      const [delivery] = await tx.select({ id: epics.id }).from(epics).where(eq(epics.taskId, taskId))
+      return createTask(tx, project, { ...input, epicId: delivery!.id }, actor)
+    }
+    const refusal = await promotionRefusal(tx, task)
+    if (refusal) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: refusal }] })
+    const [delivery] = await tx.insert(epics).values({
+      projectId: project.id, taskId, title: task.title, description: richTextToPlainText(task.description), priority: task.priority, reviewMode: project.epicReviewModeDefault, createdBy: actor
+    }).returning({ id: epics.id })
+    const subId = await createTask(tx, project, { ...input, epicId: delivery!.id }, actor)
+    await promoteToParent(tx, task, subId, actor)
+    if (task.status === 'draft') await tx.update(tasks).set({ status: 'draft' }).where(eq(tasks.id, subId))
+    if (task.status === 'ready') await transitionTask(tx, subId, { type: 'approve' }, actor)
+    return subId
   })
 }
 
@@ -495,6 +566,11 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     const { task } = await lockTask(tx, taskId)
     // Merged is final (D10): the record stays as it shipped; comments still work
     if (task.status === 'merged') throw new ApiFailure(409, { code: 'conflict', constraint: 'task_merged' })
+    if (task.status === 'parent') {
+      if (input.acceptanceCriteria) refuseOnParent(task, 'criteria')
+      if (input.dependsOn) refuseOnParent(task, 'dependencies')
+      if (input.type !== undefined || input.epicId !== undefined || input.humanReview !== undefined) refuseOnParent(task, 'delivery')
+    }
     if (input.type && !canChangeType(task, input.type)) throw new ApiFailure(409, { code: 'conflict', constraint: 'task_type_locked' })
     // D27: PM metadata edits must not remove the work that locks epic review mode.
     if (((actor.kind === 'agent' && actor.role === 'pm') || (actor.kind === 'human' && actor.viaPm)) && input.epicId !== undefined && input.epicId !== task.epicId && (task.prNumber !== null || task.integrationProtocol > 0)) {
@@ -521,6 +597,8 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     if (Object.keys(fields).length > 0) {
       await tx.update(tasks).set({ ...fields, updatedAt: new Date() }).where(eq(tasks.id, taskId))
     }
+    if (task.status === 'parent') await syncDeliveryContent(tx, taskId, fields)
+    if (fields.epicId) await ensureParent(tx, fields.epicId, actor)
     let newHumanCheck = false
     let newAgentCheck = false
     if (criteriaInput) {
@@ -633,6 +711,13 @@ export async function deleteTaskRows(db: Executor, taskId: string, actor: Actor,
     const { task, project } = await lockTask(tx, taskId)
     const mode = options.soft && task.status === 'draft' ? 'soft' : deletionFor(task)
     if (mode === 'not_allowed') throw new ApiFailure(409, { code: 'conflict', constraint: 'merged_tasks_are_immutable' })
+    const [delivery] = task.status === 'parent' ? await tx.select().from(epics).where(eq(epics.taskId, taskId)).for('update') : []
+    if (delivery) {
+      // A parent goes once it has nothing left: its sub-tasks are deleted first
+      const [sub] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.epicId, delivery.id), isNull(tasks.deletedAt))).limit(1)
+      if (sub) throw new ApiFailure(409, { code: 'conflict', constraint: 'parent_has_subtasks' })
+      if (delivery.reviewState === 'merged' || delivery.prNumber) throw new ApiFailure(409, { code: 'conflict', constraint: 'parent_delivered' })
+    }
     const dependentRows = tx.select({ task: tasks }).from(taskDependencies)
       .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId))
       .where(and(eq(taskDependencies.dependsOnId, taskId), isNull(tasks.deletedAt)))
@@ -646,6 +731,7 @@ export async function deleteTaskRows(db: Executor, taskId: string, actor: Actor,
       await applyTransition(tx, dependent, project, { type: 'block', reason: DEPENDENCY_DELETED_REASON }, { kind: 'system', component: 'server' }, { event: 'dependency_deleted', dependency: taskRef(project.prefix, task.number) })
     }
     await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.deleted', { mode, number: task.number, title: task.title, reason }))
+    if (delivery) await tx.delete(epics).where(eq(epics.id, delivery.id))
     if (mode === 'hard') await tx.delete(tasks).where(eq(tasks.id, taskId))
     // No run keeps a lease on a hidden task: it would pass every fence
     else await tx.update(tasks).set({ deletedAt: new Date(), updatedAt: new Date(), leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null }).where(eq(tasks.id, taskId))

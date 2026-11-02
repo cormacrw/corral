@@ -237,8 +237,14 @@ export function integrationCompatibilityReason(required: number, supported: read
 // Why a runner gets no new runs because its agent tools aren't the server's, or
 // null when they match. Missing means a runner older than the check, which is
 // a difference too: nothing says its tools match (COR-435).
+// Contracts of older builds that still work with this server. A change that
+// keeps every old tool call valid lists the old hash here, so runners keep
+// taking runs while they update. Remove it once they have.
+// d0: before parent tasks (D31), whose PM tools only add to the old ones
+export const COMPATIBLE_TOOL_CONTRACTS: readonly string[] = ['__OLD_HASH__']
+
 export function toolContractReason(runner: string | undefined, server: string): string | null {
-  if (runner === server) return null
+  if (runner === server || (runner && COMPATIBLE_TOOL_CONTRACTS.includes(runner))) return null
   return `Its agent tools ${runner ? `(${runner})` : '(from before tool contracts)'} differ from the server's (${server}), so it takes no new runs until it has updated.`
 }
 

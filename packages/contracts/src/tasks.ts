@@ -1,4 +1,4 @@
-import { EVIDENCE_KINDS, REVIEW_VERDICTS, richTextIssue, TASK_PRIORITIES, TASK_TYPES, type Actor, type AgentRole, type EvidenceKind, type ReviewVerdict, type TaskKind, type TaskPriority, type TaskStatus, type TaskType } from '@corral/core'
+import { EVIDENCE_KINDS, REVIEW_VERDICTS, richTextIssue, TASK_PRIORITIES, TASK_TYPES, type Actor, type AgentRole, type EpicReviewMode, type EvidenceKind, type ParentStage, type ReviewVerdict, type TaskKind, type TaskPriority, type TaskStatus, type TaskType } from '@corral/core'
 import { z } from 'zod'
 
 // ── Tasks ───────────────────────────────────────────────────────────────────
@@ -107,6 +107,19 @@ export interface TaskSubmissionSummary {
   integratedAt: string | null
 }
 
+// A parent's sub-tasks and delivery, computed on read (D31). `total` counts
+// every live sub-task; `planned` says whether any has left Backlog, and
+// `drafting` whether they're all still Drafts in a plan.
+export interface ParentRollup {
+  epicId: string
+  stage: ParentStage
+  reviewMode: EpicReviewMode
+  done: number
+  total: number
+  planned: boolean
+  drafting: boolean
+}
+
 interface TaskFields {
   id: string
   projectId: string
@@ -119,6 +132,10 @@ interface TaskFields {
   type: TaskType
   kind: TaskKind
   epicId: string | null
+  // The parent of a sub-task, and the rollup of a parent (D31). A task in a
+  // collapsed one-task epic has neither: it's top-level.
+  parentTask: { id: string, ref: string, title: string } | null
+  rollup: ParentRollup | null
   humanReview: boolean
   reviewRounds: number
   failedRuns: number

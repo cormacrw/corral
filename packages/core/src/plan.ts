@@ -21,6 +21,11 @@ export interface ProposedEpic {
   // How its tasks reach the target branch (D27); the project's default
   // when left out
   reviewMode?: EpicReviewMode | undefined
+  // An existing parent, or the task to make one (D31)
+  ref?: string | undefined
+  // Proposed as a parent, which needs two or more sub-tasks; `epics` from an
+  // older runner may hold one
+  asParent?: boolean | undefined
 }
 
 export interface PlanTaskContent {

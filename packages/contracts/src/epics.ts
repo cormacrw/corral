@@ -52,6 +52,8 @@ export interface EpicHistoryEntry {
 // A group of tasks, usually one approved plan. The description is markdown.
 export interface Epic {
   id: string
+  // Its parent task (D31); null for a collapsed one-task epic
+  taskId: string | null
   projectId: string
   title: string
   description: string

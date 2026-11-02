@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
+import { boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uuid, type PgTableExtraConfigValue } from 'drizzle-orm/pg-core'
 import { actor, createdAt, updatedAt } from './columns.ts'
 import { epicReviewMode, epicReviewState, taskPriority } from './enums.ts'
 import { projects } from './projects.ts'
@@ -45,7 +45,7 @@ export const epics = pgTable('epics', {
   createdBy: actor('created_by'),
   createdAt: createdAt(),
   updatedAt: updatedAt()
-}, t => [
+}, (t): PgTableExtraConfigValue[] => [
   index().on(t.projectId),
   unique('epics_task_id_unique').on(t.taskId),
   // Migration uses SET NULL (task_id) to preserve the required project.

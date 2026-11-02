@@ -11,7 +11,9 @@ export function deletionFor(task: CompletionState): Deletion {
   if (isTaskImmutable(task)) return 'not_allowed'
   switch (task.status) {
     case 'draft':
-    case 'backlog': return 'hard'
+    case 'backlog':
+    // A parent has no run to stop or PR to close; only an empty one gets here
+    case 'parent': return 'hard'
     default: return 'soft'
   }
 }

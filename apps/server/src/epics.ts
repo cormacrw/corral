@@ -6,6 +6,7 @@ import { appendAudit, auditEvent } from './audit.ts'
 import { epicFixRuns } from './epic-fixes.ts'
 import { deferredConflicts, openDecision, waitingOn } from './epic-rebase-approval.ts'
 import { ApiFailure, notFound } from './errors.ts'
+import { syncParentContent } from './parents.ts'
 import { toAuditEntry, toTasks, type ProjectRow } from './tasks.ts'
 
 const { agents, auditLog, epics, epicDependencies, runs, taskDependencies, taskIntegrationOperations, projects, tasks } = schema
@@ -62,6 +63,7 @@ export async function patchEpic(db: Executor, epicId: string, input: PatchEpicIn
     }
     if (changed.length > 0) {
       await tx.update(epics).set({ ...input, updatedAt: new Date() }).where(eq(epics.id, epicId))
+      await syncParentContent(tx, epicId, { title: input.title, description: input.description })
       await appendAudit(tx, { projectId: row.projectId, actor }, auditEvent('epic.updated', { epicId, changed }))
     }
     return loadEpic(tx, epicId)
@@ -119,6 +121,7 @@ function toEpic(row: EpicRow, project: ProjectRow, taskRows: (CompletionState & 
   const counted = taskRows.filter(t => !t.deletedAt && t.status !== 'draft' && t.status !== 'backlog')
   return {
     id: row.id,
+    taskId: row.taskId,
     dependsOn: edges.filter(e => e.epicId === row.id).map(e => e.dependsOnEpicId),
     blocks: edges.filter(e => e.dependsOnEpicId === row.id).map(e => e.epicId),
     projectId: row.projectId,
@@ -156,7 +159,7 @@ export async function setEpicDependencies(db: Executor, epicId: string, dependsO
     const all = await listEpics(tx, project)
     const graph = new Map(all.map(e => [e.id, e.dependsOn]))
     graph.set(epicId, [...new Set(dependsOn)])
-    const rows = await tx.select({ id: tasks.id, epicId: tasks.epicId, status: tasks.status, type: tasks.type, deletedAt: tasks.deletedAt }).from(tasks).where(eq(tasks.projectId, project.id))
+    const rows = await tx.select({ id: tasks.id, epicId: tasks.epicId, status: tasks.status, type: tasks.type, deletedAt: tasks.deletedAt, parentOf: epics.id }).from(tasks).leftJoin(epics, eq(epics.taskId, tasks.id)).where(eq(tasks.projectId, project.id))
     const edges = await tx.select({ taskId: taskDependencies.taskId, dependsOnId: taskDependencies.dependsOnId }).from(taskDependencies)
       .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId)).where(eq(tasks.projectId, project.id))
     const dependencies = Map.groupBy(edges, e => e.taskId)
