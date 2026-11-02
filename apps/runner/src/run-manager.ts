@@ -67,6 +67,7 @@ interface SpawnOptions {
 
 type StopReason = Extract<RunExit, { kind: 'stopped' | 'timed_out' | 'runner_shutdown' }>['kind']
 
+type UsageEvent = Extract<RunEvent, { type: 'usage' }>
 type RunTraffic = Extract<RunnerMessage, { type: 'run.started' | 'run.events' | 'run.ended' }>
 
 interface Outgoing {
@@ -111,6 +112,9 @@ interface ActiveRun {
   // The init line arrived, so the CLI really started (a failed --resume never gets there)
   sawInit: boolean
   resumeFailed: boolean
+  // Usage so far, and what earlier processes of this run had reached
+  usage: UsageEvent | null
+  usageBase: UsageEvent | null
   ended: boolean
   // Settles once the server has been told the run ended
   closing: Promise<void>
@@ -254,6 +258,8 @@ export class RunManager {
       resumed: false,
       sawInit: false,
       resumeFailed: false,
+      usage: null,
+      usageBase: null,
       ended: false,
       closing: Promise.resolve(),
       closed: Promise.withResolvers<void>(),
@@ -472,6 +478,7 @@ export class RunManager {
       this.#note(run, 'The previous agent session could not be resumed; starting a fresh one from the saved conversation')
       run.sessionId = null
       run.rateLimit = null
+      run.resumeFailed = true
       await this.#spawn(run, { prompt: job.fallbackPrompt, systemPrompt, mcpConfigPath, resume: null })
     }
     if (!run.started) this.#started(run)
@@ -506,6 +513,8 @@ export class RunManager {
   async #spawn(run: ActiveRun, options: SpawnOptions): Promise<void> {
     if (run.stopping || run.ended) return
     run.signalledByCorral = false
+    // Each process counts from zero, but the server stores the run's total
+    run.usageBase = run.usage
     const exit = await run.timer.during(options.resume ? 'agent_resume' : 'agent_cold_start', async () => this.#keepsWarm(run.job)
       ? await this.#warmTurn(run, await this.#spawnWarm(run, options), options.prompt)
       : this.#takesMessages(run.job)
@@ -702,12 +711,24 @@ export class RunManager {
     if (parsed.result) run.runtimeError = parsed.result.isError ? parsed.result.text || 'The agent runtime ended with an error' : null
     if (raw || parsed.events.length > 0) run.lastActivityAt = new Date().toISOString()
     run.timer.observe(parsed.events)
-    this.#queue(run, parsed.events)
+    this.#queue(run, parsed.events.map(event => event.type === 'usage' ? this.#runUsage(run, event) : event))
+  }
+
+  #runUsage(run: ActiveRun, usage: UsageEvent): UsageEvent {
+    const base = run.usageBase
+    run.usage = {
+      ...usage,
+      inputTokens: usage.inputTokens + (base?.inputTokens ?? 0),
+      cacheReadTokens: usage.cacheReadTokens + (base?.cacheReadTokens ?? 0),
+      outputTokens: usage.outputTokens + (base?.outputTokens ?? 0),
+      ...(usage.cacheWriteTokens === undefined ? {} : { cacheWriteTokens: usage.cacheWriteTokens + (base?.cacheWriteTokens ?? 0) })
+    }
+    return run.usage
   }
 
   #started(run: ActiveRun): void {
     run.started = true
-    this.#post(run, { type: 'run.started', initialHeadSha: run.initialHeadSha, sentAt: Date.now(), runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, agentSessionId: run.sessionId })
+    this.#post(run, { type: 'run.started', initialHeadSha: run.initialHeadSha, sentAt: Date.now(), runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, agentSessionId: run.sessionId, ...(run.resumeFailed ? { resumeFailed: true } : {}) })
   }
 
   #note(run: ActiveRun, text: string): void {

@@ -28,7 +28,7 @@ export function todayStats(runs: Run[], tasks: Pick<Task, 'mergedAt'>[], now = D
   return {
     runs: today.length,
     merged: tasks.filter(t => sameDay(t.mergedAt, now)).length,
-    tokens: today.reduce((n, r) => n + (r.inputTokens ?? 0) + (r.outputTokens ?? 0), 0)
+    tokens: today.reduce((n, r) => n + (r.inputTokens ?? 0) + (r.cacheWriteTokens ?? 0) + (r.outputTokens ?? 0), 0)
   }
 }
 

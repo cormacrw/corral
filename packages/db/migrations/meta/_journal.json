@@ -428,6 +428,13 @@
       "when": 1793604109318,
       "tag": "0060_lean_red_ghost",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1793610094555,
+      "tag": "0061_windy_longshot",
+      "breakpoints": true
     }
   ]
 }

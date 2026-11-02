@@ -1,6 +1,6 @@
 import { HUMAN_DECISIONS_NOTE } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { epicReviewCiSection, epicReviewPrompt, designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, epicFixPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask, developerCheckScope, epicFixCheckScope } from './prompts.ts'
+import { cappedBranchDiff, designerPrompt, designerRevisionPrompt, developerCheckScope, developerPrompt, developerRevisionPrompt, epicFixCheckScope, epicFixPrompt, epicReviewCiSection, epicReviewPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask } from './prompts.ts'
 
 const guidance = pmPrompt({ text: '', attachedTask: null, projectName: null, prefix: null, fresh: false })
 const turn = { text: 'hi', attachedTask: null, projectName: 'Test app', prefix: 'TA' }
@@ -727,5 +727,20 @@ describe('integration review prompts', () => {
     expect(section).toContain('Passed: lint')
     expect(section).toContain('Run tests')
     expect(section).toContain('A targeted test is fine')
+  })
+})
+
+describe('cappedBranchDiff', () => {
+  it('keeps every file that fits and names those that do not', () => {
+    const diff = cappedBranchDiff([
+      { filename: 'small.ts', patch: '+small' },
+      { filename: 'huge.ts', patch: '+'.repeat(40_000) },
+      { filename: 'after.ts', patch: '+after' }
+    ])
+    expect(diff).toContain('+small')
+    expect(diff).not.toContain('+++')
+    expect(diff).toContain('+after')
+    expect(diff).toContain('Left out for size, so read these on the branch:\n- huge.ts')
+    expect(diff).not.toContain('\n- after.ts')
   })
 })

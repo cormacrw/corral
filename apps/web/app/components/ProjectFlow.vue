@@ -2,7 +2,7 @@
 import { useQuery } from '@tanstack/vue-query'
 import type { FlowMetricsQuery } from '@corral/contracts'
 import { DEFAULT_FLOW_WINDOW, flowQuery } from '~/queries/projects'
-import { QUEUE_WAIT_LABEL, ROLE, STATUS, formatMs } from '~/utils/labels'
+import { QUEUE_WAIT_LABEL, ROLE, RUN_SESSION_LABELS, STATUS, dollars, formatMs } from '~/utils/labels'
 
 const props = defineProps<{ slug: string }>()
 const window = ref<FlowMetricsQuery['window']>(DEFAULT_FLOW_WINDOW)
@@ -100,6 +100,69 @@ function category(status: string) {
               </dd>
             </div>
           </dl>
+          <div
+            v-if="metrics.sessions.length"
+            class="mt-3 overflow-x-auto"
+          >
+            <table class="w-full text-sm">
+              <caption class="mb-1 text-left text-xs text-muted">
+                Developer runs by session start. Revisions follow a task's first submission. Weighted cost leaves out fresh input and runs with unknown cache writes.
+              </caption>
+              <thead class="text-left text-xs text-muted">
+                <tr>
+                  <th class="pr-3 font-normal">
+                    Session
+                  </th>
+                  <th class="pr-3 font-normal">
+                    Runs
+                  </th>
+                  <th class="pr-3 font-normal">
+                    Input
+                  </th>
+                  <th class="pr-3 font-normal">
+                    Cache write
+                  </th>
+                  <th class="pr-3 font-normal">
+                    Cache read
+                  </th>
+                  <th class="pr-3 font-normal">
+                    Output
+                  </th>
+                  <th class="font-normal">
+                    Weighted cost per run
+                  </th>
+                </tr>
+              </thead>
+              <tbody class="tabular-nums">
+                <tr
+                  v-for="row in metrics.sessions"
+                  :key="`${row.round}-${row.sessionStart}`"
+                >
+                  <td class="pr-3">
+                    {{ row.round === 'revision' ? 'Revision' : 'Other' }}: {{ RUN_SESSION_LABELS[row.sessionStart].toLowerCase() }}
+                  </td>
+                  <td class="pr-3">
+                    {{ row.runs }}
+                  </td>
+                  <td class="pr-3">
+                    {{ formatTokens(row.inputTokens) }}
+                  </td>
+                  <td class="pr-3">
+                    {{ formatTokens(row.cacheWriteTokens) }}
+                  </td>
+                  <td class="pr-3">
+                    {{ formatTokens(row.cacheReadTokens) }}
+                  </td>
+                  <td class="pr-3">
+                    {{ formatTokens(row.outputTokens) }}
+                  </td>
+                  <td>
+                    {{ row.costedRuns ? `${dollars(row.weightedCost / row.costedRuns)} (${row.costedRuns} ${row.costedRuns === 1 ? 'run' : 'runs'})` : 'Not reported' }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
         <p
           v-if="metrics.mergedTaskCount === 0"

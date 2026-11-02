@@ -152,7 +152,7 @@ describe('RunManager PM turns', () => {
     const messages = await finish('r1')
 
     expect(messages.find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'exited', code: 0 } })
-    expect(messages.find(m => m.type === 'run.started')).toMatchObject({ agentSessionId: 'fresh-session' })
+    expect(messages.find(m => m.type === 'run.started')).toMatchObject({ agentSessionId: 'fresh-session', resumeFailed: true })
     const [resume, fresh] = await calls()
     expect(resume!.args).toEqual(expect.arrayContaining(['--resume', 'made-in-the-old-checkout', '-p', 'Next message']))
     expect(fresh!.args).not.toContain('--resume')

@@ -34,7 +34,7 @@ function take(content) {
   print({ type: 'assistant', message: { content: [{ type: 'text', text: 'Got: ' + content }] } })
 }
 function finish() {
-  print({ type: 'result', subtype: 'success', is_error: false, result: 'Done', session_id: 'dev-session' })
+  print({ type: 'result', subtype: 'success', is_error: false, result: 'Done', session_id: 'dev-session', usage: { input_tokens: 2, cache_creation_input_tokens: 5, cache_read_input_tokens: 7, output_tokens: 3 } })
   busy = false
   if (closed) process.exit(0)
 }
@@ -173,6 +173,9 @@ describe('RunManager messages for live runs', () => {
     const calls = (await log()).flatMap(entry => entry.args ? [entry.args] : [])
     expect(calls).toHaveLength(2)
     expect(calls[1]).toEqual(expect.arrayContaining(['--resume', 'dev-session']))
+    // The server stores the last total, so the second process adds to the first
+    const usage = messages.flatMap(m => m.type === 'run.events' ? m.events.filter(e => e.type === 'usage') : [])
+    expect(usage.at(-1)).toEqual({ type: 'usage', inputTokens: 4, cacheWriteTokens: 10, cacheReadTokens: 14, outputTokens: 6 })
   })
 
   describe('a retry resumed over a background command left behind', () => {

@@ -36,6 +36,7 @@ Short implementation notes written while building. Not binding: `docs/README.md`
 - [Review round eligibility](review-round-eligibility.md)
 - [Rich-text description boundaries](rich-text-validation.md)
 - [Run timings](run-timings.md)
+- [Session resumes and cache costs](session-resumes.md)
 - [Remote runner deployment](runner-deployment.md)
 - [Runner protocol boundaries](runner-protocol.md)
 - [Runner versions and draining](runner-updates.md)

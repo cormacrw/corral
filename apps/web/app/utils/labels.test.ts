@@ -51,11 +51,15 @@ describe('taskCounts', () => {
 
 describe('runTokens', () => {
   it('shows input, cache reads and output apart', () => {
-    expect(runTokens({ inputTokens: 12_402, cacheReadTokens: 1_318_420, outputTokens: 369 })).toBe('12k in · 1.3M cache read · 369 out')
+    expect(runTokens({ agentRuntime: 'claude-code', inputTokens: 12_402, cacheReadTokens: 1_318_420, outputTokens: 369 })).toBe('12k in (includes cache writes) · 1.3M cache read · 369 out')
   })
 
   it('leaves cache reads out for runs recorded before they were counted', () => {
-    expect(runTokens({ inputTokens: 44_244, cacheReadTokens: null, outputTokens: 369 })).toBe('44k in · 369 out')
+    expect(runTokens({ agentRuntime: 'codex', inputTokens: 2_000, cacheWriteTokens: null, cacheReadTokens: 1_000_000, outputTokens: 100_000 }))
+      .toBe('2k in · 1.0M cache read · 100k out · $2.20 weighted, excluding input')
+    expect(runTokens({ agentRuntime: 'claude-code', inputTokens: 2_000, cacheWriteTokens: 1_000_000, cacheReadTokens: 1_000_000, outputTokens: 100_000, sessionStart: 'resumed_cold' }))
+      .toBe('2k in · 1.0M cache write · 1.0M cache read · 100k out · $10.20 weighted, excluding input · resumed cold')
+    expect(runTokens({ agentRuntime: 'claude-code', inputTokens: 44_244, cacheReadTokens: null, outputTokens: 369 })).toBe('44k in (includes cache writes) · 369 out')
   })
 })
 

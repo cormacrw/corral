@@ -1,6 +1,6 @@
 import { isTaskDone } from '@corral/core'
-import { AGENT_RUNTIMES } from '@corral/contracts/client'
-import type { Agent, AgentRuntime, AuditEntry, CliStatus, Epic, EpicFixRun, RunnerInfo, RunnerRole, RunnerStatus, InboxItem, PlanStatus, Project, Run, Task } from '@corral/contracts'
+import { AGENT_RUNTIMES, cacheWritesUnknown, weightedRunCost } from '@corral/contracts/client'
+import type { Agent, AgentRuntime, AuditEntry, CliStatus, Epic, EpicFixRun, RunnerInfo, RunnerRole, RunnerStatus, InboxItem, PlanStatus, Project, Run, RunSessionStart, Task } from '@corral/contracts'
 import type { AgentRole, DesignVersionStatus, EpicFixKind, EpicReviewMode, EpicReviewState, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
 
 export type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
@@ -359,11 +359,21 @@ export function tokens(n: number | null): string {
   return String(n)
 }
 
-// Cache reads are shown apart: they cost far less than fresh input
-export function runTokens(run: Pick<Run, 'inputTokens' | 'cacheReadTokens' | 'outputTokens'>): string {
-  const parts = [`${tokens(run.inputTokens ?? 0)} in`]
+export const RUN_SESSION_LABELS: Record<RunSessionStart, string> = { fresh: 'Fresh', resumed_warm: 'Resumed warm', resumed_cold: 'Resumed cold' }
+
+export function dollars(amount: number): string {
+  return `$${amount.toFixed(2)}`
+}
+
+// Cache traffic is shown apart: it costs differently from fresh input
+export function runTokens(run: Pick<Run, 'agentRuntime' | 'inputTokens' | 'cacheWriteTokens' | 'cacheReadTokens' | 'outputTokens' | 'sessionStart'>): string {
+  const parts = [`${tokens(run.inputTokens ?? 0)} in${cacheWritesUnknown(run) ? ' (includes cache writes)' : ''}`]
+  if (run.cacheWriteTokens !== null && run.cacheWriteTokens !== undefined) parts.push(`${tokens(run.cacheWriteTokens)} cache write`)
   if (run.cacheReadTokens !== null) parts.push(`${tokens(run.cacheReadTokens)} cache read`)
   parts.push(`${tokens(run.outputTokens ?? 0)} out`)
+  const cost = weightedRunCost(run)
+  if (cost !== null) parts.push(`${dollars(cost)} weighted, excluding input`)
+  if (run.sessionStart) parts.push(RUN_SESSION_LABELS[run.sessionStart].toLowerCase())
   return parts.join(' · ')
 }
 

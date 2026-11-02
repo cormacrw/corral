@@ -98,8 +98,13 @@ export const runs = pgTable('runs', {
   // sha256 of the JSONL transcript in the blob store; transcripts never go in the database (D8)
   transcriptBlob: text(),
   inputTokens: integer(),
+  // Null when the runtime doesn't report them, and on runs from before they
+  // were stored, whose inputTokens include them
+  cacheWriteTokens: integer(),
   cacheReadTokens: integer(),
   outputTokens: integer(),
+  // How an author run's agent session began; null on other runs and older ones
+  sessionStart: text().$type<'fresh' | 'resumed_warm' | 'resumed_cold'>(),
   // Phase and tool timings from the runner; null from older runners
   timings: jsonb(),
   queuedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
