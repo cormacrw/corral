@@ -4,7 +4,7 @@ import { schema, type Executor } from '@corral/db'
 import { and, asc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import { epicFixRuns } from './epic-fixes.ts'
-import { openDecision, waitingOn } from './epic-rebase-approval.ts'
+import { deferredConflicts, openDecision, waitingOn } from './epic-rebase-approval.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { toAuditEntry, toTasks, type ProjectRow } from './tasks.ts'
 
@@ -91,6 +91,11 @@ async function epicSyncs(db: Executor, project: ProjectRow, rows: EpicRow[]): Pr
             ? { state: 'deciding', question: deciding.question, taskId: operation.resolutionTaskId, taskRef: number === null ? null : taskRef(project.prefix, number) }
             : { state: 'resolving', files: operation.conflictFiles ?? [], taskId: operation.resolutionTaskId, taskRef: number === null ? null : taskRef(project.prefix, number) }
           : { state: 'rebasing' })
+  }
+  const deferred = await deferredConflicts(db, ids.filter(id => !syncs.has(id)))
+  for (const row of rows) {
+    const conflict = deferred.get(row.id)
+    if (conflict && row.reviewState !== 'merged') syncs.set(row.id, { state: 'conflict_pending', files: conflict.conflictFiles ?? [] })
   }
   for (const row of rows) if (row.syncError) syncs.set(row.id, { state: 'failed', error: row.syncError, fix: active.find(a => a.operation.epicId === row.id)?.operation.fix ?? null })
   return syncs

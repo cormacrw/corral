@@ -5,7 +5,7 @@ import type { PatchEpicInput } from '@corral/contracts'
 import { isTaskDone, type EpicReviewMode } from '@corral/core'
 import { ApiError } from '~/queries/client'
 import DetailHeader from './DetailHeader.vue'
-import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicHistoryText, epicReviewStatus, epicStoppedLabel, epicWithLiveCounts, PRIORITY, statusCounts } from '~/utils/labels'
+import { EPIC_CONFLICT_PENDING, EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicHistoryText, epicReviewStatus, epicStoppedLabel, epicWithLiveCounts, PRIORITY, statusCounts } from '~/utils/labels'
 
 // An epic: its title, description and progress, and the dependency tree of
 // its tasks. Docked in the flyout, as a page with room for a big tree, or
@@ -188,6 +188,14 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           variant="subtle"
           title="Resolving a rebase conflict"
           :description="`${sync.taskRef ?? 'A developer'} is rebasing this epic in private${sync.files.length ? `: ${sync.files.join(', ')}` : ''}. The epic branch moves once a reviewer approves.`"
+        />
+        <UAlert
+          v-else-if="sync?.state === 'conflict_pending'"
+          class="shrink-0"
+          color="neutral"
+          variant="subtle"
+          :title="EPIC_CONFLICT_PENDING"
+          :description="`Review carries on. A developer resolves it once, when the epic is approved${sync.files.length ? `: ${sync.files.join(', ')}` : ''}.`"
         />
         <EpicFixAlert
           v-else-if="sync?.state === 'fixing'"

@@ -1,7 +1,7 @@
 import type { InboxActionInput } from '@corral/contracts'
 import type { Actor, EpicDecisionRequest, EpicRebaseDecision, ResolutionReview } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq, inArray } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import { appendAudit, auditEvent, type ApprovalChange } from './audit.ts'
 import { ApiFailure } from './errors.ts'
@@ -178,4 +178,19 @@ export async function resolutionContext(db: Executor, taskId: string, epicId: st
     approvedHeadSha: APPROVED_STATES.includes(epic?.reviewState ?? null) ? epic?.approvedHeadSha ?? null : null,
     decisions: operation.decisions.filter(d => d.answer).map(d => ({ question: d.question, answer: [d.answer!.label, d.answer!.text].filter(Boolean).join(': ') }))
   }
+}
+
+// An epic's rebase that met a conflict and was left for its final checkpoint
+// (COR-445). It's pending while nothing newer has rebased or fixed the epic, so
+// the journal alone says so, and any later rebase clears it.
+export const CONFLICT_DEFERRED = 'Conflict left for the final checkpoint'
+// The branch reached the target some other way, with no rebase of ours to be newer
+export const CONFLICT_GONE = 'The epic branch no longer conflicts'
+
+export async function deferredConflicts(db: Executor, epicIds: string[]) {
+  if (epicIds.length === 0) return new Map<string, typeof operations.$inferSelect>()
+  const newest = await db.selectDistinctOn([operations.epicId]).from(operations)
+    .where(and(inArray(operations.epicId, epicIds), eq(operations.kind, 'rebase')))
+    .orderBy(operations.epicId, desc(operations.leaseEpoch))
+  return new Map(newest.filter(o => o.error === CONFLICT_DEFERRED).map(o => [o.epicId, o]))
 }

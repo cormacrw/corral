@@ -55,6 +55,7 @@ Start at the epic page. The banner and the status come from `sync` on `GET /api/
 | You see | `sync.state` | What's happening | What you do |
 |---|---|---|---|
 | Rebasing onto the target branch | `rebasing` | A journaled rebase is running | Nothing |
+| Rebase conflict waits until the epic is about to land, naming the files | `conflict_pending` | A rebase conflicted before approval. Its operation is `failed` with `Conflict left for the final checkpoint`, which isn't a fault. Tasks and reviews carry on, and a developer resolves it once after approval | Nothing |
 | Resolving a rebase conflict, naming the files and task | `resolving` | A developer and reviewer are working on a private candidate. The epic branch hasn't moved | Nothing. Follow the task on the board |
 | This rebase needs your decision | `deciding` | The two sides can't both hold, or a binding decision changed. The question, its alternatives and the affected changes are in your Inbox on the epic (or on the resolution task, if one was already in progress) | Answer it in Needs you |
 | Rebase stopped, with **Retry** | `failed` | Three failures on the same commits, or GitHub won't merge an up-to-date PR. `sync.error` says why | Fix the cause, then **Retry** |

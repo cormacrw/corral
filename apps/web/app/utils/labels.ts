@@ -116,6 +116,8 @@ export function epicInProgress(epic: Pick<Epic, 'reviewMode' | 'branch' | 'revie
 }
 
 // A developer run on an epic, with no task (D29)
+export const EPIC_CONFLICT_PENDING = 'Rebase conflict waits until the epic is about to land'
+
 export const EPIC_FIX: Record<EpicFixKind, { active: string, past: string }> = {
   conflict: { active: 'Resolving a rebase conflict', past: 'Rebase conflict' },
   ci: { active: 'Fixing a CI failure', past: 'CI failure' },

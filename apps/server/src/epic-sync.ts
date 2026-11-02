@@ -3,7 +3,7 @@ import { schema, type Database, type Executor } from '@corral/db'
 import { and, desc, eq, gte, inArray, isNotNull, isNull, ne, notInArray, or } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import { complete, epicBoard } from './epic-prs.ts'
-import { ACTIVE_OPERATION as ACTIVE, APPROVED_STATES, approvalChange, approvalFate } from './epic-rebase-approval.ts'
+import { ACTIVE_OPERATION as ACTIVE, APPROVED_STATES, approvalChange, approvalFate, CONFLICT_DEFERRED, CONFLICT_GONE, deferredConflicts } from './epic-rebase-approval.ts'
 import { loadEpic } from './epics.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
@@ -28,6 +28,7 @@ const EPIC_MOVED = 'The epic branch moved'
 const INTERRUPTED = 'Interrupted before a candidate was ready'
 const EPIC_MERGED = 'The epic PR merged'
 const RETRY_AT_ONCE = [EPIC_MOVED, INTERRUPTED, EPIC_MERGED]
+const NOT_FAILURES = [...RETRY_AT_ONCE, CONFLICT_DEFERRED, CONFLICT_GONE]
 const RESOLUTION_FAILED = 'The conflict resolution failed and the target has moved on'
 // Failures on the same commits before it takes a human to retry. Each waits a
 // little longer, so one bad minute doesn't use them all.
@@ -106,8 +107,10 @@ export async function retrySync(db: Database, epicId: string, actor: Actor, now:
 // The rest of this runs inside TaskIntegrator's serialized pass, and each step
 // can be worked out again from the journal and the remote after a restart.
 //
-// A clean rebase is mechanical and keeps approval. A conflict stays on an
-// isolated candidate branch: the operation holds the lock while a developer
+// A clean rebase is mechanical and keeps approval. A conflict before the final
+// checkpoint is only noted: the lock goes and the epic carries on, because the
+// target may move again and each resolution costs a run (COR-445). At the final
+// checkpoint it stays on an isolated candidate branch: the operation holds the lock while a developer
 // run on the epic, with no task, works on it (D29). CI and integration review
 // fixes take the same path. Only a reported candidate is pushed to the epic
 // branch, and approval crosses it only when approvalFate says so; a question
@@ -156,8 +159,15 @@ export class EpicSynchronizer {
     this.#poll.later(epicId)
     const head = await github.branchHead(project.repository, epic.branch!)
     const onto = await github.branchHead(project.repository, project.defaultBranch)
-    if (!head || !onto || await github.behindBy(project.repository, project.defaultBranch, head) === 0) return null
+    if (!head || !onto) return null
+    if (await github.behindBy(project.repository, project.defaultBranch, head) === 0) {
+      await this.#clearDeferred(epicId)
+      return null
+    }
     if (await this.#prShut(epic, project)) return null
+    // The same commits would conflict the same way. Approval is what changes that.
+    const deferred = (await deferredConflicts(db, [epicId])).get(epicId)
+    if (deferred?.expectedTargetSha === head && deferred.ontoSha === onto && !finalCheckpoint(epic, head)) return null
     const failures = await this.#failures(db, epic, head, onto)
     const last = failures[0]
     if (last && this.#now().getTime() - last.updatedAt.getTime() < RETRY_DELAY_MS * failures.length) return null
@@ -191,7 +201,7 @@ export class EpicSynchronizer {
   #failures(db: Executor, epic: EpicRow, head: string, onto: string) {
     return db.select().from(operations).where(and(
       eq(operations.epicId, epic.id), eq(operations.kind, 'rebase'), eq(operations.state, 'failed'), eq(operations.expectedTargetSha, head), eq(operations.ontoSha, onto),
-      notInArray(operations.error, RETRY_AT_ONCE), epic.syncRetriedAt ? gte(operations.createdAt, epic.syncRetriedAt) : undefined
+      notInArray(operations.error, NOT_FAILURES), epic.syncRetriedAt ? gte(operations.createdAt, epic.syncRetriedAt) : undefined
     )).orderBy(desc(operations.createdAt))
   }
 
@@ -240,6 +250,8 @@ export class EpicSynchronizer {
           await db.update(operations).set({ state: 'pending', updatedAt: this.#now() }).where(and(eq(operations.id, operation.id), eq(operations.state, 'running')))
           return false
         }
+        // Approval waits for the writer lock, so this read can't go stale
+        if (!finalCheckpoint(await this.#current(ctx.epic), operation.expectedTargetSha)) return this.#defer(operation, ctx, prepared.files)
         await this.#startFix(operation, ctx, prepared.files)
         return false
       case 'rebased': {
@@ -247,6 +259,33 @@ export class EpicSynchronizer {
         return this.#publish(ready!, ctx, prepared.commitSha!, runnerId, stopped)
       }
     }
+  }
+
+  async #current(epic: EpicRow): Promise<EpicRow> {
+    const [row] = await this.#d.db.select().from(epics).where(eq(epics.id, epic.id))
+    return row!
+  }
+
+  // Nothing was written and nothing failed. Ending the operation frees the
+  // writer lock, so tasks and reviews carry on; the next checkpoint tries again
+  // if the commits have moved, and resolves it for real once approved.
+  async #defer(operation: OperationRow, { epic, project }: Context, files: string[]): Promise<boolean> {
+    const { db } = this.#d
+    await db.transaction(async (tx) => {
+      const [ended] = await tx.update(operations).set({ state: 'failed', error: CONFLICT_DEFERRED, conflictFiles: files, updatedAt: this.#now() })
+        .where(and(eq(operations.id, operation.id), inArray(operations.state, [...ACTIVE]), eq(operations.leaseEpoch, operation.leaseEpoch))).returning({ id: operations.id })
+      if (ended) await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'conflict_deferred', summary: `The rebase onto ${project.defaultBranch} conflicts${files.length ? ` in ${files.join(', ')}` : ''}.`, files }))
+    })
+    await this.#publishEpic(epic.id)
+    return true
+  }
+
+  // A hand rebase or GitHub's update branch writes no operation of ours
+  async #clearDeferred(epicId: string): Promise<void> {
+    const deferred = (await deferredConflicts(this.#d.db, [epicId])).get(epicId)
+    if (!deferred) return
+    await this.#d.db.update(operations).set({ error: CONFLICT_GONE, updatedAt: this.#now() }).where(eq(operations.id, deferred.id))
+    await this.#publishEpic(epicId)
   }
 
   // The developer starts from the epic head on a branch of its own, and the
@@ -529,5 +568,10 @@ export class EpicSynchronizer {
     this.#d.events.publish({ type: 'epic.updated', epic: await loadEpic(this.#d.db, epicId) })
   }
 }
+
+// Cleared to merge, on the head that was cleared: the last rebase this epic
+// needs, so a conflict is worth a developer's run now. Any other head is about
+// to lose approval. `conflict` is an epic left there from before COR-290.
+const finalCheckpoint = (epic: EpicRow, head: string) => (epic.reviewState === 'ready_to_merge' || epic.reviewState === 'conflict') && epic.prHeadSha === head
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
