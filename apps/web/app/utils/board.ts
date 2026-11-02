@@ -69,6 +69,17 @@ export function epicStage(epic: StageEpic, tasks: Pick<Task, 'status'>[]): EpicS
   return 'in_progress'
 }
 
+// Overview filters overlap deliberately: started, unfinished epics are also Open.
+// Pass epicWithLiveCounts so task events can move an epic between filters.
+export type OverviewEpicFilter = 'open' | 'in-progress' | 'closed'
+
+export function matchesOverviewEpicFilter(epic: StageEpic, tasks: Pick<Task, 'status'>[], filter: OverviewEpicFilter): boolean {
+  const finished = epicStage(epic, tasks) === 'done'
+  if (filter === 'closed') return finished
+  if (finished) return false
+  return filter === 'open' || tasks.some(task => !['draft', 'backlog', 'ready'].includes(task.status))
+}
+
 // Whether an epic belongs on the Board: it has work left or tasks on the Board.
 // A finished epic stays while one of its done tasks is still in Complete, and
 // updatedAt covers an epic PR that merged after the tasks' window closed.

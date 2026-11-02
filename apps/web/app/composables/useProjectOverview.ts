@@ -100,6 +100,9 @@ export function useProjectOverview({ slug, project, tasks, epics: epicList, load
       if (isTaskDone(task)) group.merged++
       groups.set(id, group)
     }
+    for (const epic of list) {
+      if (!groups.has(epic.id)) groups.set(epic.id, { id: epic.id, title: epic.title, merged: 0, total: 0, epic: epicWithLiveCounts(epic, tasks.value) })
+    }
     return [...groups.values()]
   })
   const taskOf = (run: Run) => tasks.value.find(t => t.id === run.taskId)
