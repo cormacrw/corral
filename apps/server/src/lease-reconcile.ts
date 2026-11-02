@@ -101,7 +101,7 @@ export class LeaseReconcile {
     const now = this.#c.now()
     for (const active of activeRuns) {
       const ctx = await this.#c.runs.fenced(active.runId, active.leaseEpoch)
-      if (!ctx || ctx.run.runnerId !== runnerId || (ctx.task?.leaseExpiresAt && ctx.task.leaseExpiresAt <= now)) {
+      if (!ctx || ctx.run.runnerId !== runnerId || (ctx.run.role !== 'pm' && ctx.task?.leaseExpiresAt && ctx.task.leaseExpiresAt <= now)) {
         if (await this.#savingWork(active.runId, active.leaseEpoch, runnerId)) continue
         this.#c.d.runner.send({ type: 'run.stop', runId: active.runId, reason: 'This run no longer holds its lease' }, runnerId)
         continue

@@ -67,6 +67,20 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
   })
 
+  it('keeps the PM triage lease independent when resumed worker work expires', async () => {
+    const { task, project, pm } = await stopped()
+    t.github.setBranch(project.repository, 'main', 'new-target')
+    await t.orchestrator.schedule()
+    await runner.next('run.assign', m => m.job.taskId === task.id)
+    const expired = new Date(t.clock.now.getTime() - 1000)
+    await t.db.update(tasks).set({ leaseExpiresAt: expired }).where(eq(tasks.id, task.id))
+    await t.db.update(runs).set({ leaseExpiresAt: expired }).where(eq(runs.id, pm.runId))
+    await t.orchestrator.onHeartbeat([{ runId: pm.runId, leaseEpoch: pm.leaseEpoch }], 'recovery', t.clock.now.getTime())
+    const [renewed] = await t.db.select().from(runs).where(eq(runs.id, pm.runId))
+    expect(renewed!.leaseExpiresAt!.getTime()).toBeGreaterThan(t.clock.now.getTime())
+    expect((await row(task.id)).leaseExpiresAt).toEqual(expired)
+  })
+
   it('lets PM comment on implementation recovery without a human question', async () => {
     const { task, pm } = await stopped()
     expect(await runner.call(pm.runId, pm.leaseEpoch, 'get_task', { taskRef: task.ref })).toMatchObject({ ok: true })
