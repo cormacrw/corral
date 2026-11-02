@@ -7,7 +7,7 @@ import TimeAgo from '~/components/TimeAgo.vue'
 // The same sections as the web page in one column, with links to the
 // Board and Backlog. The in-page title row holds Back and Settings.
 const props = defineProps<{ overview: ProjectOverview }>()
-const { project, tasks, loading, inboxLoading, runs, history, error, load, needsYou, pmName, epics, taskOf, actorName, taskRefOf, activityText } = props.overview
+const { project, tasks, loading, inboxLoading, runs, history, error, load, needsYou, pmName, taskOf, actorName, taskRefOf, activityText } = props.overview
 </script>
 
 <template>
@@ -69,102 +69,6 @@ const { project, tasks, loading, inboxLoading, runs, history, error, load, needs
         </div>
       </header>
 
-      <UAlert
-        v-if="error"
-        color="error"
-        variant="subtle"
-        :title="error"
-        :actions="[{ label: 'Retry', onClick: load }]"
-        class="mx-4 w-auto"
-      />
-
-      <div
-        v-if="!loading && tasks.length === 0"
-        class="mx-4 rounded-lg border border-default p-6 text-center"
-      >
-        <p class="mb-3 text-muted">
-          Plan your first epic with {{ pmName }}
-        </p>
-        <UButton
-          :to="`/plan?project=${project.id}`"
-          :label="`Plan with ${pmName}`"
-        />
-      </div>
-
-      <OverviewTiles
-        :overview="overview"
-        mobile
-      />
-
-      <ProjectFlow
-        :slug="project.slug"
-        class="mx-4"
-      />
-
-      <section>
-        <div class="mb-2 flex items-center gap-2 px-4">
-          <h3 class="text-sm font-semibold text-highlighted">
-            Needs you
-          </h3>
-          <UBadge
-            :label="String(needsYou.length)"
-            size="sm"
-            :color="needsYou.length ? 'primary' : 'neutral'"
-            :variant="needsYou.length ? 'solid' : 'subtle'"
-          />
-          <UButton
-            to="/inbox"
-            label="Open Inbox"
-            variant="link"
-            class="ms-auto px-0"
-          />
-        </div>
-        <ul
-          v-if="needsYou.length > 0"
-          class="divide-y divide-default border-y border-default"
-        >
-          <li
-            v-for="item in needsYou"
-            :key="item.id"
-          >
-            <NuxtLink
-              :to="`/inbox/${item.id}`"
-              class="flex items-center gap-2 px-4 py-3 active:bg-elevated"
-            >
-              <span class="min-w-0 flex-1">
-                <span class="flex items-baseline gap-2">
-                  <span class="shrink-0 font-mono text-xs text-muted">{{ item.taskRef }}</span>
-                  <span class="truncate text-sm">{{ item.subject }}</span>
-                </span>
-                <span class="mt-1 flex items-center gap-2">
-                  <UBadge
-                    :label="inboxTypeBadge(item.type).label"
-                    :color="inboxTypeBadge(item.type).color"
-                    variant="subtle"
-                    size="sm"
-                  />
-                  <span class="text-xs text-dimmed"><TimeAgo :at="item.at" /></span>
-                </span>
-              </span>
-              <UIcon
-                name="i-lucide-chevron-right"
-                class="size-4 shrink-0 text-dimmed"
-              />
-            </NuxtLink>
-          </li>
-        </ul>
-        <USkeleton
-          v-else-if="inboxLoading"
-          class="mx-4 h-12"
-        />
-        <p
-          v-else
-          class="px-4 text-sm text-muted"
-        >
-          Nothing is waiting on you.
-        </p>
-      </section>
-
       <section class="px-4">
         <h3 class="mb-2 text-sm font-semibold text-highlighted">
           Active now
@@ -205,75 +109,134 @@ const { project, tasks, loading, inboxLoading, runs, history, error, load, needs
         </p>
       </section>
 
-      <section class="px-4">
-        <div class="mb-2 flex items-center">
-          <h3 class="text-sm font-semibold text-highlighted">
-            Epics
-          </h3>
-          <UButton
-            :to="`/projects/${project.slug}/backlog`"
-            label="Open Backlog"
-            variant="link"
-            class="ms-auto px-0"
-          />
-        </div>
-        <ul class="flex flex-col gap-3">
-          <li
-            v-for="epic in epics"
-            :key="epic.id"
-          >
-            <EpicProgressRow
-              :id="epic.id"
-              :title="epic.title"
-              :merged="epic.merged"
-              :total="epic.total"
-              :epic="epic.epic"
-            />
-          </li>
-          <li v-if="loading">
-            <USkeleton class="h-8 w-full" />
-          </li>
-          <li
-            v-else-if="epics.length === 0"
-            class="text-sm text-muted"
-          >
-            No epics yet.
-          </li>
-        </ul>
-      </section>
+      <UAlert
+        v-if="error"
+        color="error"
+        variant="subtle"
+        :title="error"
+        :actions="[{ label: 'Retry', onClick: load }]"
+        class="mx-4 w-auto"
+      />
 
-      <section class="px-4">
-        <h3 class="mb-2 text-sm font-semibold text-highlighted">
-          Recent activity
-        </h3>
-        <ol class="flex flex-col gap-2 text-sm">
-          <li
-            v-for="entry in history"
-            :key="entry.id"
-            class="flex gap-2"
-          >
-            <span
-              class="mt-2 size-1.5 shrink-0 rounded-full bg-accented"
-              aria-hidden="true"
+      <div
+        v-if="!loading && tasks.length === 0"
+        class="mx-4 rounded-lg border border-default p-6 text-center"
+      >
+        <p class="mb-3 text-muted">
+          Plan your first epic with {{ pmName }}
+        </p>
+        <UButton
+          :to="`/plan?project=${project.id}`"
+          :label="`Plan with ${pmName}`"
+        />
+      </div>
+
+      <OverviewTiles
+        :overview="overview"
+        mobile
+      />
+
+      <ProjectOverviewTabs :overview="overview">
+        <template #needs-you>
+          <section>
+            <div class="mb-2 flex items-center gap-2">
+              <h3 class="text-sm font-semibold text-highlighted">
+                Needs you
+              </h3>
+              <UBadge
+                :label="String(needsYou.length)"
+                size="sm"
+                :color="needsYou.length ? 'primary' : 'neutral'"
+                :variant="needsYou.length ? 'solid' : 'subtle'"
+              />
+              <UButton
+                to="/inbox"
+                label="Open Inbox"
+                variant="link"
+                class="ms-auto px-0"
+              />
+            </div>
+            <ul
+              v-if="needsYou.length > 0"
+              class="-mx-4 divide-y divide-default border-y border-default"
+            >
+              <li
+                v-for="item in needsYou"
+                :key="item.id"
+              >
+                <NuxtLink
+                  :to="`/inbox/${item.id}`"
+                  class="flex items-center gap-2 px-4 py-3 active:bg-elevated"
+                >
+                  <span class="min-w-0 flex-1">
+                    <span class="flex items-baseline gap-2">
+                      <span class="shrink-0 font-mono text-xs text-muted">{{ item.taskRef }}</span>
+                      <span class="truncate text-sm">{{ item.subject }}</span>
+                    </span>
+                    <span class="mt-1 flex items-center gap-2">
+                      <UBadge
+                        :label="inboxTypeBadge(item.type).label"
+                        :color="inboxTypeBadge(item.type).color"
+                        variant="subtle"
+                        size="sm"
+                      />
+                      <span class="text-xs text-dimmed"><TimeAgo :at="item.at" /></span>
+                    </span>
+                  </span>
+                  <UIcon
+                    name="i-lucide-chevron-right"
+                    class="size-4 shrink-0 text-dimmed"
+                  />
+                </NuxtLink>
+              </li>
+            </ul>
+            <USkeleton
+              v-else-if="inboxLoading"
+              class="h-12"
             />
-            <span class="min-w-0">
-              <span class="font-medium">{{ actorName(entry) }}</span>{{ ' ' }}
-              <span class="text-muted">{{ activityText(entry) }}</span>{{ ' ' }}
-              <NuxtLink
-                :to="`/tasks/${taskRefOf(entry)}`"
-                class="font-mono text-xs text-muted"
-              >{{ taskRefOf(entry) }}</NuxtLink>
-              <span class="ms-2 text-xs text-dimmed"><TimeAgo :at="entry.createdAt" /></span>
-            </span>
-          </li>
-          <li
-            v-if="history.length === 0"
-            class="text-sm text-muted"
-          >
-            Nothing yet.
-          </li>
-        </ol>
-      </section>
+            <p
+              v-else
+              class="text-sm text-muted"
+            >
+              Nothing is waiting on you.
+            </p>
+          </section>
+        </template>
+        <template #activity>
+          <section>
+            <h3 class="mb-2 text-sm font-semibold text-highlighted">
+              Recent activity
+            </h3>
+            <ol class="flex flex-col gap-2 text-sm">
+              <li
+                v-for="entry in history"
+                :key="entry.id"
+                class="flex gap-2"
+              >
+                <span
+                  class="mt-2 size-1.5 shrink-0 rounded-full bg-accented"
+                  aria-hidden="true"
+                />
+                <span class="min-w-0">
+                  <span class="font-medium">{{ actorName(entry) }}</span>{{ ' ' }}
+                  <span class="text-muted">{{ activityText(entry) }}</span>{{ ' ' }}
+                  <NuxtLink
+                    :to="`/tasks/${taskRefOf(entry)}`"
+                    class="font-mono text-xs text-muted"
+                  >{{ taskRefOf(entry) }}</NuxtLink>
+                  <span class="ms-2 text-xs text-dimmed"><TimeAgo :at="entry.createdAt" /></span>
+                </span>
+              </li>
+              <li
+                v-if="history.length === 0"
+                class="text-sm text-muted"
+              >
+                Nothing yet.
+              </li>
+            </ol>
+          </section>
+        </template>
+      </ProjectOverviewTabs>
     </div>
   </div>
 </template>

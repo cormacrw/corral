@@ -6,7 +6,7 @@ import TimeAgo from '~/components/TimeAgo.vue'
 // MobileProjectOverview (design/mobile.md) over the same data.
 const device = useDevice()
 const { overview } = useProject()
-const { project, tasks, loading, inboxLoading, runs, history, error, load, needsYou, pmName, epics, taskOf, actorName, taskRefOf, activityText } = overview
+const { project, tasks, loading, inboxLoading, runs, history, error, load, needsYou, pmName, taskOf, actorName, taskRefOf, activityText } = overview
 useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
 </script>
 
@@ -62,6 +62,46 @@ useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
         </div>
       </header>
 
+      <section>
+        <h2 class="mb-2 font-medium">
+          Active now
+        </h2>
+        <div
+          v-if="runs.length > 0"
+          class="flex flex-col gap-2"
+        >
+          <BorderGlow
+            v-for="run in runs"
+            :key="run.id"
+            :border-radius="8"
+          >
+            <NuxtLink
+              :to="`/agents/${run.agentName.toLowerCase()}/${run.id}`"
+              class="flex items-center gap-3 rounded-lg border border-primary/40 p-3 outline-primary hover:bg-elevated"
+            >
+              <AgentAvatar
+                :name="run.agentName"
+                working
+              />
+              <div class="min-w-0">
+                <p class="truncate text-sm">
+                  {{ run.agentName }} is {{ run.role === 'reviewer' ? 'reviewing' : run.role === 'pm' ? 'planning' : 'building' }} {{ run.taskRef ?? (run.epicId ? 'epic' : '') }} {{ taskOf(run)?.title ?? run.epicTitle ?? '' }}
+                </p>
+                <p class="text-xs text-muted">
+                  Run #{{ run.number }} · <ElapsedTime :from="run.startedAt ?? run.queuedAt" /> · {{ run.state.replace('_', ' ') }}
+                </p>
+              </div>
+            </NuxtLink>
+          </BorderGlow>
+        </div>
+        <p
+          v-else
+          class="text-sm text-muted"
+        >
+          No agent is working on this project right now.
+        </p>
+      </section>
+
       <UAlert
         v-if="error"
         color="error"
@@ -85,12 +125,8 @@ useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
 
       <OverviewTiles :overview="overview" />
 
-      <ProjectFlow
-        :slug="project.slug"
-      />
-
-      <div class="grid grid-cols-[repeat(auto-fit,minmax(340px,1fr))] gap-6">
-        <div class="flex flex-col gap-6">
+      <ProjectOverviewTabs :overview="overview">
+        <template #needs-you>
           <section class="rounded-lg border border-default">
             <header class="flex items-center gap-2 border-b border-default px-3 py-2">
               <h2 class="font-medium">
@@ -146,87 +182,8 @@ useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
               Nothing is waiting on you.
             </p>
           </section>
-
-          <section>
-            <h2 class="mb-2 font-medium">
-              Active now
-            </h2>
-            <div
-              v-if="runs.length > 0"
-              class="flex flex-col gap-2"
-            >
-              <BorderGlow
-                v-for="run in runs"
-                :key="run.id"
-                :border-radius="8"
-              >
-                <NuxtLink
-                  :to="`/agents/${run.agentName.toLowerCase()}/${run.id}`"
-                  class="flex items-center gap-3 rounded-lg border border-primary/40 p-3 outline-primary hover:bg-elevated"
-                >
-                  <AgentAvatar
-                    :name="run.agentName"
-                    working
-                  />
-                  <div class="min-w-0">
-                    <p class="truncate text-sm">
-                      {{ run.agentName }} is {{ run.role === 'reviewer' ? 'reviewing' : run.role === 'pm' ? 'planning' : 'building' }} {{ run.taskRef ?? (run.epicId ? 'epic' : '') }} {{ taskOf(run)?.title ?? run.epicTitle ?? '' }}
-                    </p>
-                    <p class="text-xs text-muted">
-                      Run #{{ run.number }} · <ElapsedTime :from="run.startedAt ?? run.queuedAt" /> · {{ run.state.replace('_', ' ') }}
-                    </p>
-                  </div>
-                </NuxtLink>
-              </BorderGlow>
-            </div>
-            <p
-              v-else
-              class="text-sm text-muted"
-            >
-              No agent is working on this project right now.
-            </p>
-          </section>
-        </div>
-
-        <div class="flex flex-col gap-6">
-          <section>
-            <div class="mb-2 flex items-center">
-              <h2 class="font-medium">
-                Epics
-              </h2>
-              <UButton
-                :to="`/projects/${project.slug}/backlog`"
-                label="Open Backlog"
-                variant="link"
-                size="sm"
-                class="ms-auto"
-              />
-            </div>
-            <ul class="flex flex-col gap-3">
-              <li
-                v-for="epic in epics"
-                :key="epic.id"
-              >
-                <EpicProgressRow
-                  :id="epic.id"
-                  :title="epic.title"
-                  :merged="epic.merged"
-                  :total="epic.total"
-                  :epic="epic.epic"
-                />
-              </li>
-              <li v-if="loading">
-                <USkeleton class="h-8 w-full" />
-              </li>
-              <li
-                v-else-if="epics.length === 0"
-                class="text-sm text-muted"
-              >
-                No epics yet.
-              </li>
-            </ul>
-          </section>
-
+        </template>
+        <template #activity>
           <section>
             <h2 class="mb-2 font-medium">
               Recent activity
@@ -259,8 +216,8 @@ useSeoMeta({ title: () => `${project.value?.name ?? 'Project'} · Corral` })
               </li>
             </ol>
           </section>
-        </div>
-      </div>
+        </template>
+      </ProjectOverviewTabs>
     </div>
   </UDashboardPanel>
 </template>

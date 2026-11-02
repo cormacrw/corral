@@ -13,3 +13,16 @@ Epic cards derive working agents with `epicWorkingAgents`: the union of task lea
 Lease expiry for taskless epic runs must publish `run.updated` after interrupting the run, even when no runner can acknowledge `run.stop`. `sweepLeases` in `lease-reconcile.ts` ends it through `ending.stop`, which publishes on the same path as task runs, so the active-runs query drops expired reviewers and the card clears their avatar and glow without a reload.
 
 The former `BoardEpics` carousel and `boardEpics` prop are removed from both layouts. `EpicProgressRow` and `EpicReviewLine` remain for other screens. The Tasks view retains its Epic filter and Epic details action (in the expanded Filters row on mobile). Active runs are queried for the Epics view in both layouts so taskless epic reviewers appear in the same avatar stack.
+
+The project overview uses `matchesOverviewEpicFilter` beside `epicStage` for its
+Open / In Progress / Closed filters. It takes live counts and all epic tasks;
+In Progress is based on a task leaving Draft, Backlog or Ready, rather than a
+single board column. `ProjectOverviewTabs` shares URL state (`tab`, `epicFilter`)
+and cards across desktop and mobile. `OverviewEpicCard` keeps its own collapsed
+state, with an expand button separate from the epic title link. Empty epics are
+included in overview groups; the No epic group is excluded from this tab.
+
+On mobile, the overview tabs provide the content's 16px inset. Needs you and
+Activity slots must not add another inset; the Needs you list extends back
+through the tabs' margin so row borders span the viewport, while each row keeps
+16px padding for its text.
