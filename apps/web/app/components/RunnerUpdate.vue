@@ -27,6 +27,10 @@ const label = computed(() => {
       v-if="runner.behind"
       class="text-muted"
     >{{ runner.commit.slice(0, 7) }} → {{ runner.serverCommit.slice(0, 7) }}</span>
+    <span
+      v-if="runner.toolContractReason"
+      class="text-error"
+    >{{ runner.toolContractReason }}</span>
     <UButton
       v-if="runner.behind && runner.online && !runner.draining"
       label="Update now"

@@ -37,7 +37,10 @@ defineProps<{ item: Exclude<InboxItem, { type: 'plan_thread' }>, mobile?: boolea
         :size="mobile ? 'sm' : 'xs'"
         class="shrink-0"
       />
-      <span class="flex min-w-0 items-center gap-1 text-xs text-muted">
+      <span
+        v-if="item.project"
+        class="flex min-w-0 items-center gap-1 text-xs text-muted"
+      >
         <ProjectThumbnail
           :project="item.project"
           :size="16"

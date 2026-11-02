@@ -158,7 +158,10 @@ that deletes the runner identity, worktrees and CLI logins.
 Leave `CORRAL_RUNNER_AUTO_UPDATE=false` in `deploy/runner/.env` unless the
 updater timer is installed. With it enabled, a behind runner drains
 itself and takes no new work until something updates it. With it off, the runner
-shows as behind but keeps taking work.
+shows as behind but keeps taking work, unless its agent tools differ from the
+server's: then it takes no new runs and drains anyway, so an installed timer
+updates it. Without a timer it shows in Needs you after five minutes, and this
+section is how to clear it.
 
 Without the updater timer, pause the projects this runner serves and wait for
 its active runs to finish before rebuilding. In Ubuntu, update to the same

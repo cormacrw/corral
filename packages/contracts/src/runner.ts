@@ -140,7 +140,7 @@ export const reportOutcomeInput = z.object({
   note: z.string().trim().optional().describe('Developer only, required: one line of at most 200 characters saying what this run did, posted as a comment on the task, e.g. "Addressed review: dropped idle-thread fixture"'),
   criteria: z.array(criterionVerdict).optional().describe('Reviewer only: a verdict per acceptance criterion'),
   preservesApproval: z.boolean().optional().describe('Reviewer of an epic rebase resolution only, when approving: true only if the approved behaviour is unchanged; false restarts the epic\'s normal review'),
-  decision: epicDecisionInput.optional().describe('Epic rebase resolutions only, required with stuck or blocked: the question for the human, with alternatives and the changes affected')
+  decision: epicDecisionInput.optional().describe('Epic rebase resolutions only, with stuck or blocked: the question for the human, with alternatives and the changes affected. Without it the summary is asked as the question and the human can only answer in words')
 })
 
 // Set by the runner, never the agent. headSha: the commit a developer's run
@@ -209,7 +209,17 @@ export function integrationCompatibilityReason(required: number, supported: read
     : `Task requires integration protocol ${required}. Update the runner to a build supporting PR-free epic task integration; legacy PR work remains available.`
 }
 
+// Why a runner gets no new runs because its agent tools aren't the server's, or
+// null when they match. Missing means a runner older than the check, which is
+// a difference too: nothing says its tools match (COR-435).
+export function toolContractReason(runner: string | undefined, server: string): string | null {
+  if (runner === server) return null
+  return `Its agent tools ${runner ? `(${runner})` : '(from before tool contracts)'} differ from the server's (${server}), so it takes no new runs until it has updated.`
+}
+
 export interface RunnerInfo extends RunnerCapacity {
+  // Set while its agent tools differ from the server's; see toolContractReason
+  toolContractReason?: string | null
   taskIntegrationProtocols?: number[]
   // Runs integration jobs; a runner that only submits and reviews doesn't
   taskIntegrationExecutor?: boolean
@@ -336,7 +346,7 @@ export const slotSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('derived'), cpus: z.number(), memoryBytes: z.number(), slotCpus: z.number(), slotMemoryBytes: z.number() })
 ])
 
-export const runnerHelloSchema = z.object({ type: z.literal('hello'), protocol: z.number(), taskIntegrationProtocols: z.array(z.number().int().positive()).optional(), taskIntegrationExecutor: z.boolean().optional(), epicRebaseExecutor: z.boolean().optional(), commit: z.string().default('unknown'), updateTarget: z.string().optional(), updateState: z.string().optional(), updateError: z.string().optional(), draining: z.boolean().optional(), updateRequested: z.boolean().optional(), autoUpdate: z.boolean().optional(), runnerId: z.string(), name: z.string(), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })), slotSource: slotSourceSchema.optional().catch(undefined), slots: z.number().optional(), runtimes: z.array(z.string()).optional(), roles: z.array(z.enum(RUNNER_ROLES)).optional() })
+export const runnerHelloSchema = z.object({ type: z.literal('hello'), protocol: z.number(), taskIntegrationProtocols: z.array(z.number().int().positive()).optional(), taskIntegrationExecutor: z.boolean().optional(), epicRebaseExecutor: z.boolean().optional(), commit: z.string().default('unknown'), updateTarget: z.string().optional(), toolContract: z.string().optional(), updateState: z.string().optional(), updateError: z.string().optional(), draining: z.boolean().optional(), updateRequested: z.boolean().optional(), autoUpdate: z.boolean().optional(), runnerId: z.string(), name: z.string(), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })), slotSource: slotSourceSchema.optional().catch(undefined), slots: z.number().optional(), runtimes: z.array(z.string()).optional(), roles: z.array(z.enum(RUNNER_ROLES)).optional() })
 
 // Pre-capacity/build hello packets must still get the protocol-version refusal.
 // This schema is used only for rejecting a different version, never admission.
@@ -362,7 +372,7 @@ export const runnerMessageSchema = z.discriminatedUnion('type', [
 ])
 
 export const serverMessageSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('welcome'), integrationCompatibilityReason: z.string().nullable().optional(), runnerId: z.string(), commit: z.string(), draining: z.boolean(), updateRequested: z.boolean() }),
+  z.object({ type: z.literal('welcome'), integrationCompatibilityReason: z.string().nullable().optional(), toolContractReason: z.string().nullable().optional(), runnerId: z.string(), commit: z.string(), draining: z.boolean(), updateRequested: z.boolean() }),
   // A short-lived acknowledgement of a live lease; expired acknowledgements never authorise a WIP push.
   z.object({ type: z.literal('run.lease'), runId: z.string(), leaseEpoch: z.number(), validUntil: z.string() }),
   z.object({ type: z.literal('runner.drain'), updateRequested: z.boolean() }),

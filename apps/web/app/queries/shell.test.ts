@@ -57,7 +57,7 @@ describe('shell queries', () => {
     vi.mocked(api.status).mockResolvedValue({ stopped: false, updating: false } as never)
     vi.mocked(api.me.get).mockResolvedValue({ name: 'Sam' } as never)
     vi.mocked(api.plan.sessions).mockResolvedValue([])
-    vi.mocked(api.inbox.get).mockResolvedValue({ count: 2 } as never)
+    vi.mocked(api.inbox.get).mockResolvedValue({ count: 2, needsYou: [] } as never)
     client = createQueryClient()
     stops = [startShell(client), connectQueries(client, { onEvent: pendingApply })]
   })
@@ -101,7 +101,7 @@ describe('shell queries', () => {
     applyEvent(client, { type: 'global.status', status: { stopped: true, updating: false } })
     expect(shellData.status.stopped).toBe(true)
     expect(seen.value).toEqual([true])
-    applyEvent(client, { type: 'runner.status', status: { online: false } } as ServerEvent)
+    applyEvent(client, { type: 'runner.status', status: { online: false, runners: [] } } as unknown as ServerEvent)
     expect(shellData.runner?.online).toBe(false)
     applyEvent(client, { type: 'profile.updated', profile: { name: 'Robin' } } as ServerEvent)
     expect(shellData.profile?.name).toBe('Robin')
@@ -115,7 +115,7 @@ describe('shell queries', () => {
     expect(api.agents.list).toHaveBeenCalledTimes(1)
     expect(api.inbox.get).toHaveBeenCalledTimes(1)
     vi.mocked(api.agents.list).mockResolvedValue([{ id: 'a1', activeRuns: 1 }] as never)
-    vi.mocked(api.inbox.get).mockResolvedValue({ count: 3 } as never)
+    vi.mocked(api.inbox.get).mockResolvedValue({ count: 3, needsYou: [] } as never)
 
     const source = eventSources.at(-1)!
     for (let i = 0; i < 5; i++) source.emit({ type: 'run.updated', run } as ServerEvent)

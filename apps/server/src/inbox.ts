@@ -1,4 +1,5 @@
-import type { InboxArtifact, InboxSince, ReleaseNotesItem } from '@corral/contracts'
+import type { InboxArtifact, InboxSince, ReleaseNotesItem, RunnerInfo, RunnerUpdateItem } from '@corral/contracts'
+import { runnerItemId, runnerUpdateProblem } from '@corral/contracts/client'
 import { auditText, readAudit, type AuditView } from './audit.ts'
 import { epicEventText, epicInboxItems } from './epic-prs.ts'
 import { waitingDecisions } from './epic-rebase-approval.ts'
@@ -102,6 +103,26 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   activity.sort((a, b) => b.at.localeCompare(a.at))
   resolved.sort((a, b) => b.at.localeCompare(a.at))
   return { needsYou, activity: activity.slice(0, limit), resolved: resolved.slice(0, limit), count: needsYou.length }
+}
+
+// Runners live in memory, not the database, so the route adds these. Dated by
+// the connection, which is when this runner last had the chance to be current.
+export function runnerUpdateItems(runners: RunnerInfo[], now = Date.now()): RunnerUpdateItem[] {
+  return runners.flatMap((runner) => {
+    const problem = runnerUpdateProblem(runner, now)
+    if (!problem) return []
+    return [{
+      id: runnerItemId(runner.id), type: 'runner_update', project: null, runnerId: runner.id, online: runner.online,
+      commit: runner.commit, serverCommit: runner.serverCommit, subject: `${runner.name} can't update`,
+      preview: problem.slice(0, 200), body: problem, sender: { name: 'Corral', role: 'system' }, at: runner.connectedAt,
+      taskId: null, taskRef: null, prUrl: null, resolution: null
+    }]
+  })
+}
+
+export function withRunnerItems(inbox: Inbox, runners: RunnerInfo[]): Inbox {
+  const needsYou = [...inbox.needsYou, ...runnerUpdateItems(runners)].sort((a, b) => b.at.localeCompare(a.at))
+  return { ...inbox, needsYou, count: needsYou.length }
 }
 
 // Only open sessions waiting on a human decision belong in the Inbox: a

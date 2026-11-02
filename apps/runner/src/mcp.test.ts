@@ -71,6 +71,18 @@ describe('ToolServer', () => {
     await client.close()
   })
 
+  it('offers a developer the decision field, and passes one through', async () => {
+    const { client, calls } = await connect('developer')
+    const { tools } = await client.listTools()
+    const properties = tools.find(tool => tool.name === 'report_outcome')!.inputSchema.properties as Record<string, { properties?: Record<string, unknown> }>
+    expect(Object.keys(properties.decision!.properties!)).toEqual(expect.arrayContaining(['question', 'alternatives', 'affectedChanges']))
+    const input = { outcome: 'stuck', summary: 'Which side?', note: 'Asked', decision: { question: 'Which side?', alternatives: [{ label: 'A', effect: 'Keeps A', changesBehaviour: false }, { label: 'B', effect: 'Keeps B', changesBehaviour: true }], affectedChanges: ['src/a.ts'] } }
+    const result = await client.callTool({ name: 'report_outcome', arguments: input })
+    expect(result.isError).toBeFalsy()
+    expect(calls).toEqual([{ tool: 'report_outcome', input }])
+    await client.close()
+  })
+
   // Claude's API refuses a tool whose input is a top-level union
   it('lists report_outcome with a plain object input', async () => {
     const { client } = await connect('reviewer')

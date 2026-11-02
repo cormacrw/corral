@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./agent-tools": "./src/agent-tools.ts",
     "./client": "./src/client.ts"
   },
   "scripts": {

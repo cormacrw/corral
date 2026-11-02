@@ -53,7 +53,7 @@ describe('prototype mock API', () => {
     const detail = await mockCall<Project>('GET', '/projects/corral')
     expect(detail.thumbnailUrl).toBe(corral.thumbnailUrl)
     const inbox = await mockCall<Inbox>('GET', '/inbox')
-    expect(inbox.needsYou.filter(i => i.project.id === corral.id).every(i => i.project.thumbnailUrl === corral.thumbnailUrl)).toBe(true)
+    expect(inbox.needsYou.filter(i => i.project?.id === corral.id).every(i => i.project?.thumbnailUrl === corral.thumbnailUrl)).toBe(true)
   })
 
   it('serves a project\'s open PRs, with eligible and blocked ones', async () => {

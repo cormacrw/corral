@@ -21,7 +21,7 @@ const decision = {
 }
 const item = { taskId: 't', decision } as unknown as TaskInboxItem & { decision: typeof decision }
 const Stub = defineComponent({ props: { label: String, ariaLabel: String }, emits: ['click'], setup: (p, { emit }) => () => h('button', { 'aria-label': p.ariaLabel, 'onClick': () => emit('click') }, p.label) })
-const render = () => mount(InboxEpicDecision, { props: { item }, global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]], components: { UButton: Stub, UAlert: Stub } } })
+const render = (shown = item) => mount(InboxEpicDecision, { props: { item: shown }, global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]], components: { UButton: Stub, UAlert: Stub } } })
 
 it('shows the question, alternatives, what each does to approval and the affected changes', () => {
   const text = render().text()
@@ -33,4 +33,11 @@ it('sends the chosen alternative', async () => {
   await wrapper.get('[aria-label="Choose Follow the target"]').trigger('click')
   await flushPromises()
   expect(act).toHaveBeenCalledWith('t', { action: 'decide', alternative: 1 })
+})
+
+it('asks for words when the agent gave no alternatives', () => {
+  const wrapper = render({ ...item, decision: { ...decision, alternatives: [], affectedChanges: [] } })
+  expect(wrapper.text()).toContain('Choose Answer and write your decision')
+  expect(wrapper.find('ul').exists()).toBe(false)
+  expect(wrapper.text()).not.toContain('Affected changes')
 })

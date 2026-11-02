@@ -15,6 +15,8 @@ is invalid. D20 designers have role=designer and taskType=design, on their own
 named schema, and report through `DESIGNER_RUN_OUTCOMES`.
 
 taskType, designPinned and baseBranch remain optional for older servers.
+Hello's `toolContract` is compared separately; see
+[runner versions](runner-updates.md#tool-contracts-cor-435).
 Older hello metadata remains decodable so protocol-version mismatches still
 close with 4000 and the server's protocol/commit details. Schema validation does
 not replace the existing run ownership and lease fencing checks.
@@ -35,6 +37,12 @@ verdict. Integration reviews use
 `epicReviewReportSchema`, which takes verdicts only and no criteria (D23). A
 failed parse comes back as `Not reported. <field>: <problem>`. Whether the
 role and task type may report that outcome is still checked after parsing.
+
+An epic resolution's `stuck` or `blocked` with no `decision` isn't refused:
+`#decisionFor` raises a question from the summary with no alternatives, so the
+operation still holds and the human answers in words. That counts as changing
+approved behaviour, like any written answer. A refusal here loses the question,
+because an agent that can't supply the field can only report `failed`.
 
 ## Run lifecycle
 

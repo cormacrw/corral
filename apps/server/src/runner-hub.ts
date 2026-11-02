@@ -7,6 +7,7 @@ import {
   protocolMessageType,
   RUNNER_PROTOCOL_VERSION,
   RUNNER_ROLES,
+  toolContractReason,
   type RunnerCapacity,
   type RunnerInfo,
   type RunnerMessage,
@@ -16,6 +17,7 @@ import {
   type SlotSource,
   type SetupJobResult
 } from '@corral/contracts'
+import { AGENT_TOOL_CONTRACT } from '@corral/contracts/agent-tools'
 import { randomUUID } from 'node:crypto'
 import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
@@ -155,7 +157,12 @@ export class RunnerHub {
           this.#cliCache.delete(runnerId)
           const now = new Date().toISOString()
           const capacity = parseCapacity(message)
-          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, slotsInUse: this.#inUse.get(runnerId) ?? 0, protocol: message.protocol, needsUpdate: false, connectedAt: now, lastHeartbeatAt: now, ...capacity, taskIntegrationProtocols: message.taskIntegrationProtocols ?? [], taskIntegrationExecutor: !!message.taskIntegrationExecutor, epicRebaseExecutor: !!message.epicRebaseExecutor, integrationCompatibilityReason: integrationCompatibilityReason(TASK_INTEGRATION_PROTOCOL, message.taskIntegrationProtocols), commit: message.commit || 'unknown', serverCommit: this.commit, behind: message.commit !== this.commit, draining: !!message.draining || (!!message.autoUpdate && message.commit !== this.commit && !(message.updateState === 'failed' && message.updateTarget === this.commit)), updateRequested: !!message.updateRequested, updateState: message.updateState ?? '', updateError: message.updateError ?? '', activeRunCount: message.activeRuns.length } })
+          const toolsDiffer = toolContractReason(message.toolContract, AGENT_TOOL_CONTRACT)
+          // A failed attempt at this target releases the drain, so the runner can
+          // still do setup work; toolsDiffer alone keeps it from runs
+          const failedHere = message.updateState === 'failed' && message.updateTarget === this.commit
+          const wantsUpdate = !!toolsDiffer || (!!message.autoUpdate && message.commit !== this.commit)
+          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, slotsInUse: this.#inUse.get(runnerId) ?? 0, protocol: message.protocol, needsUpdate: false, connectedAt: now, lastHeartbeatAt: now, ...capacity, taskIntegrationProtocols: message.taskIntegrationProtocols ?? [], taskIntegrationExecutor: !!message.taskIntegrationExecutor, epicRebaseExecutor: !!message.epicRebaseExecutor, integrationCompatibilityReason: integrationCompatibilityReason(TASK_INTEGRATION_PROTOCOL, message.taskIntegrationProtocols), commit: message.commit || 'unknown', serverCommit: this.commit, behind: message.commit !== this.commit, toolContractReason: toolsDiffer, draining: !!message.draining || (wantsUpdate && !failedHere), updateRequested: !!message.updateRequested, updateState: message.updateState ?? '', updateError: message.updateError ?? '', activeRunCount: message.activeRuns.length } })
           // Don't dispatch into this socket until its hello snapshot has been
           // reconciled: a newly assigned run isn't in that snapshot.
           await this.#handlers?.onConnected(message.activeRuns, runnerId).catch(error => console.error('Runner reconciliation failed', error))
@@ -163,7 +170,7 @@ export class RunnerHub {
           if (runner?.socket !== socket) return
           runner.status.online = true
           this.#publishStatus()
-          this.send({ type: 'welcome', ...(runner.status.integrationCompatibilityReason ? { integrationCompatibilityReason: runner.status.integrationCompatibilityReason } : {}), runnerId, commit: this.commit, draining: runner.status.draining, updateRequested: runner.status.updateRequested }, runnerId)
+          this.send({ type: 'welcome', ...(runner.status.integrationCompatibilityReason ? { integrationCompatibilityReason: runner.status.integrationCompatibilityReason } : {}), ...(toolsDiffer ? { toolContractReason: toolsDiffer } : {}), runnerId, commit: this.commit, draining: runner.status.draining, updateRequested: runner.status.updateRequested }, runnerId)
           void this.detectClis(true, runnerId).catch(error => console.error('Runner CLI detection failed', error))
           this.#handlers?.onReady()
           return
@@ -224,7 +231,10 @@ export class RunnerHub {
         behind: message.commit !== this.commit,
         draining: false,
         updateRequested: false,
-        connectedAt: now,
+        updateState: message.updateState ?? '',
+        updateError: message.updateError ?? '',
+        // It retries every few seconds: the first refusal is when it began waiting
+        connectedAt: old?.status.needsUpdate ? old.status.connectedAt : now,
         lastHeartbeatAt: now,
         // An older hello may not carry capacity; keep what it last said
         ...parseCapacity(message, old?.status)
@@ -243,7 +253,8 @@ export class RunnerHub {
     return [...this.#runners.entries()].filter(([, r]) => r.socket && r.status.online && (!runtime || r.status.runtimes.includes(runtime))).sort((a, b) => Number(a[1].status.draining) - Number(b[1].status.draining) || a[1].status.connectedAt.localeCompare(b[1].status.connectedAt))[0]?.[0] ?? null
   }
 
-  // Online runners ready for dispatch, longest connected first
+  // Online runners ready for dispatch, longest connected first. Agent runs also
+  // need runner.toolContractReason to be clear; setup jobs don't use agent tools.
   available(): RunnerInfo[] {
     return [...this.#runners.values()].filter(r => r.socket && r.status.online && !r.status.draining).map(r => ({ ...r.status }))
       .sort((a, b) => a.connectedAt.localeCompare(b.connectedAt))
@@ -267,7 +278,7 @@ export class RunnerHub {
     const runner = runnerId ? this.#runners.get(runnerId) : undefined
     if (!runner?.socket) return false
     if (message.type === 'run.assign') {
-      if (runner.status.draining) return false
+      if (runner.status.draining || runner.status.toolContractReason) return false
       const required = 'integrationProtocol' in message.job ? message.job.integrationProtocol ?? 0 : 0
       if (integrationCompatibilityReason(required, runner.status.taskIntegrationProtocols)) return false
     }

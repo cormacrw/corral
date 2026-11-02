@@ -36,3 +36,16 @@ fchmods the open file descriptor, and renames relative to the pinned directory.
 Pre-created temporary/destination symlinks and concurrent parent replacement
 cannot overwrite or chmod external host files. The dedicated host checkout must
 not be mounted into agent containers. Host Python 3 is a documented prerequisite.
+
+## Tool contracts (COR-435)
+
+COR-431's `stuck` reports were refused for a missing `decision` the agents couldn't send: `gaming-pc` was still on an older build while the server enforced the field. Being behind doesn't stop work unless `CORRAL_RUNNER_AUTO_UPDATE=true`, and that flag was off with the host timer installed, so the timer logged "Behind; automatic updates disabled" until a human pressed Update now.
+
+Agent tool definitions now live in `@corral/contracts/agent-tools` (a Node-only entry). Hello carries `AGENT_TOOL_CONTRACT`, a hash of what each role's agent sees: names, descriptions, input schemas and outcomes. A hash that differs, or is missing, sets `toolContractReason`. The hub then:
+
+- keeps the runner out of agent runs in `pickRunner` and at `send`, separately from `draining`, because a failed update releases the drain so that setup jobs keep working;
+- drains it whatever its auto-update flag says. The flag is the runner's own policy for being merely behind. `update-status.json` then says draining, and the timer's gate passes, so a host with the timer updates with no human step.
+
+## Telling a human
+
+`runnerUpdateProblem` (`@corral/contracts/client`, shared with web) is the rule for the `runner_update` Needs you item: a behind runner whose update failed, or one with differing tools that shows no attempt `RUNNER_UPDATE_GRACE_MS` after connecting. The second catches a host with no timer and updater exits before its `ERR` trap, which write no feedback. A runner refused at the protocol check counts too: it's offline, so Update now can't reach it, and on a 4000 close it drains itself (`UpdateStatus.refused`) whatever its flag says, which passes the timer's gate. Only runners with this code do that; an older one is reported but needs a hand. `#turnAway` keeps the first refusal's `connectedAt`, or a grace period measured from it would restart with every retry. Runners are in memory, so the `/inbox` route adds the item (`withRunnerItems`), and the web's `runner.status` handler refetches the Inbox only when the listed runners change, since heartbeats land there too. A failed update doesn't retry itself: the item's Retry update sends the drain again, and a new server commit does on reconnect.

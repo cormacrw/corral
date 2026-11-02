@@ -1,3 +1,4 @@
+import { AGENT_TOOL_CONTRACT } from '@corral/contracts/agent-tools'
 import { RUNNER_PROTOCOL_VERSION, type ServerMessage } from '@corral/contracts'
 import { expect, it, vi } from 'vitest'
 import { EventBus } from './events.ts'
@@ -20,7 +21,7 @@ it('reconciles the hello snapshot before accepting new assignments', async () =>
     onToolCall: async () => null
   })
   const connection = hub.connect({ send: raw => sent.push(JSON.parse(raw)), close: () => {} })
-  const hello = connection.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', runnerId: 'B', name: 'Gaming PC', activeRuns: [], slots: 1, runtimes: ['claude-code'], roles: ['developer'] }))
+  const hello = connection.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', toolContract: AGENT_TOOL_CONTRACT, runnerId: 'B', name: 'Gaming PC', activeRuns: [], slots: 1, runtimes: ['claude-code'], roles: ['developer'] }))
   expect(hub.online).toBe(false)
   expect(hub.pick()).toBeNull()
   expect(sent).toEqual([])
@@ -58,7 +59,7 @@ it('lists a runner on an older protocol as needing an update until it reconnects
   expect(hub.pick()).toBeNull()
 
   const updated = hub.connect({ send: () => {}, close: () => {} })
-  await updated.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, runnerId: 'M', name: 'old-mini', activeRuns: [], slots: 2, runtimes: ['claude-code'], roles: ['developer'] }))
+  await updated.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, toolContract: AGENT_TOOL_CONTRACT, runnerId: 'M', name: 'old-mini', activeRuns: [], slots: 2, runtimes: ['claude-code'], roles: ['developer'] }))
   expect(hub.status().runners).toMatchObject([{ id: 'M', online: true, needsUpdate: false, protocol: RUNNER_PROTOCOL_VERSION, slots: 2, slotsInUse: 0 }])
   hub.setInUse(new Map([['M', 1]]))
   expect(hub.status().runners[0]).toMatchObject({ slotsInUse: 1 })
@@ -69,7 +70,7 @@ it('keeps capacity provenance in runner status, tolerating older and malformed h
   const derived = { kind: 'derived', cpus: 8, memoryBytes: 10 * 1024 ** 3, slotCpus: 2, slotMemoryBytes: 2.5 * 1024 ** 3 }
   for (const [id, slots, slotSource] of [['derived', 4, derived], ['explicit', 7, { kind: 'explicit' }], ['old', 2, undefined], ['invalid', 1, { ...derived, cpus: -1 }]] as const) {
     const peer = hub.connect({ send: () => {}, close: () => {} })
-    await peer.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', runnerId: id, name: id, activeRuns: [], slots, slotSource, runtimes: [], roles: ['developer'] }))
+    await peer.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, commit: 'development', toolContract: AGENT_TOOL_CONTRACT, runnerId: id, name: id, activeRuns: [], slots, slotSource, runtimes: [], roles: ['developer'] }))
   }
   expect(hub.status().runners).toMatchObject([
     { id: 'derived', slots: 4, slotSource: derived },
@@ -84,7 +85,7 @@ it('negotiates integration separately from envelope version and fences dispatch 
   for (const [id, taskIntegrationProtocols] of [['legacy', undefined], ['capable', [1]], ['future', [2]]] as const) {
     const sent: ServerMessage[] = []
     const peer = hub.connect({ send: raw => sent.push(JSON.parse(raw)), close: () => {} })
-    await peer.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, runnerId: id, name: id, activeRuns: [], taskIntegrationProtocols }))
+    await peer.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, toolContract: AGENT_TOOL_CONTRACT, runnerId: id, name: id, activeRuns: [], taskIntegrationProtocols }))
     const detection = sent.find(m => m.type === 'job.request') as Extract<ServerMessage, { type: 'job.request' }>
     await peer.onMessage(JSON.stringify({ type: 'job.result', jobId: detection.jobId, ok: true, result: { kind: 'detect_clis', clis: [] } }))
     const job = {

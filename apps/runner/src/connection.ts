@@ -9,6 +9,7 @@ import {
   type RunnerMessage,
   type ServerMessage
 } from '@corral/contracts'
+import { AGENT_TOOL_CONTRACT } from '@corral/contracts/agent-tools'
 import WebSocket from 'ws'
 import type { UpdateStatus } from './update-status.ts'
 
@@ -147,6 +148,7 @@ export class ServerConnection {
       const message = parsed.data
       if (message.type === 'welcome') {
         if (message.integrationCompatibilityReason) console.warn(message.integrationCompatibilityReason)
+        if (message.toolContractReason) console.warn(message.toolContractReason)
         // Only now has the server taken this runner: a socket that opens and is
         // refused has to keep backing off
         this.#backoff = MIN_BACKOFF_MS
@@ -165,7 +167,7 @@ export class ServerConnection {
       if (code === 4000) {
         try {
           const detail = JSON.parse(reason.toString()) as { commit?: string }
-          if (typeof detail.commit === 'string') this.updateStatus?.server(detail.commit)
+          if (typeof detail.commit === 'string') this.updateStatus?.refused(detail.commit)
         } catch { /* Older servers may only send a readable protocol error. */ }
       }
       void this.refreshUpdateStatus()
@@ -189,7 +191,7 @@ export class ServerConnection {
     }
     // That took seconds, and the socket may have gone meanwhile
     if (this.#socket !== socket || socket.readyState !== WebSocket.OPEN) return
-    socket.send(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, taskIntegrationProtocols: [TASK_INTEGRATION_PROTOCOL], taskIntegrationExecutor: true, epicRebaseExecutor: true, commit: this.updateStatus?.commit || process.env.CORRAL_BUILD_SHA || 'development', draining: this.updateStatus?.draining ?? false, updateRequested: this.updateStatus?.updateRequested ?? false, autoUpdate: this.updateStatus?.autoUpdate ?? false, updateTarget: this.updateStatus?.serverCommit ?? '', updateState: this.updateStatus?.updateState ?? '', updateError: this.updateStatus?.updateError ?? '', ...this.#identity, ...capacity, activeRuns: this.#handlers.activeRuns() } satisfies RunnerMessage))
+    socket.send(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, taskIntegrationProtocols: [TASK_INTEGRATION_PROTOCOL], taskIntegrationExecutor: true, epicRebaseExecutor: true, toolContract: AGENT_TOOL_CONTRACT, commit: this.updateStatus?.commit || process.env.CORRAL_BUILD_SHA || 'development', draining: this.updateStatus?.draining ?? false, updateRequested: this.updateStatus?.updateRequested ?? false, autoUpdate: this.updateStatus?.autoUpdate ?? false, updateTarget: this.updateStatus?.serverCommit ?? '', updateState: this.updateStatus?.updateState ?? '', updateError: this.updateStatus?.updateError ?? '', ...this.#identity, ...capacity, activeRuns: this.#handlers.activeRuns() } satisfies RunnerMessage))
     this.#helloSent = true
     this.#heartbeat = setInterval(() => {
       // A half-open connection stays OPEN until the kernel gives up, so silence

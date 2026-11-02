@@ -1,3 +1,4 @@
+import { AGENT_TOOL_CONTRACT } from '@corral/contracts/agent-tools'
 import { RUNNER_HEARTBEAT_MS, RUNNER_PROTOCOL_VERSION, TASK_INTEGRATION_PROTOCOL, type RunnerCapacity, type RunnerMessage, type ServerMessage } from '@corral/contracts'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -55,6 +56,30 @@ describe('runner update status on the wire', () => {
   async function status() {
     return JSON.parse(await readFile(join(dataDir, 'update-status.json'), 'utf8'))
   }
+
+  it('advertises its agent tool contract in hello', async () => {
+    await start(false, socket => socket.send(JSON.stringify({ type: 'welcome', runnerId: 'r1', commit: 'old', draining: false, updateRequested: false })))
+    await vi.waitFor(() => expect(received.find(m => m.type === 'hello')).toMatchObject({ toolContract: AGENT_TOOL_CONTRACT }))
+  })
+
+  it('leaves the drain to the host updater when the server asks, with auto-update off', async () => {
+    await start(false, socket => socket.send(JSON.stringify({ type: 'welcome', runnerId: 'r1', commit: 'new', draining: true, updateRequested: false, toolContractReason: 'Tools differ' })))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ commit: 'old', serverCommit: 'new', behind: true, draining: true }))
+  })
+
+  it('asks the host updater after a protocol refusal, with auto-update off', async () => {
+    await start(false, socket => socket.close(4000, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION + 1, commit: 'new' })))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ commit: 'old', serverCommit: 'new', behind: true, draining: true }))
+  })
+
+  it('leaves a failed update for a human after a protocol refusal', async () => {
+    await start(false, socket => socket.close(4000, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION + 1, commit: 'new' })))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ serverCommit: 'new', draining: true }))
+    await writeFile(join(dataDir, 'updater-result.json'), JSON.stringify({ target: 'new', state: 'failed', error: 'Build failed', attempt: '1' }))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ updateState: 'failed', updateError: 'Build failed', draining: false }), { timeout: 3000 })
+    connection.updateStatus!.refused('new')
+    expect(connection.updateStatus!.draining).toBe(false)
+  })
 
   it('releases a failed host build drain and reports the failure without stopping live work', async () => {
     active = [{ runId: 'run-1', leaseEpoch: 1 }]

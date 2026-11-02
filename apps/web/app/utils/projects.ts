@@ -13,7 +13,7 @@ export interface ProjectCardSummary {
 
 // A project's share of Needs you
 export function projectNeedsYou(inbox: Inbox | null, projectId: string | undefined) {
-  return inbox?.needsYou.filter(i => i.project.id === projectId) ?? []
+  return inbox?.needsYou.filter(i => i.project?.id === projectId) ?? []
 }
 
 const VERB: Record<Agent['role'], string> = { pm: 'planning', developer: 'building', designer: 'designing', reviewer: 'reviewing' }
