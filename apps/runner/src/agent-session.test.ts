@@ -8,13 +8,16 @@ import type { ParsedLine } from './stream-json.ts'
 // Stands in for `claude --input-format stream-json`: stays alive, reads one
 // user message per stdin line, replays it, and answers each with a result
 // line. A message of "hang" starts a turn that never finishes; "hold" starts
-// one that any next message joins, ending with one result for both.
+// one that any next message joins, ending with one result for both. A message
+// of "orphaned" is first preceded by the empty result a resume prints for a
+// background command the last process left behind.
 const FAKE_CLAUDE = `#!/usr/bin/env node
 const { createInterface } = require('node:readline')
 let started = false
 let holding = false
 createInterface({ input: process.stdin }).on('line', (line) => {
   let content = JSON.parse(line).message.content
+  if (content === 'orphaned') console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 0, result: '', session_id: 'one-session' }))
   console.log(JSON.stringify({ type: 'user', isReplay: true, message: { role: 'user', content } }))
   if (holding) {
     holding = false
@@ -123,6 +126,17 @@ describe('spawnAgentSession', () => {
     expect(agent.message('b')).toBe(true)
     // "a" ended before "b" was taken in, so only "b"'s result is idle
     expect((await agent.nextIdle())?.text).toMatch(/^Answered b/)
+  })
+
+  it('does not take the empty result ahead of a prompt for that prompt\'s turn', async () => {
+    const agent = start()
+    agent.send('orphaned')
+    expect((await agent.nextIdle())?.text).toMatch(/^Answered orphaned/)
+
+    agent.send('orphaned')
+    expect((await agent.nextResult())?.text).toMatch(/^Answered orphaned/)
+    // It still reaches the transcript's reader
+    expect(lines.filter(line => line.emptyTurn)).toHaveLength(2)
   })
 
   it('exits once stdin closes', async () => {
