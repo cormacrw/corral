@@ -252,7 +252,9 @@ async function openTasks(db: Executor, taskId?: string) {
     const decision = decisions.get(task.id) ?? null
     const type: TaskInboxItemType = task.status === 'human_review' ? 'human_review' : task.status === 'failed' ? 'failed' : stuck || decision ? 'question' : 'blocked'
     const at = (entered?.createdAt ?? task.updatedAt).toISOString()
-    return { task, project, history, type, decision, at, arrival: arrivalKey({ id: task.id, type, at }, arrivals) }
+    const arrival = arrivalKey({ id: task.id, type, at }, arrivals)
+    // The post-triage decision needs fresh findings, not a pre-triage summary.
+    return { task, project, history, type, decision, at, arrival: task.retryStop?.sessionId ? `${arrival}:recovery-${task.retryStop.sessionId}` : arrival }
   })
 }
 

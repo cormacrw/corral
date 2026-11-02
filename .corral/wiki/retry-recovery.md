@@ -59,3 +59,7 @@ its failed-run counter reaches the limit. Target polling uses the scheduler's
 per-task backoff: 60 seconds initially, doubling to five minutes on unchanged
 or unavailable targets. Human input is checked on every pass without waiting
 for GitHub. A server restart may perform one fresh target check.
+
+Post-triage Inbox summaries use the recovery episode in their cache key and
+include PM findings in their message facts, so a pre-triage summary cannot
+claim that no findings exist after the PM has supplied them.

@@ -153,6 +153,11 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
       await t.orchestrator.schedule()
     }
     const stop = (await row(task.id)).retryStop!
+    if (kind === 'capped') {
+      const transitions = await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.taskId, task.id)).orderBy(asc(schema.auditLog.id))
+      const entered = transitions.find(entry => entry.action === 'task.transition' && (entry.detail as { to?: string }).to === 'failed')!
+      await t.db.insert(schema.inboxMessages).values({ arrival: `${task.id}:failed:audit-${entered.id}`, message: 'No findings were recorded.' })
+    }
     const pm = (await runner.next('run.assign', m => m.job.planSessionId === stop.sessionId)).job
     const findings = 'The parser supports both formats. Resolve the format requirement before another attempt.'
     expect(await runner.call(pm.runId, pm.leaseEpoch, 'add_comment', { taskRef: task.ref, body: findings })).toMatchObject({ ok: true })
@@ -164,7 +169,7 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
       expect(mine).toMatchObject([{ id: task.id, taskId: task.id, type: kind === 'capped' ? 'failed' : 'question', body: expect.stringContaining(findings) }])
       expect(mine).toHaveLength(1)
       expect(mine[0]).toMatchObject({ body: expect.stringContaining('Decision needed:') })
-      expect(mine[0]).toMatchObject({ body: expect.stringContaining('Recommendation:') })
+      expect(mine[0]).toMatchObject({ body: expect.stringContaining('Recommendation:'), message: expect.stringContaining('The parser supports both formats') })
     }
     expect((await t.db.select().from(runs).where(eq(runs.taskId, task.id))).filter(r => r.role === 'pm')).toHaveLength(1)
   })

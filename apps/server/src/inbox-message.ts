@@ -25,7 +25,7 @@ export async function messageFacts(db: Executor, items: MessageItem[]) {
   const taskIds = items.flatMap(i => i.taskId ? [i.taskId] : [])
   const [taskRows, reviewRows] = taskIds.length > 0
     ? await Promise.all([
-        db.select({ id: schema.tasks.id, epicId: schema.tasks.epicId, title: schema.tasks.title, description: schema.tasks.description, statusReason: schema.tasks.statusReason, type: schema.tasks.type })
+        db.select({ id: schema.tasks.id, epicId: schema.tasks.epicId, title: schema.tasks.title, description: schema.tasks.description, statusReason: schema.tasks.statusReason, retryStop: schema.tasks.retryStop, type: schema.tasks.type })
           .from(schema.tasks).where(inArray(schema.tasks.id, taskIds)),
         db.selectDistinctOn([schema.reviews.taskId], { taskId: schema.reviews.taskId, verdict: schema.reviews.verdict, summary: schema.reviews.summary }).from(schema.reviews)
           .where(inArray(schema.reviews.taskId, taskIds)).orderBy(schema.reviews.taskId, desc(schema.reviews.createdAt))
@@ -50,7 +50,7 @@ export async function messageFacts(db: Executor, items: MessageItem[]) {
       task: task ? { title: task.title, description: richTextToPlainText(task.description) } : null,
       epic: epic ? { title: epic.title, description: epic.description } : null,
       review: review ? { verdict: review.verdict, summary: review.summary } : item.type === 'epic_review' ? { verdict: 'approved', summary: item.body } : null,
-      reasonOrFindings: task ? task.statusReason || (task.type === 'spike' ? item.body : '') : item.type === 'epic_conflict' ? item.body : '',
+      reasonOrFindings: task ? task.retryStop ? item.body : task.statusReason || (task.type === 'spike' ? item.body : '') : item.type === 'epic_conflict' ? item.body : '',
       since: item.since ?? null,
       newArtifacts: item.newArtifacts ?? []
     }
