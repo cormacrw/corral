@@ -105,9 +105,9 @@ export class CiLogScanner {
     const key = TURBO_PREFIX.exec(line)?.[1] ?? this.#group
     if (!key || group || PASSED.test(line.replace(TURBO_PREFIX, ''))) return
     if (!this.#sections.has(key) && this.#sections.size >= MAX_SECTIONS) return
-    if (LIFECYCLE.test(line.replace(TURBO_PREFIX, '')) && !this.#beforeExit.has(key)) {
-      this.#beforeExit.set(key, (this.#sections.get(key) ?? '').slice(-MAX_SECTION_CHARS / 2))
-    }
+    // A failing package can print this twice, hundreds of thousands of lines
+    // apart. The last is its true exit, with the error somewhere above it.
+    if (LIFECYCLE.test(line.replace(TURBO_PREFIX, ''))) this.#beforeExit.set(key, this.#sections.get(key) ?? '')
     const text = `${this.#sections.get(key) ?? ''}${line.slice(0, MAX_LINE_CHARS)}\n`
     this.#sections.set(key, text.slice(-MAX_SECTION_CHARS))
   }
@@ -117,16 +117,15 @@ export class CiLogScanner {
     return [...this.#failed].flatMap((key) => {
       const end = this.#sections.get(key)
       if (!end) return []
+      // Whatever came after the exit gets half a window more. They overlap
+      // when the exit ends the section, which still leaves the full window.
       const before = this.#beforeExit.get(key)
-      const chunks = before ? [before, end.slice(-MAX_SECTION_CHARS / 2)] : [end]
-      return chunks.flatMap((text) => {
-        const limit = before ? MAX_SECTION_CHARS / 2 : MAX_SECTION_CHARS
-        return text.split('\n').slice(text.length < limit ? 0 : 1).filter((line) => {
-          if (!line.trim() || kept.has(line)) return false
-          kept.add(line)
-          return true
-        })
-      })
+      const windows = before ? [[before, MAX_SECTION_CHARS], [end.slice(-MAX_SECTION_CHARS / 2), MAX_SECTION_CHARS / 2]] as const : [[end, MAX_SECTION_CHARS]] as const
+      return windows.flatMap(([text, limit]) => text.split('\n').slice(text.length < limit ? 0 : 1).filter((line) => {
+        if (!line.trim() || kept.has(line)) return false
+        kept.add(line)
+        return true
+      }))
     })
   }
 }

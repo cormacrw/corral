@@ -13,12 +13,16 @@ const scan = (log: string, chunk = 1024) => {
 }
 
 // Shape reported from job 125066364374: passing groups, a bare failing
-// package header, ungrouped output, ELIFECYCLE, then the next passing group.
+// package header, ungrouped output with an early ELIFECYCLE, the final
+// ELIFECYCLE, then the next passing group.
 const turboLog = lines(
   '##[group]Run pnpm run test', 'pnpm run test', '##[endgroup]',
   '##[group]@corral/core:test', ' ✓ core.test.ts', '##[endgroup]',
   '@corral/web:test',
-  ...noise('web', 50),
+  ...noise('web', 25),
+  ' ERROR  run failed: command  exited (1)',
+  '[ELIFECYCLE] Test failed',
+  ...noise('web', 25),
   '\u001B[41m\u001B[1m FAIL \u001B[22m\u001B[49m  app/utils/labels.test.ts > labels > says which fix stopped',
   'AssertionError: expected \'Fix stopped\' to be \'Rebase stopped\'',
   ' - Expected', ' + Received', '',
@@ -67,6 +71,40 @@ describe('CiLogScanner', () => {
     expect(excerpt).toContain('Error: Cannot find module ./generated/routes')
     expect(excerpt).toContain('Process completed with exit code 1.')
     expect(excerpt.length).toBeLessThanOrEqual(8000)
+  })
+
+  // Job 125066364374 prints ELIFECYCLE right after turbo's `ERROR run failed`,
+  // then hundreds of thousands of lines more, then again at the true end
+  const twoExits = (stack: string[]) => lines(
+    '##[group]@corral/core:test', 'passed', '##[endgroup]',
+    '@corral/web:test', ...noise('web', 7000),
+    ' ERROR  run failed: command  exited (1)',
+    '[ELIFECYCLE] Test failed',
+    ...Array.from({ length: 5000 }, (_, i) => `[Vue warn] ${i} ${'w'.repeat(160)}`),
+    'Error: Cannot find module ./generated/routes',
+    ...stack,
+    '[ELIFECYCLE] Test failed',
+    '##[group]@corral/server:test', ...noise('server', 20_000),
+    '##[endgroup]', ' Failed:    @corral/web#test',
+    '##[error]Process completed with exit code 1.'
+  )
+  const frames = (n: number) => Array.from({ length: n }, (_, i) => `    at frame${i} (/home/runner/work/corral/node_modules/vitest/dist/chunks/runner.js:${i}:${i}) ${'.'.repeat(65)}`)
+
+  it.each([0, 9, 12, 18])('keeps an unmatched error above the last of two ELIFECYCLEs, with %i stack frames', (n) => {
+    const { tail, failureLines } = scan(twoExits(frames(n)), 4096)
+    expect(tail).not.toContain('Cannot find module')
+    const excerpt = ciExcerpt(tail, failureLines)
+    expect(excerpt).toContain('Error: Cannot find module ./generated/routes')
+    expect(excerpt).toContain('Process completed with exit code 1.')
+    expect(excerpt.length).toBeLessThanOrEqual(8000)
+  })
+
+  it('loses nothing when the last line of a failed section is its ELIFECYCLE', () => {
+    const { failureLines } = scan(lines('@corral/web:test', ...noise('web', 500), 'Error: broken at the end', '[ELIFECYCLE] Test failed', '##[group]b:test', 'x', '##[endgroup]', ' Failed:    @corral/web#test'))
+    const text = failureLines.join('\n')
+    expect(text).toContain('Error: broken at the end')
+    expect(text).toContain('[ELIFECYCLE] Test failed')
+    expect(new Set(failureLines).size).toBe(failureLines.length)
   })
 
   it('reserves FAIL headers and assertions despite ten noisy progress failures', () => {
