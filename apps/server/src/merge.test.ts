@@ -420,6 +420,10 @@ describe('merge orchestrator and human controls', () => {
       const live = t.github.pulls.get(pr.number)!
       Object.assign(live, { merged: true, state: 'closed', mergeCommitSha: 'outside-sha' })
       const row = await taskRow(task.id)
+      // Paused for the pass: a scheduler pass could lease the task once it's
+      // back in progress, and a leased task is left to its run
+      const developers = eq(agents.role, 'developer')
+      await t.db.update(agents).set({ paused: true }).where(developers)
       await t.db.update(tasks).set({ status: 'ready_to_merge' }).where(eq(tasks.id, task.id))
       await t.db.update(schema.projects).set({ paused: false }).where(eq(schema.projects.id, project.id))
       // The pass reads Ready to merge; the human's change lands before it records anything
@@ -431,6 +435,7 @@ describe('merge orchestrator and human controls', () => {
       spy.mockRestore()
       expect(await taskRow(task.id)).toMatchObject({ status: 'blocked', statusReason: expect.stringContaining(`PR #${pr.number} merged`) })
       await pause(project)
+      await t.db.update(agents).set({ paused: false }).where(developers)
     })
   })
 
