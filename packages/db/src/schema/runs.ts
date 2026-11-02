@@ -13,7 +13,7 @@ import {
   uuid,
   type AnyPgColumn
 } from 'drizzle-orm/pg-core'
-import { DESIGNER_RUN_OUTCOMES, DEVELOPER_RUN_OUTCOMES, PM_RUN_OUTCOMES, REVIEWER_RUN_OUTCOMES, TERMINAL_RUN_STATES, type RebaseReview } from '@corral/core'
+import { DESIGNER_RUN_OUTCOMES, DEVELOPER_RUN_OUTCOMES, PM_RUN_OUTCOMES, REVIEWER_RUN_OUTCOMES, TERMINAL_RUN_STATES, type EpicFixKind, type RebaseReview } from '@corral/core'
 import { createdAt, updatedAt } from './columns.ts'
 import { agentRole, runOutcome, runState } from './enums.ts'
 import { epics } from './epics.ts'
@@ -82,6 +82,13 @@ export const runs = pgTable('runs', {
   headSha: text(),
   review: text().$type<RebaseReview>(),
   conflictedFiles: jsonb().$type<string[]>(),
+  // A round keeping a PR healthy (D29): what started it, on a task or an epic,
+  // the operation of a developer run on an epic, what the developer reported
+  // and whether that work was reviewed again
+  fixKind: text().$type<EpicFixKind>(),
+  operationId: uuid(),
+  behaviourChanged: boolean(),
+  reReviewed: boolean(),
   summary: text(),
   error: text(),
   // Known reset time when the outcome is rate_limited (D3)
@@ -107,14 +114,13 @@ export const runs = pgTable('runs', {
   // The few live runs among many finished ones. Lists ACTIVE_RUN_STATES.
   index('runs_active_number_index').on(t.number)
     .where(sql`${t.state} in ('queued', 'starting', 'running', 'waiting_for_input', 'stopping')`),
-  check('runs_task_unless_pm', sql`${t.taskId} is not null or ${t.role} = 'pm' or (${t.epicId} is not null and ${t.role} = 'reviewer')`),
-  // A PM turn belongs to neither a task nor an epic, a developer or designer
-  // never to an epic, and a reviewer to one or the other. planSessionId isn't checked: it
+  check('runs_task_unless_pm', sql`${t.taskId} is not null or ${t.role} = 'pm' or (${t.epicId} is not null and ${t.role} in ('reviewer', 'developer'))`),
+  // A PM turn belongs to neither a task nor an epic, a designer never to an
+  // epic, and a reviewer or developer to one or the other. planSessionId isn't checked: it
   // goes null when its session is deleted.
   // Roles as text too: designer is added in the same migration batch on a new database
   check('runs_role_context', sql`case ${t.role}::text
     when 'pm' then ${t.taskId} is null and ${t.epicId} is null
-    when 'developer' then ${t.epicId} is null
     when 'designer' then ${t.epicId} is null
     else ${t.taskId} is null or ${t.epicId} is null
   end`),

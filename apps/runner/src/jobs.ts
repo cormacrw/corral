@@ -40,7 +40,7 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob, pmTurnRun
       return { kind: 'detect_clis', clis: await detectClis(config) }
 
     case 'github':
-      return githubRequest(job.method, job.path, job.body)
+      return githubRequest(job.method, job.path, job.body, job.tailChars)
 
     case 'cleanup_worktrees': {
       // Keeps any worktree with uncommitted changes (PRD §7.4)
@@ -173,13 +173,14 @@ async function ghSignedIn(): Promise<boolean> {
 
 // One GitHub REST call through `gh api`, returning the status and JSON body.
 // gh exits non-zero on 4xx/5xx but still prints the response.
-export async function githubRequest(method: string, path: string, body?: unknown): Promise<Extract<SetupJobResult, { kind: 'github' }>> {
+export async function githubRequest(method: string, path: string, body?: unknown, tailChars?: number): Promise<Extract<SetupJobResult, { kind: 'github' }>> {
   const args = ['api', '--include', '-X', method, path, '-H', 'Accept: application/vnd.github+json']
   if (body !== undefined) args.push('--input', '-')
   const result = await gh(args, { input: body === undefined ? '' : JSON.stringify(body), timeoutMs: 60_000 })
   const parsed = parseIncludedResponse(result.stdout)
   if (!parsed) throw new Error(result.stderr.trim() || `gh api ${method} ${path} failed`)
-  return { kind: 'github', ...parsed }
+  // A CI log can run to megabytes, and only its end reaches anyone
+  return { kind: 'github', ...parsed, body: tailChars && typeof parsed.body === 'string' ? parsed.body.slice(-tailChars) : parsed.body }
 }
 
 export function parseIncludedResponse(output: string): { status: number, body: unknown } | null {

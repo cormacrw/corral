@@ -49,7 +49,7 @@ async function rebaseRound(humanReview: boolean, options: { epicMode?: 'each_tas
 }
 async function submitted(humanReview = false, options: { epicMode?: 'each_task', checkFailures?: RebaseCheckFailure[], humanCheck?: boolean } = {}) {
   const { task, criteria, dev } = await rebaseRound(humanReview, options)
-  const submission = { outcome: 'pr_rebased', review: humanReview ? 'trivial' : 'needs_review', conflictedFiles: ['app.ts'], headSha: 'new-head', summary: 'app.ts: retained main validation and task navigation', note: 'app.ts: retained both sides of the conflict' }
+  const submission = { outcome: 'pr_rebased', behaviourChanged: false, review: humanReview ? 'trivial' : 'needs_review', conflictedFiles: ['app.ts'], headSha: 'new-head', summary: 'app.ts: retained main validation and task navigation', note: 'app.ts: retained both sides of the conflict' }
   const validation = []
   for (const invalid of [
     { ...submission, review: undefined },
@@ -202,7 +202,7 @@ function stubCompare(base: string, options: { oldDiff?: ChangedFile[], newDiff?:
   t.github.setComparison('old-base', 'new-base', { mergeBase: 'old-base', files: options.onBase ?? [file('lib/queue.ts', '+main')] })
 }
 async function reportRebase(dev: RunJob, review: 'trivial' | 'needs_review' = 'trivial') {
-  const report = { outcome: 'pr_rebased', review, conflictedFiles: ['app.ts'], headSha: 'new-head', summary: 'app.ts: kept both sides', note: 'app.ts: kept both sides' }
+  const report = { outcome: 'pr_rebased', behaviourChanged: false, review, conflictedFiles: ['app.ts'], headSha: 'new-head', summary: 'app.ts: kept both sides', note: 'app.ts: kept both sides' }
   const response = await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', report)
   expect(response).toMatchObject({ ok: true })
   return { report, response }

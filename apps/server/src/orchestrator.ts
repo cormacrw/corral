@@ -1,5 +1,6 @@
 import { RUNNER_HEARTBEAT_MS, type GlobalStatus, type PmRunJob, type RunnerMessage } from '@corral/contracts'
 import { ACTIVE_RUN_STATES, type Actor } from '@corral/core'
+import { EpicFixes } from './epic-fixes.ts'
 import { schema } from '@corral/db'
 import { and, eq, inArray, isNull } from 'drizzle-orm'
 import { AgentTools } from './agent-tools.ts'
@@ -75,6 +76,7 @@ export class Orchestrator implements RunnerHandlers {
     core.ending = new RunEnding(core)
     core.jobs = new RunJobs(core)
     core.outcomes = new RunOutcomes(core)
+    core.fixes = new EpicFixes(core)
     core.tools = new AgentTools(core)
     core.human = new HumanActions(core)
     core.pm = new PmDispatch(core)

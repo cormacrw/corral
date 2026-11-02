@@ -241,7 +241,7 @@ export class MergeOrchestrator {
     if (failed.length > 0) {
       // flows.md 7b: CI fails → In progress with the failure attached
       const body = ['CI failed on this commit; please fix and report pr_updated.', '', ...failed.map(c => `- ${c.name}: failed${c.url ? ` (${c.url})` : ''}`)].join('\n')
-      await this.#transition(task.id, { type: 'ci_failed' }, { event: 'ci_failed', checks: failed.map(c => c.name) }, body)
+      await this.#transition(task.id, { type: 'ci_failed' }, { event: 'ci_failed', checks: failed.map(c => c.name) }, body, 'ready_to_merge', { ciFix: failed.map(c => ({ name: c.name, url: c.url })), approvedHeadSha: pr.headSha })
       return
     }
     if (pending.length > 0) {
@@ -479,11 +479,12 @@ export class MergeOrchestrator {
   }
 
   // Only from the status the pass read: a human may have moved the task since
-  async #transition(taskId: string, event: Parameters<typeof applyTransition>[3], detail: TransitionDetail, comment?: string, from: TaskStatus = 'ready_to_merge'): Promise<void> {
+  async #transition(taskId: string, event: Parameters<typeof applyTransition>[3], detail: TransitionDetail, comment?: string, from: TaskStatus = 'ready_to_merge', values?: Partial<typeof tasks.$inferInsert>): Promise<void> {
     await this.#d.db.transaction(async (tx) => {
       const { task, project } = await lockTask(tx, taskId)
       if (task.leaseRunId || task.status !== from) return
       await applyTransition(tx, task, project, event, server, detail)
+      if (values) await tx.update(tasks).set(values).where(eq(tasks.id, taskId))
       if (comment) await tx.insert(comments).values({ taskId, author: server, body: comment })
     })
     await this.#publish(taskId)

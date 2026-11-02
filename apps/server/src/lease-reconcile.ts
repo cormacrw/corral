@@ -1,7 +1,7 @@
 import { RUNNER_HEARTBEAT_MS } from '@corral/contracts'
 import { ACTIVE_RUN_STATES, LEASE_DURATION_MS } from '@corral/core'
 import { schema } from '@corral/db'
-import { and, eq, inArray, isNotNull, isNull, lt, or } from 'drizzle-orm'
+import { and, eq, gt, inArray, isNotNull, isNull, lt, or } from 'drizzle-orm'
 import { KEEP_WORK_STOPS, RUNNER_RESTARTED, UUID, type RunContext, type RunCore } from './run-context.ts'
 
 const { runs, tasks } = schema
@@ -39,7 +39,7 @@ export class LeaseReconcile {
     for (const id of [...expiredRuns.map(r => r.id), ...expired.map(r => r.runId!)]) {
       const ctx = await this.#c.runs.load(id)
       if (!ctx) continue
-      await this.#c.ending.stop(ctx, ctx.run.epicId ? 'Epic review lease expired' : ctx.run.role === 'pm' ? 'PM turn lease expired: no heartbeat from the runner' : 'Lease expired: no heartbeat from the runner', { reason: 'Lease expired' })
+      await this.#c.ending.stop(ctx, ctx.run.epicId ? ctx.run.role === 'developer' ? 'Epic fix lease expired' : 'Epic review lease expired' : ctx.run.role === 'pm' ? 'PM turn lease expired: no heartbeat from the runner' : 'Lease expired: no heartbeat from the runner', { reason: 'Lease expired' })
     }
   }
 
@@ -128,7 +128,14 @@ export class LeaseReconcile {
   // reached the runner before the assignment did, so it's stopped again.
   async #savingWork(runId: string, leaseEpoch: number, runnerId: string): Promise<boolean> {
     const ctx = await this.#c.runs.load(runId)
-    if (!ctx?.task || ctx.task.deletedAt || ctx.task.leaseRunId !== null) return false
+    if (!ctx) return false
+    if (ctx.task) {
+      if (ctx.task.deletedAt || ctx.task.leaseRunId !== null) return false
+    } else if (ctx.run.epicId && ctx.run.operationId && ctx.run.role === 'developer') {
+      const [operation] = await this.#c.d.db.select({ state: schema.taskIntegrationOperations.state }).from(schema.taskIntegrationOperations).where(eq(schema.taskIntegrationOperations.id, ctx.run.operationId))
+      const [newer] = await this.#c.d.db.select({ id: runs.id }).from(runs).where(and(eq(runs.operationId, ctx.run.operationId), gt(runs.number, ctx.run.number))).limit(1)
+      if (operation?.state !== 'running' || newer) return false
+    } else return false
     const { run } = ctx
     return (run.role === 'developer' || run.role === 'designer') && run.state === 'interrupted' && run.startedAt !== null && run.leaseEpoch === leaseEpoch && run.runnerId === runnerId && KEEP_WORK_STOPS.has(run.error ?? '')
   }

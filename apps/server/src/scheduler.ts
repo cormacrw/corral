@@ -59,8 +59,8 @@ export class Scheduler {
   // The runner a run goes to: an online one that takes the role, has a
   // signed-in CLI for the runtime and a free slot, the emptiest first. A run
   // with a previous runner that's still online waits for that one.
-  async pickRunner(tx: Executor, role: RunnerRole, runtime: string, previous: string | null, integrationProtocol = 0): Promise<string | null> {
-    const fit = this.#c.d.runner.available().filter(r => !r.toolContractReason && r.roles.includes(role) && r.runtimes.includes(runtime) && !integrationCompatibilityReason(integrationProtocol, r.taskIntegrationProtocols))
+  async pickRunner(tx: Executor, role: RunnerRole, runtime: string, previous: string | null, integrationProtocol = 0, epicFix = false): Promise<string | null> {
+    const fit = this.#c.d.runner.available().filter(r => !r.toolContractReason && r.roles.includes(role) && r.runtimes.includes(runtime) && !integrationCompatibilityReason(integrationProtocol, r.taskIntegrationProtocols) && (!epicFix || r.epicFixExecutor))
     if (!fit.length) return null
     const busy = await tx.select({ runnerId: runs.runnerId, n: count() }).from(runs)
       .where(and(inArray(runs.state, [...ACTIVE_RUN_STATES]), inArray(runs.runnerId, fit.map(r => r.id))))
@@ -147,7 +147,15 @@ export class Scheduler {
         const ctx = await this.#c.runs.load(job.runId)
         if (!ctx) break
         if (ctx.run.runnerId) await this.#c.d.db.update(runs).set({ runnerName: runner.name(ctx.run.runnerId) }).where(eq(runs.id, job.runId))
-        if (!await this.dispatch(ctx, job, RUNNER_WENT_OFFLINE)) break
+        if (!await this.dispatch(ctx, await this.#c.epicPrs.addCiResult(job, ctx.project.requiredChecks), RUNNER_WENT_OFFLINE)) break
+        if (this.#c.stopped || this.#c.updating) return
+        if (agent.wakeIntervalSeconds !== null) break
+      }
+    }
+    if (agent.role === 'developer' && (agent.wakeIntervalSeconds === null || await this.#awake(agent))) {
+      const claimFix = () => this.exclusive(() => this.#c.fixes.claim(agent.id, tx => this.pickRunner(tx, 'developer', agent.runtime, null, 0, true)))
+      for (let runId = await claimFix(); runId; runId = await claimFix()) {
+        await this.#assignFix(runId)
         if (this.#c.stopped || this.#c.updating) return
         if (agent.wakeIntervalSeconds !== null) break
       }
@@ -173,6 +181,23 @@ export class Scheduler {
     const [last] = await this.#c.d.db.select({ queuedAt: runs.queuedAt }).from(runs)
       .where(eq(runs.agentId, agent.id)).orderBy(desc(runs.queuedAt)).limit(1)
     return !last || this.#c.now().getTime() - last.queuedAt.getTime() >= agent.wakeIntervalSeconds! * 1000
+  }
+
+  // A developer run on an epic (D29). It fails with the cause, counting towards
+  // the fix's bound, rather than pinning its agent until the lease expires.
+  async #assignFix(runId: string): Promise<void> {
+    const { db, runner } = this.#c.d
+    const ctx = await this.#c.runs.load(runId)
+    if (!ctx) return
+    if (ctx.run.runnerId) await db.update(runs).set({ runnerName: runner.name(ctx.run.runnerId) }).where(eq(runs.id, runId))
+    try {
+      await this.dispatch(ctx, await this.#c.fixes.job(ctx), RUNNER_WENT_OFFLINE)
+    } catch (error) {
+      console.error(`Assigning run ${runId} failed`, error)
+      await this.#c.ending.failRun(ctx, errorText(error))
+      await this.#c.ending.publish(ctx)
+    }
+    await this.#c.fixes.publish(ctx.run.epicId!)
   }
 
   // Whether the run was handed to the runner

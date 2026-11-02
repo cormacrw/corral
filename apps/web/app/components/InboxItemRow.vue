@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { InboxItem } from '@corral/contracts'
-import { inboxTypeBadge } from '~/utils/labels'
+import { inboxItemBadge } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 import TimeAgo from './TimeAgo.vue'
 
@@ -31,8 +31,8 @@ defineProps<{ item: Exclude<InboxItem, { type: 'plan_thread' }>, mobile?: boolea
     >{{ item.fromSha ? `${item.fromSha}…` : '' }}{{ item.toSha }}</span>
     <span :class="['flex items-center gap-2', mobile ? 'mt-0.5' : 'mt-1']">
       <UBadge
-        :label="inboxTypeBadge(item.type).label"
-        :color="inboxTypeBadge(item.type).color"
+        :label="inboxItemBadge(item).label"
+        :color="inboxItemBadge(item).color"
         variant="subtle"
         :size="mobile ? 'sm' : 'xs'"
         class="shrink-0"

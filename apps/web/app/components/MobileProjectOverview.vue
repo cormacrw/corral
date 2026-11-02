@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ProjectOverview } from '~/composables/useProjectOverview'
-import { inboxTypeBadge } from '~/utils/labels'
+import { inboxItemBadge } from '~/utils/labels'
 import TimeAgo from '~/components/TimeAgo.vue'
 
 // Project overview on mobile (design/mobile.md, frame "Project overview").
@@ -184,8 +184,8 @@ const { project, tasks, loading, inboxLoading, runs, history, error, load, needs
                     </span>
                     <span class="mt-1 flex items-center gap-2">
                       <UBadge
-                        :label="inboxTypeBadge(item.type).label"
-                        :color="inboxTypeBadge(item.type).color"
+                        :label="inboxItemBadge(item).label"
+                        :color="inboxItemBadge(item).color"
                         variant="subtle"
                         size="sm"
                       />

@@ -21,7 +21,7 @@ it('updates prerequisite and blocks progress and the waiting alert from task eve
   const client = testQueryClient()
   client.setDefaultOptions({ queries: { staleTime: Infinity, retry: false, gcTime: Infinity } })
   const project = projects[0]!
-  const own: EpicDetail = { ...epics[0]!, id: 'own', projectId: project.id, title: 'Current epic', reviewMode: 'direct', branch: null, prNumber: null, reviewState: null, dependsOn: ['pre'], blocks: ['next'], tasks: [] }
+  const own: EpicDetail = { ...epics[0]!, id: 'own', projectId: project.id, title: 'Current epic', reviewMode: 'direct', branch: null, prNumber: null, reviewState: null, dependsOn: ['pre'], blocks: ['next'], tasks: [], fixes: [] }
   const prerequisite = { ...own, id: 'pre', title: 'Prerequisite', taskCount: 1, mergedCount: 0 }
   const blocked = { ...own, id: 'next', title: 'Follow-up', taskCount: 1, mergedCount: 0 }
   const task = (over: Partial<Task> = {}) => ({ id: 't1', number: 1, ref: 'TA-1', projectId: project.id, epicId: 'pre', status: 'ready', type: 'task', ...over }) as Task
@@ -92,7 +92,7 @@ it('keeps an open epic\'s task list live as its tasks change, join and leave', a
   client.setDefaultOptions({ queries: { staleTime: Infinity, retry: false, gcTime: Infinity } })
   const project = projects[0]!
   const task = (over: Partial<Task> = {}) => ({ id: 't1', number: 1, ref: 'TA-1', title: 'First', projectId: project.id, epicId: 'own', status: 'ready', type: 'task', priority: 'medium', dependsOn: [], ...over }) as Task
-  const own: EpicDetail = { ...epics[0]!, id: 'own', projectId: project.id, reviewMode: 'direct', branch: null, prNumber: null, reviewState: null, dependsOn: [], blocks: [], tasks: [task()] }
+  const own: EpicDetail = { ...epics[0]!, id: 'own', projectId: project.id, reviewMode: 'direct', branch: null, prNumber: null, reviewState: null, dependsOn: [], blocks: [], tasks: [task()], fixes: [] }
   client.setQueryData(keys.projects.list(), [project])
   client.setQueryData(keys.tasks.list(project.slug), [task()])
   client.setQueryData(keys.epics.list(project.slug), [own])

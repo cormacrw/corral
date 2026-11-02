@@ -1,6 +1,6 @@
 import type { TaskStatus } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { agentStatus, cliLoginCommand, detectedRuntimes, formatMs, epicInProgress, epicReviewStatus, epicWithLiveCounts, inboxItemLink, plural, prNumberLabel, runtimeLabel, runBadge, runRef, runTitle, runTokens, statusCounts, taskCounts, taskTypeBadge, cardTypeIcon } from './labels.ts'
+import { agentStatus, cliLoginCommand, detectedRuntimes, formatMs, epicInProgress, epicFixResult, epicReviewStatus, epicWithLiveCounts, inboxItemLink, plural, prNumberLabel, runtimeLabel, runBadge, runRef, runTitle, runTokens, statusCounts, taskCounts, taskTypeBadge, cardTypeIcon } from './labels.ts'
 
 const tasks = (...statuses: TaskStatus[]) => statuses.map(status => ({ status }))
 
@@ -196,4 +196,19 @@ it('counts in the singular and the plural', () => {
 it('names a PR by number when its URL has one', () => {
   expect(prNumberLabel('https://github.com/o/r/pull/41')).toBe('#41')
   expect(prNumberLabel(null)).toBe('Open PR')
+})
+
+describe('epic fixes (D29)', () => {
+  const epic = { reviewMode: 'epic', branch: 'b', reviewState: 'ready_to_merge', taskCount: 2, mergedCount: 2 } as const
+  it('says what the developer on the epic is doing, and what stopped', () => {
+    expect(epicReviewStatus({ ...epic, sync: { state: 'fixing', fix: 'ci', reason: '', files: [], developer: null, attempts: 0 } })?.label).toBe('Fixing a CI failure')
+    expect(epicReviewStatus({ ...epic, sync: { state: 'fixing', fix: 'review', reason: '', files: [], developer: null, attempts: 0 } })?.label).toBe('Addressing integration review')
+    expect(epicReviewStatus({ ...epic, sync: { state: 'failed', error: 'x', fix: 'ci' } })?.label).toBe('Fix stopped, retry to carry on')
+    expect(epicReviewStatus({ ...epic, sync: { state: 'failed', error: 'x' } })?.label).toBe('Rebase stopped, retry to carry on')
+  })
+  it('reads a past fix', () => {
+    expect(epicFixResult({ behaviourChanged: false, reReviewed: false })).toEqual(['Behaviour unchanged', 'Kept approval'])
+    expect(epicFixResult({ behaviourChanged: true, reReviewed: true })).toEqual(['Behaviour changed', 'Reviewed again'])
+    expect(epicFixResult({ behaviourChanged: null, reReviewed: null })).toEqual(['Not reported'])
+  })
 })

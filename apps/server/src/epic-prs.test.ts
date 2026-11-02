@@ -79,7 +79,7 @@ it.each(['epic', 'each_task'] as const)('opens %s PR only after the last board t
   expect(job).toMatchObject({ role: 'reviewer', taskId: null, branch: epic.branch, headSha: pr.headSha, baseBranch: 'develop' })
   expect((await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId)))[0]?.runnerName).toBeTruthy()
   expect(job.prompt).toContain('git diff origin/develop...HEAD')
-  expect(job.prompt).toContain('WITHOUT THE CACHE')
+  expect(job.prompt).toContain('without the cache')
   expect(job.prompt).toContain('Search API returns saved searches')
   expect(job.prompt).toContain(task.acceptanceCriteria[0]!.text)
   expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(false)
@@ -104,25 +104,18 @@ it.each(['epic', 'each_task'] as const)('opens %s PR only after the last board t
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
-it('keeps changes requested out of Inbox and creates a Ready fix task', async () => {
+it('keeps changes requested out of Inbox and hands them to a developer run on the epic, with no task', async () => {
   const { project, epic, other } = await setup()
   const job = await lastMerge(other.id, epic.id)
+  const before = (await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))).length
   expect(await report(job, 'changes_requested')).toMatchObject({ ok: true })
   expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(false)
-  const fixes = await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))
-  const fix = fixes.find(t => t.title.startsWith('Fix integration:'))!
-  expect(fix).toMatchObject({ status: 'ready', epicId: epic.id })
-  await capture('changes-requested.json', { reviewerReport: { outcome: 'changes_requested', summary: 'UI sends the wrong search field; align it with the API.' }, request: { method: 'GET', url: `${t.server!.url}/api/inbox` }, status: 200, response: await inbox(), epic: await (await fetch(`${t.server!.url}/api/epics/${epic.id}`)).json(), fixTask: fix })
-  expect(JSON.stringify(fix.description)).toContain('wrong search field')
-  expect(fix.title).toBe('Fix integration: UI sends the wrong search field; align it with the API')
-  const [held] = await t.db.select().from(schema.epics).where(eq(schema.epics.id, epic.id))
-  expect(held!.reviewState).toBe('changes_requested')
-  // Finishing the fix reuses the PR and starts a fresh integration review.
-  await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, fix.id))
-  await t.orchestrator.schedule()
-  const second = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.runId !== job.runId)).job
-  expect(await report(second, 'approved')).toMatchObject({ ok: true })
-  expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(true)
+  expect(await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))).toHaveLength(before)
+  const [operation] = await t.db.select().from(schema.taskIntegrationOperations).where(eq(schema.taskIntegrationOperations.epicId, epic.id))
+  expect(operation).toMatchObject({ kind: 'rebase', state: 'running', fix: 'review', expectedTargetSha: job.headSha })
+  expect(operation!.fixBrief).toContain('wrong search field')
+  await capture('changes-requested.json', { reviewerReport: { outcome: 'changes_requested', summary: 'UI sends the wrong search field; align it with the API.' }, request: { method: 'GET', url: `${t.server!.url}/api/inbox` }, status: 200, response: await inbox(), epic: await (await fetch(`${t.server!.url}/api/epics/${epic.id}`)).json() })
+  expect(await reviewState(epic.id)).toBe('changes_requested')
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
@@ -202,7 +195,8 @@ it('human changes requested create a fix, hold the PR, and bring the same PR bac
 it('sends the epic PR back to review if its fix task is dropped from the board', async () => {
   const { project, epic, other } = await setup()
   const job = await lastMerge(other.id, epic.id)
-  expect(await report(job, 'changes_requested')).toMatchObject({ ok: true })
+  expect(await report(job, 'approved')).toMatchObject({ ok: true })
+  expect((await t.request('POST', `/api/epics/${epic.id}/review`, { action: 'request_changes', headSha: job.headSha, text: 'Deleting needs a confirmation' })).status).toBe(200)
   const fix = await fixOf(epic.id)
   await t.db.update(schema.tasks).set({ deletedAt: new Date() }).where(eq(schema.tasks.id, fix.id))
   await t.orchestrator.schedule()

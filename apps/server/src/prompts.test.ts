@@ -1,6 +1,6 @@
 import { HUMAN_DECISIONS_NOTE } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask } from './prompts.ts'
+import { epicReviewCiSection, epicReviewPrompt, designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask } from './prompts.ts'
 
 const turn = { text: 'hi', attachedTask: null, projectName: 'Test app', prefix: 'TA' }
 
@@ -603,5 +603,33 @@ describe('human decisions contract (D11)', () => {
     ['PR-free', true]
   ])('sends the question to the summary from a %s rebase', (_name, prFree) => {
     expect(developerRevisionPrompt({ ...task, rebaseOnly: true, prFree }, [])).toContain('report stuck instead, with the question in the summary')
+  })
+})
+
+describe('integration review prompts', () => {
+  const input = { agentName: 'Vera', title: 'Saved searches', context: { epicId: 'e' }, target: 'main', headSha: 'abc123', requiredChecks: ['ci'], lastReview: null }
+
+  it('tells the reviewer not to run the gates with required CI, and to run them without', () => {
+    expect(epicReviewPrompt(input)).toContain('so don\'t rerun the project\'s lint, typecheck, tests or build')
+    const none = epicReviewPrompt({ ...input, requiredChecks: [] })
+    expect(none).toContain('Run the project\'s lint, typecheck, tests and build yourself')
+    expect(none).not.toContain('don\'t rerun')
+  })
+
+  it('covers the whole epic the first time, and what changed since on a repeat', () => {
+    expect(epicReviewPrompt(input)).toContain('Review the whole combined diff with git diff origin/main...HEAD')
+    const repeat = epicReviewPrompt({ ...input, lastReview: { headSha: 'old999', summary: 'The UI sends the wrong field', outcome: 'changes_requested', fixes: ['Renamed the field'] } })
+    expect(repeat).toContain('old999')
+    expect(repeat).toContain('The UI sends the wrong field')
+    expect(repeat).toContain('git diff old999..HEAD')
+    expect(repeat).toContain('plus anything those changes could affect')
+    expect(repeat).not.toContain('Review the whole combined diff')
+  })
+
+  it('reads CI for the head under review, and says a failure isn\'t reproduced with a full run', () => {
+    const section = epicReviewCiSection({ read: true, passed: ['lint'], pending: [], failures: [{ name: 'test', url: 'https://x/job/1', step: 'Run tests', excerpt: 'FAIL a.test.ts' }] })
+    expect(section).toContain('Passed: lint')
+    expect(section).toContain('Run tests')
+    expect(section).toContain('A targeted test is fine')
   })
 })

@@ -9,6 +9,10 @@ const emit = defineEmits<{ resolved: [] }>()
 const review = useMutation({ ...reviewEpic, ...holdsInbox })
 const busy = review.isPending
 const error = computed(() => review.error.value?.message ?? null)
+const answer = ref('')
+function send() {
+  review.mutate({ id: props.item.epicId, input: { action: 'decide', headSha: props.item.headSha, text: answer.value.trim() } }, { onSuccess: () => emit('resolved') })
+}
 function handOff() {
   review.mutate({ id: props.item.epicId, input: { action: 'rebase', headSha: props.item.headSha } }, { onSuccess: () => emit('resolved') })
 }
@@ -20,7 +24,7 @@ function handOff() {
     aria-label="Epic PR conflict"
   >
     <InboxEpicHeader
-      badge="Epic conflict · Needs you"
+      :badge="item.stopped ? `${item.stopped.fix === 'ci' || item.stopped.fix === 'review' ? 'Fix' : 'Rebase'} stopped · Needs you` : 'Epic conflict · Needs you'"
       color="error"
       :title="item.subject"
       :epic-id="item.epicId"
@@ -36,11 +40,21 @@ function handOff() {
         :item="item"
       />
       <p
-        v-else
+        v-else-if="!item.stopped"
         class="break-words"
       >
         The epic PR can't rebase onto {{ item.targetBranch }}.
       </p>
+      <p
+        v-if="item.stopped"
+        class="break-words"
+      >
+        {{ item.stopped.error }}
+      </p>
+      <InboxEpicDecision
+        v-if="item.decision"
+        :item="{ taskId: null, epicId: item.epicId, headSha: item.headSha, decision: item.decision }"
+      />
       <section
         v-if="item.files.length"
         aria-label="Conflicting files"
@@ -64,7 +78,7 @@ function handOff() {
         </ul>
       </section>
       <p
-        v-else
+        v-else-if="!item.decision && !item.stopped"
         class="text-muted"
       >
         Corral couldn't work out which files conflict; the PR on GitHub shows them.
@@ -76,16 +90,47 @@ function handOff() {
         :title="error"
         color="error"
       />
-      <p class="text-xs text-muted">
-        A developer rebases the epic branch and force-pushes it. The epic PR then goes back to agent review, and to you.
-      </p>
-      <UButton
-        label="Hand the rebase to a developer"
-        icon="i-lucide-git-branch"
-        :loading="busy"
-        class="justify-center max-sm:min-h-11 max-sm:w-full"
-        @click="handOff"
-      />
+      <template v-if="item.decision">
+        <UTextarea
+          v-model="answer"
+          aria-label="Answer in your own words"
+          placeholder="Or answer in your own words"
+          autoresize
+          :rows="2"
+          class="w-full"
+        />
+        <UButton
+          label="Send answer"
+          :disabled="!answer.trim()"
+          :loading="busy"
+          class="justify-center max-sm:min-h-11 max-sm:w-full"
+          @click="send"
+        />
+      </template>
+      <template v-else-if="item.stopped">
+        <p class="text-xs text-muted">
+          Automatic recovery has stopped. Retry counts attempts afresh and starts it again.
+        </p>
+        <UButton
+          label="Retry"
+          icon="i-lucide-rotate-cw"
+          :loading="busy"
+          class="justify-center max-sm:min-h-11 max-sm:w-full"
+          @click="handOff"
+        />
+      </template>
+      <template v-else>
+        <p class="text-xs text-muted">
+          A developer rebases the epic branch and force-pushes it. The epic PR then goes back to agent review, and to you.
+        </p>
+        <UButton
+          label="Hand the rebase to a developer"
+          icon="i-lucide-git-branch"
+          :loading="busy"
+          class="justify-center max-sm:min-h-11 max-sm:w-full"
+          @click="handOff"
+        />
+      </template>
     </footer>
   </section>
 </template>

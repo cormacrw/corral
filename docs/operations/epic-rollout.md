@@ -44,7 +44,7 @@ While you have a mix of runners:
 | Merged means | The PR squash-merged into the epic branch | The commit carrying its `Corral-Submission` trailer was read back from the epic branch |
 | Human review | On the task | On the epic's final approval (`humanReview` and human checks are ticked there) |
 
-A task with neither `pr` nor `submission` hasn't submitted yet. At `integration_protocol` 0 it can still go either way, depending on the runner its developer run lands on. At `1` it's already PR-free, because selection happens when the developer run starts. A rebase resolution task (branch `corral/epic-rebase/<operation>`) has no PR and no submission, and uses `pr_updated`; that's expected.
+A task with neither `pr` nor `submission` hasn't submitted yet. At `integration_protocol` 0 it can still go either way, depending on the runner its developer run lands on. At `1` it's already PR-free, because selection happens when the developer run starts. A rebase resolution task left from before D29 (branch `corral/epic-rebase/<operation>`) has no PR and no submission, and uses `pr_updated`; that's expected. New epic fixes have no task: their developer runs have `epic_id` and `operation_id`.
 
 An epic's PR description and its review in the Inbox list both kinds together, with each task's PR or commits and its evidence.
 
@@ -56,7 +56,7 @@ Start at the epic page. The banner and the status come from `sync` on `GET /api/
 |---|---|---|---|
 | Rebasing onto the target branch | `rebasing` | A journaled rebase is running | Nothing |
 | Resolving a rebase conflict, naming the files and task | `resolving` | A developer and reviewer are working on a private candidate. The epic branch hasn't moved | Nothing. Follow the task on the board |
-| This rebase needs your decision | `deciding` | The two sides can't both hold, or a binding decision changed. The question, its alternatives and the affected changes are in your Inbox on the resolution task | Answer it in Needs you |
+| This rebase needs your decision | `deciding` | The two sides can't both hold, or a binding decision changed. The question, its alternatives and the affected changes are in your Inbox on the epic (or on the resolution task, if one was already in progress) | Answer it in Needs you |
 | Rebase stopped, with **Retry** | `failed` | Three failures on the same commits, or GitHub won't merge an up-to-date PR. `sync.error` says why | Fix the cause, then **Retry** |
 | No banner, task in Ready to merge | `null` | Integration is queued or running, which `sync` doesn't show; check for an executor, then the journal below | Nothing, unless the project is paused, the kill switch is on or an update hold is set |
 | Waiting for your review | `null` | The Inbox has the epic review | Approve or request changes |
@@ -72,7 +72,7 @@ Pausing the project, the kill switch and an update hold all stop new writes, lea
 | State | Meaning |
 |---|---|
 | `pending` | Written, no git work started |
-| `running` | The runner is working, or a candidate is waiting for CI, a pause, or a conflict resolution (`resolution_task_id` set) |
+| `running` | The runner is working, or a candidate is waiting for CI, a pause, or a developer run on the epic (`fix` set), or a resolution task from before D29 (`resolution_task_id` set) |
 | `reconciling` | A push was sent, or was about to be, and its result is unknown until the remote has been read |
 | `succeeded` | Confirmed on the branch; `result_head_sha` is the commit |
 | `failed` | Ended; `error` says why |
@@ -81,15 +81,15 @@ Pausing the project, the kill switch and an update hold all stop new writes, lea
 
 ## Recovering
 
-**After a restart or crash of the server or a runner: do nothing.** Every step is rebuilt from the journal and the remote on the next merge pass (within 15 seconds of a runner being online). A push that landed is recorded once, a push that didn't is retried, and a candidate cut off part-way starts again. A reviewed resolution is pushed again as the same commit. Don't push the epic branch, and don't edit the journal, to help it along.
+**After a restart or crash of the server or a runner: do nothing.** Every step is rebuilt from the journal and the remote on the next merge pass (within 15 seconds of a runner being online). A push that landed is recorded once, a push that didn't is retried, and a candidate cut off part-way starts again. A finished fix or reviewed resolution is pushed again as the same commit. Don't push the epic branch, and don't edit the journal, to help it along.
 
 | Stopped thing | How to resume it |
 |---|---|
-| Epic shows **Rebase stopped** | Fix the cause, then press **Retry**, or `POST /api/epics/<id>/sync/retry`. This restarts the failure count, and a reviewed resolution pushes its same commit |
-| A **Rebase epic** task **Failed** at its run cap | **Retry** it to run on the same commits. Otherwise do nothing: once the target moves, the operation ends with `The conflict resolution failed and the target has moved on`, the task goes, and the next checkpoint rebases afresh |
+| Epic shows **Rebase stopped** | Fix the cause, then press **Retry**, or `POST /api/epics/<id>/sync/retry`. This restarts the failure and fix counts. A finished fix or reviewed resolution pushes its same commit, and otherwise another developer run starts |
+| A **Rebase epic** task from before D29 **Failed** at its run cap | **Retry** it to run on the same commits. Otherwise do nothing: once the target moves, the operation ends with `The conflict resolution failed and the target has moved on`, the task goes, and the next checkpoint rebases afresh |
 | Task **Failed** after three integration failures | Read `error` on its operations, then choose **Retry** on its Inbox item. It goes back to its developer |
 | Task **Blocked** because the epic branch is missing, or checks never finished | Restore the cause, then choose **Answer** on its Inbox item and say what you fixed. It goes back to in progress |
 | Resolution task deleted, or the epic branch moved outside Corral | Nothing. The operation ends, its task and candidate go, and the next checkpoint starts again |
 | Epic PR merge refused three times | It's back in Human review. Approving retries the merge |
 
-**A push to an epic branch outside Corral costs its approval.** Any head Corral didn't produce from the approved head loses approval, whatever it contains, and restarts integration review and human approval. Only clean rebases and resolutions whose review validated them carry it, and CI always runs again on the new head.
+**A push to an epic branch outside Corral costs its approval.** Any head Corral didn't produce from the approved head loses approval, whatever it contains, and restarts integration review and human approval. Only clean rebases and fixes that D29 validates carry it, and CI always runs again on the new head.

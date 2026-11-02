@@ -1,4 +1,4 @@
-import type { AgentRole, EpicRebaseDecision } from '@corral/core'
+import type { AgentRole, EpicFixKind, EpicRebaseDecision } from '@corral/core'
 import { z } from 'zod'
 import type { AgentRuntime } from './agent-runtimes.ts'
 import type { Deployment } from './deployments.ts'
@@ -107,15 +107,18 @@ export type PlanThreadAttention =
 export type PlanThreadItem = PlanThreadBase & PlanThreadAttention
 
 export const epicReviewActionInput = z.object({
-  // `rebase` sends an epic PR conflict round the automatic rebase again
-  action: z.enum(['approve', 'request_changes', 'rebase']),
+  // `rebase` sends an epic PR conflict round the automatic rebase again.
+  // `decide` answers an epic fix's question, by alternative or in writing.
+  action: z.enum(['approve', 'request_changes', 'rebase', 'decide']),
   headSha: z.string().min(1),
   text: z.string().trim().optional(),
+  alternative: z.number().int().min(0).optional(),
   // What the human confirmed on this approval (D27, D28). The server compares
   // these with what the epic's tasks need now, not with what the client saw.
   confirmedCriteria: z.array(z.uuid()).default([]),
   confirmedTasks: z.array(z.uuid()).default([])
 }).refine(input => input.action !== 'request_changes' || Boolean(input.text), { message: 'Describe the changes needed', path: ['text'] })
+  .refine(input => input.action !== 'decide' || input.alternative !== undefined || Boolean(input.text), { message: 'Pick an alternative or write an answer', path: ['text'] })
 export type EpicReviewActionInput = z.input<typeof epicReviewActionInput>
 
 export interface EpicReviewItem extends InboxItemBase, ReviewChanges {
@@ -159,6 +162,10 @@ export interface ReleaseNotesItem extends InboxItemBase {
 
 // An epic PR that couldn't rebase onto the target branch (D27)
 export interface EpicConflictItem extends InboxItemBase, ReviewChanges {
+  // An epic fix's question for the human (D29), which this item then is
+  decision?: EpicRebaseDecision
+  // Recovery ran out (D11, D29): why it stopped, until Retry or the merge
+  stopped?: { error: string, fix: EpicFixKind | null }
   id: string
   type: 'epic_conflict'
   epicId: string

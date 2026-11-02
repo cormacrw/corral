@@ -1,7 +1,7 @@
 import { isTaskDone } from '@corral/core'
 import { AGENT_RUNTIMES } from '@corral/contracts/client'
-import type { Agent, AgentRuntime, CliStatus, Epic, RunnerInfo, RunnerRole, RunnerStatus, InboxItem, PlanStatus, Project, Run, Task } from '@corral/contracts'
-import type { AgentRole, DesignVersionStatus, EpicReviewMode, EpicReviewState, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
+import type { Agent, AgentRuntime, CliStatus, Epic, EpicFixRun, RunnerInfo, RunnerRole, RunnerStatus, InboxItem, PlanStatus, Project, Run, Task } from '@corral/contracts'
+import type { AgentRole, DesignVersionStatus, EpicFixKind, EpicReviewMode, EpicReviewState, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
 
 export type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
 
@@ -86,6 +86,26 @@ export function epicInProgress(epic: Pick<Epic, 'reviewMode' | 'branch' | 'revie
   return epic.mergedCount < epic.taskCount || (epic.reviewMode !== 'direct' && epic.branch !== null && epic.reviewState !== 'merged')
 }
 
+// A developer run on an epic, with no task (D29)
+export const EPIC_FIX: Record<EpicFixKind, { active: string, past: string }> = {
+  conflict: { active: 'Resolving a rebase conflict', past: 'Rebase conflict' },
+  ci: { active: 'Fixing a CI failure', past: 'CI failure' },
+  review: { active: 'Addressing integration review', past: 'Integration review changes' }
+}
+
+export const epicStoppedLabel = (fix: EpicFixKind | null | undefined) => fix === 'ci' || fix === 'review' ? 'Fix stopped' : 'Rebase stopped'
+
+// A developer's page for one run
+export const runPath = (developer: string, runId: string) => `/agents/${developer.toLowerCase()}/${runId}`
+
+// What the developer reported, and whether review followed
+export function epicFixResult(run: Pick<EpicFixRun, 'behaviourChanged' | 'reReviewed'>): string[] {
+  return [
+    run.behaviourChanged === null ? 'Not reported' : run.behaviourChanged ? 'Behaviour changed' : 'Behaviour unchanged',
+    ...run.reReviewed === null ? [] : [run.reReviewed ? 'Reviewed again' : 'Kept approval']
+  ]
+}
+
 // What the epic's review is waiting on, for its progress; null while its
 // tasks are still going in and in `direct` mode, which has no epic PR
 export function epicReviewStatus(epic: Pick<Epic, 'reviewMode' | 'branch' | 'reviewState' | 'taskCount' | 'mergedCount'> & Partial<Pick<Epic, 'sync'>>): { label: string, color: Color } | null {
@@ -93,7 +113,8 @@ export function epicReviewStatus(epic: Pick<Epic, 'reviewMode' | 'branch' | 'rev
   if (epic.sync?.state === 'rebasing') return { label: 'Rebasing onto the target branch', color: 'info' }
   if (epic.sync?.state === 'deciding') return { label: 'Rebase needs your decision', color: 'warning' }
   if (epic.sync?.state === 'resolving') return { label: 'Resolving a rebase conflict', color: 'info' }
-  if (epic.sync?.state === 'failed') return { label: 'Rebase stopped, retry to carry on', color: 'error' }
+  if (epic.sync?.state === 'fixing') return { label: EPIC_FIX[epic.sync.fix].active, color: 'info' }
+  if (epic.sync?.state === 'failed') return { label: `${epicStoppedLabel(epic.sync.fix)}, retry to carry on`, color: 'error' }
   const allMerged = epic.taskCount > 0 && epic.mergedCount === epic.taskCount
   switch (epic.reviewState) {
     case null: return allMerged && epic.branch ? { label: 'All tasks complete, epic PR opening', color: 'neutral' } : null
@@ -163,6 +184,11 @@ export function inboxTypeBadge(type: InboxItem['type']): { label: string, color:
     activity: { label: 'Activity', color: 'neutral' as const },
     plan_thread: { label: 'Plan', color: 'primary' as const }
   })[type]
+}
+
+// An item's badge: a stopped epic shares the conflict's type, not its meaning
+export function inboxItemBadge(item: Pick<InboxItem, 'type'> & { stopped?: unknown }): { label: string, color: Color } {
+  return item.stopped ? { label: 'Epic stopped', color: 'error' } : inboxTypeBadge(item.type)
 }
 
 export const TASK_TYPE: Record<Task['type'], string> = {

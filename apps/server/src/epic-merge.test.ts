@@ -74,18 +74,22 @@ it('shows an up-to-date PR GitHub won\'t merge as an operational failure, and a 
   await t.mergePass()
   expect(await reload(epic.id)).toMatchObject({ reviewState: 'ready_to_merge', syncError: expect.stringContaining('can\'t merge') })
   expect(((await (await t.request('GET', `/api/epics/${epic.id}`)).json()) as { sync: unknown }).sync).toMatchObject({ state: 'failed' })
-  expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(false)
+  expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(true)
   expect((await t.request('POST', `/api/epics/${epic.id}/sync/retry`)).status).toBe(200)
   expect((await reload(epic.id)).syncError).toBeNull()
+  expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(false)
 })
 
-it('sends a failed required check back as a fix task in the epic', async () => {
+it('sends a failed required check to a developer run on the epic, with no task and approval standing', async () => {
   const { epic, head } = await approved()
+  const before = (await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))).length
   t.github.setChecks(head, [{ name: 'ci', conclusion: 'failure', url: 'http://ci' }])
   await t.mergePass()
-  expect((await reload(epic.id)).reviewState).toBe('open')
-  const fixes = await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))
-  expect(fixes.find(row => row.title === 'Fix integration: CI failed on the epic PR')).toMatchObject({ status: 'ready' })
+  await t.mergePass()
+  expect((await reload(epic.id)).reviewState).toBe('ready_to_merge')
+  expect(await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))).toHaveLength(before)
+  const fixes = await t.db.select().from(schema.taskIntegrationOperations).where(eq(schema.taskIntegrationOperations.epicId, epic.id))
+  expect(fixes).toMatchObject([{ fix: 'ci', state: 'running', expectedTargetSha: head, fixChecks: [{ name: 'ci', url: 'http://ci' }] }])
 })
 
 it('returns a repeatedly refused merge to the human, whose approval retries it', async () => {

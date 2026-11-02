@@ -21,6 +21,8 @@ export class FakeGitHub implements GitHubClient {
   onUpdateBranch: (() => Promise<void>) | null = null
   // Commits the base has that a head doesn't, by head SHA
   behind = new Map<string, number>()
+  // What ciFailure answers, by check name; anything else can't be read
+  ciLogs = new Map<string, { step: string | null, log: string }>()
   #nextNumber = 1
 
   #key(repository: string, branch: string): string {
@@ -54,6 +56,13 @@ export class FakeGitHub implements GitHubClient {
   async branchHead(repository: string, branch: string): Promise<string | null> {
     this.#record('branchHead', repository, branch)
     return this.branches.get(this.#key(repository, branch)) ?? null
+  }
+
+  async ciFailure(repository: string, check: { name: string, url: string | null }) {
+    this.#record('ciFailure', repository, check.name)
+    const found = this.ciLogs.get(check.name)
+    if (!found) throw new GitHubError(404, 'No such log')
+    return found
   }
 
   async findOpenPullRequest(repository: string, branch: string): Promise<PullRequest | null> {
