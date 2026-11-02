@@ -139,7 +139,7 @@ const { project, tasks, loading, inboxLoading, runs, history, error, load, needs
       <ProjectOverviewTabs :overview="overview">
         <template #needs-you>
           <section>
-            <div class="mb-2 flex items-center gap-2 px-4">
+            <div class="mb-2 flex items-center gap-2">
               <h3 class="text-sm font-semibold text-highlighted">
                 Needs you
               </h3>
@@ -158,7 +158,7 @@ const { project, tasks, loading, inboxLoading, runs, history, error, load, needs
             </div>
             <ul
               v-if="needsYou.length > 0"
-              class="divide-y divide-default border-y border-default"
+              class="-mx-4 divide-y divide-default border-y border-default"
             >
               <li
                 v-for="item in needsYou"
@@ -192,18 +192,18 @@ const { project, tasks, loading, inboxLoading, runs, history, error, load, needs
             </ul>
             <USkeleton
               v-else-if="inboxLoading"
-              class="mx-4 h-12"
+              class="h-12"
             />
             <p
               v-else
-              class="px-4 text-sm text-muted"
+              class="text-sm text-muted"
             >
               Nothing is waiting on you.
             </p>
           </section>
         </template>
         <template #activity>
-          <section class="px-4">
+          <section>
             <h3 class="mb-2 text-sm font-semibold text-highlighted">
               Recent activity
             </h3>

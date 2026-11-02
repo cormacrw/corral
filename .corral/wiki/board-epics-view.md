@@ -21,3 +21,8 @@ single board column. `ProjectOverviewTabs` shares URL state (`tab`, `epicFilter`
 and cards across desktop and mobile. `OverviewEpicCard` keeps its own collapsed
 state, with an expand button separate from the epic title link. Empty epics are
 included in overview groups; the No epic group is excluded from this tab.
+
+On mobile, the overview tabs provide the content's 16px inset. Needs you and
+Activity slots must not add another inset; the Needs you list extends back
+through the tabs' margin so row borders span the viewport, while each row keeps
+16px padding for its text.
