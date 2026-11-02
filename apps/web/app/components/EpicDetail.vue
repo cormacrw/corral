@@ -173,12 +173,14 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
     >
       <div :class="['flex flex-col gap-5 p-4', props.mode === 'page' && 'w-[360px] shrink-0 overflow-y-auto overscroll-contain border-e border-default max-[900px]:w-full max-[900px]:border-e-0']">
         <UAlert
+          class="shrink-0"
           v-if="waiting.length"
           color="warning"
           variant="subtle"
           :title="`Waiting on ${waiting.map(e => e.title).join(', ')}`"
         />
         <UAlert
+          class="shrink-0"
           v-if="sync?.state === 'resolving'"
           color="info"
           variant="subtle"
@@ -186,10 +188,12 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           :description="`${sync.taskRef ?? 'A developer'} is rebasing this epic in private${sync.files.length ? `: ${sync.files.join(', ')}` : ''}. The epic branch moves once a reviewer approves.`"
         />
         <EpicFixAlert
+          class="shrink-0"
           v-else-if="sync?.state === 'fixing'"
           :sync="sync"
         />
         <UAlert
+          class="shrink-0"
           v-else-if="sync?.state === 'deciding'"
           color="warning"
           variant="subtle"
@@ -197,6 +201,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           :description="`${sync.question} It's in your Inbox${sync.taskRef ? ` on ${sync.taskRef}` : ''}. The rebase resumes when you answer.`"
         />
         <UAlert
+          class="shrink-0"
           v-else-if="sync?.state === 'failed'"
           color="error"
           variant="subtle"
