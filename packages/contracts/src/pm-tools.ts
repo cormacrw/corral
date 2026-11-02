@@ -1,4 +1,4 @@
-import { AGENT_ROLES, EPIC_REVIEW_MODES, RUN_STATES, type EpicReviewMode } from '@corral/core'
+import { AGENT_ROLES, RUN_STATES, type EpicReviewMode } from '@corral/core'
 import { z } from 'zod'
 import { createAgentInput, createProjectInput, createTaskInput, humanTransitionInput, patchAgentInput, patchEpicInput, patchProjectInput, patchTaskInput, runMessageInput } from './api.ts'
 import type { AgentTool } from './runner.ts'
@@ -24,16 +24,19 @@ const version = z.number().int().positive()
 // but a known direct action needs the human.
 // `parentId` and `parent` are what the PM sees. The stored names stay on the
 // server, and neutralPmInput reads what runners from before D31 still send.
-const reviewModeInput = z.enum([...EPIC_REVIEW_MODES, 'parent']).optional().transform(mode => mode === 'parent' ? 'epic' as const : mode)
+const reviewModeInput = z.enum(['parent', 'each_task', 'direct']).optional().transform(mode => mode === 'parent' ? 'epic' as const : mode)
 const parentFields = { ...patchEpicInput.omit({ description: true, reviewMode: true }).shape, reviewMode: reviewModeInput }
+function without<T extends object, K extends keyof T>(shape: T, key: K): Omit<T, K> {
+  const fields = { ...shape }
+  delete fields[key]
+  return fields
+}
 function taskFields<T extends { epicId: unknown }>(shape: T) {
-  const { epicId: _epicId, ...fields } = shape
-  return { ...fields, parentId: z.uuid().nullable().optional() }
+  return { ...without(shape, 'epicId'), parentId: z.uuid().nullable().optional() }
 }
 
 function projectFields<T extends { epicReviewModeDefault: unknown }>(shape: T) {
-  const { epicReviewModeDefault: _stored, ...fields } = shape
-  return { ...fields, defaultReviewMode: reviewModeInput }
+  return { ...without(shape, 'epicReviewModeDefault'), defaultReviewMode: reviewModeInput }
 }
 // The project's field, as the server stores it
 export function storedProjectFields<T extends { defaultReviewMode?: EpicReviewMode | undefined }>({ defaultReviewMode, ...fields }: T) {
@@ -158,7 +161,7 @@ export const pmDirectTools = {
   },
   update_project: {
     confirmRequired: false,
-    description: 'Change a project\'s settings. A change that lowers a gate takes a confirm card instead of acting: removing a required check, turning off humanReviewDefault, a default review mode with less human review, raising reviewRoundCap or failedRunCap, or setting paused to false on a paused project. defaultBranch is its target branch, humanReviewDefault and epicReviewModeDefault its default review modes, reviewRoundCap and failedRunCap its round caps, and paused stops new work starting. Pass only what changes.',
+    description: 'Change a project\'s settings. A change that lowers a gate takes a confirm card instead of acting: removing a required check, turning off humanReviewDefault, a default review mode with less human review, raising reviewRoundCap or failedRunCap, or setting paused to false on a paused project. defaultBranch is its target branch, humanReviewDefault and defaultReviewMode its default review modes, reviewRoundCap and failedRunCap its round caps, and paused stops new work starting. Pass only what changes.',
     input: { project: projectSlug, ...projectFields(patchProjectInput.shape) }
   },
   create_project: {
@@ -251,10 +254,16 @@ export function isPmDirectTool(tool: string): tool is PmDirectTool {
 // What an older runner's call means now, and the stored field for a new one
 export function neutralPmCall(tool: string, input: unknown): { tool: string, input: unknown } {
   if (!input || typeof input !== 'object') return { tool, input }
-  const { epicId, epicReviewModeDefault, ...rest } = input as Record<string, unknown>
-  const renamed = { ...rest, ...epicId !== undefined && { parentId: epicId }, ...epicReviewModeDefault !== undefined && { defaultReviewMode: epicReviewModeDefault } }
+  const { epicId, epicReviewModeDefault, reviewMode, ...rest } = input as Record<string, unknown>
+  const mode = (value: unknown) => value === 'epic' ? 'parent' : value
+  const renamed = {
+    ...rest,
+    ...epicId !== undefined && { parentId: epicId },
+    ...reviewMode !== undefined && { reviewMode: mode(reviewMode) },
+    ...epicReviewModeDefault !== undefined && { defaultReviewMode: mode(epicReviewModeDefault) }
+  }
   if (tool === 'update_epic') return { tool: 'update_parent', input: renamed }
-  return ['create_task', 'update_task', 'update_project', 'create_project'].includes(tool) ? { tool, input: renamed } : { tool, input }
+  return ['create_task', 'update_task', 'update_parent', 'update_project', 'create_project'].includes(tool) ? { tool, input: renamed } : { tool, input }
 }
 
 // The PM role's complete tool registry, shared by MCP registration and API coverage.

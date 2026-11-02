@@ -26,17 +26,19 @@ const proposedTask = z.object({
 const reviewMode = z.enum([...EPIC_REVIEW_MODES, 'parent'], { error: 'reviewMode must be one of parent, each_task, direct' }).optional()
   .transform(mode => mode === 'parent' ? 'epic' as const : mode)
 
+const REVIEW_MODE_HELP = 'How its sub-tasks reach the target branch: parent = human reviews the parent\'s PR; each_task = human also reviews every sub-task; direct = sub-tasks merge straight into the target branch. Leave it out for the project\'s default.'
+const parentFields = {
+  key: z.string().trim().min(1).describe('A short handle used by a task\'s parent, e.g. p1'),
+  ref: z.string().trim().toUpperCase().optional().transform(ref => ref || undefined).describe('An existing parent to add to, or a Draft, Backlog or unclaimed Ready task with no runs to turn into one, e.g. COR-4. It keeps its ref and comments, and its criteria move to its first sub-task. Leave out for a new parent'),
+  title: z.string().trim().default('').describe('Required for a new parent'),
+  summary: z.string().trim().default(''),
+  dependsOn: z.array(z.string().trim()).optional().describe('Parent keys in this plan or refs of existing parents. Omit to keep dependencies in a revision; [] clears them. Sub-tasks wait until these parents are done.')
+}
+
 export const proposedPlanInput = z.object({
   title: z.string().trim().min(1),
   summary: z.string().trim().default(''),
-  parents: z.array(z.object({
-    key: z.string().trim().min(1).describe('A short handle used by a task\'s parent, e.g. p1'),
-    ref: z.string().trim().toUpperCase().optional().transform(ref => ref || undefined).describe('An existing parent to add to, or a Draft, Backlog or unclaimed Ready task with no runs to turn into one, e.g. COR-4. It keeps its ref and comments, and its criteria move to its first sub-task. Leave out for a new parent'),
-    title: z.string().trim().default('').describe('Required for a new parent'),
-    summary: z.string().trim().default(''),
-    dependsOn: z.array(z.string().trim()).optional().describe('Parent keys in this plan or refs of existing parents. Omit to keep dependencies in a revision; [] clears them. Sub-tasks wait until these parents are done.'),
-    reviewMode: reviewMode.describe('How its sub-tasks reach the target branch: parent = human reviews the parent\'s PR; each_task = human also reviews every sub-task; direct = sub-tasks merge straight into the target branch. Leave it out for the project\'s default.')
-  })).default([]),
+  parents: z.array(z.object({ ...parentFields, reviewMode: reviewMode.describe(REVIEW_MODE_HELP) })).default([]),
   epics: z.array(z.object({
     key: z.string().trim().min(1).describe('A short handle, e.g. e1'),
     title: z.string().trim(),
@@ -51,9 +53,11 @@ export const proposedPlanInput = z.object({
 })
 
 // What the PM is offered: the same plan without the names older runners send
-const { epic: _epic, ...advertisedTask } = proposedTask.shape
-const { epics: _epics, epic: _legacyEpic, ...advertisedPlan } = proposedPlanInput.shape
-export const advertisedPlanInput = { ...advertisedPlan, tasks: z.array(z.object(advertisedTask)) }
+export const advertisedPlanInput = {
+  ...proposedPlanInput.omit({ epics: true, epic: true, parents: true }).shape,
+  parents: z.array(z.object({ ...parentFields, reviewMode: z.enum(['parent', 'each_task', 'direct'], { error: 'reviewMode must be one of parent, each_task, direct' }).optional().describe(REVIEW_MODE_HELP) })).default([]),
+  tasks: z.array(proposedTask.omit({ epic: true }))
+}
 
 const REF = /^([A-Za-z]+)-(\d+)$/
 

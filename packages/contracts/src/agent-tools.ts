@@ -143,7 +143,7 @@ export function outcomesFor(role: AgentRole): readonly string[] {
 // the conversation or on Corral as a whole, or names its project in its own
 // input like delete_project and list_runs. Their inputs are strict on the
 // server, so a tool is only listed here if the server accepts `project` for it.
-const PM_PROJECT_TOOLS: readonly AgentTool[] = ['attach_evidence', 'add_comment', 'list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'propose_plan', 'flag_stale_docs', 'create_task', 'update_task', 'move_task', 'approve_task', 'delete_task', 'update_epic']
+const PM_PROJECT_TOOLS: readonly AgentTool[] = ['attach_evidence', 'add_comment', 'list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'propose_plan', 'flag_stale_docs', 'create_task', 'update_task', 'move_task', 'approve_task', 'delete_task', 'update_parent']
 
 export function toolDefinition(role: AgentRole, tool: AgentTool): ToolDefinition {
   const definition = roleToolDefinitions[role][tool] ?? toolDefinitions[tool as keyof typeof toolDefinitions]

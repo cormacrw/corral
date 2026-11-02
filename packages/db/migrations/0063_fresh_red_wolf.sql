@@ -29,7 +29,8 @@ FROM (
   SELECT "epic_id", max("merged_at") AS at FROM "tasks"
   WHERE "epic_id" IS NOT NULL AND "deleted_at" IS NULL
   GROUP BY "epic_id"
-  HAVING bool_and("status" = 'merged' OR ("type" = 'design' AND "status" = 'approved')) AND count(*) > 0
+  -- As text: a database this far behind adds these values in this transaction
+  HAVING bool_and("status"::text = 'merged' OR ("type"::text = 'design' AND "status"::text = 'approved')) AND count(*) > 0
 ) AS landed
 WHERE "epics"."id" = landed.epic_id AND "epics"."merged_at" IS NULL AND ("epics"."review_mode" = 'direct' OR "epics"."branch" IS NULL);--> statement-breakpoint
 -- Adds parents only: no branch, PR, review, evidence or existing task's status

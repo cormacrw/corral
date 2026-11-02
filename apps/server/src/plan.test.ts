@@ -768,7 +768,7 @@ describe('plan sessions', () => {
     })
 
     const bad = await propose([{ key: 'e1', title: 'Login', reviewMode: 'later' }])
-    expect(bad).toMatchObject({ ok: false, error: expect.stringContaining('reviewMode must be one of epic, each_task, direct') })
+    expect(bad).toMatchObject({ ok: false, error: expect.stringContaining('reviewMode must be one of parent, each_task, direct') })
     expect(await t.db.select().from(epics).where(eq(epics.projectId, project.id))).toEqual([])
 
     expect(await propose([{ key: 'e1', title: 'Login' }, { key: 'e2', title: 'Logout', reviewMode: 'each_task' }])).toMatchObject({ ok: true })

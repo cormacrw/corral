@@ -1,4 +1,5 @@
-import { pmActionTools, pmDirectTools, proposedPlanInput, type AgentTool } from '@corral/contracts'
+import { advertisedPlanInput, pmActionTools, pmDirectTools, type AgentTool } from '@corral/contracts'
+import { z } from 'zod'
 import { TASK_TYPES, type AgentRole } from '@corral/core'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
@@ -38,11 +39,11 @@ describe('ToolServer', () => {
     const input = { title: ' Plan ', tasks: [{ key: 't', title: ' Task ', description: '', type: 'task', design: { taskRef: ' cor-8 ', version: 2 } }] }
     const result = await client.callTool({ name: 'propose_plan', arguments: input })
     expect(result.isError).not.toBe(true)
-    expect(calls).toEqual([{ tool: 'propose_plan', input: proposedPlanInput.parse(input) }])
+    expect(calls).toEqual([{ tool: 'propose_plan', input: z.object(advertisedPlanInput).parse(input) }])
     const listed = (await client.listTools()).tools.find(t => t.name === 'propose_plan')!
     expect(JSON.stringify(listed.inputSchema)).toContain('The design task, e.g. COR-70')
     const invalid = { ...input, tasks: [{ ...input.tasks[0], design: { taskRef: 'COR-8', version: 0 } }] }
-    const parsed = proposedPlanInput.safeParse(invalid)
+    const parsed = z.object(advertisedPlanInput).safeParse(invalid)
     expect(parsed.success).toBe(false)
     if (parsed.success) throw new Error('Expected invalid version')
     const rejected = await client.callTool({ name: 'propose_plan', arguments: invalid })
@@ -118,7 +119,7 @@ describe('ToolServer', () => {
   it('exposes typed PM mutations and forwards their inputs', async () => {
     const { client, calls } = await connect('pm')
     const listed = (await client.listTools()).tools
-    for (const name of ['create_task', 'update_task', 'move_task', 'approve_task', 'delete_task', 'update_epic']) {
+    for (const name of ['create_task', 'update_task', 'move_task', 'approve_task', 'delete_task', 'update_parent']) {
       expect(listed.some(t => t.name === name)).toBe(true)
       expect(ROLE_TOOLS.developer).not.toContain(name)
       expect(ROLE_TOOLS.reviewer).not.toContain(name)
@@ -197,7 +198,7 @@ describe('ToolServer', () => {
   it('passes project slugs through every project-scoped PM tool', async () => {
     const { client, calls } = await connect('pm')
     const tools = (await client.listTools()).tools
-    const scoped = ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'propose_plan', 'flag_stale_docs', 'create_task', 'update_task', 'move_task', 'approve_task', 'delete_task', 'update_epic']
+    const scoped = ['list_tasks', 'get_task', 'get_run_outcomes', 'get_attachment', 'get_design', 'propose_plan', 'flag_stale_docs', 'create_task', 'update_task', 'move_task', 'approve_task', 'delete_task', 'update_parent']
     for (const name of scoped) {
       expect(tools.find(t => t.name === name)?.inputSchema.properties, name).toHaveProperty('project')
     }
@@ -251,15 +252,15 @@ describe('ToolServer', () => {
   it('takes an optional review mode per epic in propose_plan and names the allowed values for an unknown one (D27)', async () => {
     const { client, calls } = await connect('pm')
     const propose = (await client.listTools()).tools.find(t => t.name === 'propose_plan')!
-    expect(propose.inputSchema).toMatchObject({ properties: { epics: { items: { properties: { reviewMode: { enum: ['epic', 'each_task', 'direct'] } } } } } })
+    expect(propose.inputSchema).toMatchObject({ properties: { parents: { items: { properties: { reviewMode: { enum: ['parent', 'each_task', 'direct'] } } } } } })
 
-    const task = { key: 't1', epic: 'e1', title: 'Login', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] }
-    await client.callTool({ name: 'propose_plan', arguments: { title: 'Login', epics: [{ key: 'e1', title: 'Login', reviewMode: 'each_task' }], tasks: [task] } })
-    expect(calls).toEqual([{ tool: 'propose_plan', input: expect.objectContaining({ epics: [expect.objectContaining({ reviewMode: 'each_task' })] }) }])
+    const task = { key: 't1', parent: 'e1', title: 'Login', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] }
+    await client.callTool({ name: 'propose_plan', arguments: { title: 'Login', parents: [{ key: 'e1', title: 'Login', reviewMode: 'each_task' }], tasks: [task] } })
+    expect(calls).toEqual([{ tool: 'propose_plan', input: expect.objectContaining({ parents: [expect.objectContaining({ reviewMode: 'each_task' })] }) }])
 
-    const unknown = await client.callTool({ name: 'propose_plan', arguments: { title: 'Login', epics: [{ key: 'e1', title: 'Login', reviewMode: 'later' }], tasks: [task] } })
+    const unknown = await client.callTool({ name: 'propose_plan', arguments: { title: 'Login', parents: [{ key: 'e1', title: 'Login', reviewMode: 'later' }], tasks: [task] } })
     expect(unknown.isError).toBe(true)
-    expect(JSON.stringify(unknown.content)).toContain('reviewMode must be one of epic, each_task, direct')
+    expect(JSON.stringify(unknown.content)).toContain('reviewMode must be one of parent, each_task, direct')
     expect(calls).toHaveLength(1)
     await client.close()
   })

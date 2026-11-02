@@ -26,6 +26,9 @@ const shown = (value: unknown) => {
   return text.length > VALUE_MAX ? `${text.slice(0, VALUE_MAX)}…` : text
 }
 
+// The stored mode `epic` is parent-level review
+const modeName = (mode: string | undefined) => mode === 'epic' ? 'parent' : mode
+
 export type PmEditTool = 'create_task' | 'update_task' | 'update_parent'
 
 export interface PmEdit {
@@ -188,7 +191,7 @@ export class PmCalls {
       const removed = changes.requiredChecks ? project.requiredChecks.filter(check => !changes.requiredChecks!.includes(check)) : []
       if (removed.length) lowered.push(`stop requiring ${removed.join(', ')}`)
       if (changes.humanReviewDefault === false && project.humanReviewDefault) lowered.push('turn off human review by default')
-      if (lowersMode(project.epicReviewModeDefault, changes.epicReviewModeDefault)) lowered.push(`change the default parent review mode from ${project.epicReviewModeDefault} to ${changes.epicReviewModeDefault}`)
+      if (lowersMode(project.epicReviewModeDefault, changes.epicReviewModeDefault)) lowered.push(`change the default parent review mode from ${modeName(project.epicReviewModeDefault)} to ${modeName(changes.epicReviewModeDefault)}`)
       if (changes.reviewRoundCap !== undefined && changes.reviewRoundCap > project.reviewRoundCap) lowered.push(`raise the review round cap from ${project.reviewRoundCap} to ${changes.reviewRoundCap}`)
       if (changes.failedRunCap !== undefined && changes.failedRunCap > project.failedRunCap) lowered.push(`raise the failed run cap from ${project.failedRunCap} to ${changes.failedRunCap}`)
       if (changes.paused === false && project.paused) lowered.push('resume the paused project, which restarts its runs and merges')
@@ -208,7 +211,7 @@ export class PmCalls {
       const { parentId: epicId, ...changes } = z.object(pmActionTools.update_parent.input).strict().parse(scoped)
       const epic = await getEpic(db, epicId)
       if (epic.projectId !== project.id) return null
-      if (!epic.reviewModeLocked && lowersMode(epic.reviewMode, changes.reviewMode)) lowered.push(`change its review mode from ${epic.reviewMode} to ${changes.reviewMode}`)
+      if (!epic.reviewModeLocked && lowersMode(epic.reviewMode, changes.reviewMode)) lowered.push(`change its review mode from ${modeName(epic.reviewMode)} to ${modeName(changes.reviewMode)}`)
       return card(`parent ${epic.title}`, others(changes, ['reviewMode']), { id: epic.id, taskId: null, projectId: project.id })
     }
 

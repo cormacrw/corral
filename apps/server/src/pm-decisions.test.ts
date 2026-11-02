@@ -168,9 +168,9 @@ describe('PM tools for the Inbox, designs and agents', () => {
     it('takes a card for less review on an epic, not more', async () => {
       const { id: projectId } = await (await t.request('GET', `/api/projects/${slug}`)).json() as { id: string }
       const [epic] = await t.db.insert(schema.epics).values({ projectId, title: 'Gated', reviewMode: 'epic', createdBy: t.actor }).returning()
-      await lowered('update_epic', { epicId: epic!.id, reviewMode: 'direct' }, 'from epic to direct')
+      await lowered('update_epic', { epicId: epic!.id, reviewMode: 'direct' }, 'from parent to direct')
       expect(await call('update_epic', { epicId: epic!.id, reviewMode: 'each_task' })).toMatchObject({ ok: true, result: { reviewMode: 'each_task' } })
-      await lowered('update_epic', { epicId: epic!.id, reviewMode: 'epic' }, 'from each_task to epic')
+      await lowered('update_epic', { epicId: epic!.id, reviewMode: 'epic' }, 'from each_task to parent')
     })
 
     it('takes a card to lower a project\'s gates, and applies them on Confirm', async () => {

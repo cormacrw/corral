@@ -700,7 +700,7 @@ export class PlanService {
             if (reviewModeLocked(row!, taskRows)) throw new ToolError('The plan was not saved: the review mode can\'t change once a task in the parent has submitted work or opened a PR.')
             // Only an epic still being planned is the plan's to set: its tasks are all Drafts
             const live = previous?.status === 'approved' || taskRows.some(t => t.status !== 'draft')
-            if (live && lowersMode(row!.reviewMode, epic.reviewMode)) throw new ToolError(`The plan was not saved: it would lower ${row!.title} from ${row!.reviewMode} to ${epic.reviewMode} review. Use update_parent, which asks the human.`)
+            if (live && lowersMode(row!.reviewMode, epic.reviewMode)) throw new ToolError(`The plan was not saved: it would lower ${row!.title} to ${epic.reviewMode === 'epic' ? 'parent' : epic.reviewMode} review. Use update_parent, which asks the human.`)
           }
           await tx.update(epics).set({ title: epic.title, description: epic.summary, ...(epic.reviewMode && { reviewMode: epic.reviewMode }), updatedAt: new Date() }).where(eq(epics.id, current))
           await syncParentContent(tx, current, { title: epic.title, description: epic.summary })
