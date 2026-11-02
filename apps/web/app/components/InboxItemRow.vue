@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { InboxItem } from '@corral/contracts'
-import { inboxTypeBadge } from '~/utils/labels'
+import { inboxItemBadge } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 import TimeAgo from './TimeAgo.vue'
 

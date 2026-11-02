@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inboxTypeBadge } from '~/utils/labels'
+import { inboxItemBadge } from '~/utils/labels'
 import TimeAgo from '~/components/TimeAgo.vue'
 
 // Project overview (design/project-overview.md). Mobile gets

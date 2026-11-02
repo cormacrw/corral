@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ProjectOverview } from '~/composables/useProjectOverview'
-import { inboxTypeBadge } from '~/utils/labels'
+import { inboxItemBadge } from '~/utils/labels'
 import TimeAgo from '~/components/TimeAgo.vue'
 
 // Project overview on mobile (design/mobile.md, frame "Project overview").
