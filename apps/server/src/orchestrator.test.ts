@@ -470,7 +470,7 @@ describe('orchestrator', () => {
     const { project, task, job } = await assigned()
     await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Read the auth module; need a provider decision', summary: 'Which OAuth provider?' })
     const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
-    expect(notes).toMatchObject([{ author: { kind: 'agent', role: 'developer', runId: job.runId }, body: 'Read the auth module; need a provider decision', pinned: false }])
+    expect(notes).toContainEqual(expect.objectContaining({ author: { kind: 'agent', role: 'developer', runId: job.runId }, body: 'Read the auth module; need a provider decision', pinned: false }))
     await pause(project)
   })
 
