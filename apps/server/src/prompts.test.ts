@@ -27,9 +27,9 @@ describe('pmPrompt', () => {
     expect(intro).toContain('Task IDs look like TA-12')
     expect(intro).toContain('list_tasks shows it live')
     expect(intro).toContain('`bug` for a fix to wrong behaviour, `spike` for an investigation whose deliverable is written findings, and `task` for everything else')
-    expect(intro).toContain('plan a cohesive feature as one epic')
-    expect(intro).toContain('plan each independent fix, such as a Bug Bash item, as a standalone task with no epic and its own PR')
-    expect(intro).toContain('Small tasks, descriptions in markdown, verifiable acceptance criteria, explicit dependencies')
+    expect(intro).toContain('a big feature is always one epic, even with a single task')
+    expect(intro).toContain('Plan each independent fix, such as a Bug Bash item, as a standalone task with no epic and its own PR')
+    expect(intro).toContain('Descriptions in markdown, verifiable acceptance criteria, explicit dependencies')
     expect(intro).toContain('To refine an existing Backlog task or an unclaimed Ready task, read it with get_task and include it in the plan with its `ref`')
     expect(intro).toContain('humanReview true for auth, data migrations, payments, deletions and security-sensitive code')
     expect(intro).toContain('at the epic\'s approval')
@@ -37,6 +37,18 @@ describe('pmPrompt', () => {
     expect(intro).toContain('only then may you call approve_plan ("ready" for the board, "backlog" for later)')
     expect(intro).toContain('Never approve on your own initiative')
     expect(intro).toContain('Keep replies short and concrete')
+  })
+
+  it.each([
+    { projectName: 'Test app', prefix: 'TA' },
+    { projectName: 'Another project', prefix: 'OTHER' }
+  ])('sends parallel-only task planning rules to new sessions on $projectName', (project) => {
+    const intro = pmPrompt({ ...turn, ...project, fresh: true })
+    expect(intro).toContain('Split a feature into tasks only when the parts can run in parallel on different code')
+    expect(intro).toContain('Work that would run in sequence or change the same files is one task')
+    expect(intro).toContain('a big feature is always one epic, even with a single task, so it appears in the epic views')
+    expect(intro).toContain('Plan each independent fix, such as a Bug Bash item, as a standalone task with no epic')
+    expect(intro).not.toMatch(/small tasks|split the build across several epics/i)
   })
 
   it('sends team status questions to get_agent_activity', () => {
@@ -53,12 +65,12 @@ describe('pmPrompt', () => {
     expect(pmPrompt({ ...turn, fresh: false })).not.toContain('propose_plan')
   })
 
-  it('plans a design\'s build from the spec and the codebase, across epics, pinning screens (D20)', () => {
+  it('plans a design\'s build from the spec and the codebase, keeping features in epics and pinning screens (D20)', () => {
     const intro = pmPrompt({ ...turn, fresh: true })
     expect(intro).toContain('read it with get_design')
     expect(intro).toContain('Plan from the spec and the real codebase')
     expect(intro).toContain('a reference for the look, not code to copy')
-    expect(intro).toContain('split the build across several epics')
+    expect(intro).toContain('keep each big feature in one epic and split tasks only for parallel work on different code')
     expect(intro).toContain('pin every task that builds UI to the approved version and the screen ids')
     expect(intro).toContain('write its acceptance criteria from the spec')
   })
