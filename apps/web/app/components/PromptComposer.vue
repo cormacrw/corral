@@ -11,6 +11,7 @@ import { attachmentProblem, withAttachments } from '~/utils/attachments'
 // can be pasted, dropped or picked: each uploads straight away and goes out
 // as ![name](attachment:<id>) after the text.
 const props = withDefaults(defineProps<{
+  inputId?: string
   placeholder?: string
   hint?: string
   disabled?: boolean
@@ -159,6 +160,7 @@ function onPick(event: Event) {
     @drop="onDrop"
   >
     <UChatPrompt
+      :id="props.inputId"
       v-model="text"
       :placeholder="props.placeholder"
       :disabled="props.disabled"

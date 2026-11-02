@@ -62,11 +62,11 @@ Task items (human review, question, blocked, failed, Activity and Resolved) use 
   |---|---|---|
   | Human review | Approve and merge (Accept findings on spikes, Approve design on designs) · Request changes | Approve sends, with the composer’s text and attached images as its note (waiting for pending uploads), and the Inbox moves on. An unmet criterion doesn't stop it. |
   | Question, Blocked | Answer · Send back to Backlog · Delete task | Send back sends |
-  | Failed | Retry, with its status picker beside it · Send back to Backlog · Delete task | Retry and Send back send |
+  | Failed | Retry, with its status picker beside it · Send back to Backlog · Delete task | Retry and Send back send, Retry with whatever note is in the composer. An empty note still retries. |
   | Activity, Resolved | None, and no composer | |
 
   **Request changes**, **Answer** and **Delete task** open the composer instead, with **Cancel** above it. Delete waits for it because it can't be undone, and takes an optional reason.
-- **Composer** (`InboxPanelTray`), pinned to the bottom of an item you can act on: with no action chosen it's the reply box, "Reply to {sender}…", which adds a comment to the task and leaves the item where it is.
+- **Composer** (`InboxPanelTray`), pinned to the bottom of an item you can act on: with no action chosen it's the reply box, "Reply to {sender}…", which adds a comment to the task and leaves the item where it is. A failed item opens on Retry instead: the composer is labelled **Note to send with Retry (optional)**, its hint says the note guides the agent's next run, and its send button retries with the chosen status. **Reply instead** beside the label switches it to the reply box, with **Cancel** above to return. Cancelling any action on a failed item, or sending a reply, returns to the Retry note.
 
 ### What each kind shows
 
@@ -189,7 +189,7 @@ An epic PR in human review and an epic PR rebase conflict have their own layout 
 
 - **Loading:** skeleton rows in the list. An item's top block shows at once from the Inbox data, with skeletons for its verdict and tab body until the task and its evidence arrive; Approve reads **Loading task…** and the actions wait.
 - **An action fails:** an inline error above the composer, or above the action bar on a phone with the composer closed. The draft is kept, and an action that opens the composer stays chosen.
-- **The task fails to load:** an inline error at the end of the top block with **Retry**, instead of a spinner. Approval stays blocked, because its human-criteria check needs the task, and its action reads **Task not loaded**. The other actions and the reply box still work.
+- **The task fails to load:** an inline error at the end of the top block with **Retry**, instead of a spinner. Approval stays blocked, because its human-criteria check needs the task, and its action reads **Task not loaded**. The other actions and the reply box still work, on a failed item through **Reply instead**.
 - **A task changed status elsewhere:** the item shows "Already resolved. This task changed status elsewhere." in Overview, with no actions and no composer, and no action bar on a phone.
 
 ## Responsive

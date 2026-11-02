@@ -179,6 +179,41 @@ describe('developer and reviewer attachments', () => {
     expect(reviewerPrompt(review, 'Rita')).not.toContain('Attached images')
     expect(developerPrompt(task, 'Victor')).not.toContain('get_attachment')
   })
+
+  describe('pinned human comments', () => {
+    const comments = [
+      { author: 'Human', body: 'Use the existing API', pinned: true, createdAt: new Date('2026-10-01T00:00:00.000Z') },
+      { author: 'Rita', body: 'Pinned by the reviewer', pinned: true, createdAt: new Date('2026-10-02T00:00:00.000Z') }
+    ]
+    const neutral = [
+      '## Pinned comments (read these first)',
+      '',
+      '- Human (2026-10-01T00:00:00.000Z): Use the existing API',
+      '- Rita (2026-10-02T00:00:00.000Z): Pinned by the reviewer'
+    ].join('\n')
+
+    it.each([
+      ['task', reviewerPrompt({ ...review, comments }, 'Rita')],
+      ['rebase', reviewerPrompt({ ...review, comments, rebaseOnly: true, approvedHeadSha: 'old' }, 'Rita')],
+      ['spike', reviewerPrompt({ ...review, comments, spike: true, branch: null }, 'Rita')],
+      ['design', reviewerPrompt({ ...review, comments, design: { version: 1 } }, 'Rita')]
+    ])('stay neutral for the %s reviewer', (_name, prompt) => {
+      expect(prompt).toContain(neutral)
+      expect(prompt).not.toContain('Human instructions')
+      expect(prompt).not.toContain('Follow these instructions')
+    })
+
+    it.each([
+      ['developer', developerPrompt({ ...task, comments }, 'Victor')],
+      ['resumed developer', developerRevisionPrompt({ ...task, comments }, [])],
+      ['designer', designerPrompt({ ...task, comments, design: { version: null } }, 'Dee')],
+      ['resumed designer', designerRevisionPrompt({ ...task, comments, design: { version: 1 } }, [])]
+    ])('are instructions for the %s', (_name, prompt) => {
+      expect(prompt).toContain('## Human instructions')
+      expect(prompt).toContain('Follow these instructions from the human')
+      expect(prompt).toContain('Use the existing API')
+    })
+  })
 })
 
 describe('pmFallbackPrompt', () => {

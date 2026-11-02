@@ -54,11 +54,21 @@ function section(title: string, body: string): string {
   return `## ${title}\n\n${body.trim()}\n`
 }
 
-function commentsSection(task: PromptTask): string {
-  const pinned = task.comments.filter(c => c.pinned)
+function humanInstructionsSection(task: PromptTask): string {
+  const instructions = task.comments.filter(c => c.pinned && c.author === 'Human')
+  return instructions.length > 0
+    ? section('Human instructions', `Follow these instructions from the human, including any guidance sent with Retry, as you continue the task. Address each point before reporting your outcome.\n\n${instructions.map(c => `- ${c.createdAt.toISOString()}: ${c.body}`).join('\n')}`)
+    : ''
+}
+
+// Reviewers judge the work, so the human's pinned comments are context for them,
+// not instructions to carry out
+function commentsSection(task: PromptTask, role: 'author' | 'reviewer'): string {
+  const pinned = task.comments.filter(c => c.pinned && (role === 'reviewer' || c.author !== 'Human'))
   const recent = task.comments.filter(c => !c.pinned).slice(-10)
   const format = (c: PromptTask['comments'][number]) => `- ${c.author} (${c.createdAt.toISOString()}): ${c.body}`
   return [
+    role === 'author' ? humanInstructionsSection(task) : '',
     pinned.length > 0 ? section('Pinned comments (read these first)', pinned.map(format).join('\n')) : '',
     recent.length > 0 ? section('Recent comments and feedback', recent.map(format).join('\n')) : ''
   ].join('\n')
@@ -148,7 +158,7 @@ export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderRev
     section('Evidence the developer attached (this round)', evidence),
     task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
     submissionHistory(task),
-    commentsSection(task),
+    commentsSection(task, 'reviewer'),
     attachmentsSection(task),
     pinSection(task, 'reviewer'),
     epicResolutionSection(task),
@@ -215,7 +225,7 @@ Conflicted files: ${task.rebaseReport?.conflictedFiles?.join(', ') ?? '(not reco
     rebaseCheckSection(task.rebaseCheckFailures ?? []),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria (previously approved)', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
-    commentsSection(task),
+    commentsSection(task, 'reviewer'),
     attachmentsSection(task),
     pinSection(task, 'reviewer'),
     gatesSection(task),
@@ -268,7 +278,7 @@ function spikeReviewerPrompt(task: ReviewTask, agentName: string): string {
     section('Findings under review', task.findings?.trim() || '(no findings were reported)'),
     section('Evidence the developer attached (this round)', evidenceList(task)),
     task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
-    commentsSection(task),
+    commentsSection(task, 'reviewer'),
     attachmentsSection(task),
     section('How to review', `
 - Do not edit, commit or push.
@@ -390,7 +400,7 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
     stoppedRunSection(task),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria', criteriaList(task)),
-    commentsSection(task),
+    commentsSection(task, 'author'),
     attachmentsSection(task),
     pinSection(task, 'developer'),
     section('How to work', `
@@ -424,7 +434,7 @@ function spikeDeveloperPrompt(task: PromptTask, agentName: string): string {
     stoppedRunSection(task),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria', criteriaList(task)),
-    commentsSection(task),
+    commentsSection(task, 'author'),
     attachmentsSection(task),
     section('How to work', `
 - Investigate; don't change code. You are in a checkout of \`${task.defaultBranch}\` with no branch: don't commit or push, and no PR is opened. Put experiments and notes in your scratch folder, outside the repository.
@@ -470,7 +480,7 @@ export function designerPrompt(task: PromptTask, agentName: string): string {
     stoppedRunSection(task),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria', criteriaList(task)),
-    commentsSection(task),
+    commentsSection(task, 'author'),
     attachmentsSection(task),
     section('How to work', DESIGN_HOW_TO(task))
   ].join('\n')
@@ -489,6 +499,7 @@ export function developerRevisionPrompt(task: PromptTask, feedback: PromptTask['
       : `${task.ref} is back with you. This is the same session${task.branch ? ` and the same branch, \`${task.branch}\`` : ''}: continue from your earlier work.`,
     '',
     stoppedRunSection(task),
+    humanInstructionsSection(task),
     section('New comments', feedback.length > 0 ? feedback.map(format).join('\n') : '(none: re-read the task with `get_task`)'),
     section('What to do', `
 - Address every point of the feedback, and finish whatever the task still needs.${task.squashRebase ? `\n- ${EPIC_REBASE_NO_GATES}` : ''}
@@ -506,6 +517,7 @@ export function designerRevisionPrompt(task: PromptTask, feedback: PromptTask['c
     `Changes were requested on design v${version} of ${task.ref}. This is the same session and the same branch, \`${task.branch}\`: continue from your earlier work.`,
     '',
     stoppedRunSection(task),
+    humanInstructionsSection(task),
     section('Feedback', feedback.length > 0 ? feedback.map(format).join('\n') : '(no written feedback: re-read the task with get_task)'),
     section('What to do', `
 - Address every point of the feedback in the prototype and in \`design.md\`.
@@ -529,7 +541,7 @@ function designReviewerPrompt(task: ReviewTask, underReview: DesignUnderReview |
     underReview ? section('Screenshots in this version', underReview.screenshots.map(s => `- ${s}`).join('\n') || '(none)') : '',
     section('Evidence the developer attached (this round)', evidenceList(task)),
     task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
-    commentsSection(task),
+    commentsSection(task, 'reviewer'),
     attachmentsSection(task),
     section('How to review', `
 - Do not edit, commit or push.
@@ -562,7 +574,7 @@ ${WORK_NOTE}
   ? 'Report `commit_submitted` with a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions. If a human decision is needed, report stuck instead, with the question in the summary.'
   : 'Report `pr_rebased` with `conflictedFiles`: a non-empty list of every file in which you resolved a conflict, and `review`: `trivial` only if the resolution just combines both sides with no new logic, renames or behaviour changes; otherwise choose `needs_review`. The server checks a `trivial` choice: if only the conflicted files changed and no project doc moved on the base, the approval carries over without a review. Anything else goes to Agent review. Include a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions. If a human decision is needed, report stuck instead, with the question in the summary.'}
 - Always finish by calling \`report_outcome\`.`),
-    commentsSection(task)
+    commentsSection(task, 'author')
   ].join('\n')
 }
 
@@ -585,7 +597,7 @@ function epicRebaseDeveloperPrompt(task: PromptTask, agentName: string): string 
     stoppedRunSection(task),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria', criteriaList(task)),
-    commentsSection(task),
+    commentsSection(task, 'author'),
     attachmentsSection(task),
     section('How to work', `
 - You are in a git worktree on the epic branch \`${task.branch}\`. Do not push and do not use \`gh\`. Corral force-pushes it with --force-with-lease when you report, and no separate PR is opened.
