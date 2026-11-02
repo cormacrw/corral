@@ -88,7 +88,8 @@ export class RunJobs {
       .where(and(eq(runs.taskId, task.id), inArray(runs.role, ['developer', 'designer']), ne(runs.id, ctx.run.id)))
       .orderBy(desc(runs.number)).limit(1)
     const stoppedRun = lastRun && (lastRun.state === 'interrupted' || (lastRun.state === 'failed' && lastRun.summary === null))
-      ? { number: lastRun.number, reason: lastRun.error ?? 'Stopped', wipSha: lastRun.headSha }
+      // A head that never moved isn't saved work
+      ? { number: lastRun.number, reason: lastRun.error ?? 'Stopped', wipSha: lastRun.headSha === lastRun.retryContext?.head ? null : lastRun.headSha }
       : null
     // The server reads what developers can't (D8, D29). This never fails a job.
     const ciFailures = task.ciFix ? await readCiFailures(this.#c.d.github, ctx.project.repository, task.ciFix) : null
