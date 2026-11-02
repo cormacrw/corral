@@ -6,6 +6,12 @@ lint and typecheck. `CORRAL_CHECK_CPUS` is the single positive integer setting
 workers, including direct package test commands. Do not add concurrency, worker
 or timeout flags. Existing database hook timeouts remain in the configs.
 
+The root `pnpm run test` runs one package at a time. Vitest's worker cap is per
+package, so Turbo's default parallelism in CI meant about 24 workers on 4 vCPUs,
+and unrelated slow tests timed out at random (PGlite setup, subprocess tests).
+A timeout in a suite that passes alone points here first: don't raise one test's
+limit.
+
 Reviewers still follow D26: required CI owns the gates when configured. Without
 required CI, use `pnpm run check --review` and run the build without the cache.
 The first review check forces Turbo execution. Once every check succeeds on a

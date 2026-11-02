@@ -90,5 +90,6 @@ jobs:
         run: pnpm run test
         env:
           CORRAL_DATABASE_URL: postgres://corral:corral@localhost:5432/corral
-          # GitHub's standard runner for public repositories has 4 vCPUs
+          # GitHub's standard runner for public repositories has 4 vCPUs. The root
+          # test script runs one package at a time, so this caps the whole step.
           CORRAL_CHECK_CPUS: 4
