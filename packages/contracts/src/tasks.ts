@@ -32,7 +32,9 @@ export const patchTaskInput = z.object({
   epicId: z.uuid().nullable().optional(),
   humanReview: z.boolean().optional(),
   // Replaces the list; existing criteria keep their IDs when their text is unchanged
-  acceptanceCriteria: z.array(z.object({ id: z.uuid().optional(), text: z.string().trim().min(1), checkedByHuman: z.boolean().optional() })).optional(),
+  acceptanceCriteria: z.array(z.object({ id: z.uuid().optional(), text: z.string().trim().min(1), checkedByHuman: z.boolean().optional() }))
+    .refine(criteria => new Set(criteria.flatMap(c => c.id ? [c.id] : [])).size === criteria.filter(c => c.id).length, 'Each criterion id can appear only once')
+    .optional(),
   // Task numbers in the same project; replaces the list
   dependsOn: z.array(z.number().int().positive()).optional()
 })

@@ -12,6 +12,8 @@ export type { ParsedLine } from './stream-json.ts'
 
 export interface RuntimeOptions {
   cwd: string
+  // cwd isn't a checkout: a global PM session (D30)
+  noRepository?: boolean | undefined
   prompt: string
   // Role instructions from the repo, plus the runner's notes
   systemPrompt: string

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { approveDesignVersion, isDesignPinStale, nextDesignVersion, STALE_PIN_STATUSES, type DesignVersionState } from './design.ts'
 import type { DesignPinTarget } from './plan.ts'
 import { TASK_STATUSES } from './status.ts'
-import { requiresHumanReview, TASK_TYPES } from './task.ts'
+import { canChangeType, requiresHumanReview, TASK_TYPES } from './task.ts'
 
 const versions = (...statuses: DesignVersionState['status'][]): (DesignVersionState & { id: string })[] =>
   statuses.map((status, i) => ({ id: `v${i + 1}`, version: i + 1, status }))
@@ -62,6 +62,21 @@ describe('design task type (D20)', () => {
     expect(requiresHumanReview('design', true)).toBe(true)
     expect(requiresHumanReview('task', false)).toBe(false)
     expect(requiresHumanReview('bug', true)).toBe(true)
+  })
+
+  it('fixes spike and design types once a task has left Draft or Backlog', () => {
+    expect(canChangeType({ status: 'draft', type: 'design' }, 'task')).toBe(true)
+    expect(canChangeType({ status: 'backlog', type: 'task' }, 'design')).toBe(true)
+    expect(canChangeType({ status: 'human_review', type: 'design' }, 'task')).toBe(false)
+    expect(canChangeType({ status: 'human_review', type: 'task' }, 'design')).toBe(false)
+    expect(canChangeType({ status: 'ready_to_merge', type: 'task' }, 'spike')).toBe(false)
+    expect(canChangeType({ status: 'in_progress', type: 'spike' }, 'bug')).toBe(false)
+    expect(canChangeType({ status: 'human_review', type: 'design' }, 'design')).toBe(true)
+    expect(canChangeType({ status: 'human_review', type: 'task' }, 'bug')).toBe(true)
+    expect(canChangeType({ status: 'ready_to_merge', type: 'task' }, 'bug')).toBe(false)
+    expect(canChangeType({ status: 'approved', type: 'bug' }, 'task')).toBe(false)
+    expect(canChangeType({ status: 'merged', type: 'bug' }, 'task')).toBe(false)
+    expect(canChangeType({ status: 'ready_to_merge', type: 'task' }, 'task')).toBe(true)
   })
 })
 

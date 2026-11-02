@@ -475,6 +475,20 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     expect((await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.some(i => i.taskId === task.id)).toBe(false)
   })
 
+  it('puts a stuck task back to work once the PM answers its question', async () => {
+    const { task, job } = await assigned()
+    expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Which format?', summary: 'CSV or JSON?' })).toMatchObject({ ok: true })
+    await t.orchestrator.schedule()
+    const stopped = await row(task.id)
+    const pm = (await runner.next('run.assign', m => m.job.planSessionId === stopped.retryStop!.sessionId)).job
+    runner.send({ type: 'run.started', runId: pm.runId, leaseEpoch: pm.leaseEpoch, agentSessionId: 'triage' })
+    expect(await runner.call(pm.runId, pm.leaseEpoch, 'act_on_inbox', { taskRef: task.ref, action: 'clarify', text: 'Use JSON' })).toMatchObject({ ok: true, result: { status: 'in_progress' } })
+    expect(await row(task.id)).toMatchObject({ status: 'in_progress', retryStop: null })
+    await t.orchestrator.schedule()
+    await runner.next('run.assign', m => m.job.taskId === task.id && m.job.runId !== job.runId)
+    expect(await row(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: expect.any(String), retryStop: null })
+  })
+
   it('triages the failed-run cap exactly once even without a known head', async () => {
     const { task, project, job } = await assigned(1)
     await fail(job, 'new-head')

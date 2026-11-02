@@ -37,6 +37,8 @@ const composer = vue.defineComponent({
   setup: () => () => vue.h('form')
 })
 
+const auditActivity = vue.defineComponent({ name: 'AuditActivity', props: ['text'], setup: () => () => vue.h('p') })
+
 beforeEach(() => {
   sessionStorage.clear()
   for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'useTemplateRef', 'toRaw'] as const) vi.stubGlobal(name, vue[name])
@@ -58,7 +60,7 @@ async function mountDetail(client = testQueryClient()) {
   const wrapper = mount(TaskDetail, {
     props: { taskRef: 'COR-1', mode: 'page' },
     shallow: true,
-    global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { DraftComposer: composer, UTabs: tabs }, stubs: { DraftComposer: false, UTabs: false, teleport: true } }
+    global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { DraftComposer: composer, UTabs: tabs, AuditActivity: auditActivity }, stubs: { DraftComposer: false, UTabs: false, AuditActivity: false, teleport: true } }
   })
   await flushPromises()
   return wrapper
@@ -83,6 +85,12 @@ it('shows a task from a loaded project list while its own entry loads', async ()
   expect(wrapper.findComponent({ name: 'USkeleton' }).exists()).toBe(false)
   expect(wrapper.find('u-skeleton-stub').exists()).toBe(false)
   expect(wrapper.html()).toContain(taskA.title)
+})
+
+it('words a PM pause in the Activity', async () => {
+  vi.mocked(api.tasks.history).mockResolvedValue([{ id: 1, action: 'task.paused', detail: {}, createdAt: new Date().toISOString(), actor: { kind: 'agent', role: 'pm', runId: 'r1' } }] as never)
+  const wrapper = await mountDetail()
+  expect(wrapper.findComponent(auditActivity).props('text')).toBe('paused the task')
 })
 
 it('drops a save that finishes after moving to another task', async () => {

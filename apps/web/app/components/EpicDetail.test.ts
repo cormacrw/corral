@@ -29,6 +29,8 @@ it('updates prerequisite and blocks progress and the waiting alert from task eve
   client.setQueryData(keys.tasks.list(project.slug), [task(), task({ id: 't2', ref: 'TA-2', epicId: 'next', type: 'design' })])
   client.setQueryData(keys.epics.list(project.slug), [own, prerequisite, blocked])
   vi.spyOn(api.epics, 'get').mockResolvedValue(own)
+  vi.spyOn(api.epics, 'history').mockResolvedValue([])
+  vi.spyOn(api.epics, 'activity').mockResolvedValue([])
   const list = vi.spyOn(api.epics, 'list')
   for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
   vi.stubGlobal('useLocalStorage', (_key: string, initial: unknown) => vue.ref(initial))
@@ -98,6 +100,8 @@ it('keeps an open epic\'s task list live as its tasks change, join and leave', a
   client.setQueryData(keys.epics.list(project.slug), [own])
   client.setQueryData(keys.epics.detail('own'), own)
   const get = vi.spyOn(api.epics, 'get').mockImplementation(async () => client.getQueryData<EpicDetail>(keys.epics.detail('own'))!)
+  vi.spyOn(api.epics, 'history').mockResolvedValue([])
+  vi.spyOn(api.epics, 'activity').mockResolvedValue([])
   for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
   vi.stubGlobal('useLocalStorage', (_key: string, initial: unknown) => vue.ref(initial))
   vi.stubGlobal('useProjectLists', useProjectLists)
@@ -173,6 +177,17 @@ it('keeps the description editor open when saving fails', async () => {
   await view.saveDescription()
   expect(patch).toHaveBeenCalledOnce()
   expect(view.editingDescription).toBe(true)
+  wrapper.unmount()
+})
+
+it('keeps the epic page when only its activity can\'t load', async () => {
+  vi.spyOn(api.epics, 'activity').mockRejectedValue(new Error('Down'))
+  const wrapper = await mountEpic('page')
+  const view = wrapper.vm as unknown as { tab: string, error: string | null }
+  view.tab = 'activity'
+  await flushPromises()
+  expect(view.error).toBeNull()
+  expect(wrapper.text()).toContain('Couldn\'t load the activity.')
   wrapper.unmount()
 })
 

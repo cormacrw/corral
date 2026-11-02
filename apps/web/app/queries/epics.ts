@@ -27,3 +27,5 @@ export const retryEpicSync = defineMutation<{ ok: boolean }, { id: string }>({
   mutationFn: ({ id }) => api.epics.retrySync(id),
   invalidates: (_, { id }) => [keys.inbox(), keys.epics.lists(), keys.epics.detail(id)]
 })
+
+export const epicActivityQuery = (id: string) => queryOptions({ queryKey: keys.epics.activity(id), queryFn: () => api.epics.activity(id) })

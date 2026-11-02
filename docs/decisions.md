@@ -148,6 +148,8 @@ Full table, disk layout, flows and the known POC push limitation are in [archite
 
 **Amended by D18:** a Plan session can run on Codex instead of `claude`, picked per session and locked once it has messages. What this decision says about `claude` sessions and `--resume` applies to the session's runtime.
 
+**Amended by D30:** the PM gets typed tools for every area, and its checkout applies only to sessions tied to a project. Its limits on merging, editing docs and approving plans stay.
+
 **Consequence:** PM chat requires the runner to be online. When hosted, that means the user's runner must be connected to chat.
 
 ---
@@ -211,11 +213,14 @@ A status says whose turn it is. Whether a run is actually active is shown by the
 | Agent review, Human review, Ready to merge | Merged | GitHub shows the PR merged outside Corral | Server |
 | Ready, In progress, Agent review, Human review, Ready to merge | Blocked | See causes below | Server |
 | In progress, Agent review, Ready to merge | Failed | See causes below | Server |
+| Blocked | In progress | The PM answers a question or adds information (D30) | PM |
 | Blocked, Failed | Backlog, Ready or In progress | Human resolves it (In progress keeps the branch and PR) | **Human only** |
 
 **Amended by D28:** criteria reserved for a human require neither agent evidence nor an agent met/unmet verdict. Their recorded verdict is **Needs human check**. Reviewer approval and a newly added human check use the Human review routes above; human approval then follows the usual merge gates.
 
 All transitions go through `packages/core` and are enforced by the server. Anything not in this table is rejected.
+
+**Amended by D30:** the PM can create tasks in Backlog of any kind, and can propose the human's transitions on a confirm card. They run only when the human clicks Confirm, so the actor is still the human.
 
 ### Blocked vs Failed
 
@@ -257,6 +262,8 @@ An actionable item remains visible until its decision is resolved. Reading it, m
 **Default feature loop:** the human agrees requirements and approves a plan for a cohesive feature in an `epic`-review epic. Agents implement, review, revise and integrate ordinary internal task steps automatically, then present the completed feature for one epic approval or request for changes. Requested changes run through internal fix tasks and integration review before the feature returns for a human decision. Internal review and handoff are informational, not extra approval checkpoints.
 
 This policy does not approve work or convert existing epics' review modes. D20, D27 and D28 still govern routing: `each_task`, `direct`, existing task PRs and explicit standalone/design/spike approvals keep their required reviews. PR-free epic tasks retain sensitive flags and human checks as obligations confirmed at final epic approval; agents neither judge nor auto-confirm them. Existing Human review tasks stay there. Approval invalidation, CI and merge gates remain unchanged.
+
+**Amended by D30:** the PM's actions appear in Activity, and it can act on Inbox items, with decisions on a confirm card. The PM still raises no Needs-you items of its own.
 
 **Recovery contract (COR-436):** New no-progress stops and every cap (failed runs, review rounds and repeated review feedback, CI fixes in a row, integration attempts, merge attempts) receive one PM triage turn. Developer `stuck` and rebase-review `blocked` reports also receive that diagnosis before escalation; their existing task questions and D27 alternatives remain intact. Suppress a Failed, Blocked or no-progress-stopped task item only while a triage run has been dispatched or its open recovery conversation has a pending question or plan. Triage that is queued, or that can't be created because there is no PM, hides nothing. When triage ends with neither, including when it fails, restore the task decision in Needs you with PM findings (or that there are none) and recovery guidance. A no-progress stop keeps its In progress or Agent review status, so it appears as a Stopped item with Retry, Give direction, Send back and Delete; these release the stop without resetting the failed-run counter. A reply authorizes retry only by choosing an explicitly marked retry option on a pending recovery question; leaving stopped or asking for clarification never resets counters. Existing explicit task-resolution actions remain human decisions.
 
@@ -309,6 +316,8 @@ PM questions and plan approvals remain in the same Plan session, actionable from
 - **Pause is per project.** Pausing stops new runs for that project only.
 
 **Amended by D23:** adds the designer role, its instructions fallback and fresh-install seed, and includes designers in global agent capacity and configuration.
+
+**Amended by D30:** Plan sessions can be global as well as tied to a project, and a global session has no `projectId`.
 
 **Why:** A personal software factory (D12) runs more than one codebase. Planning, review and agent capacity are shared across all of them, while task state belongs to one repo.
 
@@ -897,3 +906,79 @@ Developers still never run `gh` (D8). The server reads the failed job's step nam
 Without tasks, these fixes are shown on the epic: its page and flyout and the Epic board show the current fix, its developer and its reason, plus past fix runs with whether behaviour changed. `runs` gain `fixKind`, `behaviourChanged`, `reReviewed` and `operationId`. Flow metrics count the runs as developer work on the epic, and show fixes that needed re-review against those that skipped it, reviews per epic, and tokens on first builds against follow-up work, over the selected window. Old `rebase_handed_off`, `rebase_resolving` and fix task history stays readable.
 
 **Why:** a fix task made a reviewer and a fresh set of criteria out of mechanical repairs. Epic reviews were 21 of 88 runs in the period measured, with 29% of context tokens, and 7 epics averaged 3 reviews each. Run #3842 spent 11.5 minutes failing to reproduce a CI failure it couldn't read. The developer knows whether behaviour changed, and the server, CI and the merge gates check everything that doesn't rest on its word. Review is kept for changed work, where it finds something.
+
+---
+
+## D30 — The PM is the human's point of contact, through deliberate tools
+
+**Status:** Accepted 2026-10-30 (COR-239). Amends D9, D10, D11, D13, D16, D20 and PRD §7.2. The tools below are implemented; [flows.md](flows.md) describes the shipped flows.
+
+**Decision:** The PM chat is the human's point of contact for everything in Corral, and planning is one of its jobs. The PM can do anything the human can, through **specific, typed tools for each area**, not one general API tool.
+
+### Tools per area
+
+| Area | Covers |
+|---|---|
+| Tasks and epics | Reading, creating, editing and moving them |
+| Projects | Reading them, changing their settings, pausing them |
+| Runs | Reading them, stopping them, sending messages to live runs |
+| Inbox | Reading items and acting on them |
+| Designs | Reading versions, approving them, requesting changes |
+| Agents | Reading them and changing their settings |
+| Threads | Listing Plan sessions, reading them, starting them, closing them |
+
+Each tool does one thing, with a typed input. The server validates it and applies the same rules as for the human, so a tool never gets around D10's transitions or a project's gates.
+
+**Why specific tools:**
+
+- **Narrower blast radius under prompt injection.** The PM reads text it doesn't control, such as code, task descriptions and agent output. An injected instruction can only reach the actions the tools expose, in the shape they accept, while a general tool would expose every route, including any added later.
+- **Fewer mistakes.** A typed tool with a clear purpose is harder to misuse than a composed method, path and body.
+- **Actions can be treated differently.** Each tool has its own place in the rules: some act directly and some need the human's confirmation (below).
+- **A readable audit.** "Stopped run #128" says what happened. "POST to a URL" doesn't.
+
+### Attribution
+
+Every agent action is attributed to the agent and session that made it, and shown in Activity and the audit log. An action the human confirmed records both: the human who confirmed it, and the agent and session that proposed it.
+
+### Confirm-required tools
+
+**Confirm-required** tools are the destructive or decision-making ones. They don't act directly: the tool posts a **confirm card** in the chat saying what will happen, and the action runs only when the human clicks **Confirm**. If the human doesn't click it, nothing happens. They cover:
+
+- **Deleting** a project or a task.
+- **Stopping** a run, **stop-all**, the kill switch on every run, and **resume-all**, which lifts it.
+- **Setting an update hold**, which queues PM turns after work drains.
+- **Approving** tasks or designs.
+- **Moving a task** through a human board transition.
+- **Inbox decisions**, such as resolving a Needs-you item or retrying a Stopped one (`act_on_inbox` `retry`, `resolve`, `send_back`, `delete`).
+- **Lowering a gate:** no PM route lowers one without a card naming it. That covers turning off a task's human review, creating a task without it where the project reviews by default, moving a task somewhere with less human review, rewording, removing or clearing a human check, resuming a paused task or project, a review mode with less human review on an epic or a project's default, removing a required check, turning off a project's human review default, and raising its review round or failed run cap. These tools stay direct otherwise, and raising a gate stays direct. The card names exactly what's lowered and shows the values of what else the call changes. A delete card names the human gates the task loses, and a `resolve` card says it resets the cap counter.
+
+Plans can't lower a gate on existing work. `propose_plan` refuses a lower review mode on an epic with live work, and a revision of an existing task refuses to turn off human review, move it somewhere with less review or drop a human check, at proposal and again at approval, pointing at `update_epic` or `update_task`. A revision that leaves `humanReview` out keeps the task's setting, and rewording a human check keeps it a human check.
+
+This isn't a role restriction. The PM can propose any of these at any time, whether or not the human asked. The click is the human's own action, so it goes through the same endpoint and rules as the button elsewhere in the app, and is refused the same way if the state has moved on.
+
+Task approval cards name every current **Checked by a human** criterion (D28). Confirm explicitly says the human checked each one; adding or rewording a check invalidates the old card. Cards without human checks keep their existing summary.
+
+Plan approval isn't a confirm-required tool: `approve_plan` keeps D9's rule, that the human must have written since the plan was proposed.
+
+### API coverage
+
+Every server API route has a PM tool or an **explicit, reasoned exclusion**. The exclusions are a list in the repository, each with its reason, such as a route only the deploy script calls (`POST /api/deployments`). A **coverage check** in CI fails when a route has neither, so a new route can't quietly leave the PM behind.
+
+The method/path map is `pmRouteTools` in [`apps/server/src/pm-route-coverage.ts`](../apps/server/src/pm-route-coverage.ts); `pmRouteExclusions` beside it records an individual reason for every exclusion. Keys are exact registered methods and paths (including parameter names), not path prefixes. `apps/server/src/pm-route-coverage.test.ts` assembles the real listener through `createServerApp`, including the runner WebSocket and design-file middleware, and checks Hono's route table without starting a listener or database. It runs with the normal server tests in CI. Unknown tools are checked against `PM_TOOL_NAMES` in `packages/contracts/src/pm-tools.ts`, the same registry used to expose the PM role's MCP tools. New routes must add a mapping to an existing tool or a reasoned exclusion; removed routes must remove their entries. A mapping records the corresponding operation, not identical transport or response shape (for example, `get_run` returns a bounded transcript rather than streaming it).
+
+### Global sessions
+
+Sessions can be **global** as well as tied to a project. A global session has **no repository worktree**. To read code it starts a thread in a project, which is a normal project session with its read-only checkout (D9). Sessions tied to a project work as before.
+
+### Amendments to earlier decisions
+
+- **D9:** the PM's tools are no longer the short list there, and `propose_plan` is no longer the only way for the PM to change the board: it can create and edit tasks with its task tools. Plans stay the way to propose a body of work. Only a session tied to a project has a read-only checkout. **Unchanged:** the PM has no tool to merge or edit docs, its checkout stays read-only, and a turn runs when the human or another PM thread sends a message, or the human approves a design (COR-243). Child completion notifications are saved for the parent’s next turn; they do not start one.
+- **D10:** the PM can create tasks in Backlog of any kind, not only documentation tasks. The **Human only** transitions stay human: the PM can propose them on a confirm card, and the transition runs on the human's click with the human as its actor.
+- **D10 (COR-240, reconciled with main):** Merged work stays immutable through both PM and human edits (`409 task_merged`). Epic membership is fixed for PM edits once a task has a PR (`409 task_epic_locked`), preserving D27’s review-mode lock. The task UI stays read-only after merge; follow-up work remains a new task.
+- **D10 (COR-298):** a task can't enter or leave the `spike` or `design` type once it has left Draft or Backlog; `PATCH` and `update_task` return `409 task_type_locked`. Those types have their own end states, so a retyped task could otherwise skip them. Changing between `task` and `bug` stays open until the task is approved or awaiting merge, when its type is fixed (also `409 task_type_locked`).
+- **D10 (COR-246):** the one exception is the PM's `answer` transition, Blocked → In progress, for answering a developer's own `stuck` question. It's refused on a block from a cap, repeated feedback or a human decision (D24), and on a Stopped item, so it can't lift a cap. It keeps the review-round and failed-run counters, and clears the triage stop the question raised. `resolve` stays **Human only**.
+- **D11:** "the PM stays in Plan" no longer holds. The PM can read and act on the Inbox, with decisions on a confirm card, and its actions appear in Activity. **Unchanged:** it raises no Needs-you items of its own.
+- **D13:** "Plan sessions belong to one project" and "every PM session has a `projectId`" no longer hold, because global sessions have none. A project session's project is still locked once it has messages.
+- **D16 (COR-241, COR-323):** set_update_hold now requires human confirmation because it can queue every PM turn. The updating banner offers Lift through DELETE /api/update-hold, including after finishing has latched. clear_update_hold remains direct but cannot execute from a queued turn.
+- **D20:** design approval stays **Human only**. The PM can propose it on a confirm card, and the rest of D20's approval flow follows from the human's click as usual.
+- **PRD §7.2:** the PM still can't merge PRs, approve its own plan or modify canonical documentation. "Cannot bypass role permissions" now means the tools and rules above.

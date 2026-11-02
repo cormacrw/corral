@@ -9,7 +9,7 @@ const proposedTask = z.object({
   description: z.string().trim(),
   type: z.enum(TASK_TYPES),
   priority: z.enum(TASK_PRIORITIES).default('medium'),
-  humanReview: z.boolean().default(false),
+  humanReview: z.boolean().optional().describe('Leave out on a task with a ref to keep its current setting'),
   acceptanceCriteria: z.array(z.union([z.string().trim(), z.object({ text: z.string().trim(), checkedByHuman: z.boolean().optional() })])).default([]),
   dependsOn: z.array(z.string().trim()).default([]).describe('Keys of tasks in this plan, or refs of existing tasks'),
   // The approved design version a build task builds (D20)
@@ -50,7 +50,7 @@ export function normalizeProposedPlan(input: z.output<typeof proposedPlanInput>)
     tasks: plan.tasks.map(t => ({
       ...t,
       epic: t.epic || (legacyEpic ? 'main' : undefined),
-      humanReview: requiresHumanReview(t.type, t.humanReview),
+      humanReview: requiresHumanReview(t.type, t.humanReview ?? false),
       dependsOn: t.dependsOn.map(dependency)
     }))
   }

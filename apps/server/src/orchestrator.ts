@@ -1,4 +1,4 @@
-import { RUNNER_HEARTBEAT_MS, type GlobalStatus, type PmRunJob, type RunnerMessage } from '@corral/contracts'
+import { RUNNER_HEARTBEAT_MS, type GlobalStatus, type InboxActionInput, type PmRunJob, type RunnerMessage, type Task } from '@corral/contracts'
 import { ACTIVE_RUN_STATES, type Actor } from '@corral/core'
 import { EpicFixes } from './epic-fixes.ts'
 import { schema } from '@corral/db'
@@ -11,6 +11,9 @@ import { HumanActions } from './human-actions.ts'
 import { LeaseReconcile } from './lease-reconcile.ts'
 import { MergeOrchestrator } from './merge.ts'
 import type { PlanService } from './plan.ts'
+import { PmActions } from './pm-actions.ts'
+import { PmCalls } from './pm-calls.ts'
+import { PmDecisions } from './pm-decisions.ts'
 import { PmDispatch } from './pm-dispatch.ts'
 import { PmTools } from './pm-tools.ts'
 import { KILL_SWITCH_STOP, RunContexts, type OrchestratorDeps, type PlanSessionRow, type RunCore } from './run-context.ts'
@@ -41,14 +44,28 @@ export class Orchestrator implements RunnerHandlers {
   #c: RunCore
   #timer: NodeJS.Timeout | null = null
   #ticking: Promise<void> | null = null
+  readonly pmActions: PmActions
+  readonly pmDecisions: PmDecisions
   readonly epicPrs: EpicPullRequests
   readonly pmTools: PmTools
   readonly merges: MergeOrchestrator
   readonly sweep: WorktreeSweep
 
   constructor(deps: OrchestratorDeps) {
+    this.pmActions = new PmActions({
+      db: deps.db,
+      events: deps.events,
+      prepare: (sessionId, tool, input) => this.#c.pmCalls.prepare(sessionId, tool, input),
+      execute: (sessionId, tool, prepared, actor) => this.#c.pmCalls.execute(sessionId, tool, prepared, actor),
+      sessionChanged: async sessionId => this.plans?.actionSessionChanged(sessionId)
+    })
+    this.pmTools = new PmTools({ db: deps.db, events: deps.events, runner: deps.runner, transcripts: deps.transcripts, orchestrator: this, editEntity: (sessionId, tool, input, actor) => this.#c.pmCalls.editEntity(sessionId, tool, input, actor) })
+    this.pmDecisions = new PmDecisions({
+      db: deps.db,
+      inboxAction: (taskId, input, actor) => this.inboxAction(taskId, input, actor),
+      approveDesign: (taskId, version, note, actor) => this.approveDesign(taskId, version, note, actor)
+    })
     this.epicPrs = new EpicPullRequests(deps)
-    this.pmTools = new PmTools({ db: deps.db, transcripts: deps.transcripts })
     this.merges = new MergeOrchestrator({
       db: deps.db,
       events: deps.events,
@@ -69,6 +86,8 @@ export class Orchestrator implements RunnerHandlers {
       releaseNotes: null,
       epicPrs: this.epicPrs,
       pmTools: this.pmTools,
+      pmActions: this.pmActions,
+      pmDecisions: this.pmDecisions,
       merges: this.merges,
       sweep: this.sweep
     } as RunCore
@@ -80,6 +99,7 @@ export class Orchestrator implements RunnerHandlers {
     core.tools = new AgentTools(core)
     core.human = new HumanActions(core)
     core.pm = new PmDispatch(core)
+    core.pmCalls = new PmCalls(core, this)
     core.leases = new LeaseReconcile(core)
     core.exits = new RunExits(core)
     core.scheduler = new Scheduler(core)
@@ -104,6 +124,7 @@ export class Orchestrator implements RunnerHandlers {
 
   // Reads the kill switch; called once at startup
   async init(): Promise<void> {
+    await this.pmActions.recoverInterrupted()
     const [row] = await this.#c.d.db.select().from(settings).where(eq(settings.key, 'stopped'))
     this.#c.stopped = row?.value === true
     this.merges.stopped = this.#c.stopped
@@ -251,6 +272,18 @@ export class Orchestrator implements RunnerHandlers {
 
   noticeTaskEdit(taskId: string, edit: TaskContentEdit, actor: Actor): Promise<void> {
     return this.#c.human.noticeTaskEdit(taskId, edit, actor)
+  }
+
+  taskChanged(taskId: string): Promise<void> {
+    return this.#c.human.taskChanged(taskId)
+  }
+
+  inboxAction(taskId: string, input: InboxActionInput, actor: Actor): Promise<Task | null> {
+    return this.#c.human.inboxAction(taskId, input, actor)
+  }
+
+  approveDesign(taskId: string, version: number | undefined, note: string | undefined, actor: Actor): Promise<void> {
+    return this.#c.human.approveDesign(taskId, version, note, actor)
   }
 
   deleteTask(taskId: string, actor: Actor, reason: string | null): Promise<void> {

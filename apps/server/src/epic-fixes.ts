@@ -112,7 +112,8 @@ export class EpicFixes {
   // The candidate branch, once: a run after a refused publish carries on from it
   async job(ctx: RunContext): Promise<RunJob> {
     const { db, github } = this.#c.d
-    const { run, agent, project } = ctx
+    const { run, agent } = ctx
+    const project = ctx.project!
     const [row] = await db.select({ operation: operations, epic: epics }).from(operations).innerJoin(epics, eq(epics.id, operations.epicId)).where(eq(operations.id, run.operationId!))
     if (!row) throw new Error('The fix\'s operation is gone')
     const { operation, epic } = row
@@ -163,7 +164,8 @@ export class EpicFixes {
   // Nothing moves here: the synchronizer's pass publishes the reported commit
   async #submit(ctx: RunContext, report: OutcomeReport) {
     const { db, github } = this.#c.d
-    const { run, project } = ctx
+    const { run } = ctx
+    const project = ctx.project!
     const { headSha, behaviourChanged } = report
     if (!headSha) throw new ToolError('There is no commit to submit. Commit your work, then report again.')
     if (behaviourChanged === undefined) throw new ToolError('Not submitted. Add behaviourChanged: true if this changes what the code does, false if approved behaviour is unchanged.')
@@ -191,7 +193,8 @@ export class EpicFixes {
   // that stops a developer stops the epic until a human retries.
   async #stuck(ctx: RunContext, report: OutcomeReport) {
     const { db } = this.#c.d
-    const { run, project } = ctx
+    const { run } = ctx
+    const project = ctx.project!
     if (!report.decision && run.fixKind === 'conflict') throw new ToolError('Not reported. An epic rebase asks the human through `decision`: one focused question, at least two alternatives and the changes affected. Add it and report again.')
     await db.transaction(async (tx) => {
       const operation = await this.#active(tx, run)
@@ -215,7 +218,7 @@ export class EpicFixes {
     const attempts = operation.fixAttempts + 1
     await tx.update(operations).set({ fixAttempts: attempts, updatedAt: this.#c.now() }).where(eq(operations.id, operation.id))
     if (attempts < MAX_FIX_ATTEMPTS) return false
-    const [project] = await tx.select().from(projects).where(eq(projects.id, run.projectId))
+    const [project] = await tx.select().from(projects).where(eq(projects.id, run.projectId!))
     await recordSyncFailure(tx, project!, run.epicId!, `The developer failed ${attempts} times to fix the ${FIX_LABEL[operation.fix!]}. The last run: ${error}`, this.#c.now())
     return true
   }

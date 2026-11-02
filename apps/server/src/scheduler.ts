@@ -153,7 +153,7 @@ export class Scheduler {
         const ctx = await this.#c.runs.load(job.runId)
         if (!ctx) break
         if (ctx.run.runnerId) await this.#c.d.db.update(runs).set({ runnerName: runner.name(ctx.run.runnerId) }).where(eq(runs.id, job.runId))
-        if (!await this.dispatch(ctx, await this.#c.epicPrs.addCiResult(job, ctx.project.requiredChecks), RUNNER_WENT_OFFLINE)) break
+        if (!await this.dispatch(ctx, await this.#c.epicPrs.addCiResult(job, ctx.project!.requiredChecks), RUNNER_WENT_OFFLINE)) break
         if (this.#c.stopped || this.#c.updating) return
         if (agent.wakeIntervalSeconds !== null) break
       }
