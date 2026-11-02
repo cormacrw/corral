@@ -8,6 +8,7 @@ import { bundleProblem } from './designs.ts'
 import { raiseDecision, recordResolutionReview } from './epic-rebase-approval.ts'
 import type { PullRequest } from './github.ts'
 import { carryOverApproval, checkTrivialRebase } from './rebase-review.ts'
+import { triageBlocked } from './retry-recovery.ts'
 import { evidenceState, isEpicRebaseTask, isEpicResolution, taskBase } from './task-base.ts'
 import { recordTaskSubmission } from './task-submissions.ts'
 import { addComment, applyTransition, toTaskState, type ProjectRow, type TaskRow } from './tasks.ts'
@@ -69,7 +70,7 @@ export class RunOutcomes {
           if (!ctx.task?.rebaseOnly && !(ctx.task && isEpicResolution(ctx.task))) throw new ToolError('Only a rebase review can report blocked.')
           return this.#blockedRebaseReview(ctx, report.summary, report.decision)
         case 'failed':
-          await this.#c.ending.failRun(ctx, report.summary, { summary: report.summary })
+          await this.#c.ending.failRun(ctx, report.summary, { summary: report.summary, headSha: report.headSha })
           this.#c.ending.finished(ctx, 'Reported failed')
           return { ok: true, message: 'Recorded. You can stop now.' }
       }
@@ -110,7 +111,7 @@ export class RunOutcomes {
         case 'stuck':
           return this.#stuck(ctx, report.summary, report.note!, report.decision)
         case 'failed':
-          await this.#c.ending.failRun(ctx, report.summary, { summary: report.summary }, report.note)
+          await this.#c.ending.failRun(ctx, report.summary, { summary: report.summary, headSha: report.headSha }, report.note)
           this.#c.ending.finished(ctx, 'Reported failed')
           return { ok: true, message: 'Recorded. You can stop now.' }
       }
@@ -182,6 +183,8 @@ export class RunOutcomes {
       // flagged, otherwise Ready to merge (D10). PR-free work always takes
       // Ready to merge: the human sees it at the epic review (D27)
       const state = await applyTransition(tx, locked.task, locked.project, verdict === 'approved' ? { type: 'review_approved' } : { type: 'changes_requested', similarity }, server, { event: verdict === 'approved' ? 'review_approved' : 'changes_requested', runId: ctx.run.id, headSha, ...(similarity !== undefined && { similarity }) })
+      // The review-round cap and repeated feedback get the PM's diagnosis first (D11)
+      if (state.status === 'blocked') await triageBlocked(tx, ctx, locked.task)
       await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: verdict, summary: report.summary, headSha })
       return state
     })
@@ -254,10 +257,11 @@ export class RunOutcomes {
       await tx.insert(comments).values({ taskId: task.id, author: this.#c.runs.actor(ctx), body: `Rebase review blocked: ${reason.trim()}` })
       if (decision) await raiseDecision(tx, task, project, decision, ctx.run.id, this.#c.runs.actor(ctx))
       await applyTransition(tx, task, project, { type: 'block', reason: decision?.question ?? reason }, server, { event: 'blocked', runId: ctx.run.id })
+      await triageBlocked(tx, ctx, task)
       await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'blocked', summary: reason })
     })
-    this.#c.ending.finished(ctx, 'Rebase review blocked: waiting on a human')
-    return { ok: true, message: 'The task is Blocked for a human decision. You can stop now.' }
+    this.#c.ending.finished(ctx, 'Rebase review blocked: waiting on PM triage')
+    return { ok: true, message: 'The task is Blocked for PM triage. You can stop now.' }
   }
 
   // An epic rebase holds its writer lock until the human answers on the
@@ -270,7 +274,7 @@ export class RunOutcomes {
     return { question: summary.trim(), alternatives: [], affectedChanges: [] }
   }
 
-  // Asks a human: the task becomes Blocked with the question as its reason (D11)
+  // Holds the task for PM diagnosis before any human question (D11).
   async #stuck(ctx: RunContext, question: string, note: string, structured?: EpicDecisionRequest) {
     const decision = this.#decisionFor(ctx, question, structured)
     const comment = await this.#c.d.db.transaction(async (tx) => {
@@ -278,12 +282,13 @@ export class RunOutcomes {
       const comment = await this.#c.ending.postNote(tx, ctx, note)
       if (decision) await raiseDecision(tx, task, project, decision, ctx.run.id, this.#c.runs.actor(ctx))
       await applyTransition(tx, task, project, { type: 'block', reason: decision?.question ?? question }, server, { event: 'stuck', runId: ctx.run.id })
+      await triageBlocked(tx, ctx, task)
       await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'stuck', summary: question })
       return comment
     })
     this.#c.d.events.publish({ type: 'comment.created', comment })
-    this.#c.ending.finished(ctx, 'Stuck: waiting on a human')
-    return { ok: true, message: 'The task is Blocked until a human answers. You can stop now.' }
+    this.#c.ending.finished(ctx, 'Stuck: waiting on PM triage')
+    return { ok: true, message: 'The task is Blocked for PM triage. You can stop now.' }
   }
 
   // What every code submission must pass before anything changes: the branch

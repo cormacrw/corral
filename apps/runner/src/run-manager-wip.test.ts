@@ -164,6 +164,18 @@ describe('a stopped run keeps its work', () => {
     expect(await onOrigin('corral/epic-feature')).toBe(base)
   })
 
+  it('reports the actual failed head without pushing or trusting an agent-supplied head', async () => {
+    await start(developer())
+    const worktree = worktreePath(dataDir, 'task-1', 'developer')
+    await git(['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '--allow-empty', '-m', 'Partial progress'], { cwd: worktree })
+    const head = (await git(['rev-parse', 'HEAD'], { cwd: worktree })).stdout.trim()
+    void callTool('report_outcome', { outcome: 'failed', summary: 'Cannot continue', note: 'Partial progress', headSha: 'agent-guess' })
+    await expect.poll(() => sent.some(m => m.type === 'tool.call')).toBe(true)
+    expect(sent.find(m => m.type === 'tool.call')).toMatchObject({ input: { outcome: 'failed', headSha: head } })
+    expect(sent.find(m => m.type === 'run.started')).toMatchObject({ initialHeadSha: await onOrigin('main') })
+    expect(await onOrigin(BRANCH)).toBeNull()
+  })
+
   it('tells the server which commit a reviewer\'s checkout is at, over anything the agent passes', async () => {
     const head = await onOrigin('main')
     await start(developer({ role: 'reviewer', headSha: head }))

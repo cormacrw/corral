@@ -16,7 +16,8 @@ let project: Project
 databaseFixture('postgres', async () => {
   t = await createTestApp('postgres', { listen: true })
   await t.db.update(schema.agents).set({ concurrency: 20, wakeIntervalSeconds: null })
-  runner = await FakeRunner.connect(t.server!.url)
+  // Blocked rounds leave their PM triage runs open
+  runner = await FakeRunner.connect(t.server!.url, [], 'r1', { slots: 50 })
   project = await t.createProject({ repository: 'cormacrw/test-app', defaultBranch: 'main' })
 })
 afterAll(async () => {

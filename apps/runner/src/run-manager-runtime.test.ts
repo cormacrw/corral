@@ -71,6 +71,17 @@ describe('RunManager runtimes', () => {
     expect(await readFile(`${codexBin}.stdin`, 'utf8')).toBe('Plan it')
   })
 
+  it('preserves a CLI-reported connection failure instead of reducing it to exit code 1', async () => {
+    const runtime = fakeRuntime('codex', [])
+    runtime.spawn = (options) => {
+      options.onLine('{}', { sessionId: 'cut-session', events: [], rateLimit: null, result: { isError: true, text: 'stream disconnected before completion' } })
+      return { pid: -1, exited: Promise.resolve({ code: 1, signal: null }), kill: () => {} }
+    }
+    const manager = new RunManager(config, connection, tools, new Map([['codex', runtime]]))
+    manager.assign(pmJob({ runId: 'cut', runtime: 'codex' }))
+    expect((await finish('cut')).find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'error', message: 'stream disconnected before completion' } })
+  })
+
   it('reports phase and tool timings on run.ended for a Codex run', async () => {
     const fixture = join(import.meta.dirname, 'fixtures', 'codex', 'tools.jsonl')
     const codexBin = join(dirname(dataDir), 'codex')

@@ -22,7 +22,7 @@ export class InboxMessages {
     this.#events = events
     this.#runner = runner
     events.subscribe((event) => {
-      if (event.type === 'task.updated' && ['human_review', 'blocked', 'failed'].includes(event.task.status)) this.refresh(event.task.id, 'task')
+      if (event.type === 'task.updated' && ['human_review', 'blocked', 'failed', 'in_progress', 'agent_review'].includes(event.task.status)) this.refresh(event.task.id, 'task')
       if (event.type === 'epic.updated' && ['human_review', 'conflict'].includes(event.epic.reviewState ?? '')) this.refresh(event.epic.id, 'epic')
     })
     this.refresh()

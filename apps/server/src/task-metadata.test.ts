@@ -71,7 +71,6 @@ it.each(['stuck', 'failed'] as const)('rejects missing or blank %s reasons over 
   })
   const resolved = await request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'resolve', to: 'in_progress' })
   expect(resolved).toMatchObject({ status: 'in_progress', statusReason: null, draftSession: null, pr: null, lease: null })
-  await t.db.delete(schema.projects).where(eq(schema.projects.id, project.id))
 })
 
 it('exposes grouped Draft ownership and removes it from HTTP and SSE when the task leaves Draft', async () => {

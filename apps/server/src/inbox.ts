@@ -6,19 +6,20 @@ import { waitingDecisions } from './epic-rebase-approval.ts'
 import { fileArtifacts, isNew, workNotes } from './inbox-changes.ts'
 import type { ActionableInboxItem, Comment, Evidence, Inbox, PlanThreadAttention, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { arrivalKey, storedMessages, withMessages, type PreparedItem } from './inbox-message.ts'
-import { designPreviewUrl, humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
+import { ACTIVE_RUN_STATES, designPreviewUrl, humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, count, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
+import { and, count, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm'
 import { actorLabel } from './orchestrator.ts'
 import { thumbnailUrl } from './projects.ts'
 import { sessionStates, type SessionAttention } from './plan.ts'
 import { listEvidenceFor } from './runs.ts'
+import { idleStop, REPETITION_REASON } from './retry-recovery.ts'
 import { listCommentsFor } from './tasks.ts'
 
 const { deployments, agents, auditLog, planSessions, planEpics, planTasks, projects, reviews, runs, tasks, epics } = schema
 
 // A request for changes, or an answer: a clarify is a resolve with a pinned comment
-const HUMAN_ACTIONS = ['human_request_changes', 'resolve']
+const HUMAN_ACTIONS = ['human_request_changes', 'resolve', 'release_stop']
 const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'pr_rebased', 'commit_submitted', 'integrated', 'findings_reported', 'design_submitted', 'changes_requested', 'merged', 'ci_failed', 'base_conflict', 'head_moved']
 
 // The Inbox (D11, design/inbox.md): Needs you holds only decisions the human
@@ -65,7 +66,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     const detail = readAudit(entry.detail)
     const { event } = detail
     const base = { id: String(entry.id), project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: task.title, prUrl: task.prUrl, at: entry.createdAt.toISOString() }
-    if (entry.actor.kind === 'human' && (entry.action === 'task.deleted' || ['resolve', 'human_approve', 'human_request_changes', 'send_back'].includes(event ?? ''))) {
+    if (entry.actor.kind === 'human' && (entry.action === 'task.deleted' || ['resolve', 'release_stop', 'human_approve', 'human_request_changes', 'send_back'].includes(event ?? ''))) {
       const resolution = resolutionText(entry.action, detail, task.type)
       resolved.push({ ...base, type: 'activity', preview: resolution, body: resolution, sender: { name: 'You', role: 'system' }, resolution })
     }
@@ -200,7 +201,9 @@ function threadAttention(attention: Exclude<SessionAttention, { status: 'none' }
 }
 
 function openTaskFilter(taskId?: string) {
-  return and(inArray(tasks.status, ['human_review', 'blocked', 'failed']), isNull(tasks.deletedAt), taskId ? eq(tasks.id, taskId) : undefined)
+  // A stopped task stays in its working status, so nothing else would list it
+  const stopped = and(inArray(tasks.status, ['in_progress', 'agent_review']), isNull(tasks.leaseRunId), isNotNull(tasks.retryStop))
+  return and(or(inArray(tasks.status, ['human_review', 'blocked', 'failed']), stopped), isNull(tasks.deletedAt), taskId ? eq(tasks.id, taskId) : undefined)
 }
 
 type OpenTask = typeof tasks.$inferSelect
@@ -220,11 +223,30 @@ async function taskTransitions(db: Executor, taskIds: string[]) {
 // its status: updates that keep the status (a PR head moving, an edit) don't
 // move it.
 async function openTasks(db: Executor, taskId?: string) {
-  const open = await db.select({ task: tasks, project: projects }).from(tasks)
+  const candidates = await db.select({ task: tasks, project: projects }).from(tasks)
     .innerJoin(projects, eq(projects.id, tasks.projectId))
     .where(openTaskFilter(taskId))
+  const recoveryIds = [...new Set(candidates.flatMap(({ task }) => task.retryStop?.sessionId ? [task.retryStop.sessionId] : []))]
+  const sessions = recoveryIds.length ? await db.select().from(planSessions).where(inArray(planSessions.id, recoveryIds)) : []
+  const recovery = new Map((await sessionStates(db, sessions)).map(state => [state.session.id, state]))
+  const activeTriage = recoveryIds.length
+    ? await db.select({ taskId: runs.taskId, sessionId: runs.planSessionId, runnerId: runs.runnerId }).from(runs)
+        .where(and(eq(runs.role, 'pm'), inArray(runs.planSessionId, recoveryIds), inArray(runs.state, [...ACTIVE_RUN_STATES]), inArray(runs.taskId, candidates.map(c => c.task.id))))
+    : []
+  // A turn with no runner may never start while the PM is paused or offline
+  const triaging = new Set(activeTriage.filter(run => run.runnerId).map(run => `${run.taskId}:${run.sessionId}`))
+  const waiting = new Set(activeTriage.filter(run => !run.runnerId).map(run => `${run.taskId}:${run.sessionId}`))
+  const open = candidates.filter(({ task }) => {
+    if (!task.retryStop) return true
+    if (!task.retryStop.sessionId) return true // No PM has it yet, and there may never be one
+    const state = recovery.get(task.retryStop.sessionId)
+    return !state || state.session.closed || (!triaging.has(`${task.id}:${task.retryStop.sessionId}`) && !['question', 'needs_approval'].includes(state.attention.status))
+  })
   const histories = await taskTransitions(db, open.map(o => o.task.id))
   const decisions = await waitingDecisions(db, open.filter(o => o.task.status === 'blocked').map(o => o.task.id))
+  // No status change marks a stop's arrival: it arrived when its last run ended.
+  const stopRuns = open.flatMap(o => idleStop(o.task) && o.task.retryStop!.runId ? [o.task.retryStop!.runId] : [])
+  const stoppedAt = new Map(stopRuns.length ? (await db.select({ id: runs.id, endedAt: runs.endedAt }).from(runs).where(inArray(runs.id, stopRuns))).map(r => [r.id, r.endedAt]) : [])
   return open.map(({ task, project }) => {
     const history = histories.get(task.id) ?? []
     const arrivals = history.filter((e) => {
@@ -236,9 +258,13 @@ async function openTasks(db: Executor, taskId?: string) {
     const stuck = task.status === 'blocked' && readAudit(entered?.detail).event === 'stuck'
     // An epic rebase's decision is a question too, whoever raised it
     const decision = decisions.get(task.id) ?? null
-    const type: TaskInboxItemType = task.status === 'human_review' ? 'human_review' : task.status === 'failed' ? 'failed' : stuck || decision ? 'question' : 'blocked'
-    const at = (entered?.createdAt ?? task.updatedAt).toISOString()
-    return { task, project, history, type, decision, at, arrival: arrivalKey({ id: task.id, type, at }, arrivals) }
+    const stop = idleStop(task)
+    const type: TaskInboxItemType = task.status === 'human_review' ? 'human_review' : task.status === 'failed' ? 'failed' : stop ? 'stopped' : stuck || decision ? 'question' : 'blocked'
+    const at = ((stop ? stoppedAt.get(task.retryStop!.runId ?? '') : entered?.createdAt) ?? task.updatedAt).toISOString()
+    const arrival = arrivalKey({ id: task.id, type, at }, arrivals)
+    // The post-triage decision needs fresh findings, not a pre-triage summary.
+    const triaged = task.retryStop?.sessionId && !waiting.has(`${task.id}:${task.retryStop.sessionId}`)
+    return { task, project, history, type, decision, at, arrival: triaged ? `${arrival}:recovery-${task.retryStop!.sessionId}` : arrival }
   })
 }
 
@@ -268,7 +294,7 @@ async function prepareTaskItems(db: Executor, open: Open[]): Promise<PreparedIte
     db.selectDistinctOn([runs.taskId], { taskId: runs.taskId, name: agents.name, role: agents.role }).from(runs).innerJoin(agents, eq(agents.id, runs.agentId))
       .where(inArray(runs.taskId, ids)).orderBy(runs.taskId, desc(runs.number)),
     listEvidenceFor(db, ids),
-    listCommentsFor(db, open.filter(o => actions.get(o.task.id) || (o.task.status === 'human_review' && o.task.type === 'spike')).map(o => o.task.id)),
+    listCommentsFor(db, open.filter(o => o.task.retryStop || actions.get(o.task.id) || (o.task.status === 'human_review' && o.task.type === 'spike')).map(o => o.task.id)),
     designs.length > 0
       ? db.select({ id: schema.designVersions.id, taskId: schema.designVersions.taskId, version: schema.designVersions.version, status: schema.designVersions.status, createdAt: schema.designVersions.createdAt })
           .from(schema.designVersions).where(inArray(schema.designVersions.taskId, designs)).orderBy(desc(schema.designVersions.version))
@@ -293,7 +319,9 @@ async function prepareTaskItems(db: Executor, open: Open[]): Promise<PreparedIte
     // criteria and evidence sit right under it (design/inbox.md)
     const body = task.status === 'human_review'
       ? humanReviewNote(task, notes, taskVersions, approvalOf.get(task.id), humanCriteriaOf.get(task.id) ?? [])
-      : (task.statusReason ?? '')
+      : task.retryStop
+        ? recoveryNote(task, notes)
+        : (task.statusReason ?? '')
     const item: TaskInboxItem = {
       id: task.id,
       type,
@@ -337,6 +365,23 @@ function taskChanges(task: OpenTask, action: ReturnType<typeof humanAction>, evi
 }
 
 interface DesignVersionFacts { id: string, version: number, status: string, createdAt: Date }
+
+// What blocks the task, the PM's findings from this stop, and the decision.
+// The server's comment linking the conversation marks where this stop's
+// triage began, so an earlier stop's findings aren't presented as current.
+function recoveryNote(task: OpenTask, notes: Comment[]): string {
+  const session = task.retryStop!.sessionId
+  const start = notes.findIndex(note => note.author.kind !== 'human' && note.body.includes(`(/plan/${session})`))
+  const findings = session ? notes.slice(start + 1).findLast(note => note.author.kind === 'agent' && note.author.role === 'pm')?.body : undefined
+  return [
+    `Blocked: ${task.statusReason ?? REPETITION_REASON}`,
+    findings ? `PM findings: ${findings}` : session ? 'PM triage produced no findings.' : 'PM triage hasn’t started.',
+    idleStop(task)
+      ? 'Decision needed: retry, give the developer new direction, or send this task back to the Backlog. It stays stopped until you choose, reply or the target branch changes.'
+      : 'Decision needed: resolve the block and explicitly retry, or leave this task stopped.',
+    findings ? 'Recommendation: address the PM findings before authorizing another attempt.' : 'Recommendation: review the failed runs before authorizing another attempt.'
+  ].join('\n\n')
+}
 
 function humanReviewNote(task: OpenTask, notes: Comment[], versions: DesignVersionFacts[], review: { criteria: { criterionId: string, met: boolean | null }[] } | undefined, humanCriteria: { id: string }[]): string {
   if (task.type === 'spike') return notes.findLast(c => c.body.startsWith('## Findings\n'))?.body ?? ''
@@ -398,6 +443,7 @@ function resolutionText(action: string, { event, to }: AuditView, type: string):
     return type === 'design' ? 'You approved the design' : 'You approved the merge'
   }
   if (event === 'human_request_changes') return 'You requested changes'
+  if (event === 'release_stop') return to === 'backlog' ? 'You sent the task back to Backlog' : 'You restarted the stopped task'
   if (event === 'send_back') return 'You sent the task back to Backlog'
   if (event === 'resolve') {
     return `You moved the task to ${String(to ?? 'a new status').replace('_', ' ')}`

@@ -52,7 +52,7 @@ export const agents = pgTable('agents', {
 const sqlList = (values: readonly string[]) => sql.raw(`(${values.map(v => `'${v}'`).join(', ')})`)
 const terminalStates = sqlList(TERMINAL_RUN_STATES)
 
-// One agent session (PRD §4.5). PM turns have no task.
+// One agent session (PRD §4.5). PM recovery turns link to their task.
 export const runs = pgTable('runs', {
   runnerId: text(),
   // The runner's name when the run was placed on it, shown on the run
@@ -80,6 +80,8 @@ export const runs = pgTable('runs', {
   pmJob: jsonb(),
   // The commit a developer run pushed, or a reviewer run reviewed
   headSha: text(),
+  // Inputs at dispatch, for detecting completed failures with no progress.
+  retryContext: jsonb().$type<{ head: string, target: string, human: string }>(),
   review: text().$type<RebaseReview>(),
   conflictedFiles: jsonb().$type<string[]>(),
   // A round keeping a PR healthy (D29): what started it, on a task or an epic,
@@ -115,12 +117,12 @@ export const runs = pgTable('runs', {
   index('runs_active_number_index').on(t.number)
     .where(sql`${t.state} in ('queued', 'starting', 'running', 'waiting_for_input', 'stopping')`),
   check('runs_task_unless_pm', sql`${t.taskId} is not null or ${t.role} = 'pm' or (${t.epicId} is not null and ${t.role} in ('reviewer', 'developer'))`),
-  // A PM turn belongs to neither a task nor an epic, a designer never to an
-  // epic, and a reviewer or developer to one or the other. planSessionId isn't checked: it
+  // A PM turn may link to its recovery task, but never an epic; a designer never
+  // to an epic, and a reviewer or developer to one or the other. planSessionId isn't checked: it
   // goes null when its session is deleted.
   // Roles as text too: designer is added in the same migration batch on a new database
   check('runs_role_context', sql`case ${t.role}::text
-    when 'pm' then ${t.taskId} is null and ${t.epicId} is null
+    when 'pm' then ${t.epicId} is null
     when 'designer' then ${t.epicId} is null
     else ${t.taskId} is null or ${t.epicId} is null
   end`),

@@ -414,6 +414,13 @@
       "when": 1793597488491,
       "tag": "0058_married_kang",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1793599817541,
+      "tag": "0059_luxuriant_lady_deathstrike",
+      "breakpoints": true
     }
   ]
 }

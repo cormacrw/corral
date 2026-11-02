@@ -12,6 +12,7 @@ import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
 import { pmFallbackPrompt, pmPrompt, questionText, sessionTitlePrompt } from './prompts.ts'
 import type { RunnerHub } from './runner-hub.ts'
+import { answerRecovery } from './retry-recovery.ts'
 import { requireRuntimeCli } from './setup.ts'
 import { addComment, createTask, deleteTaskRows, draftSessions, findTaskByRef, loadTask, loadTasks, patchTask, pinStaleness, setDesignPin, transitionTask, type ProjectRow } from './tasks.ts'
 
@@ -66,6 +67,7 @@ export interface PlanDeps {
   db: Database
   events: EventBus
   runner: RunnerHub
+  recoveryReady?(taskIds: string[]): void
   stopRun(runId: string, actor: Actor): Promise<void>
   // Starts a PM run for a session; the orchestrator owns runs. The job
   // carries the session's runtime, not the PM agent's (D18).
@@ -337,11 +339,14 @@ export class PlanService {
       attached = `${task.ref} ${task.title}`
     }
     const text = input.text || `Refine ${attached}`
+    const pending = (await sessionState(db, session)).attention
     const message = await insertMessage(db, sessionId, { role: 'human', kind: 'message', text })
     // A new message reopens a session closed by approving its plan
     await db.update(planSessions).set({ updatedAt: new Date(), unread: false, closedAt: null }).where(eq(planSessions.id, sessionId))
     await appendAudit(db, { projectId: project.id, actor }, auditEvent('plan.message', { sessionId, messageId: message!.id }))
     this.#d.events.publish({ type: 'plan.message', message: toMessage(message!) })
+    const recovered = await answerRecovery(db, this.#d.events, sessionId, text, actor, !session.closedAt && pending.status === 'question' ? pending.question.id : null)
+    if (recovered.length) this.#d.recoveryReady?.(recovered)
 
     await this.#turn(session, project, {
       prompt: pmPrompt({ text, attachedTask: attached, projectName: project.name, prefix: project.prefix, fresh: session.agentSessionId === null }),
@@ -484,8 +489,13 @@ export class PlanService {
       case 'ask_question': {
         const parsed = askQuestionInput.safeParse(input)
         if (!parsed.success) throw new ToolError(`The question was not asked: ${z.prettifyError(parsed.error)}`)
-        const { question, recommendation, options } = parsed.data
+        const { question, recommendation, options, retryOptions } = parsed.data
+        if (retryOptions?.some(choice => ![...(options ?? []), recommendation].includes(choice))) throw new ToolError('retryOptions must name exact answer options or the recommendation.')
         const message = await insertMessage(db, sessionId, { role: 'pm', kind: 'question', text: question, recommendation, options }, { runId })
+        await db.transaction(async (tx) => {
+          const stopped = await tx.select().from(tasks).where(sql`${tasks.retryStop}->>'sessionId' = ${sessionId}`).for('update')
+          for (const task of stopped) await tx.update(tasks).set({ retryStop: { ...task.retryStop!, retryQuestion: { id: message!.id, options: retryOptions ?? [] } } }).where(eq(tasks.id, task.id))
+        })
         this.#d.events.publish({ type: 'plan.message', message: toMessage(message) })
         // The session now has a question: its Inbox item moves up (D11)
         this.#d.events.publish({ type: 'plan.session', session: await this.#toSession(await this.#session(sessionId), runId) })

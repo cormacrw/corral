@@ -109,6 +109,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
         only && inArray(tasks.id, [...only]),
         skip.length > 0 ? notInArray(tasks.id, [...skip]) : undefined,
         isNull(tasks.leaseRunId),
+        isNull(tasks.retryStop),
         isNull(tasks.deletedAt),
         eq(tasks.paused, false),
         eq(projects.paused, false)

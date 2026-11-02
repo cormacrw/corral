@@ -10,7 +10,7 @@ One place for everything an agent needs you to decide, from every project, with 
 
 Items come from two places:
 
-- **Developer and reviewer runs:** human reviews, blocked and failed tasks, questions, and Activity.
+- **Developer and reviewer runs:** human reviews, blocked, failed and stopped tasks, questions, and Activity.
 - **Plan sessions that need you** (D11): each open session with a question from Juno, a plan needing approval or a failed Juno turn is a **Plan thread** item. They can be handled from the Inbox or from Plan; both act on the same session. A session with only an unread reply is informational and stays in Plan. See [Plan threads](#plan-threads).
 
 There's no separate notifications feed.
@@ -42,10 +42,10 @@ There are three columns. The list divider can be resized (280–560px, default 3
 
 ### 2. Selected message
 
-Task items (human review, question, blocked, failed, Activity and Resolved) use **Option D** (`InboxPanel`, with `useInboxPanel` deriving what it shows). What's needed to decide sits up front, and everything else is one click away in tabs. On a phone the actions and composer move to a bottom bar ([mobile.md](mobile.md#inbox)). Plan threads, epic items and release notes have their own layouts.
+Task items (human review, question, blocked, failed, stopped, Activity and Resolved) use **Option D** (`InboxPanel`, with `useInboxPanel` deriving what it shows). What's needed to decide sits up front, and everything else is one click away in tabs. On a phone the actions and composer move to a bottom bar ([mobile.md](mobile.md#inbox)). Plan threads, epic items and release notes have their own layouts.
 
 - **Top block**, which fits at 1280×800 without scrolling:
-  - one quiet line (`InboxPanelMeta`): kind (Code, Design or Spike review, Question, Blocked, Failed, Activity, Resolved) · project · ref · sender · time
+  - one quiet line (`InboxPanelMeta`): kind (Code, Design or Spike review, Question, Blocked, Failed, Stopped, Activity, Resolved) · project · ref · sender · time
   - the title, and a **Task details** icon button (`aria-pressed`). The flyout is closed whenever an item opens, and one click opens it.
   - shared `InboxMessage` in place of a TL;DR: the short `message` clamped to three lines, and its **New** row on one line that scrolls sideways. Items with no message show **TL;DR** and the first paragraph of the body, cut to two lines.
   - the verdict on reviews (`InboxPanelVerdict`): reviewer and round, gates passed, criteria met. It's red only when a criterion is unmet; a human check waiting for its tick isn't unmet.
@@ -63,10 +63,11 @@ Task items (human review, question, blocked, failed, Activity and Resolved) use 
   | Human review | Approve and merge (Accept findings on spikes, Approve design on designs) · Request changes | Approve sends, with the composer’s text and attached images as its note (waiting for pending uploads), and the Inbox moves on. An unmet criterion doesn't stop it. |
   | Question, Blocked | Answer · Send back to Backlog · Delete task | Send back sends |
   | Failed | Retry, with its status picker beside it · Send back to Backlog · Delete task | Retry and Send back send, Retry with whatever note is in the composer. An empty note still retries. |
+  | Stopped | Retry · Give direction · Send back to Backlog · Delete task | Retry and Send back send |
   | Activity, Resolved | None, and no composer | |
 
-  **Request changes**, **Answer** and **Delete task** open the composer instead, with **Cancel** above it. Delete waits for it because it can't be undone, and takes an optional reason.
-- **Composer** (`InboxPanelTray`), pinned to the bottom of an item you can act on: with no action chosen it's the reply box, "Reply to {sender}…", which adds a comment to the task and leaves the item where it is. A failed item opens on Retry instead: the composer is labelled **Note to send with Retry (optional)**, its hint says the note guides the agent's next run, and its send button retries with the chosen status. **Reply instead** beside the label switches it to the reply box, with **Cancel** above to return. Cancelling any action on a failed item, or sending a reply, returns to the Retry note.
+  **Request changes**, **Answer**, **Give direction** and **Delete task** open the composer instead, with **Cancel** above it. Delete waits for it because it can't be undone, and takes an optional reason.
+- **Composer** (`InboxPanelTray`), pinned to the bottom of an item you can act on: with no action chosen it's the reply box, "Reply to {sender}…", which adds a comment to the task and leaves the item where it is, except on a Stopped item, where new human input releases the stop. A failed item opens on Retry instead: the composer is labelled **Note to send with Retry (optional)**, its hint says the note guides the agent's next run, and its send button retries with the chosen status. **Reply instead** beside the label switches it to the reply box, with **Cancel** above to return. Cancelling any action on a failed item, or sending a reply, returns to the Retry note.
 
 ### What each kind shows
 
@@ -92,7 +93,7 @@ An open Plan session (D9) that's waiting on you, shown as an Inbox item (D11). A
   - a **failed turn**: Juno's last turn ended in an error and nothing will retry it (`failure` holds the error). Reading doesn't clear it; messaging the session or deleting the thread does.
 - A session with only an **unread reply** is informational: it isn't listed and doesn't count, and the conversation stays in Plan.
 - Idle sessions, with none of the three, aren't Inbox items. They stay in Plan and its side nav threads ([plan.md](plan.md#side-nav-threads)). There's no "Open in Plan" divider or group.
-- **Order:** Needs you is one list of task items, threads and epic items, **newest first** by when each arrived (`at`), with no grouping or divider. The page shows it in the server's order. A task arrives when it enters Human review, Blocked or Failed (its latest transition into that status), so an update that keeps its status, such as its PR head moving, doesn't move it. A thread arrives when it started waiting: when the question was asked, the plan was proposed or the turn failed.
+- **Order:** Needs you is one list of task items, threads and epic items, **newest first** by when each arrived (`at`), with no grouping or divider. The page shows it in the server's order. A task arrives when it enters Human review, Blocked or Failed (its latest transition into that status), so an update that keeps its status, such as its PR head moving, doesn't move it. A stopped task keeps its working status and arrives when the run that stopped it ended. A thread arrives when it started waiting: when the question was asked, the plan was proposed or the turn failed.
 - The **Needs you** count is every listed item. Global, project and mobile counts all come from this list.
 - `plan.session` events add, re-sort and remove threads live: a question, a new plan version or a failed turn adds or moves a thread up; answering its question (until Juno asks again), approving its plan, messaging it after a failed turn or closing it, here or in Plan, removes it at once.
 
@@ -179,7 +180,7 @@ An epic PR in human review and an epic PR rebase conflict have their own layout 
 
 ## Data
 
-- **Items:** id, project, task ref, type (question / human review / blocked / failed / activity / plan thread), sender agent and role, time, subject, preview, body, unread, resolved outcome.
+- **Items:** id, project, task ref, type (question / human review / blocked / failed / stopped / activity / plan thread), sender agent and role, time, subject, preview, body, unread, resolved outcome.
 - **Type-specific fields:** PR, checks, criteria with evidence, positions, suggested answers. A plan thread has the session id, title, status (needs approval / question / failed), `activeRunId`, preview, `failure` and the time it started waiting; its question and plan come from the Plan session endpoints.
 - **What changed since the last review:** a needs-you task or epic item carries `since` and `newArtifacts`. `since` is null until the human has acted, then holds when they last requested changes or answered, what they said, the developers' one-line notes after it, and an epic's fix tasks. `newArtifacts` lists the files added after that action, plus a design's latest version with its preview link, and on an epic each file names its task. Before any action everything is new. Written (`note`) evidence is never listed. Actions and artifacts are compared by time, because review rounds reset when a task is resolved.
 - **Counts per filter.**

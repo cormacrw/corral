@@ -470,7 +470,7 @@ describe('orchestrator', () => {
     const { project, task, job } = await assigned()
     await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Read the auth module; need a provider decision', summary: 'Which OAuth provider?' })
     const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
-    expect(notes).toMatchObject([{ author: { kind: 'agent', role: 'developer', runId: job.runId }, body: 'Read the auth module; need a provider decision', pinned: false }])
+    expect(notes).toContainEqual(expect.objectContaining({ author: { kind: 'agent', role: 'developer', runId: job.runId }, body: 'Read the auth module; need a provider decision', pinned: false }))
     await pause(project)
   })
 
@@ -665,7 +665,7 @@ describe('orchestrator', () => {
     await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
       outcome: 'changes_requested', summary: 'Still wrong', criteria: [{ criterionId: task.acceptanceCriteria[0]!.id, met: false, note: '' }]
     })
-    expect(await taskRow(task.id)).toMatchObject({ status: 'blocked', reviewRounds: 5, statusReason: 'Review-round cap reached (5)' })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'blocked', reviewRounds: 5, statusReason: 'Review-round cap reached (5)', retryStop: expect.objectContaining({ capped: false, status: 'agent_review' }) })
     await pause(project)
   })
 
@@ -737,10 +737,11 @@ describe('orchestrator', () => {
     const audit = await reviewAudit(task.id)
     expect(audit.map(a => (a.detail as { similarity?: number }).similarity)).toEqual([undefined, expect.any(Number)])
     expect((audit[1]!.detail as { similarity: number }).similarity).toBeGreaterThanOrEqual(0.8)
+    expect((await taskRow(task.id)).retryStop).toMatchObject({ capped: false, status: 'agent_review' })
 
     // It needs the human, like any other Blocked task
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
-    expect(inbox.needsYou.find(i => i.taskId === task.id)).toMatchObject({ type: 'blocked', body: 'The reviewer asked for the same changes twice' })
+    expect(inbox.needsYou.find(i => i.taskId === task.id)).toMatchObject({ type: 'blocked', body: expect.stringContaining('The reviewer asked for the same changes twice') })
     await pause(project)
   })
 

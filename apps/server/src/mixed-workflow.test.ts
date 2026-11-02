@@ -630,8 +630,18 @@ describe('a target update that conflicts', () => {
     // It waits, with the lock held and nothing moved, however long it's left
     await mergePasses(3)
     await t.orchestrator.schedule()
+    const recovery = (await taskRow(fix.id)).retryStop!
+    expect(recovery.sessionId).toEqual(expect.any(String))
+    expect((await inbox()).needsYou).toEqual([])
+    const pm = (await runner.next('run.assign', m => m.job.planSessionId === recovery.sessionId)).job
+    expect(await runner.call(pm.runId, pm.leaseEpoch, 'get_task', { taskRef: `${project.prefix}-${fix.number}` })).toMatchObject({ ok: true })
+    const question = `Blocked: the target changed a binding decision; both behaviours cannot stand. Decision needed: ${decision.question}`
+    expect(await runner.call(pm.runId, pm.leaseEpoch, 'ask_question', { question, recommendation: 'Follow the target', options: decision.alternatives.map(a => a.label), retryOptions: decision.alternatives.map(a => a.label) })).toMatchObject({ ok: true })
+    runner.send({ type: 'run.events', runId: pm.runId, leaseEpoch: pm.leaseEpoch, events: [{ type: 'message', text: 'This binding decision needs human authority.' }] })
+    runner.send({ type: 'run.ended', runId: pm.runId, leaseEpoch: pm.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
+    await expect.poll(async () => (await t.db.select().from(schema.runs).where(eq(schema.runs.id, pm.runId)))[0]!.state).toBe('completed')
     const needsYou = (await inbox()).needsYou
-    expect(needsYou).toMatchObject([{ id: fix.id, type: 'question', body: decision.question, decision: { question: decision.question, bindingDecision: decision.bindingDecision, alternatives: decision.alternatives, affectedChanges: decision.affectedChanges } }])
+    expect(needsYou).toMatchObject([{ id: recovery.sessionId, type: 'plan_thread', status: 'question', question: { text: question, recommendation: 'Follow the target' } }])
     const waiting = await sync(epic.id)
     expect(waiting).toMatchObject({ state: 'deciding', question: decision.question, taskId: fix.id })
     // What the operator guide's journal query shows for it
@@ -642,7 +652,12 @@ describe('a target update that conflicts', () => {
     expect(merged).toEqual([])
     await capture('behaviour-decision.json', { scenario: 'The target changed behaviour the epic relies on, so both can\'t stand.', request: { method: 'GET', url: '/api/inbox' }, needsYouItem: needsYou[0], epicSync: waiting, operatorJournalQuery: operatorView, epicBranchMoved: false, targetLanded: false })
 
-    expect((await t.request('POST', `/api/inbox/${fix.id}/actions`, { action: 'decide', alternative: 1 })).status).toBe(200)
+    expect((await t.request('POST', `/api/plan/sessions/${recovery.sessionId}/messages`, { text: 'Follow the target' })).status).toBe(201)
+    const recorded = (await ops(epic.id)).find(o => o.id === operation.id)!.decisions[0]!.answer
+    expect(recorded).toMatchObject({ alternative: 1, label: 'Follow the target', changesBehaviour: true })
+    const continuation = (await runner.next('run.assign', m => m.job.planSessionId === recovery.sessionId)).job
+    runner.send({ type: 'run.events', runId: continuation.runId, leaseEpoch: continuation.leaseEpoch, events: [{ type: 'message', text: 'The decision is recorded; work can resume.' }] })
+    runner.send({ type: 'run.ended', runId: continuation.runId, leaseEpoch: continuation.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
     expect(await taskRow(fix.id)).toMatchObject({ status: 'in_progress' })
     expect((await ops(epic.id)).filter(o => o.kind === 'rebase').map(o => [o.id, o.state])).toEqual([[operation.id, 'running']])
 

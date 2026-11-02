@@ -7,9 +7,10 @@ import { runEndValues } from './run-lifecycle.ts'
 import { listAgents } from './runs.ts'
 import { applyTransition, lockTask } from './tasks.ts'
 import { RUNNER_RESTARTED, UUID, server, type RunContext, type RunCore, type RunRow } from './run-context.ts'
+import { stopRepeated } from './retry-recovery.ts'
 import { lastPmReply } from './run-ending.ts'
 
-const { agents, runs } = schema
+const { agents, runs, tasks } = schema
 
 // How long to wait after a usage limit with no known reset time (D3)
 const RATE_LIMIT_BACKOFF_MS = 30 * 60 * 1000
@@ -58,7 +59,8 @@ export class RunExits {
       // Only from before it started: a replay must not move a run back or
       // restart its clock. Still active: the server may have ended the run
       // since it was fenced.
-      await db.update(runs).set({ state: 'running', startedAt: this.#c.now(), agentSessionId: message.agentSessionId })
+      await db.update(runs).set({ state: 'running', startedAt: this.#c.now(), agentSessionId: message.agentSessionId,
+        ...(message.initialHeadSha && ctx.run.retryContext ? { retryContext: { ...ctx.run.retryContext, head: message.initialHeadSha } } : {}) })
         .where(and(eq(runs.id, ctx.run.id), inArray(runs.state, ['queued', 'starting'])))
       this.#c.leases.confirmLease(ctx, message.sentAt)
       if (ctx.run.role === 'pm' && ctx.run.planSessionId) await this.#c.plans?.onRunStarted(ctx.run.planSessionId, message.agentSessionId)
@@ -71,7 +73,7 @@ export class RunExits {
     if (!ctx) return
     const live = isActiveRun(ctx.run.state) && ctx.run.leaseEpoch === message.leaseEpoch
     if (live && ctx.run.role === 'pm') await this.#pmExited(ctx, message.exit, message.lastActivityAt)
-    else if (live) await this.#runExited(ctx, message.exit, message.lastActivityAt, message.wipSha ?? null)
+    else if (live) await this.#runExited(ctx, message.exit, message.lastActivityAt, message.wipSha ?? null, message.headSha ?? null)
     else if (reconciled(ctx.run, message.leaseEpoch)) await this.#restoreExit(ctx, message.exit, message.lastActivityAt)
     // The server already ended a run it stopped; only the runner knows the agent's last activity
     else if (ctx.run.state === 'interrupted' && ctx.run.error && ctx.run.leaseEpoch === message.leaseEpoch && !ctx.run.error.includes(LAST_ACTIVITY)) {
@@ -124,8 +126,10 @@ export class RunExits {
           const locked = ctx.task ? await lockTask(tx, ctx.task.id).catch(() => null) : null
           if (locked && !locked.task.leaseRunId && locked.task.leaseEpoch === ctx.run.leaseEpoch && ['in_progress', 'agent_review'].includes(locked.task.status)) {
             await applyTransition(tx, locked.task, locked.project, { type: 'run_failed' }, server, { event: 'run_failed', runId: ctx.run.id, error })
+            const [failed] = await tx.select().from(tasks).where(eq(tasks.id, locked.task.id))
+            await stopRepeated(tx, { ...ctx, run: { ...ctx.run, retryContext: null } }, failed!, null)
           }
-          await tx.update(runs).set(runEndValues({ state: 'failed', outcome: 'failed', error }, ended)).where(reconciledRun)
+          await tx.update(runs).set({ ...runEndValues({ state: 'failed', outcome: 'failed', error }, ended), retryContext: null }).where(reconciledRun)
         })
       }
     }
@@ -189,7 +193,7 @@ export class RunExits {
   }
 
   // The agent process ended without its outcome having been accepted
-  async #runExited(ctx: RunContext, exit: RunExit, lastActivityAt: string | null | undefined, headSha: string | null): Promise<void> {
+  async #runExited(ctx: RunContext, exit: RunExit, lastActivityAt: string | null | undefined, wipSha: string | null, head: string | null): Promise<void> {
     switch (exit.kind) {
       case 'rate_limited': {
         const resetsAt = this.#limitResetsAt(exit)
@@ -199,11 +203,22 @@ export class RunExits {
       }
       case 'stopped':
       case 'runner_shutdown':
-        await this.#c.ending.endRun(ctx, { state: 'interrupted', error: runExitError(exit, lastActivityAt), headSha })
+        await this.#c.ending.endRun(ctx, { state: 'interrupted', error: runExitError(exit, lastActivityAt), headSha: wipSha })
+        return
+      case 'error':
+      case 'signalled':
+      case 'timed_out':
+        // A runtime or infrastructure cut still respects the failed-run cap,
+        // but cannot establish a completed no-progress attempt.
+        ctx.run.retryContext = null
+        await this.#c.d.db.update(runs).set({ retryContext: null }).where(eq(runs.id, ctx.run.id))
+        await this.#c.ending.failRun(ctx, runExitError(exit, lastActivityAt), { headSha: wipSha ?? ctx.run.headSha })
         return
       default:
-        // An epic review keeps the head it was claimed for: failures count per head
-        await this.#c.ending.failRun(ctx, runExitError(exit, lastActivityAt), { headSha: headSha ?? ctx.run.headSha })
+        // An ordinary exit without an outcome is still a failed attempt, and
+        // its local head is what repetition compares.
+        // Epic review caps continue to count against their claimed head.
+        await this.#c.ending.failRun(ctx, runExitError(exit, lastActivityAt), { headSha: wipSha ?? head ?? ctx.run.headSha })
     }
   }
 }

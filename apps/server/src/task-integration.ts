@@ -5,6 +5,7 @@ import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
 import { EpicSynchronizer } from './epic-sync.ts'
 import type { EventBus } from './events.ts'
 import { MAX_CI_FIXES } from './ci-output.ts'
+import { triageCap } from './retry-recovery.ts'
 import type { CheckResult, GitHubClient } from './github.ts'
 import { ciFixesInARow } from './task-base.ts'
 import type { RunnerHub } from './runner-hub.ts'
@@ -382,6 +383,8 @@ export class TaskIntegrator {
       const { task, project } = await lockTask(tx, taskId)
       if (task.status !== 'ready_to_merge' || task.leaseRunId) return
       await applyTransition(tx, task, project, event, server, detail)
+      // Both of this class's failures are caps
+      if (event.type === 'fail') await triageCap(tx, taskId, true)
       if (values) await tx.update(tasks).set(values).where(eq(tasks.id, taskId))
       if (comment) await tx.insert(comments).values({ taskId, author: server, body: comment })
     })

@@ -24,7 +24,7 @@ export class HumanActions {
     if (!ctx || !isActiveRun(ctx.run.state)) throw new ApiFailure(409, { code: 'conflict', constraint: 'run_not_active' })
     await this.#c.d.db.transaction(async (tx) => {
       if (!await this.#c.ending.endRunIn(tx, ctx, { state: 'interrupted', error: HUMAN_STOP })) throw new ApiFailure(409, { code: 'conflict', constraint: 'run_not_active' })
-      if (ctx.task) await tx.update(tasks).set({ paused: true }).where(eq(tasks.id, ctx.task.id))
+      if (ctx.task && ctx.run.role !== 'pm') await tx.update(tasks).set({ paused: true }).where(eq(tasks.id, ctx.task.id))
       if (ctx.run.epicId && ctx.run.role === 'developer' && ctx.run.operationId) {
         await recordSyncFailure(tx, ctx.project, ctx.run.epicId, 'The developer fix was stopped by a human. Retry when ready to continue.', this.#c.now())
       }

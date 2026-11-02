@@ -122,7 +122,7 @@ export class RunContexts {
     const ctx = await this.load(runId)
     if (!ctx || ctx.run.leaseEpoch !== leaseEpoch) return null
     if (!isActiveRun(ctx.run.state)) return null
-    if (ctx.task && (ctx.task.leaseRunId !== runId || ctx.task.leaseEpoch !== leaseEpoch)) return null
+    if (ctx.run.role !== 'pm' && ctx.task && (ctx.task.leaseRunId !== runId || ctx.task.leaseEpoch !== leaseEpoch)) return null
     return ctx
   }
 

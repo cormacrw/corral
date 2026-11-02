@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { describe, expect, it } from 'vitest'
 import { inboxActions } from '~/utils/inbox-actions'
+import { inboxTypeBadge } from '~/utils/labels'
 import InboxDesignReviewLink from './InboxDesignReviewLink.vue'
 
 const UButton = defineComponent({
@@ -34,4 +35,9 @@ it('offers version approval for designs, and nothing generic while task type is 
   expect(inboxActions('human_review', { type: 'spike' })[0]?.label).toBe('Accept findings')
   expect(inboxActions('human_review', null, 'loading')[0]?.label).toBe('Loading task…')
   expect(inboxActions('human_review', null, 'failed')[0]?.label).toBe('Task not loaded')
+})
+
+it('offers a stopped task a way to retry, redirect or send it back', () => {
+  expect(inboxActions('stopped', { type: 'task' }).map(a => a.value)).toEqual(['retry', 'clarify', 'send_back', 'delete'])
+  expect(inboxTypeBadge('stopped').label).toBe('Stopped')
 })

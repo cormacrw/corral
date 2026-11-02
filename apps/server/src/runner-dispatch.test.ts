@@ -91,11 +91,14 @@ describe('runner capacity, runtimes and roles', () => {
     expect(assigns(a).length + assigns(b).length).toBe(3)
     expect(await taskRow(fourth.id)).toMatchObject({ status: 'ready', leaseRunId: null })
 
-    // One of B's runs ends (the agent is stuck on a question): its slot takes the fourth task
+    // A stuck worker first hands its free slot to PM triage, then the fourth task.
     const [first] = assigns(b) as Extract<typeof b.received[number], { type: 'run.assign' }>[]
     const job = first!.job
     expect(await b.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Need a decision on error copy', summary: 'Which error copy?' })).toMatchObject({ ok: true })
     b.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'stopped' }, headSha: null })
+    const triage = (await b.next('run.assign', m => m.job.role === 'pm')).job
+    b.send({ type: 'run.events', runId: triage.runId, leaseEpoch: triage.leaseEpoch, events: [{ type: 'message', text: 'Implementation diagnosis recorded; no human decision needed.' }] })
+    b.send({ type: 'run.ended', runId: triage.runId, leaseEpoch: triage.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
     const next = await b.next('run.assign', m => m.job.taskId === fourth.id)
     expect(next.job.role).toBe('developer')
     expect(await taskRow(fourth.id)).toMatchObject({ status: 'in_progress', leaseRunId: next.job.runId })

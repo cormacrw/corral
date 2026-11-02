@@ -50,7 +50,8 @@ const validEvents: Record<TaskEventType, TaskEvent> = {
   block: { type: 'block', reason: 'Requirements contradict each other' },
   fail: { type: 'fail', reason: 'Repository not accessible' },
   run_failed: { type: 'run_failed' },
-  resolve: { type: 'resolve', to: 'ready' }
+  resolve: { type: 'resolve', to: 'ready' },
+  release_stop: { type: 'release_stop', to: null }
 }
 
 // The D10 transition table, written out independently of TRANSITION_RULES:
@@ -76,7 +77,8 @@ const d10: Record<TaskEventType, [TaskStatus[], Actor]> = {
   block: [['ready', 'in_progress', 'agent_review', 'human_review', 'ready_to_merge'], server],
   fail: [['in_progress', 'agent_review', 'ready_to_merge'], server],
   run_failed: [['in_progress', 'agent_review'], server],
-  resolve: [['blocked', 'failed'], human]
+  resolve: [['blocked', 'failed'], human],
+  release_stop: [['in_progress', 'agent_review'], human]
 }
 
 // Table rows whose guard needs more than the default state

@@ -77,6 +77,7 @@ export function useInboxPanel(ctx: InboxPanelContext) {
       case 'question': return { label: 'Question', icon: 'i-lucide-circle-help', color: 'text-info' }
       case 'blocked': return { label: 'Blocked', icon: 'i-lucide-circle-pause', color: 'text-warning' }
       case 'failed': return { label: 'Failed', icon: 'i-lucide-circle-x', color: 'text-error' }
+      case 'stopped': return { label: 'Stopped', icon: 'i-lucide-octagon-pause', color: 'text-warning' }
       default: return { label: 'Activity', icon: 'i-lucide-activity', color: 'text-muted' }
     }
   })
@@ -144,7 +145,8 @@ export function useInboxPanel(ctx: InboxPanelContext) {
     clarify: 'Your answer goes to the developer, who carries on.',
     send_back: 'Moves the task to the Backlog.',
     delete: 'Removes the task. You can give a reason first.',
-    resolve: 'Starts the task again from the status you pick.'
+    resolve: 'Starts the task again from the status you pick.',
+    retry: 'Starts another run from where the task stopped.'
   }))
 
   return { item, task, isReview, isDesign, canAct, kind, readOnlyNote, tldr, latestReview, history, criteria, met, gates, images, others, hasVerdict, pr, hasPullRequest, prDetail, prLoading, prFailed, prError, retryPullRequest, preview, primary, secondary, explanations }

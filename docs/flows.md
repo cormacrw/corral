@@ -229,13 +229,31 @@ Recovery still in progress is informational: reconciliation, retry and developer
 | Usage limit hit | Run outcome `rate_limited`; group paused until reset; not counted as a failure (D3) |
 | Human stops a run | Process tree killed, run → Interrupted; the task is **paused** so the scheduler doesn't restart it until the human presses **Resume** on the task (`POST /projects/:slug/tasks/:number/resume`, human only). That clears the pause and asks for a scheduling pass for the task right away, and the run that starts depends on its status: a developer run in In progress, a reviewer run in Agent review |
 | A developer run stops before reporting | The runner commits uncommitted changes as a WIP commit and pushes the task branch. The next developer run starts from that commit, and its prompt says it continues a stopped run and gives the stop reason and the commit |
-| Agent reports `stuck` | Task → **Blocked** |
-| Review cap reached | Task → **Blocked** |
+| Agent reports `stuck` or rebase reviewer reports `blocked` | Task → **Blocked**; one PM triage turn diagnoses it first. The original question and epic alternatives return to Needs you if triage ends without a pending question or plan |
+| Review cap reached, or repeated review feedback | Task → **Blocked**, after one PM triage turn |
 | Unrecoverable error / unsafe merge failure | Task → **Failed** |
-| CI fails on a task | The same task → In progress with the CI output in the prompt. Not changed → Ready to merge, CI on the new head. Changed → Agent review. A report on the failing commit is refused, and three fixes in a row that still fail → Failed (D29) |
+| CI fails on a task | The same task → In progress with the CI output in the prompt. Not changed → Ready to merge, CI on the new head. Changed → Agent review. A report on the failing commit is refused, and three fixes in a row that still fail → Failed, after one PM triage turn (D29, D11) |
 | CI fails on an epic PR, or integration review requests changes | A developer run on the epic, with no task (section 4). Refused or failed attempts, or too many fixes, stop at **Rebase stopped** with **Retry**, on the epic and in **Needs you** until Retry or the merge |
 | The CI log can't be fetched | The round still starts; the prompt says the output is unavailable and links the CI run |
 | Human deletes the task | Run stopped, PR closed, branch removed when safe, task soft-deleted; dependents → Blocked (D10) |
+
+Two consecutive completed failures at the same checkout head, target and human
+input stop automatic retries. A new stop or failed-run cap queues one PM triage
+turn, linked on the task; historical Failed tasks are not replayed on deploy.
+The PM investigates task history and code, proposes implementation follow-up
+or records findings, and asks only for requirements, authority or recovery
+choices. Failed, Blocked and no-progress-stopped work stays actionable after
+comment-only or failed triage, with the decision, PM findings and a
+recommendation. A no-progress stop keeps its status and shows as a Stopped item
+with Retry, Give direction, Send back and Delete. Pending PM questions
+and plans own the Inbox item while they await a decision; they do not discard
+that task decision. Only an explicitly retry-authorizing choice on a pending
+recovery question resumes work through the usual human resolution. Refusal or
+a clarifying question keeps it stopped. Target changes release eligible
+no-progress stops, polled with a per-task 60-second to five-minute backoff;
+usage limits and infrastructure interruptions retain their automatic recovery
+and caps.
+
 
 ---
 

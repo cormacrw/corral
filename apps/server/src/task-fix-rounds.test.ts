@@ -19,7 +19,8 @@ let priorTaskIds = new Set<string>()
 beforeAll(async () => {
   t = await createTestApp('pglite', { listen: true })
   await t.db.update(schema.agents).set({ concurrency: 20, wakeIntervalSeconds: null })
-  runner = await FakeRunner.connect(t.server!.url)
+  // Capped rounds leave their PM triage runs open
+  runner = await FakeRunner.connect(t.server!.url, [], 'r1', { slots: 50 })
   project = await t.createProject({ repository: 'cormacrw/test-app', defaultBranch: 'main' })
   await t.db.update(schema.projects).set({ requiredChecks: ['lint'] }).where(eq(schema.projects.id, project.id))
 })
@@ -139,7 +140,7 @@ describe('a round started by a CI failure', () => {
       await t.orchestrator.schedule()
       dev = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
     }
-    expect(await taskRow(task.id)).toMatchObject({ status: 'failed', statusReason: expect.stringContaining('after 3 fixes in a row: lint') })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'failed', statusReason: expect.stringContaining('after 3 fixes in a row: lint'), retryStop: expect.objectContaining({ capped: true, sessionId: null }) })
     await t.orchestrator.schedule()
     expect((await t.db.select().from(schema.runs).where(eq(schema.runs.taskId, task.id))).filter(r => r.role === 'developer')).toHaveLength(3)
   })
