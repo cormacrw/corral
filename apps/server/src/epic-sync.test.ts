@@ -1124,7 +1124,7 @@ describe('developer runs on the epic', () => {
 
   it('waits for a later pass when GitHub fails before a fix can start, spending no attempt', async () => {
     const epic = await humanApproved(await conflicted())
-    await pass()
+    // Before the pass: its scheduler poke can claim the fix straight away
     const { createBranch } = t.github
     t.github.createBranch = async () => {
       throw new GitHubError(502, 'Bad gateway')
@@ -1132,6 +1132,7 @@ describe('developer runs on the epic', () => {
     onTestFinished(() => {
       t.github.createBranch = createBranch
     })
+    await pass()
     await t.orchestrator.schedule()
     await t.orchestrator.schedule()
     const started = await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id))
@@ -1145,9 +1146,14 @@ describe('developer runs on the epic', () => {
 
   it('starts no fix while the epic PR is closed, and starts once it reopens', async () => {
     const epic = await humanApproved(await conflicted())
+    // Paused for the pass: its scheduler poke could claim the fix before the
+    // PR closes
+    const developers = eq(schema.agents.role, 'developer')
+    await t.db.update(schema.agents).set({ paused: true }).where(developers)
     await pass()
     const { prNumber } = await reload(epic.id)
     t.github.pulls.get(prNumber!)!.state = 'closed'
+    await t.db.update(schema.agents).set({ paused: false }).where(developers)
     await t.orchestrator.schedule()
     expect(await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id))).toEqual([])
     t.github.pulls.get(prNumber!)!.state = 'open'
