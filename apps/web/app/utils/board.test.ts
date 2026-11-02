@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Task } from '@corral/contracts'
 import type { BoardFilters } from './board.ts'
-import { BOARD_COLUMNS, cardAssignee, boardMove, boardColumnKey, boardView, EPIC_COLUMNS, epicOnBoard, epicStage, epicWorkingAgents, filterLabel, filtersFromQuery, filtersToQuery, hasEpicFilters, hasFilters, matchesEpicFilter, matchesFilter, COMPLETE_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds, unfinishedPrerequisites } from './board.ts'
+import { matchesOverviewEpicFilter, BOARD_COLUMNS, cardAssignee, boardMove, boardColumnKey, boardView, EPIC_COLUMNS, epicOnBoard, epicStage, epicWorkingAgents, filterLabel, filtersFromQuery, filtersToQuery, hasEpicFilters, hasFilters, matchesEpicFilter, matchesFilter, COMPLETE_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds, unfinishedPrerequisites } from './board.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 const now = Date.parse('2026-10-29T12:00:00Z')
@@ -432,5 +432,35 @@ describe('epicWorkingAgents', () => {
       expect(epicWorkingAgents('epic', [], [run('epic', 'b', state)], agents)).toEqual([agents[1]])
     }
     expect(epicWorkingAgents('epic', [task('epic', null)], [run('epic', 'b', 'completed')], agents)).toEqual([])
+  })
+})
+
+describe('overview epic filters', () => {
+  const epic = { reviewMode: 'direct' as const, branch: null, reviewState: null, taskCount: 1, mergedCount: 0 }
+  const matches = (status: Task['status'], counts = epic) => ['open', 'in-progress', 'closed'].map(filter => matchesOverviewEpicFilter(counts, [{ status }], filter as 'open' | 'in-progress' | 'closed'))
+
+  it.each(['draft', 'backlog', 'ready'] as const)('keeps %s only in Open', (status) => {
+    expect(matches(status)).toEqual([true, false, false])
+  })
+  it.each(['in_progress', 'blocked', 'failed', 'agent_review', 'human_review', 'ready_to_merge'] as const)('keeps %s in Open and In Progress', (status) => {
+    expect(matches(status)).toEqual([true, true, false])
+  })
+  it('moves from unstarted through started to closed with live counts', () => {
+    expect(matches('ready')).toEqual([true, false, false])
+    expect(matches('in_progress')).toEqual([true, true, false])
+    expect(matches('merged', { ...epic, mergedCount: 1 })).toEqual([false, false, true])
+  })
+  it('keeps empty epics open and unstarted', () => {
+    expect(matchesOverviewEpicFilter({ ...epic, taskCount: 0 }, [], 'open')).toBe(true)
+    expect(matchesOverviewEpicFilter({ ...epic, taskCount: 0 }, [], 'in-progress')).toBe(false)
+    expect(matchesOverviewEpicFilter({ ...epic, taskCount: 0 }, [], 'closed')).toBe(false)
+  })
+  it.each(['open', 'in_review', 'human_review', 'ready_to_merge', 'conflict', 'merged'] as const)('uses the done stage for epic PR state %s', (reviewState) => {
+    const reviewing = { ...epic, reviewMode: 'epic' as const, reviewState, mergedCount: 1 }
+    const tasks = [{ status: 'merged' as const }]
+    const done = epicStage(reviewing, tasks) === 'done'
+    expect(matchesOverviewEpicFilter(reviewing, tasks, 'closed')).toBe(done)
+    expect(matchesOverviewEpicFilter(reviewing, tasks, 'open')).toBe(!done)
+    expect(matchesOverviewEpicFilter(reviewing, tasks, 'in-progress')).toBe(!done)
   })
 })
