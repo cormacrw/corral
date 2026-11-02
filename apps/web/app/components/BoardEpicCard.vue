@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Agent, Epic } from '@corral/contracts'
+import { EPIC_FIX, epicStoppedLabel, runPath } from '~/utils/labels'
 
 // An epic on the Board: its title and progress, with a blocked icon while
 // prerequisite epics are unfinished (COR-154). The card is a div so the icon
@@ -97,6 +98,42 @@ function openPrerequisite(id: string) {
           class="rounded-full bg-accented"
           :style="{ flex: epic.taskCount - epic.mergedCount }"
         />
+      </div>
+      <div
+        v-if="epic.sync?.state === 'fixing'"
+        class="min-w-0 text-xs"
+        data-testid="epic-card-fix"
+      >
+        <p class="font-medium text-info">
+          {{ EPIC_FIX[epic.sync.fix].active }}
+        </p>
+        <NuxtLink
+          v-if="epic.sync.developer"
+          :to="runPath(epic.sync.developer.name, epic.sync.developer.runId)"
+          class="font-medium text-primary hover:underline"
+          @click.stop
+        >
+          {{ epic.sync.developer.name }}
+        </NuxtLink>
+        <span
+          v-else
+          class="text-muted"
+        >Waiting for a developer</span>
+        <p class="mt-0.5 line-clamp-2 break-words text-muted">
+          {{ epic.sync.reason }}
+        </p>
+      </div>
+      <div
+        v-else-if="epic.sync?.state === 'failed'"
+        class="min-w-0 text-xs"
+        data-testid="epic-card-stopped"
+      >
+        <p class="font-medium text-error">
+          {{ epicStoppedLabel(epic.sync.fix) }}
+        </p>
+        <p class="mt-0.5 line-clamp-2 break-words text-muted">
+          {{ epic.sync.error }}
+        </p>
       </div>
       <div class="flex items-center justify-between gap-2">
         <span class="text-xs text-muted">{{ epic.mergedCount }} of {{ epic.taskCount }} merged</span>

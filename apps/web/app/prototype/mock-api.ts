@@ -201,6 +201,7 @@ route('GET', '/projects/:slug/epics', ([slug]) => f.epics.filter(e => e.projectI
 route('POST', '/epics/:id/review', ([id], body) => {
   const epic = f.epics.find(e => e.id === id) ?? notFound()
   const { action } = body as EpicReviewActionInput
+  if (action === 'decide') return { ok: true }
   epic.reviewState = action === 'approve' ? 'ready_to_merge' : action === 'request_changes' ? 'changes_requested' : 'open'
   emit({ type: 'epic.updated', epic })
   return { ok: true }
@@ -237,7 +238,7 @@ route('PUT', '/epics/:id/dependencies', ([id], body) => {
 })
 route('GET', '/epics/:id', ([id]) => {
   const epic = f.epics.find(e => e.id === id) ?? notFound()
-  return { ...epic, tasks: f.tasks.filter(t => t.epicId === epic.id) }
+  return { ...epic, tasks: f.tasks.filter(t => t.epicId === epic.id), fixes: f.epicFixes[epic.id] ?? [] }
 })
 route('GET', '/epics/:id/history', () => f.epicHistory)
 

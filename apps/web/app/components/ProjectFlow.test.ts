@@ -25,7 +25,8 @@ const sample = (days: number): FlowMetrics => ({
   cycleTime: { medianMs: days * 3600000, p90Ms: days * 2 * 3600000 },
   timeInStatus: [{ status: 'human_review', medianMs: 3600000, p90Ms: 7200000 }],
   runsByRole: [{ role: 'developer', duration: { medianMs: 60000, p90Ms: 120000 }, queueWait: { medianMs: 0, p90Ms: 60000 } }],
-  averageDeveloperRuns: 1, slowestTasks: [{ ref: 'COR-1', leadTimeMs: days * 86400000, dominantStatus: 'human_review' }]
+  averageDeveloperRuns: 1, slowestTasks: [{ ref: 'COR-1', leadTimeMs: days * 86400000, dominantStatus: 'human_review' }],
+  fixes: { reReviewed: 2, skippedReview: 5, epicDeveloperRuns: 3 }, epicReviews: { reviews: 6, epics: 4, perEpic: 1.5 }, tokens: { firstBuild: 1_200_000, followUp: 300_000 }
 })
 const mountFlow = () => mount(ProjectFlow, {
   props: { slug: 'corral' },
@@ -169,3 +170,11 @@ it('keeps the figures when a live refresh fails', async () => {
 })
 
 afterEach(() => client.clear())
+
+it('shows rework for the window: fixes, reviews per epic and tokens', async () => {
+  flow.mockReset().mockResolvedValue(sample(1))
+  const wrapper = mountFlow()
+  await flushPromises()
+  const text = wrapper.get('[aria-label="Rework"]').text()
+  for (const part of ['2 reviewed again, 5 kept approval', 'Developer runs on epics', '1.5 (6 across 4)', '1.2M vs 300K']) expect(text).toContain(part)
+})

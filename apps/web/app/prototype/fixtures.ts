@@ -11,6 +11,7 @@ import type {
   Epic,
   Evidence,
   GlobalStatus,
+  EpicFixRun,
   FlowMetrics,
   FlowMetricsQuery,
   Inbox,
@@ -229,8 +230,22 @@ export const epics: Epic[] = [
   epicInReview('e-audit', 'Audit trail', 'in_review', 216),
   epicInReview('e-themes', 'Project themes', 'changes_requested', 217),
   epicInReview('e-digest', 'Weekly digest', 'ready_to_merge', 218),
-  epicInReview('e-tags', 'Task tags', 'merged', 219)
+  epicInReview('e-tags', 'Task tags', 'merged', 219),
+  // A developer on the epic, with no task (D29), and two that are stopped or waiting
+  { ...epicInReview('e-search', 'Saved searches', 'ready_to_merge', 220), sync: { state: 'fixing', fix: 'conflict', reason: 'The rebase onto main conflicts in apps/server/src/search.ts.', files: ['apps/server/src/search.ts'], developer: { agentId: 'a-dev', name: 'Victor', runId: 'run-fix-1', runNumber: 3901 }, attempts: 0 } },
+  { ...epicInReview('e-feeds', 'Activity feeds', 'ready_to_merge', 221), sync: { state: 'fixing', fix: 'ci', reason: 'CI failed on the epic PR. ci: failed', files: [], developer: null, attempts: 1 } },
+  { ...epicInReview('e-exportpdf', 'PDF exports', 'ready_to_merge', 222), sync: { state: 'failed', fix: 'ci', error: '3 fixes for CI failure have been published and it\'s still failing. The last: CI failed on the epic PR. ci: failed' } }
 ]
+
+export const epicFixes: Record<string, EpicFixRun[]> = {
+  'e-search': [
+    { runId: 'run-fix-0', runNumber: 3890, fix: 'ci', developer: 'Victor', reason: 'CI failed on the epic PR. ci: failed', state: 'completed', outcome: 'pr_updated', summary: 'Fixed the flaky search fixture.', behaviourChanged: false, reReviewed: false, at: ago(90) },
+    { runId: 'run-fix-00', runNumber: 3872, fix: 'review', developer: 'Victor', reason: 'The filter panel and API disagree on the field name.', state: 'completed', outcome: 'pr_updated', summary: 'Renamed the field in the panel.', behaviourChanged: true, reReviewed: true, at: ago(200) }
+  ],
+  'e-exportpdf': [
+    { runId: 'run-fix-2', runNumber: 3880, fix: 'ci', developer: 'Victor', reason: 'CI failed on the epic PR. ci: failed', state: 'failed', outcome: 'failed', summary: 'The run ended with an error', behaviourChanged: null, reReviewed: null, at: ago(30) }
+  ]
+}
 
 function epicInReview(id: string, title: string, reviewState: Epic['reviewState'], prNumber: number): Epic {
   const fixing = reviewState === 'changes_requested'
@@ -382,6 +397,9 @@ export const tasks: Task[] = [
   ...epicTasks('e-webhooks', 25, ['Queue failed webhooks', 'Back off between retries']),
   ...epicTasks('e-audit', 27, ['Record every status change', 'Show the trail on a task']),
   ...epicTasks('e-themes', 29, ['Pick a project colour', 'Theme the board header']),
+  ...epicTasks('e-search', 330, ['Save a search', 'List saved searches']),
+  ...epicTasks('e-feeds', 332, ['Record activity', 'Show the feed']),
+  ...epicTasks('e-exportpdf', 334, ['Render a PDF', 'Offer the download']),
   task(corral, 31, { title: 'Fix: theme contrast on the board header', status: 'in_progress', epicId: 'e-themes' }),
   ...epicTasks('e-digest', 32, ['Collect the week\'s merges', 'Send the digest']),
   ...epicTasks('e-tags', 34, ['Add tags to tasks', 'Filter the Board by tag'], 60),
@@ -1017,6 +1035,9 @@ export function flowMetrics(slug: string, window: FlowMetricsQuery['window']): F
           { role: 'pm', duration: pair(0.1), queueWait: pair(0.02) }
         ],
     averageDeveloperRuns: empty ? 0 : scale,
+    fixes: { reReviewed: empty ? 0 : 2 * scale, skippedReview: empty ? 0 : 5 * scale, epicDeveloperRuns: empty ? 0 : 3 * scale },
+    epicReviews: { reviews: empty ? 0 : 5 * scale, epics: empty ? 0 : 3 * scale, perEpic: empty ? 0 : 5 / 3 },
+    tokens: { firstBuild: empty ? 0 : 1_400_000 * scale, followUp: empty ? 0 : 450_000 * scale },
     slowestTasks: empty
       ? []
       : (slug === 'corral' ? ['COR-1', 'COR-10', 'COR-2'] : ['WEB-2']).map((ref, i) => ({

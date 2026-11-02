@@ -17,4 +17,11 @@ export interface FlowMetrics {
   runsByRole: { role: AgentRole, queueWait: FlowPercentiles, duration: FlowPercentiles }[]
   averageDeveloperRuns: number
   slowestTasks: { ref: string, leadTimeMs: number, dominantStatus: TaskStatus }[]
+  // Rounds keeping a PR healthy that ended in the window (D29): those where the
+  // work was reviewed again, and those where it kept its approval
+  fixes: { reReviewed: number, skippedReview: number, epicDeveloperRuns: number }
+  // Integration reviews that ended in the window, and the epics they covered
+  epicReviews: { reviews: number, epics: number, perEpic: number }
+  // Developer tokens in the window: up to a task's first submission, and after it
+  tokens: { firstBuild: number, followUp: number }
 }
