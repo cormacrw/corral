@@ -240,8 +240,8 @@ export function integrationCompatibilityReason(required: number, supported: read
 // Contracts of older builds that still work with this server. A change that
 // keeps every old tool call valid lists the old hash here, so runners keep
 // taking runs while they update. Remove it once they have.
-// d0: before parent tasks (D31), whose PM tools only add to the old ones
-export const COMPATIBLE_TOOL_CONTRACTS: readonly string[] = ['__OLD_HASH__']
+// cc3d950e1d8050a1: before parent tasks (D31), whose PM tools only add to it
+export const COMPATIBLE_TOOL_CONTRACTS: readonly string[] = ['cc3d950e1d8050a1']
 
 export function toolContractReason(runner: string | undefined, server: string): string | null {
   if (runner === server || (runner && COMPATIBLE_TOOL_CONTRACTS.includes(runner))) return null

@@ -8,7 +8,7 @@ import { agentActivity, UnknownAgent } from './agent-activity.ts'
 import { listTaskAttachments } from './attachments.ts'
 import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-state.ts'
 import { listEpics, replaceEpicDependencies, reviewModeLocked } from './epics.ts'
-import { collapseUnstartedParent, deleteEpicWithParent, syncParentContent } from './parents.ts'
+import { collapseUnstartedParent, deleteEpicWithParent, parentFacts, syncParentContent } from './parents.ts'
 import { lostHumanChecks, lowersMode, matchCriteria, taskReview } from './review-gates.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import type { EventBus } from './events.ts'
@@ -498,7 +498,7 @@ export class PlanService {
       case 'list_tasks': {
         const parsed = listTasksInput.safeParse(input)
         if (!parsed.success) throw new ToolError(`The tasks were not listed: ${z.prettifyError(parsed.error)}`)
-        const { status, epic, query, includeMerged } = parsed.data
+        const { status, epic, parent, query, includeMerged } = parsed.data
         const statuses = status === undefined ? [] : [status].flat()
         const rows = await db.select({ id: tasks.id, number: tasks.number, title: tasks.title, status: tasks.status, type: tasks.type, priority: tasks.priority, epicId: tasks.epicId, humanReview: tasks.humanReview, statusReason: tasks.statusReason, prUrl: tasks.prUrl }).from(tasks)
           .where(and(
@@ -513,10 +513,13 @@ export class PlanService {
         const epicRows = await db.select().from(epics).where(eq(epics.projectId, project!.id))
         const epicDeps = await db.select().from(epicDependencies).innerJoin(epics, eq(epics.id, epicDependencies.epicId)).where(eq(epics.projectId, project!.id))
         const needle = query?.toLowerCase()
+        const facts = await parentFacts(db, project!, rows)
+        const parentOf = (t: { epicId: string | null }) => t.epicId ? facts.parents.get(t.epicId) ?? null : null
         const matches = rows
           .map(t => ({ ...t, ref: taskRef(project!.prefix, t.number) }))
           // In memory: an epic id that isn't a UUID finds nothing here, where Postgres would reject it
-          .filter(t => (!epic || t.epicId === epic) && (!needle || t.ref.toLowerCase().includes(needle) || t.title.toLowerCase().includes(needle)))
+          .filter(t => (!epic || t.epicId === epic) && (!parent || parentOf(t)?.ref === parent.toUpperCase()) && (!needle || t.ref.toLowerCase().includes(needle) || t.title.toLowerCase().includes(needle)))
+          .filter(t => !facts.rollups.get(t.id)?.drafting)
         return {
           project: { name: project!.name, prefix: project!.prefix, defaultBranch: project!.defaultBranch, epicReviewModeDefault: project!.epicReviewModeDefault },
           epics: epicRows.map(e => ({ id: e.id, title: e.title, reviewMode: e.reviewMode, dependsOn: epicDeps.filter(d => d.epic_dependencies.epicId === e.id).map(d => d.epic_dependencies.dependsOnEpicId) })),
@@ -530,7 +533,9 @@ export class PlanService {
             ...(t.humanReview && { humanReview: true }),
             ...(t.statusReason && { statusReason: t.statusReason }),
             ...(t.prUrl && { pr: t.prUrl }),
-            dependsOn: deps.filter(d => d.taskId === t.id).map(d => taskRef(project!.prefix, d.number))
+            dependsOn: deps.filter(d => d.taskId === t.id).map(d => taskRef(project!.prefix, d.number)),
+            ...(parentOf(t) && { parent: parentOf(t)!.ref }),
+            ...(facts.rollups.has(t.id) && { stage: facts.rollups.get(t.id)!.stage, subTasks: { done: facts.rollups.get(t.id)!.done, total: facts.rollups.get(t.id)!.total } })
           }))
         }
       }
