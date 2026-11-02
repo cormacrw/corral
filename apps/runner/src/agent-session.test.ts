@@ -8,13 +8,21 @@ import type { ParsedLine } from './stream-json.ts'
 // Stands in for `claude --input-format stream-json`: stays alive, reads one
 // user message per stdin line, replays it, and answers each with a result
 // line. A message of "hang" starts a turn that never finishes; "hold" starts
-// one that any next message joins, ending with one result for both.
+// one that any next message joins, ending with one result for both. A message
+// of "orphaned" is first preceded by the empty result a resume prints for a
+// background command the last process left behind.
 const FAKE_CLAUDE = `#!/usr/bin/env node
 const { createInterface } = require('node:readline')
 let started = false
 let holding = false
 createInterface({ input: process.stdin }).on('line', (line) => {
   let content = JSON.parse(line).message.content
+  if (content.startsWith('/')) {
+    const local_command = content.slice(1)
+    console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 0, local_command, result: local_command === 'context' ? 'Context usage' : '', session_id: 'one-session' }))
+    return
+  }
+  if (content === 'orphaned') console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 0, result: '', session_id: 'one-session' }))
   console.log(JSON.stringify({ type: 'user', isReplay: true, message: { role: 'user', content } }))
   if (holding) {
     holding = false
@@ -123,6 +131,37 @@ describe('spawnAgentSession', () => {
     expect(agent.message('b')).toBe(true)
     // "a" ended before "b" was taken in, so only "b"'s result is idle
     expect((await agent.nextIdle())?.text).toMatch(/^Answered b/)
+  })
+
+  it('does not take the empty result ahead of a prompt for that prompt\'s turn', async () => {
+    const agent = start()
+    agent.send('orphaned')
+    expect((await agent.nextIdle())?.text).toMatch(/^Answered orphaned/)
+
+    agent.send('orphaned')
+    expect((await agent.nextResult())?.text).toMatch(/^Answered orphaned/)
+    // It still reaches the transcript's reader
+    expect(lines.filter(line => line.emptyTurn)).toHaveLength(2)
+  })
+
+  it('returns a CLI slash command result with no model turn or prompt replay', async () => {
+    const agent = start()
+    agent.send('first')
+    await agent.nextResult()
+
+    agent.send('/context')
+    expect(await agent.nextResult()).toEqual({ isError: false, text: 'Context usage' })
+    expect(lines.some(line => line.replayed === '/context')).toBe(false)
+  })
+
+  it.each(['/clear', '/compact'])('returns the empty result of %s, which is never replayed', async (command) => {
+    const agent = start()
+    agent.send('first')
+    await agent.nextResult()
+
+    agent.send(command)
+    expect(await agent.nextResult()).toEqual({ isError: false, text: '' })
+    expect(lines.some(line => line.replayed === command)).toBe(false)
   })
 
   it('exits once stdin closes', async () => {

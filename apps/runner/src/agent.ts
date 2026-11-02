@@ -80,21 +80,26 @@ export type AgentOptionsWithoutPrompt = Omit<AgentOptions, 'prompt'>
 // message, and each turn ends with a result line. onLine still sees every line.
 // A message() can join the turn under way, which then ends with one result
 // for both, so each result records whether the CLI had taken in every
-// message by then (its replay of the message came first).
+// message by then (its replay of the message came first). An empty result
+// ahead of a sent prompt's replay answers nothing we sent, so it's no turn:
+// taken for one, it would close stdin on the turn that's just starting.
 export function spawnAgentSession(options: AgentOptionsWithoutPrompt): AgentSession {
   const results: Turn[] = []
   const waiting: ((turn: Turn | null) => void)[] = []
   const unreplayed: string[] = []
+  const unreplayedPrompts: string[] = []
   let ended = false
   const { child, exited, parser } = startAgent(agentArgs({ ...options, input: 'stream-json' }), 'pipe', {
     ...options,
     onLine(raw, parsed) {
       options.onLine(raw, parsed)
       if (parsed.replayed !== undefined) {
-        const index = unreplayed.indexOf(parsed.replayed)
-        if (index >= 0) unreplayed.splice(index, 1)
+        for (const list of [unreplayed, unreplayedPrompts]) {
+          const index = list.indexOf(parsed.replayed)
+          if (index >= 0) list.splice(index, 1)
+        }
       }
-      if (!parsed.result) return
+      if (!parsed.result || (parsed.emptyTurn && unreplayedPrompts.length > 0)) return
       const turn = { result: parsed.result, idle: unreplayed.length === 0 }
       const next = waiting.shift()
       if (next) next(turn)
@@ -121,6 +126,7 @@ export function spawnAgentSession(options: AgentOptionsWithoutPrompt): AgentSess
     send(prompt) {
       if (ended || !stdin.writable) return
       parser.startTurn()
+      unreplayedPrompts.push(prompt)
       write(prompt)
     },
     message(text) {
