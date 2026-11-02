@@ -334,7 +334,7 @@ describe('merge orchestrator and human controls', () => {
       expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge' })
     }
     await t.mergePass()
-    expect(await taskRow(task.id)).toMatchObject({ status: 'failed', statusReason: expect.stringContaining('refused the merge 3 times') })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'failed', statusReason: expect.stringContaining('refused the merge 3 times'), retryStop: expect.objectContaining({ capped: true, sessionId: null }) })
     expect(t.github.pulls.get(pr.number)).toMatchObject({ merged: false })
     t.github.mergeResult = { merged: true, sha: 'merge-sha', message: '' }
     await pause(project)
@@ -452,7 +452,7 @@ describe('merge orchestrator and human controls', () => {
       expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', failedRuns: 0 })
       t.github.mergeResult = new GitHubError(422, 'Pull Request is not mergeable')
       for (let i = 0; i < 3; i++) await t.mergePass()
-      expect(await taskRow(task.id)).toMatchObject({ status: 'failed', statusReason: expect.stringContaining('merge failed 3 times') })
+      expect(await taskRow(task.id)).toMatchObject({ status: 'failed', statusReason: expect.stringContaining('merge failed 3 times'), retryStop: expect.objectContaining({ capped: true, sessionId: null }) })
       expect(t.github.pulls.get(pr.number)).toMatchObject({ merged: false })
       t.github.mergeResult = merges
       await pause(project)

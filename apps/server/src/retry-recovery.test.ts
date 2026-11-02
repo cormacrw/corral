@@ -1,9 +1,10 @@
 import type { Inbox, RunJob, TaskInboxItem } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { databaseFixture } from '@corral/db/testing'
-import { asc, eq } from 'drizzle-orm'
+import { asc, eq, inArray } from 'drizzle-orm'
 import { afterAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
+import { humanInput, triageCap } from './retry-recovery.ts'
 import { RUNNER_RESTARTED } from './run-context.ts'
 import { FakeRunner } from './test-runner.ts'
 
@@ -245,6 +246,73 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     await expect.poll(async () => (await t.db.select().from(runs).where(eq(runs.id, pm.runId)))[0]!.state).toBe('completed')
   }
 
+  // A cap reached outside any run, as the merge and integration paths do
+  async function capped(status: 'failed' | 'blocked' = 'failed') {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    await t.db.update(tasks).set({ status, statusReason: 'GitHub refused the merge 3 times: head moved' }).where(eq(tasks.id, task.id))
+    await triageCap(t.db, task.id, status === 'failed')
+    return { project, task }
+  }
+
+  it('gives a cap with no run one triage, showing it unless a run is dispatched', async () => {
+    const { project, task } = await capped()
+    expect((await row(task.id)).retryStop).toMatchObject({ runId: null, capped: true, sessionId: null })
+    expect(await mine(project.id)).toMatchObject([{ id: task.id, type: 'failed', body: expect.stringContaining('PM triage hasn’t started.') }])
+    await t.db.update(agents).set({ paused: true }).where(eq(agents.role, 'pm'))
+    await t.orchestrator.schedule()
+    const { sessionId } = (await row(task.id)).retryStop!
+    expect((await t.db.select().from(runs).where(eq(runs.planSessionId, sessionId!)))).toMatchObject([{ role: 'pm', state: 'queued' }])
+    expect(await mine(project.id)).toMatchObject([{ id: task.id, type: 'failed' }])
+    await t.db.update(agents).set({ paused: false }).where(eq(agents.role, 'pm'))
+    await t.orchestrator.schedule()
+    const pm = (await runner.next('run.assign', m => m.job.planSessionId === sessionId)).job
+    expect(await mine(project.id)).toEqual([])
+    expect(await runner.call(pm.runId, pm.leaseEpoch, 'add_comment', { taskRef: task.ref, body: 'The base branch was force-pushed.' })).toMatchObject({ ok: true })
+    await finishPm(pm)
+    for (let i = 0; i < 2; i++) await t.orchestrator.schedule()
+    expect(await t.db.select().from(runs).where(eq(runs.taskId, task.id))).toHaveLength(1)
+    expect(await mine(project.id)).toMatchObject([{ id: task.id, type: 'failed', body: expect.stringContaining('The base branch was force-pushed.') }])
+  })
+
+  describe('with no PM agent', () => {
+    const withoutPm = async <T>(work: () => Promise<T>) => {
+      // Agents with runs can't be deleted
+      const pms = await t.db.update(agents).set({ role: 'reviewer' }).where(eq(agents.role, 'pm')).returning()
+      try {
+        return await work()
+      } finally {
+        await t.db.update(agents).set({ role: 'pm' }).where(inArray(agents.id, pms.map(pm => pm.id)))
+      }
+    }
+
+    it('keeps a stop visible and releases it on human input', async () => withoutPm(async () => {
+      const project = await t.createProject()
+      const task = await t.createTask(project.slug)
+      await t.db.update(tasks).set({ status: 'in_progress', statusReason: null, retryStop: { runId: null, target: null, human: 'earlier', status: 'in_progress', capped: false, sessionId: null } }).where(eq(tasks.id, task.id))
+      expect(await mine(project.id)).toMatchObject([{ id: task.id, type: 'stopped', body: expect.stringContaining('PM triage hasn’t started.') }])
+      await t.orchestrator.schedule()
+      expect((await row(task.id)).retryStop).toBeNull()
+    }))
+
+    it('releases a stop on a target change', async () => withoutPm(async () => {
+      const project = await t.createProject()
+      const task = await t.createTask(project.slug)
+      t.github.setBranch(project.repository, project.defaultBranch, 'new-target')
+      await t.db.update(tasks).set({ status: 'in_progress', retryStop: { runId: null, target: 'old-target', human: await humanInput(t.db, task.id), status: 'in_progress', capped: false, sessionId: null } }).where(eq(tasks.id, task.id))
+      await t.orchestrator.schedule()
+      expect((await row(task.id)).retryStop).toBeNull()
+    }))
+
+    it('drops a stop a human already resolved, queuing no triage', async () => withoutPm(async () => {
+      const { project, task } = await capped()
+      await t.db.update(tasks).set({ status: 'ready', statusReason: null }).where(eq(tasks.id, task.id))
+      await t.orchestrator.schedule()
+      expect((await row(task.id)).retryStop).toBeNull()
+      expect(await mine(project.id)).toEqual([])
+    }))
+  })
+
   it('resolves a cap only after an explicitly authorized pending retry choice', async () => {
     const { task, job } = await assigned(1)
     await fail(job)
@@ -289,7 +357,7 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     if (kind === 'capped') {
       const transitions = await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.taskId, task.id)).orderBy(asc(schema.auditLog.id))
       const entered = transitions.find(entry => entry.action === 'task.transition' && (entry.detail as { to?: string }).to === 'failed')!
-      await t.db.insert(schema.inboxMessages).values({ arrival: `${task.id}:failed:audit-${entered.id}`, message: 'No findings were recorded.' })
+      await t.db.insert(schema.inboxMessages).values({ arrival: `${task.id}:failed:audit-${entered.id}`, message: 'No findings were recorded.' }).onConflictDoUpdate({ target: schema.inboxMessages.arrival, set: { message: 'No findings were recorded.' } })
     }
     const pm = (await runner.next('run.assign', m => m.job.planSessionId === stop.sessionId)).job
     const findings = 'The parser supports both formats. Resolve the format requirement before another attempt.'

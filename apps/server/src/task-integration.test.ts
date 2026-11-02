@@ -298,6 +298,7 @@ it('fails a task over later passes when its own submission can\'t be integrated'
   await tick()
   expect(await row(task)).toMatchObject({ status: 'failed' })
   expect((await row(task)).statusReason).toContain('Integration failed 3 times')
+  expect((await row(task)).retryStop).toMatchObject({ capped: true })
   expect(await git('rev-parse', epic.branch)).toBe(epic.base)
 })
 

@@ -67,7 +67,7 @@ Task items (human review, question, blocked, failed, stopped, Activity and Resol
   | Activity, Resolved | None, and no composer | |
 
   **Request changes**, **Answer**, **Give direction** and **Delete task** open the composer instead, with **Cancel** above it. Delete waits for it because it can't be undone, and takes an optional reason.
-- **Composer** (`InboxPanelTray`), pinned to the bottom of an item you can act on: with no action chosen it's the reply box, "Reply to {sender}…", which adds a comment to the task and leaves the item where it is. A failed item opens on Retry instead: the composer is labelled **Note to send with Retry (optional)**, its hint says the note guides the agent's next run, and its send button retries with the chosen status. **Reply instead** beside the label switches it to the reply box, with **Cancel** above to return. Cancelling any action on a failed item, or sending a reply, returns to the Retry note.
+- **Composer** (`InboxPanelTray`), pinned to the bottom of an item you can act on: with no action chosen it's the reply box, "Reply to {sender}…", which adds a comment to the task and leaves the item where it is, except on a Stopped item, where new human input releases the stop. A failed item opens on Retry instead: the composer is labelled **Note to send with Retry (optional)**, its hint says the note guides the agent's next run, and its send button retries with the chosen status. **Reply instead** beside the label switches it to the reply box, with **Cancel** above to return. Cancelling any action on a failed item, or sending a reply, returns to the Retry note.
 
 ### What each kind shows
 

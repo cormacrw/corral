@@ -18,7 +18,7 @@ export const REPETITION_REASON = 'Two consecutive failures left the head unchang
 // A no-progress stop leaves the task in its working status with nothing to
 // claim it, so it waits on the human once its triage has ended.
 export function idleStop(task: Pick<TaskRow, 'status' | 'retryStop' | 'leaseRunId'>): boolean {
-  return Boolean(task.retryStop?.sessionId) && !task.leaseRunId && (task.status === 'in_progress' || task.status === 'agent_review')
+  return Boolean(task.retryStop) && !task.leaseRunId && (task.status === 'in_progress' || task.status === 'agent_review')
 }
 
 // Only human input resets repetition. Agent notes and triage must not do so.
@@ -58,6 +58,14 @@ export async function triageBlocked(tx: Executor, ctx: RunContext, task: TaskRow
     human: await humanInput(tx, task.id), status: task.status === 'agent_review' ? 'agent_review' : 'in_progress', capped: false, sessionId: null } }).where(eq(tasks.id, task.id))
 }
 
+// A cap that isn't a failed run: the transition has just moved the task to
+// Failed or Blocked, under its lock. There may be no run to point at.
+export async function triageCap(tx: Executor, taskId: string, capped: boolean): Promise<void> {
+  const [run] = await tx.select({ id: runs.id }).from(runs).where(and(eq(runs.taskId, taskId), ne(runs.role, 'pm'))).orderBy(desc(runs.number)).limit(1)
+  await tx.update(tasks).set({ retryStop: { runId: run?.id ?? null, target: null, human: await humanInput(tx, taskId), status: 'in_progress', capped, sessionId: null } })
+    .where(and(eq(tasks.id, taskId), isNull(tasks.retryStop)))
+}
+
 export function triagePrompt(ref: string, reason: string): string {
   return `Automatic recovery for ${ref} stopped: ${reason}. This is its one PM triage turn for this stop. Read get_task, list_runs and get_run for its failures, then inspect the relevant code and project docs. Resolve implementation problems yourself: propose concrete follow-up work with propose_plan or leave actionable findings with add_comment on ${ref}. Do not ask the human to debug or decide implementation details. Do not approve a plan, reset counters, or restart unchanged work. Only ask_question if requirements, authority or a recovery decision genuinely require the human. State what is blocked, what recovery was tried and why it stopped, the decision needed, and a recommendation (or why none is safe). Keep the recommendation in ask_question's recommendation field. Leave a comment on ${ref} linking your findings or proposal. For a recovery question, set retryOptions to only the exact answer choices (or recommendation) that authorize retrying or continuing work. Never include leaving stopped, refusal, or clarification in retryOptions. Human plan approval still applies.`
 }
@@ -70,33 +78,32 @@ export async function reconcileRecovery(c: RunCore, targetPoll: Backoff): Promis
   const stopped = await db.select({ task: tasks, project: projects }).from(tasks).innerJoin(projects, eq(projects.id, tasks.projectId))
     .where(and(isNull(tasks.deletedAt), isNotNull(tasks.retryStop)))
   for (const { task, project } of stopped) {
-    const stop = task.retryStop
-    if (stop?.sessionId) {
-      const human = await humanInput(db, task.id)
-      let target: string | null = null
-      if (human === stop.human && c.d.runner.online && !stop.capped && task.status !== 'blocked' && stop.target && targetPoll.due(task.id)) {
-        targetPoll.later(task.id)
-        try {
-          target = await c.d.github.branchHead(project.repository, await taskBase(db, task, project))
-        } catch { /* An unavailable target is not evidence of change. */ }
-      }
-      if (!stop.capped && task.status !== 'blocked' && (human !== stop.human || (target && target !== stop.target))) {
-        await db.transaction(async (tx) => {
-          const { task: current } = await lockTask(tx, task.id)
-          if (current.retryStop?.runId === stop.runId && !current.leaseRunId) await tx.update(tasks).set({ retryStop: null }).where(eq(tasks.id, task.id))
-        })
-        targetPoll.clear(task.id)
-        events.publish({ type: 'task.updated', task: await loadTask(db, task.id) })
-        continue
-      }
-      // A human explicitly resolved a capped task through D10.
-      if ((stop.capped && task.status !== 'failed') || (!stop.capped && task.status !== 'blocked' && task.status !== stop.status)) {
-        await db.update(tasks).set({ retryStop: null }).where(eq(tasks.id, task.id))
-        targetPoll.clear(task.id)
-        continue
-      }
-      if (stop.sessionId) continue
+    const stop = task.retryStop!
+    // Whether or not triage was queued: with no PM a stop must still release.
+    const human = await humanInput(db, task.id)
+    let target: string | null = null
+    if (human === stop.human && c.d.runner.online && !stop.capped && task.status !== 'blocked' && stop.target && targetPoll.due(task.id)) {
+      targetPoll.later(task.id)
+      try {
+        target = await c.d.github.branchHead(project.repository, await taskBase(db, task, project))
+      } catch { /* An unavailable target is not evidence of change. */ }
     }
+    if (!stop.capped && task.status !== 'blocked' && (human !== stop.human || (target && target !== stop.target))) {
+      await db.transaction(async (tx) => {
+        const { task: current } = await lockTask(tx, task.id)
+        if (current.retryStop?.runId === stop.runId && !current.leaseRunId) await tx.update(tasks).set({ retryStop: null }).where(eq(tasks.id, task.id))
+      })
+      targetPoll.clear(task.id)
+      events.publish({ type: 'task.updated', task: await loadTask(db, task.id) })
+      continue
+    }
+    // A human explicitly resolved a capped task through D10.
+    if ((stop.capped && task.status !== 'failed') || (!stop.capped && task.status !== 'blocked' && task.status !== stop.status)) {
+      await db.update(tasks).set({ retryStop: null }).where(eq(tasks.id, task.id))
+      targetPoll.clear(task.id)
+      continue
+    }
+    if (stop.sessionId) continue
     const queued = await db.transaction(async (tx) => {
       const { task: locked } = await lockTask(tx, task.id)
       if (!locked.retryStop || locked.retryStop.sessionId || locked.leaseRunId) return null

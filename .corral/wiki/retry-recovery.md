@@ -19,6 +19,11 @@ that would otherwise look like an ordinary exit code 1. Ordinary process exits
 without an outcome can establish repetition when both heads are known. Nothing raises a
 retry cap or carries approval across new work.
 
+Caps that aren't failed runs call `triageCap` (or `triageBlocked` for a reviewer)
+right after their transition: CI fixes in a row, integration and merge attempts,
+the review-round cap and repeated feedback. The core machine stays unaware; a cap
+with no run has a null `retryStop.runId`.
+
 A stop is durable in `tasks.retryStop`. The scheduler reconciles it before
 claiming workers, and queues one PM run and one fresh Plan session under the
 task lock. PM runs may now link to a task for its run history, but remain
@@ -30,8 +35,10 @@ The PM reads the task, run diagnostics and code, and comments with actionable
 findings or proposes work for human plan approval. Only requirements,
 authority and recovery decisions become `ask_question` items in Needs you,
 with the block, attempted recovery, decision and recommendation. The original
-Failed, Blocked or stopped item is suppressed while triage is active or its open
-recovery conversation has a pending question or plan. Comment-only or failed
+Failed, Blocked or stopped item is suppressed while a triage run is dispatched or
+its open recovery conversation has a pending question or plan. A queued run
+hides nothing, since a paused PM or offline runner may never start it, and a
+stop with no session (no PM agent) stays listed and releases like any other. Comment-only or failed
 triage restores the original task decision to Needs you, including any D27 alternatives, with PM
 findings and recovery guidance. A failed or closed recovery conversation cannot
 hide the task permanently. The task

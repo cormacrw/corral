@@ -230,9 +230,9 @@ Recovery still in progress is informational: reconciliation, retry and developer
 | Human stops a run | Process tree killed, run → Interrupted; the task is **paused** so the scheduler doesn't restart it until the human presses **Resume** on the task (`POST /projects/:slug/tasks/:number/resume`, human only). That clears the pause and asks for a scheduling pass for the task right away, and the run that starts depends on its status: a developer run in In progress, a reviewer run in Agent review |
 | A developer run stops before reporting | The runner commits uncommitted changes as a WIP commit and pushes the task branch. The next developer run starts from that commit, and its prompt says it continues a stopped run and gives the stop reason and the commit |
 | Agent reports `stuck` or rebase reviewer reports `blocked` | Task → **Blocked**; one PM triage turn diagnoses it first. The original question and epic alternatives return to Needs you if triage ends without a pending question or plan |
-| Review cap reached | Task → **Blocked** |
+| Review cap reached, or repeated review feedback | Task → **Blocked**, after one PM triage turn |
 | Unrecoverable error / unsafe merge failure | Task → **Failed** |
-| CI fails on a task | The same task → In progress with the CI output in the prompt. Not changed → Ready to merge, CI on the new head. Changed → Agent review. A report on the failing commit is refused, and three fixes in a row that still fail → Failed (D29) |
+| CI fails on a task | The same task → In progress with the CI output in the prompt. Not changed → Ready to merge, CI on the new head. Changed → Agent review. A report on the failing commit is refused, and three fixes in a row that still fail → Failed, after one PM triage turn (D29, D11) |
 | CI fails on an epic PR, or integration review requests changes | A developer run on the epic, with no task (section 4). Refused or failed attempts, or too many fixes, stop at **Rebase stopped** with **Retry**, on the epic and in **Needs you** until Retry or the merge |
 | The CI log can't be fetched | The round still starts; the prompt says the output is unavailable and links the CI run |
 | Human deletes the task | Run stopped, PR closed, branch removed when safe, task soft-deleted; dependents → Blocked (D10) |

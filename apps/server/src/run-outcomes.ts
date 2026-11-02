@@ -183,6 +183,8 @@ export class RunOutcomes {
       // flagged, otherwise Ready to merge (D10). PR-free work always takes
       // Ready to merge: the human sees it at the epic review (D27)
       const state = await applyTransition(tx, locked.task, locked.project, verdict === 'approved' ? { type: 'review_approved' } : { type: 'changes_requested', similarity }, server, { event: verdict === 'approved' ? 'review_approved' : 'changes_requested', runId: ctx.run.id, headSha, ...(similarity !== undefined && { similarity }) })
+      // The review-round cap and repeated feedback get the PM's diagnosis first (D11)
+      if (state.status === 'blocked') await triageBlocked(tx, ctx, locked.task)
       await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: verdict, summary: report.summary, headSha })
       return state
     })

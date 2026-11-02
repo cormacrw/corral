@@ -11,6 +11,7 @@ import { publishDependents } from './dependent-tasks.ts'
 import { TaskIntegrator } from './task-integration.ts'
 import type { EventBus } from './events.ts'
 import { MAX_CI_FIXES } from './ci-output.ts'
+import { triageCap } from './retry-recovery.ts'
 import { isTransient, requiredChecks, type CheckResult, type GitHubClient, type PullRequest } from './github.ts'
 import { SharedReads } from './pull-requests.ts'
 import { Backoff, HeadAttempts, MAX_MERGE_ATTEMPTS } from './retries.ts'
@@ -377,6 +378,7 @@ export class MergeOrchestrator {
         const attempt = this.#attempts.next(taskId, pr.headSha)
         if (attempt >= MAX_MERGE_ATTEMPTS) {
           await applyTransition(tx, locked.task, locked.project, { type: 'fail', reason: `GitHub merge failed ${attempt} times and retrying isn't safe: ${error instanceof Error ? error.message : String(error)}` }, server, { event: 'merge_failed' })
+          await triageCap(tx, taskId, true)
           this.#attempts.clear(taskId)
         }
         return false
@@ -392,6 +394,7 @@ export class MergeOrchestrator {
       await appendAudit(tx, { projectId: project.id, taskId, actor: server }, auditEvent('merge.refused', { pr: pr.number, message: result.message, attempt }))
       if (attempt >= MAX_MERGE_ATTEMPTS) {
         await applyTransition(tx, locked.task, locked.project, { type: 'fail', reason: `GitHub refused the merge ${attempt} times: ${result.message}` }, server, { event: 'merge_failed' })
+        await triageCap(tx, taskId, true)
         this.#attempts.clear(taskId)
       }
       return false
@@ -489,6 +492,8 @@ export class MergeOrchestrator {
       const { task, project } = await lockTask(tx, taskId)
       if (task.leaseRunId || task.status !== from) return
       await applyTransition(tx, task, project, event, server, detail)
+      // A failed CI check only fails the task at the CI-fix cap
+      if (event.type === 'fail' && detail.event === 'ci_failed') await triageCap(tx, taskId, true)
       if (values) await tx.update(tasks).set(values).where(eq(tasks.id, taskId))
       if (comment) await tx.insert(comments).values({ taskId, author: server, body: comment })
     })
