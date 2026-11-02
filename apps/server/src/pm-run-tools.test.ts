@@ -138,7 +138,7 @@ describe('list_runs and get_run', () => {
     await result('get_run', { runNumber: failedReview.number })
     await call('get_run', { runNumber: 99_999_998 })
     const entries = await t.db.select().from(auditLog).where(eq(auditLog.action, 'pm.tool_called'))
-    const read = entries.find(e => (e.detail as { summary: string }).summary === `Read run #${failedReview.number} on epic Saved searches`)
+    const read = entries.find(e => (e.detail as { summary: string }).summary === `Read run #${failedReview.number} on Saved searches`)
     expect(read).toMatchObject({ projectId: failedReview.projectId, actor: { kind: 'agent', role: 'pm', runId: pm.runId } })
     expect(entries.some(e => (e.detail as { ok: boolean, error?: string }).error === 'Run #99999998 doesn\'t exist')).toBe(true)
   })
