@@ -74,13 +74,21 @@ const exists = async (bare: string, commit: string, file: string) => (await git(
 // target renamed under the epic's edit carries that edit, so it's both sides'
 // and only has to survive at its new path. The epic's own files don't count.
 // The push guard and the rebase review share this, so a reviewer is shown
-// exactly what the guard would otherwise refuse.
+// exactly what the guard would otherwise refuse. A CI or review fix sits on the
+// head it fixes, so nothing separates the sides by history: there, a file that
+// was already there and that the epic never changed is the target's. A new file
+// is the fix's own.
 async function targetChanges(bare: string, job: { targetBranch: string, expectedHeadSha: string, candidateSha: string }) {
   const base = await required(['merge-base', job.candidateSha, remoteRef(job.targetBranch)], bare)
   const fork = await required(['merge-base', job.expectedHeadSha, base], bare)
   const epicFiles = new Set(await changed(bare, fork, job.expectedHeadSha))
   const carried = (await renames(bare, fork, base)).filter(([from]) => epicFiles.has(from))
   const shared = new Set([...epicFiles, ...carried.map(([, to]) => to)])
+  if (fork === base) {
+    const edited = (await changed(bare, job.expectedHeadSha, job.candidateSha)).filter(file => !shared.has(file))
+    const present = await Promise.all(edited.map(file => exists(bare, base, file)))
+    return { base, carried, undone: edited.filter((_, i) => present[i]) }
+  }
   const targetOnly = (await changed(bare, fork, base)).filter(file => !shared.has(file))
   const altered = new Set(await changed(bare, base, job.candidateSha))
   return { base, carried, undone: targetOnly.filter(file => altered.has(file)) }

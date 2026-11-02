@@ -116,6 +116,33 @@ describe('a round started by a CI failure', () => {
     expect(comments.map(c => c.body)).toEqual(expect.arrayContaining([expect.stringContaining('did not change')]))
   })
 
+  it('refuses a report on the commit CI failed on, leaving the round open', async () => {
+    const { dev, task } = await ciRound()
+    const failedOn = (await taskRow(task.id)).headSha
+    expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', behaviourChanged: false, note: 'Nothing to change', summary: 'No change', headSha: failedOn })).toMatchObject({ ok: false, error: expect.stringContaining('still at the commit CI failed on') })
+    expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', headSha: failedOn })
+    expect((await taskRow(task.id)).ciFix).not.toBeNull()
+  })
+
+  it('stops at Failed for a human once three fixes in a row still fail CI', async () => {
+    const { dev: first, task, branch } = await ciRound()
+    let dev = first
+    for (let n = 1; n <= 3; n++) {
+      const head = `still-failing-${task.number}-${n}`
+      t.github.setBranch(project.repository, branch, head)
+      t.github.pulls.get((await taskRow(task.id)).prNumber!)!.headSha = head
+      t.github.setChecks(head, [{ name: 'lint', conclusion: 'failure', url: null }])
+      expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', behaviourChanged: false, note: 'Fixed the lint rule', summary: 'Fixed lint', headSha: head })).toMatchObject({ ok: true })
+      await t.mergePass()
+      if (n === 3) break
+      await t.orchestrator.schedule()
+      dev = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
+    }
+    expect(await taskRow(task.id)).toMatchObject({ status: 'failed', statusReason: expect.stringContaining('after 3 fixes in a row: lint') })
+    await t.orchestrator.schedule()
+    expect((await t.db.select().from(schema.runs).where(eq(schema.runs.taskId, task.id))).filter(r => r.role === 'developer')).toHaveLength(3)
+  })
+
   it('goes to Agent review when behaviour changed', async () => {
     const { dev, task, branch } = await ciRound()
     t.github.setBranch(project.repository, branch, `changed-${task.number}`)

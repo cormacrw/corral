@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { inspectEpicRebase, prepareEpicRebase, pushEpicRebase } from '../../runner/src/epic-rebase.ts'
 import { exec } from '../../runner/src/exec.ts'
+import { GitHubError } from './github.ts'
 import { inspectIntegration, prepareIntegration, pushIntegration } from '../../runner/src/integration.ts'
 import { createTestDataDir, TEST_REPOSITORY } from '../../runner/src/test-repo.ts'
 import { readAudit } from './audit.ts'
@@ -1113,6 +1114,44 @@ describe('developer runs on the epic', () => {
     await pass()
     expect(await git('rev-parse', epic.branch)).toBe(adapted)
     expect(await reload(epic.id)).toMatchObject({ reviewState: 'open', approvedHeadSha: null })
+    await t.db.update(schema.epics).set({ reviewState: 'in_review', prHeadSha: adapted }).where(eq(schema.epics.id, epic.id))
+    await t.orchestrator.schedule()
+    const review = (await runner.next('run.assign', m => m.job.role === 'reviewer' && m.job.epicId === epic.id)).job
+    expect(review.prompt).toContain('## Files only the target changed')
+    expect(review.prompt).toContain('`target-only.md`')
+    expect(review.prompt).toContain('+adapted')
+  })
+
+  it('waits for a later pass when GitHub fails before a fix can start, spending no attempt', async () => {
+    const epic = await humanApproved(await conflicted())
+    await pass()
+    const { createBranch } = t.github
+    t.github.createBranch = async () => {
+      throw new GitHubError(502, 'Bad gateway')
+    }
+    onTestFinished(() => {
+      t.github.createBranch = createBranch
+    })
+    await t.orchestrator.schedule()
+    await t.orchestrator.schedule()
+    const started = await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id))
+    expect(started).toMatchObject([{ state: 'interrupted' }])
+    expect((await ops(epic.id))[0]).toMatchObject({ fixAttempts: 0 })
+    expect((await reload(epic.id)).syncError).toBeNull()
+    t.github.createBranch = createBranch
+    t.clock.now = new Date(t.clock.now.getTime() + 10 * 60_000)
+    expect((await fixJob(epic.id)).epicId).toBe(epic.id)
+  })
+
+  it('starts no fix while the epic PR is closed, and starts once it reopens', async () => {
+    const epic = await humanApproved(await conflicted())
+    await pass()
+    const { prNumber } = await reload(epic.id)
+    t.github.pulls.get(prNumber!)!.state = 'closed'
+    await t.orchestrator.schedule()
+    expect(await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id))).toEqual([])
+    t.github.pulls.get(prNumber!)!.state = 'open'
+    expect((await fixJob(epic.id)).epicId).toBe(epic.id)
   })
 
   it('returns the epic to integration review when the developer reports a behaviour change', async () => {
@@ -1132,7 +1171,8 @@ describe('developer runs on the epic', () => {
     const extra = await commitOn(job.branch!, 'unrelated.txt', 'slipped in\n')
     t.github.setBranch(TEST_REPOSITORY, job.branch!, extra)
     expect(resolved).not.toBe(extra)
-    expect(await fixReport(job, { behaviourChanged: false, headSha: extra, conflictedFiles: [epic.file] })).toMatchObject({ ok: true })
+    // The server knows what conflicted: the developer's list can't widen it
+    expect(await fixReport(job, { behaviourChanged: false, headSha: extra, conflictedFiles: [epic.file, 'unrelated.txt'] })).toMatchObject({ ok: true })
     await pass()
     expect(await reload(epic.id)).toMatchObject({ reviewState: 'open', approvedHeadSha: null })
     expect((await approvalEvents(epic.id)).at(-1)).toMatchObject({ detail: { reason: expect.stringContaining('unrelated.txt') } })
@@ -1341,6 +1381,30 @@ describe('developer runs on the epic', () => {
       return head
     }
 
+    it('refuses an unchanged CI fix that edits a file the epic never touched, and shows the reviewer one that says it changed behaviour', async () => {
+      const shared = `main-only-${++branches}.test.ts`
+      await commitOn('main', shared, 'test("main")\n')
+      const epic = await failing()
+      await t.mergePass()
+      const job = await fixJob(epic.id)
+      const gutted = await commitOn(job.branch!, shared, 'gutted\n')
+      t.github.setBranch(TEST_REPOSITORY, job.branch!, gutted)
+      expect(await fixReport(job, { behaviourChanged: false, headSha: gutted })).toMatchObject({ ok: true })
+      t.clock.now = new Date(t.clock.now.getTime() + 5 * 60_000)
+      await pass()
+      expect(await git('rev-parse', epic.branch)).toBe(epic.head)
+      expect((await ops(epic.id)).find(o => o.fix === 'ci')).toMatchObject({ fixAttempts: 1, fixReport: null })
+      const retry = await fixJob(epic.id)
+      expect(retry.prompt).toContain(`It changes target branch work the epic never touched: ${shared}`)
+      // The second runner's worktree must reach what the first one pushed
+      expect(retry.continueFrom).toBe(gutted)
+      expect(await fixReport(retry, { behaviourChanged: true, headSha: gutted })).toMatchObject({ ok: true })
+      t.clock.now = new Date(t.clock.now.getTime() + 5 * 60_000)
+      await pass()
+      expect(await git('rev-parse', epic.branch)).toBe(gutted)
+      expect((await ops(epic.id)).find(o => o.fix === 'ci')!.fixReport).toMatchObject({ targetFiles: [{ path: shared, diff: expect.stringContaining('+gutted') }] })
+    })
+
     it('creates no task, gives the developer CI\'s output, and keeps approval until CI passes when behaviour is unchanged', async () => {
       const epic = await failing()
       await t.mergePass()
@@ -1349,6 +1413,9 @@ describe('developer runs on the epic', () => {
       expect(job.prompt).toContain('FAIL src/app.test.ts')
       expect(job.prompt).toContain('untrusted')
       expect(job.prompt).not.toContain('Post job cleanup')
+      expect(job.prompt).toContain('starting from any test that failed')
+      expect(job.prompt).not.toContain('run no lint')
+      expect(job.continueFrom).toBe(epic.head)
       expect((await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id)))).toHaveLength(1)
       expect((await fixEpic(epic.id)).sync).toMatchObject({ state: 'fixing', fix: 'ci' })
       const head = await committed(job, `fix-${++branches}.txt`)

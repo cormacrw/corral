@@ -232,7 +232,7 @@ Recovery still in progress is informational: reconciliation, retry and developer
 | Agent reports `stuck` | Task → **Blocked** |
 | Review cap reached | Task → **Blocked** |
 | Unrecoverable error / unsafe merge failure | Task → **Failed** |
-| CI fails on a task | The same task → In progress with the CI output in the prompt. Not changed → Ready to merge, CI on the new head. Changed → Agent review (D29) |
+| CI fails on a task | The same task → In progress with the CI output in the prompt. Not changed → Ready to merge, CI on the new head. Changed → Agent review. A report on the failing commit is refused, and three fixes in a row that still fail → Failed (D29) |
 | CI fails on an epic PR, or integration review requests changes | A developer run on the epic, with no task (section 4). Refused or failed attempts, or too many fixes, stop at **Rebase stopped** with **Retry**, on the epic and in **Needs you** until Retry or the merge |
 | The CI log can't be fetched | The round still starts; the prompt says the output is unavailable and links the CI run |
 | Human deletes the task | Run stopped, PR closed, branch removed when safe, task soft-deleted; dependents → Blocked (D10) |

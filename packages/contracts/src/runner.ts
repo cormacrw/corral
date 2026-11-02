@@ -77,7 +77,7 @@ export const epicDeveloperRunJobSchema = z.object({
   ...runJobCommon, role: z.literal('developer'), taskId: z.null(), taskRef: z.null(),
   epicId: z.string().min(1), branch: z.string().min(1), headSha: z.string().min(1),
   baseBranch: z.string().optional(), planSessionId: z.null(),
-  taskType: z.never().optional(), designPinned: z.never().optional(), continueFrom: z.never().optional()
+  taskType: z.never().optional(), designPinned: z.never().optional(), continueFrom: z.string().nullish()
 })
 export const runJobSchema = z.union([
   z.discriminatedUnion('role', [pmRunJobSchema, developerRunJobSchema, designerRunJobSchema, reviewerRunJobSchema]),

@@ -5,7 +5,8 @@ import { and, asc, count, desc, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { claimNextTask, type Claim, type Place } from './claim.ts'
 import { Backoff } from './retries.ts'
 import { EpicBranchError } from './task-base.ts'
-import { KILL_SWITCH_STOP, RUNNER_WENT_OFFLINE, errorText, type AgentRow, type RunContext, type RunCore } from './run-context.ts'
+import { isTransient } from './github.ts'
+import { FIX_NOT_STARTED, KILL_SWITCH_STOP, RUNNER_WENT_OFFLINE, errorText, type AgentRow, type RunContext, type RunCore } from './run-context.ts'
 
 const { agents, projects, runs, tasks } = schema
 
@@ -153,9 +154,9 @@ export class Scheduler {
       }
     }
     if (agent.role === 'developer' && (agent.wakeIntervalSeconds === null || await this.#awake(agent))) {
-      const claimFix = () => this.exclusive(() => this.#c.fixes.claim(agent.id, tx => this.pickRunner(tx, 'developer', agent.runtime, null, 0, true)))
+      const claimFix = () => this.exclusive(() => this.#c.fixes.claim(agent.id, tx => this.pickRunner(tx, 'developer', agent.runtime, null, 0, true), skip))
       for (let runId = await claimFix(); runId; runId = await claimFix()) {
-        await this.#assignFix(runId)
+        await this.#assignFix(runId, skip)
         if (this.#c.stopped || this.#c.updating) return
         if (agent.wakeIntervalSeconds !== null) break
       }
@@ -183,21 +184,32 @@ export class Scheduler {
     return !last || this.#c.now().getTime() - last.queuedAt.getTime() >= agent.wakeIntervalSeconds! * 1000
   }
 
-  // A developer run on an epic (D29). It fails with the cause, counting towards
-  // the fix's bound, rather than pinning its agent until the lease expires.
-  async #assignFix(runId: string): Promise<void> {
+  // A developer run on an epic (D29). If it can't start for a reason that says
+  // nothing about the fix, the epic waits for a later pass, as a task does.
+  // Otherwise it fails with the cause, counting towards the fix's bound, rather
+  // than pinning its agent until the lease expires.
+  async #assignFix(runId: string, skip: string[]): Promise<void> {
     const { db, runner } = this.#c.d
     const ctx = await this.#c.runs.load(runId)
     if (!ctx) return
     if (ctx.run.runnerId) await db.update(runs).set({ runnerName: runner.name(ctx.run.runnerId) }).where(eq(runs.id, runId))
+    const epicId = ctx.run.epicId!
     try {
-      await this.dispatch(ctx, await this.#c.fixes.job(ctx), RUNNER_WENT_OFFLINE)
+      if (await this.dispatch(ctx, await this.#c.fixes.job(ctx), RUNNER_WENT_OFFLINE)) this.#assignRetry.clear(epicId)
+      else {
+        this.#assignRetry.later(epicId)
+        skip.push(epicId)
+      }
     } catch (error) {
       console.error(`Assigning run ${runId} failed`, error)
-      await this.#c.ending.failRun(ctx, errorText(error))
+      skip.push(epicId)
+      if (isTransient(error)) {
+        this.#assignRetry.later(epicId)
+        await this.#c.ending.endRun(ctx, { state: 'interrupted', error: FIX_NOT_STARTED })
+      } else await this.#c.ending.failRun(ctx, errorText(error))
       await this.#c.ending.publish(ctx)
     }
-    await this.#c.fixes.publish(ctx.run.epicId!)
+    await this.#c.fixes.publish(epicId)
   }
 
   // Whether the run was handed to the runner

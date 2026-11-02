@@ -1,5 +1,5 @@
 import { attachmentIdsInMarkdown, HUMAN_DECISIONS_NOTE, richTextToMarkdown } from '@corral/core'
-import type { EpicFixKind } from '@corral/core'
+import type { EpicFixKind, TargetFileChange } from '@corral/core'
 import type { CiFailure } from './ci-output.ts'
 import type { RebaseCheckFailure } from './rebase-review.ts'
 
@@ -138,8 +138,6 @@ export interface TaskSubmission {
   createdAt: Date
 }
 
-export type TargetFileChange = { path: string, diff: string, truncated: boolean }
-
 // The design version under review (D20)
 export interface DesignUnderReview {
   version: number
@@ -228,14 +226,17 @@ function targetFilesNote(files: TargetFileChange[]): string {
 // saw in this epic, which is why approval can't carry across them.
 function targetFilesSection(ontoSha: string, files: TargetFileChange[], target: string): string {
   if (files.length === 0) return ''
-  const fence = '`'.repeat(1 + Math.max(2, ...files.flatMap(f => (f.diff.match(/`+/g) ?? []).map(run => run.length))))
-  const diffs = files.map(f => `### \`${f.path}\`\n\n${fence}diff\n${f.diff}\n${fence}${f.truncated ? `\n\nThis diff is cut short. Read the rest with \`git diff ${ontoSha} HEAD -- ${f.path}\`.` : ''}`)
   return section('Files only the target changed', `Only \`${target}\` changed these files, and the epic never touched them, yet this candidate does:
 ${files.map(f => `- \`${f.path}\``).join('\n')}
 
 Approve only if each change is an adaptation the epic's changes require, such as a test following a type the epic changed, and drops none of the target's work. Otherwise request changes. Approving any of these means \`preservesApproval: false\`, because the human never approved these edits.
 
-${diffs.join('\n\n')}`)
+${targetFileDiffs(files, ontoSha)}`)
+}
+
+function targetFileDiffs(files: TargetFileChange[], base: string): string {
+  const fence = '`'.repeat(1 + Math.max(2, ...files.flatMap(f => (f.diff.match(/`+/g) ?? []).map(run => run.length))))
+  return files.map(f => `### \`${f.path}\`\n\n${fence}diff\n${f.diff}\n${fence}${f.truncated ? `\n\nThis diff is cut short. Read the rest with \`git diff ${base} HEAD -- ${f.path}\`.` : ''}`).join('\n\n')
 }
 
 function rebaseReviewerPrompt(task: ReviewTask, agentName: string): string {
@@ -293,7 +294,7 @@ export function ciFailuresBody(failures: CiFailure[]): string {
   ].join('\n\n')
 }
 
-const CI_REPORT = 'Report `behaviourChanged`: `false` only if this fix leaves approved behaviour unchanged (a test, its fixture, CI config, a lint fix): the approval then carries with no new review, and CI runs on your new head. `true` if it changes what the code does: it goes back to review.'
+const CI_REPORT = 'Report `behaviourChanged`: `false` only if this fix leaves approved behaviour unchanged (a test, its fixture, CI config, a lint fix) and touches only files this work already changed, or new ones: the approval then carries with no new review, and CI runs on your new head. `true` if it changes what the code does: it goes back to review.'
 
 function ciFixSection(task: PromptTask): string {
   if (!task.ciFailures) return ''
@@ -325,6 +326,8 @@ export interface EpicReviewInput {
   target: string
   headSha: string
   requiredChecks: string[]
+  // What fixes since the last approval changed in files only the target changed
+  targetFiles: TargetFileChange[]
   // The last verdict on this epic, which makes this a repeat review
   lastReview: { headSha: string, summary: string, outcome: string, fixes: string[] } | null
 }
@@ -343,8 +346,21 @@ export function epicReviewPrompt(input: EpicReviewInput): string {
     '',
     section('Scope', scope),
     gatesSection({ requiredChecks: input.requiredChecks, prFree: false }),
+    epicTargetFilesSection(input.targetFiles, target),
     section('How to review', `This is a read-only checkout: do not edit, commit or push. The evidence is context; do not re-judge individual task evidence. Criteria checked by a human and tasks flagged humanReview wait for the human at this epic's approval: do not attempt them, produce evidence or verdicts for them, or request changes over them. Use get_task for the whole epic and get_evidence to fetch any listed evidence ID. Always finish with report_outcome, outcome approved or changes_requested, and specific reasoning in summary. No per-task criteria verdicts are required. Changes requested go to a developer as a brief, with no task, and the epic comes back to you; approval sends the epic PR to human review.`)
   ].join('\n')
+}
+
+// However narrow the scope above, these need a verdict: Corral let them through
+// a guard that refuses them on any commit no reviewer sees (COR-434)
+function epicTargetFilesSection(files: TargetFileChange[], target: string): string {
+  if (files.length === 0) return ''
+  return section('Files only the target changed', `The epic never touched these files, yet a fix since the last approval changed them:
+${files.map(f => `- \`${f.path}\``).join('\n')}
+
+Whatever your scope above, check each hunk against the \`${target}\` commit that caused it, with \`git log origin/${target} -- <file>\`. Approve only if each change is an adaptation the epic's changes require and drops none of the target's work. Otherwise request changes.
+
+${targetFileDiffs(files, `origin/${target}`)}`)
 }
 
 export interface EpicFixInput {
@@ -369,7 +385,11 @@ export const REFUSED = 'Corral refused your last candidate'
 // A developer run on an epic, with no task (D29)
 export function epicFixPrompt(input: EpicFixInput): string {
   const { fix, branch, target, ontoSha, files } = input
-  const gates = input.requiredChecks.length > 0 ? EPIC_REBASE_NO_GATES : 'This project has no required CI, so run its lint, typecheck, tests and build before reporting. Do not add concurrency, worker or timeout flags.'
+  const gates = input.requiredChecks.length === 0
+    ? 'This project has no required CI, so run its lint, typecheck, tests and build before reporting. Do not add concurrency, worker or timeout flags.'
+    : fix === 'conflict'
+      ? EPIC_REBASE_NO_GATES
+      : 'Required CI runs on your new head, so run only the checks relevant to this fix, with the project\'s own commands, starting from any test that failed.'
   const job = fix === 'conflict'
     ? section('The conflict', `Corral could not rebase this epic onto \`${target}\` cleanly. Run \`git fetch origin && git rebase ${ontoSha}\`. Never merge \`${target}\` in. Resolve the conflicts in ${files.length ? files.join(', ') : 'the files git reports'}.
 

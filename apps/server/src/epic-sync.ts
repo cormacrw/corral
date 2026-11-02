@@ -270,14 +270,29 @@ export class EpicSynchronizer {
     const runnerId = this.#d.runner.epicRebaseRunner()
     if (!runnerId || await this.#held(ctx)) return false
     await this.#checkFix(operation, ctx, report)
-    return this.#push(operation, ctx, report.headSha, runnerId, stopped, report.behaviourChanged || operation.fix === 'review')
+    const reReviewed = report.behaviourChanged || operation.fix === 'review'
+    if (reReviewed && !await this.#keepTargetFiles(operation, ctx, report)) return false
+    return this.#push(operation, ctx, report.headSha, runnerId, stopped, reReviewed)
+  }
+
+  // Before the push, which is the last the guard sees of these. The integration
+  // review is their whole review (COR-434). No answer waits for the next pass.
+  async #keepTargetFiles(operation: OperationRow, { project }: Context, report: EpicFixReport): Promise<boolean> {
+    try {
+      const targetFiles = await targetFileChanges(this.#d.runner, { repository: project.repository, targetBranch: project.defaultBranch, expectedHeadSha: operation.expectedTargetSha, candidateSha: report.headSha })
+      await this.#d.db.update(operations).set({ fixReport: { ...report, targetFiles } }).where(eq(operations.id, operation.id))
+      return true
+    } catch (error) {
+      if (error instanceof EpicBranchError) return false
+      throw error
+    }
   }
 
   // Before the push: afterwards the old head is unreachable. Only a conflict
   // reported as unchanged on an approved head has anything riding on this.
   async #checkFix(operation: OperationRow, { epic, project }: Context, report: EpicFixReport): Promise<void> {
     if (operation.fix !== 'conflict' || report.behaviourChanged || !APPROVED_STATES.includes(epic.reviewState)) return
-    const check = await checkTrivialRebase(this.#d.github, project.repository, { baseBranch: project.defaultBranch, approvedHeadSha: operation.expectedTargetSha, newHeadSha: report.headSha, conflictedFiles: report.conflictedFiles })
+    const check = await checkTrivialRebase(this.#d.github, project.repository, { baseBranch: project.defaultBranch, approvedHeadSha: operation.expectedTargetSha, newHeadSha: report.headSha, conflictedFiles: operation.conflictFiles ?? [] })
     const outsideConflicts = check.failures.find(f => f.condition === 'changes_outside_conflicts')?.files ?? []
     await this.#d.db.update(operations).set({ fixReport: { ...report, outsideConflicts, checkError: check.error ?? null } }).where(eq(operations.id, operation.id))
   }

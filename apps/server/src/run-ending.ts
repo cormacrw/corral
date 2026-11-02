@@ -7,7 +7,7 @@ import { publishDependents } from './dependent-tasks.ts'
 import { runEndValues, type RunEnd } from './run-lifecycle.ts'
 import { getRun } from './runs.ts'
 import { addComment, applyTransition, loadTask, lockTask } from './tasks.ts'
-import { KEEP_WORK_STOPS, server, type RunContext, type RunCore } from './run-context.ts'
+import { KEEP_WORK_STOPS, NEVER_STARTED, server, type RunContext, type RunCore } from './run-context.ts'
 
 const { runs, tasks } = schema
 
@@ -70,7 +70,7 @@ export class RunEnding {
     }
     const [ended] = await tx.update(runs).set(runEndValues(end, this.#c.now()))
       .where(and(eq(runs.id, ctx.run.id), inArray(runs.state, [...ACTIVE_RUN_STATES]))).returning({ id: runs.id })
-    if (ended && ctx.run.epicId && ctx.run.role === 'developer' && (end.state === 'failed' || (end.state === 'interrupted' && !KEEP_WORK_STOPS.has(end.error ?? '')))) {
+    if (ended && ctx.run.epicId && ctx.run.role === 'developer' && (end.state === 'failed' || (end.state === 'interrupted' && !KEEP_WORK_STOPS.has(end.error ?? '') && !NEVER_STARTED.has(end.error ?? '')))) {
       await this.#c.fixes.runFailed(tx, ctx.run, end.error ?? 'The developer run ended without a result')
     }
     if (ctx.task) {

@@ -852,6 +852,7 @@ The developer reports `behaviourChanged` at the end of every fix. It means one t
 ### Task rounds
 
 - **CI:** a developer round started by a real CI failure must report `behaviourChanged`. A round sent back for another reason, such as a submission that turned out empty, is an ordinary round. With `false`, the approval and criteria verdicts carry over, the task returns to **Ready to merge** and CI runs on the new head. It merges only once CI passes there. A PR-free task's submission records approval on the new head. With `true`, it goes to **Agent review**.
+- **Bound:** a CI round must move the head: reporting the commit CI failed on is refused. A task whose CI fails again after three CI fixes in a row goes to **Failed** with the reason, and a human's **Retry** starts the count again. It's the same bound as an epic's.
 - **Rebase-only rounds:** `pr_rebased` also requires `behaviourChanged`, so the report means the same thing in both. `true` goes to **Agent review**, whatever `review` says. `false` with `review: trivial` is D24's server-checked path, and differences beyond the conflicted files still go to **Agent review**, whatever the developer reports. `needs_review` goes to **Agent review**.
 - The developer's report is posted as a comment, so it shows in the task's activity.
 
@@ -871,6 +872,7 @@ The developer reports `behaviourChanged` at the end of every fix. It means one t
 | `ci` | `true` | Publish, then integration review and the human |
 | `review` | Either | Publish, then integration review and the human |
 
+- **Target-only files:** a fix may not change a file the epic never touched that was already there, unless it's reported with `behaviourChanged: true` or is a `review` fix (COR-434). That applies to `ci` and `review` fixes too, where the file is simply one outside the epic's own diff. Those edits are the only ones the guard lets through unseen, so the integration review lists each with its diff until a review approves, and on a repeat review too.
 - **Refused publish:** the epic branch doesn't move, and the operation goes back to a developer run with the reason. Refusals, failed developer runs and unexpected interruptions (lease expiry, runner shutdown or reconnect loss) count once per run in `fixAttempts`, against D27's existing bound: three (`MAX_FAILED_ATTEMPTS`) set `syncError`, and the epic shows **Rebase stopped** with **Retry**.
 - **Human Stop:** stopping an epic fix holds the operation in the recoverable stopped state until Retry. It does not spend an attempt. Saving-work heartbeats preserve the stopped run's push permission until a newer run starts or the operation ends. The kill switch pauses scheduling without spending an attempt.
 - **Stopped is a Needs-you item:** under D11, every stop (`syncError`) is an `epic_conflict` Inbox item carrying the failure, what was tried and Retry, and it stays until Retry or the merge. That includes a developer's `stuck` with no `decision`, whose question is the failure text. It isn't a product decision and asks for no approval.

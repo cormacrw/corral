@@ -293,6 +293,8 @@ export class RunOutcomes {
     const task = ctx.task!
     const head = await github.branchHead(ctx.project.repository, task.branch!)
     const { criteria, attached, missing } = await evidenceState(db, task)
+    // CI failed on this commit, so it can't be the fix
+    if (task.ciFix !== null && !task.rebaseOnly && headSha === task.headSha) throw new ToolError('Not submitted. The branch is still at the commit CI failed on: there is nothing new to check. Commit your fix and report again, or report `stuck` if it isn\'t yours to fix.')
 
     // Check with core before touching GitHub, so a rejected outcome leaves no trace
     const check = transition(toTaskState(task), {

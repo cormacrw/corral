@@ -15,6 +15,8 @@ export const MAX_EXCERPT_CHARS = 8000
 const MIN_TAIL_CHARS = 2000
 // How much of a raw log leaves the runner, which is where the end can be found
 export const MAX_LOG_CHARS = 256_000
+// Fixes in a row that CI still failed before it needs a human, on a task or an epic
+export const MAX_CI_FIXES = 3
 // Each failure costs a few GitHub calls, and the first is usually the cause
 const MAX_CHECKS = 3
 

@@ -1,8 +1,9 @@
 import { arrivalKey, storedMessages, withMessages, type PreparedItem } from './inbox-message.ts'
 import type { EpicConflictItem, EpicHistoryEntry, EpicReviewActionInput, EpicReviewItem, EpicReviewReport, EpicReviewTask, InboxSince, RunJob } from '@corral/contracts'
 import { ACTIVE_RUN_STATES, isActiveRun, feedbackFixTitle, FIX_TITLE_PREFIX, feedbackPoints, isTaskDone, LEASE_DURATION_MS, markdownToRichText, taskRef, type Actor, type CompletionState, type EpicRebaseDecision } from '@corral/core'
+import type { TargetFileChange } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm'
 import { appendAudit, auditEvent, auditText, readAudit, type AuditView } from './audit.ts'
 import { readCiFailures } from './ci-output.ts'
 import { actorLabel, type OrchestratorDeps } from './orchestrator.ts'
@@ -40,6 +41,23 @@ function reviewDue(epic: EpicRow, pr: PullRequest): boolean {
 
 // How often a PR closed without merging is read, in case it's reopened
 const CLOSED_POLL_MS = 120_000
+
+// What fixes published since the last approval changed in files only the target
+// changed, newest per file. A verdict of changes requested doesn't clear them.
+async function unreviewedTargetFiles(tx: Executor, epicId: string): Promise<TargetFileChange[]> {
+  const [approved] = await tx.select({ endedAt: runs.endedAt }).from(runs)
+    .where(and(eq(runs.epicId, epicId), eq(runs.role, 'reviewer'), eq(runs.state, 'completed'), eq(runs.outcome, 'approved'))).orderBy(desc(runs.number)).limit(1)
+  const published = await tx.select({ report: schema.taskIntegrationOperations.fixReport }).from(schema.taskIntegrationOperations)
+    .where(and(eq(schema.taskIntegrationOperations.epicId, epicId), eq(schema.taskIntegrationOperations.state, 'succeeded'), isNotNull(schema.taskIntegrationOperations.fix), approved?.endedAt ? gte(schema.taskIntegrationOperations.updatedAt, approved.endedAt) : undefined))
+    .orderBy(desc(schema.taskIntegrationOperations.updatedAt))
+  const files = new Map<string, TargetFileChange>()
+  for (const { report } of published) {
+    for (const file of report?.targetFiles ?? []) {
+      if (!files.has(file.path)) files.set(file.path, file)
+    }
+  }
+  return [...files.values()]
+}
 
 export class EpicPullRequests {
   private d: OrchestratorDeps
@@ -152,13 +170,14 @@ export class EpicPullRequests {
         const context = await epicReviewContext(tx, epic, project)
         const [last] = await tx.select({ headSha: runs.headSha, summary: runs.summary, outcome: runs.outcome }).from(runs)
           .where(and(eq(runs.epicId, epic.id), eq(runs.role, 'reviewer'), eq(runs.state, 'completed'), inArray(runs.outcome, ['approved', 'changes_requested']), ne(runs.id, run!.id))).orderBy(desc(runs.number)).limit(1)
+        const targetFiles = await unreviewedTargetFiles(tx, epic.id)
         const fixes = last?.headSha ? await tx.select({ summary: runs.summary, kind: runs.fixKind }).from(runs).where(and(eq(runs.epicId, epic.id), eq(runs.role, 'developer'), eq(runs.outcome, 'pr_updated'))).orderBy(desc(runs.number)).limit(5) : []
         return {
           runId: run!.id, runNumber: run!.number, leaseEpoch: 1, role: 'reviewer', runtime: agent.runtime,
           projectId: project.id, repository: project.repository, defaultBranch: project.defaultBranch, baseBranch: project.defaultBranch,
           taskId: null, taskRef: null, epicId: epic.id, branch: epic.branch, headSha: epic.prHeadSha,
           planSessionId: null, agentSessionId: null, fallbackPrompt: null, model: null, timeoutSeconds: RUN_TIMEOUT_SECONDS,
-          prompt: epicReviewPrompt({ agentName: agent.name, title: epic.title, context, target: project.defaultBranch, headSha: epic.prHeadSha, requiredChecks: project.requiredChecks, lastReview: last?.headSha ? { headSha: last.headSha, summary: last.summary ?? '', outcome: last.outcome!, fixes: fixes.map(f => f.summary ?? '').filter(Boolean) } : null })
+          prompt: epicReviewPrompt({ agentName: agent.name, title: epic.title, context, target: project.defaultBranch, headSha: epic.prHeadSha, requiredChecks: project.requiredChecks, targetFiles, lastReview: last?.headSha ? { headSha: last.headSha, summary: last.summary ?? '', outcome: last.outcome!, fixes: fixes.map(f => f.summary ?? '').filter(Boolean) } : null })
         }
       }
       return null

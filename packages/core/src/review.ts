@@ -40,6 +40,14 @@ export interface EpicFixReport {
   summary: string
   outsideConflicts?: string[]
   checkError?: string | null
+  // What it changes in files only the target changed, for the integration review
+  targetFiles?: TargetFileChange[]
+}
+
+export interface TargetFileChange {
+  path: string
+  diff: string
+  truncated: boolean
 }
 
 // A choice of product behaviour that a resolution can't make for itself

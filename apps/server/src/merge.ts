@@ -5,11 +5,12 @@ import { EpicMerger } from './epic-merge.ts'
 import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
 import { verdictForSubmission } from './claim.ts'
 import { activeRebase } from './epic-sync.ts'
-import { evidenceState, isEpicResolution, taskBase } from './task-base.ts'
+import { ciFixesInARow, evidenceState, isEpicResolution, taskBase } from './task-base.ts'
 import { ApiFailure } from './errors.ts'
 import { publishDependents } from './dependent-tasks.ts'
 import { TaskIntegrator } from './task-integration.ts'
 import type { EventBus } from './events.ts'
+import { MAX_CI_FIXES } from './ci-output.ts'
 import { isTransient, requiredChecks, type CheckResult, type GitHubClient, type PullRequest } from './github.ts'
 import { SharedReads } from './pull-requests.ts'
 import { Backoff, HeadAttempts, MAX_MERGE_ATTEMPTS } from './retries.ts'
@@ -239,6 +240,10 @@ export class MergeOrchestrator {
     const checks = await github.checks(project.repository, pr.headSha)
     const { failed, pending } = requiredChecks(project.requiredChecks, checks)
     if (failed.length > 0) {
+      if (await ciFixesInARow(db, task.id) >= MAX_CI_FIXES) {
+        await this.#transition(task.id, { type: 'fail', reason: `CI still fails after ${MAX_CI_FIXES} fixes in a row: ${failed.map(c => c.name).join(', ')}` }, { event: 'ci_failed', checks: failed.map(c => c.name) })
+        return
+      }
       // flows.md 7b: CI fails → In progress with the failure attached
       const body = ['CI failed on this commit; please fix and report pr_updated.', '', ...failed.map(c => `- ${c.name}: failed${c.url ? ` (${c.url})` : ''}`)].join('\n')
       await this.#transition(task.id, { type: 'ci_failed' }, { event: 'ci_failed', checks: failed.map(c => c.name) }, body, 'ready_to_merge', { ciFix: failed.map(c => ({ name: c.name, url: c.url })), approvedHeadSha: pr.headSha })

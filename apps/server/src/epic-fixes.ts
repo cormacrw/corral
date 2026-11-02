@@ -3,7 +3,7 @@ import { ACTIVE_RUN_STATES, isActiveRun, LEASE_DURATION_MS, type Actor, type Epi
 import { schema, type Executor } from '@corral/db'
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
-import { readCiFailures } from './ci-output.ts'
+import { MAX_CI_FIXES, readCiFailures } from './ci-output.ts'
 import { ACTIVE_OPERATION as ACTIVE, answerOn, openDecision } from './epic-rebase-approval.ts'
 import { recordSyncFailure } from './epic-sync.ts'
 import { ApiFailure } from './errors.ts'
@@ -22,9 +22,8 @@ type EpicRow = typeof epics.$inferSelect
 // Developer runs on one operation that come to nothing before a human has to
 // retry: failed, interrupted unexpectedly, or refused at the publish check
 export const MAX_FIX_ATTEMPTS = 3
-// Published CI fixes since the last retry before CI's verdict needs a human.
-// Review fixes stop at the project's review round cap.
-const MAX_CI_FIXES = 3
+// Published CI fixes since the last retry stop at MAX_CI_FIXES, and review fixes
+// at the project's review round cap.
 
 const FIX_LABEL: Record<EpicFixKind, string> = { conflict: 'rebase conflict', ci: 'CI failure', review: 'integration review changes' }
 
@@ -70,8 +69,9 @@ export class EpicFixes {
   }
 
   // A claim, like an integration review's: nothing is sent yet
-  async claim(agentId: string, place: (tx: Executor) => Promise<string | null>): Promise<string | null> {
+  async claim(agentId: string, place: (tx: Executor) => Promise<string | null>, skip: readonly string[] = []): Promise<string | null> {
     const now = this.#c.now()
+    const closed = await this.#closedPrs()
     return this.#c.d.db.transaction(async (tx) => {
       const [agent] = await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')
       if (!agent || agent.role !== 'developer' || agent.paused || (agent.pausedUntil && agent.pausedUntil > now)) return null
@@ -82,7 +82,7 @@ export class EpicFixes {
         .where(and(isNotNull(operations.fix), eq(operations.state, 'running'), isNull(operations.fixReport), isNull(epics.syncError), eq(projects.paused, false)))
         .orderBy(asc(operations.createdAt)).for('update', { of: operations, skipLocked: true })
       for (const { operation, project } of candidates) {
-        if (openDecision(operation)) continue
+        if (openDecision(operation) || closed.has(operation.epicId) || skip.includes(operation.epicId)) continue
         const [live] = await tx.select({ id: runs.id }).from(runs).where(and(eq(runs.epicId, operation.epicId), inArray(runs.state, [...ACTIVE_RUN_STATES]))).limit(1)
         if (live) continue
         const runnerId = await place(tx)
@@ -94,6 +94,21 @@ export class EpicFixes {
     })
   }
 
+  // Epics waiting on a fix whose PR isn't open: a run there could never publish.
+  // Read before the claim's transaction, and an unread PR counts until a later pass.
+  async #closedPrs(): Promise<Set<string>> {
+    const { db, github } = this.#c.d
+    const waiting = await db.select({ epicId: epics.id, prNumber: epics.prNumber, repository: projects.repository }).from(operations)
+      .innerJoin(epics, eq(epics.id, operations.epicId)).innerJoin(projects, eq(projects.id, epics.projectId))
+      .where(and(isNotNull(operations.fix), eq(operations.state, 'running'), isNull(operations.fixReport), isNull(epics.syncError), isNotNull(epics.prNumber)))
+    const closed = new Set<string>()
+    await Promise.all(waiting.map(async ({ epicId, prNumber, repository }) => {
+      const pr = await github.getPullRequest(repository, prNumber!).catch(() => null)
+      if (!pr || pr.state !== 'open' || pr.merged) closed.add(epicId)
+    }))
+    return closed
+  }
+
   // The candidate branch, once: a run after a refused publish carries on from it
   async job(ctx: RunContext): Promise<RunJob> {
     const { db, github } = this.#c.d
@@ -103,11 +118,13 @@ export class EpicFixes {
     const { operation, epic } = row
     const branch = epicResolutionBranch(operation.id)
     await github.createBranch(project.repository, branch, operation.expectedTargetSha)
+    // A runner's kept worktree may predate a run on another runner
+    const continueFrom = await github.branchHead(project.repository, branch) ?? null
     const failures = operation.fixChecks?.length ? await readCiFailures(github, project.repository, operation.fixChecks) : []
     return {
       runId: run.id, runNumber: run.number, leaseEpoch: run.leaseEpoch!, role: 'developer', runtime: agent.runtime,
       projectId: project.id, repository: project.repository, defaultBranch: project.defaultBranch, baseBranch: project.defaultBranch,
-      taskId: null, taskRef: null, epicId: epic.id, branch, headSha: operation.expectedTargetSha,
+      taskId: null, taskRef: null, epicId: epic.id, branch, headSha: operation.expectedTargetSha, continueFrom,
       planSessionId: null, agentSessionId: null, fallbackPrompt: null, model: null, timeoutSeconds: RUN_TIMEOUT_SECONDS,
       prompt: epicFixPrompt({
         agentName: agent.name, epicTitle: epic.title, goal: epic.description, fix: operation.fix!, brief: operation.fixBrief ?? '', branch, epicBranch: epic.branch!,

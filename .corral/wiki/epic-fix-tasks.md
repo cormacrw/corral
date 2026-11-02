@@ -22,7 +22,16 @@ so `startReview` compares with the branch before it drops approval.
 
 A fix has no reviewer before it publishes, so the push guard's target-only rule
 (`epic-rebases.md`) lets an edit through only on a review fix or one reported with
-`behaviourChanged: true`: those send the epic back to integration review.
+`behaviourChanged: true`: those send the epic back to integration review. A CI or
+review fix has `ontoSha` at the epic head, so history can't separate the sides;
+the guard then counts any already-present file outside the epic's diff. The server
+keeps each such diff on `fixReport.targetFiles` before pushing, and `epicReviewPrompt`
+lists them until a review approves.
+
+A run that never reached a runner (`NEVER_STARTED`) costs no attempt, and the epic
+waits on the scheduler's backoff. `claim` skips an epic whose PR isn't open, and
+`job` sends the candidate's head as `continueFrom`, so a kept worktree on another
+runner catches up or fails instead of overwriting newer work.
 
 `fixAttempts` counts refused publishes, failed developer runs and non-human
 interruptions (including lease expiry, runner shutdown and reconnect loss). The

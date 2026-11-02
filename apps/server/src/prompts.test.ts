@@ -607,7 +607,7 @@ describe('human decisions contract (D11)', () => {
 })
 
 describe('integration review prompts', () => {
-  const input = { agentName: 'Vera', title: 'Saved searches', context: { epicId: 'e' }, target: 'main', headSha: 'abc123', requiredChecks: ['ci'], lastReview: null }
+  const input = { agentName: 'Vera', title: 'Saved searches', context: { epicId: 'e' }, target: 'main', headSha: 'abc123', requiredChecks: ['ci'], targetFiles: [], lastReview: null }
 
   it('tells the reviewer not to run the gates with required CI, and to run them without', () => {
     expect(epicReviewPrompt(input)).toContain('so don\'t rerun the project\'s lint, typecheck, tests or build')
@@ -618,6 +618,12 @@ describe('integration review prompts', () => {
 
   it('covers the whole epic the first time, and what changed since on a repeat', () => {
     expect(epicReviewPrompt(input)).toContain('Review the whole combined diff with git diff origin/main...HEAD')
+    const adapted = epicReviewPrompt({ ...input, lastReview: { headSha: 'old999', summary: 'Fine', outcome: 'changes_requested', fixes: [] }, targetFiles: [{ path: 'src/main-only.ts', diff: '+adapted', truncated: true }] })
+    expect(adapted).toContain('## Files only the target changed')
+    expect(adapted).toContain('check each hunk against the `main` commit that caused it')
+    expect(adapted).toContain('+adapted')
+    expect(adapted).toContain('git diff origin/main HEAD -- src/main-only.ts')
+    expect(epicReviewPrompt(input)).not.toContain('Files only the target changed')
     const repeat = epicReviewPrompt({ ...input, lastReview: { headSha: 'old999', summary: 'The UI sends the wrong field', outcome: 'changes_requested', fixes: ['Renamed the field'] } })
     expect(repeat).toContain('old999')
     expect(repeat).toContain('The UI sends the wrong field')
