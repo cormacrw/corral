@@ -16,6 +16,10 @@ describe('agentEnv', () => {
     expect(env.GIT_CONFIG_VALUE_0).toBe('no-push://corral-pushes-for-you')
   })
 
+  it('leaves the production service mode out of agent commands', () => {
+    expect(agentEnv({ NODE_ENV: 'production' }).NODE_ENV).toBeUndefined()
+  })
+
   it('leaves out the runner\'s own Corral settings', () => {
     const env = agentEnv({
       PATH: '/usr/bin',
@@ -70,6 +74,19 @@ describe('agent commits', () => {
     await git(['commit', '--quiet', '-m', 'Agent commit'])
     return git(['log', '-1', '--format=%an <%ae> / %cn <%ce>'])
   }
+
+  it('cannot push through origin even when the repository config allows it', async () => {
+    await git(['init', '--quiet', '--initial-branch', 'main'])
+    await commitAndShowIdentity()
+    const origin = join(root, 'origin.git')
+    await git(['init', '--quiet', '--bare', origin])
+    await git(['remote', 'add', 'origin', origin])
+    await git(['config', 'remote.origin.pushurl', origin])
+    await expect(git(['push', 'origin', 'HEAD:main'])).rejects.toThrow('no-push')
+    // The same local-only path used by deployment fixtures remains usable.
+    await git(['push', origin, 'HEAD:main'])
+    expect(await git(['--git-dir', origin, 'rev-parse', 'main'])).toBe(await git(['rev-parse', 'HEAD']))
+  })
 
   it('have the configured author and committer', async () => {
     await git(['init', '--quiet', '--initial-branch', 'main'])

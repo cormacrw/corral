@@ -22,7 +22,7 @@ async function fixture() {
   await writeFile(join(cwd, '.git', 'info', 'exclude'), 'bin/\ncalls\n.corral/checks/\n')
   await writeFile(join(cwd, 'bin', 'pnpm'), `#!/usr/bin/env node
 const fs = require('node:fs');
-fs.appendFileSync('calls', JSON.stringify({ args: process.argv.slice(2), cpus: process.env.CORRAL_CHECK_CPUS, force: process.env.TURBO_FORCE, workers: process.env.VITEST_MAX_WORKERS }) + '\\n');
+fs.appendFileSync('calls', JSON.stringify({ args: process.argv.slice(2), cpus: process.env.CORRAL_CHECK_CPUS, force: process.env.TURBO_FORCE, workers: process.env.VITEST_MAX_WORKERS, nodeEnv: process.env.NODE_ENV }) + '\\n');
 if (process.argv.includes(process.env.FAIL_STAGE)) process.exit(7);
 `, { mode: 0o755 })
   const run = (args: string[] = [], extra = {}) => exec(process.execPath, [resolve(import.meta.dirname, '../../../scripts/check.ts'), ...args], {
@@ -39,7 +39,8 @@ test('validates a single positive CPU setting', () => {
 
 test('runs all workspace gates at the shared cap and includes root checks', async () => {
   const { run, calls } = await fixture()
-  await run([], { CORRAL_CHECK_CPUS: '2', VITEST_MAX_WORKERS: '99' })
+  await run([], { CORRAL_CHECK_CPUS: '2', VITEST_MAX_WORKERS: '99', NODE_ENV: 'production' })
+  expect((await calls()).every(call => call.nodeEnv === undefined)).toBe(true)
   expect(await calls()).toEqual([
     expect.objectContaining({ args: ['exec', 'turbo', 'run', 'lint', 'typecheck', 'test', '--concurrency=2'], cpus: '2', workers: '2' }),
     expect.objectContaining({ args: ['exec', 'eslint', 'scripts'] }),
