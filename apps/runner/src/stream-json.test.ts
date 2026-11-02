@@ -4,6 +4,16 @@ import { parseResetTime, StreamJsonParser } from './stream-json.ts'
 const line = (data: unknown) => JSON.stringify(data)
 
 describe('StreamJsonParser', () => {
+  it.each([
+    { text: '', isError: false, emptyTurn: true },
+    { text: 'Context usage', isError: false, emptyTurn: undefined },
+    { text: '', isError: true, emptyTurn: undefined }
+  ])('marks only successful empty zero-turn results as empty: %j', ({ text, isError, emptyTurn }) => {
+    const parsed = new StreamJsonParser().parse(line({ type: 'result', subtype: isError ? 'error' : 'success', num_turns: 0, result: text }))
+    expect(parsed.result).toEqual({ isError, text })
+    expect(parsed.emptyTurn).toBe(emptyTurn)
+  })
+
   it('reads the session ID from the init line', () => {
     const parser = new StreamJsonParser()
     const parsed = parser.parse(line({ type: 'system', subtype: 'init', session_id: 'sess-1', model: 'claude-fable-5-1' }))

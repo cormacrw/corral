@@ -10,7 +10,7 @@ An agent that ends its turn with a background command running prints a `result`,
 
 Resuming that session makes the CLI announce the orphaned command before it reads our prompt, as a `result` with `subtype: success`, `num_turns: 0` and empty text. It comes ahead of the prompt's replay. Taken for the end of the turn, it closed stdin and started the 20-second countdown as the real turn began, so the retry was killed mid-tool with `Exit code 137` in its transcript.
 
-`spawnAgentSession` drops such a result from its turns while a sent prompt hasn't been replayed. The check needs both conditions: error results must still end a turn, since a refused prompt may never be replayed. Warm PM turns use the same queue.
+`spawnAgentSession` drops such a result from its turns while a sent prompt hasn't been replayed. The check needs both conditions: error results must still end a turn, since a refused prompt may never be replayed. Successful zero-turn results with text must also end a turn: CLI slash commands such as `/context` return their answer without replaying the prompt. Warm PM turns use the same queue.
 
 ## The transcript
 

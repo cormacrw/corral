@@ -17,6 +17,10 @@ let started = false
 let holding = false
 createInterface({ input: process.stdin }).on('line', (line) => {
   let content = JSON.parse(line).message.content
+  if (content === '/context') {
+    console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 0, result: 'Context usage', session_id: 'one-session' }))
+    return
+  }
   if (content === 'orphaned') console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, num_turns: 0, result: '', session_id: 'one-session' }))
   console.log(JSON.stringify({ type: 'user', isReplay: true, message: { role: 'user', content } }))
   if (holding) {
@@ -137,6 +141,16 @@ describe('spawnAgentSession', () => {
     expect((await agent.nextResult())?.text).toMatch(/^Answered orphaned/)
     // It still reaches the transcript's reader
     expect(lines.filter(line => line.emptyTurn)).toHaveLength(2)
+  })
+
+  it('returns a CLI slash command result with no model turn or prompt replay', async () => {
+    const agent = start()
+    agent.send('first')
+    await agent.nextResult()
+
+    agent.send('/context')
+    expect(await agent.nextResult()).toEqual({ isError: false, text: 'Context usage' })
+    expect(lines.some(line => line.replayed === '/context')).toBe(false)
   })
 
   it('exits once stdin closes', async () => {

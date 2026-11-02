@@ -21,7 +21,7 @@ export interface ParsedLine {
   // A user message the CLI echoes as it takes it in (--replay-user-messages),
   // whether it starts a turn or joins the one under way
   replayed?: string
-  // A result that took no model turn. A resumed session prints one for the
+  // An empty result that took no model turn. A resumed session prints one for the
   // background commands its last process left behind, ahead of the new prompt
   emptyTurn?: boolean
 }
@@ -154,7 +154,7 @@ export class StreamJsonParser {
         const isError = data.is_error === true || (data.subtype !== undefined && data.subtype !== 'success')
         const text = data.result ?? (Array.isArray(data.errors) ? data.errors.map(String).join('\n') : '') ?? ''
         out.result = { isError, text }
-        if (!isError && data.num_turns === 0) out.emptyTurn = true
+        if (!isError && data.num_turns === 0 && !text) out.emptyTurn = true
         if (isError && LIMIT_TEXT.test(text)) out.rateLimit = { resetsAt: parseResetTime(text) }
         if (isError) out.events.push({ type: 'system', text: `The agent ended with an error: ${text || data.subtype}` })
         if (data.usage) {
