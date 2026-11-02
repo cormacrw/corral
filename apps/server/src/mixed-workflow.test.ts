@@ -572,6 +572,9 @@ async function conflictedResolution(epic: { id: string }, onto: string, file: st
 
 async function resolutionSubmits(fix: { id: string }, criteria: { id: string }[], head: string) {
   const dev = await assigned(fix, 'developer')
+  expect(dev).toMatchObject({ checkScope: 'none' })
+  expect(dev.prompt).toContain('run no lint, typecheck, tests, build or check scripts')
+  expect(dev.prompt).not.toContain('Squash the branch')
   for (const c of criteria) await runner.call(dev.runId, dev.leaseEpoch, 'attach_evidence', { criterionId: c.id, kind: 'note', note: 'Kept both sides' })
   expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', note: 'Resolved', summary: 'Rebased', headSha: head })).toMatchObject({ ok: true })
 }

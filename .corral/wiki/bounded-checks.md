@@ -12,6 +12,30 @@ and unrelated slow tests timed out at random (PGlite setup, subprocess tests).
 A timeout in a suite that passes alone points here first: don't raise one test's
 limit.
 
+Developer runs check what the project's required CI leaves to them. The server
+puts `checkScope` on the job, and the runner sets `CORRAL_CHECK_SCOPE` in the
+agent's environment, the only `CORRAL_*` variable an agent sees:
+
+| Run | Required checks | `CORRAL_CHECK_SCOPE` | Prompt asks for |
+|---|---|---|---|
+| First attempt, review round, CI fix, task rebase | Yes | `targeted` | Fast, relevant checks; a CI fix starts from what failed |
+| Epic conflict fix, epic rebase or resolution task | Yes | `none` | No checks at all |
+| Any | No | unset | The full local check |
+
+Any project's check script can honour the variable. `scripts/check.ts` returns
+at once on `none`, and runs lint and typecheck without the test suites on
+`targeted`. `--review` and an unset variable run everything. A published head
+still needs required CI to merge, and a failure returns as an epic CI failure.
+Spikes change no code, so their prompt asks for no checks and the variable stays
+unset.
+
+A runner too old to know `checkScope` drops it, so the variable is unset and
+`scripts/check.ts` runs in full. That's safe but slow, and nothing refuses it.
+
+Targeted checks trust required CI to report. A required check that never reports
+reads as pending: the merge pass keeps polling, with no agent run and no Inbox
+item, so the work waits in Ready to merge.
+
 Reviewers still follow D26: required CI owns the gates when configured. Without
 required CI, use `pnpm run check --review` and run the build without the cache.
 The first review check forces Turbo execution. Once every check succeeds on a

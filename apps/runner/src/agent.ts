@@ -1,3 +1,4 @@
+import type { CheckScope } from '@corral/contracts'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { StringDecoder } from 'node:string_decoder'
 import { STOP_GRACE_MS, type AgentExit, type AgentProcess, type AgentRuntime, type AgentSession, type RuntimeOptions, type TurnResult } from './agent-runtime.ts'
@@ -52,7 +53,9 @@ export function agentArgs(options: ArgOptions & ({ prompt: string } | { input: '
 // a runner would otherwise join this runner's server and share its data dir.
 // The configured git identity goes in as GIT_AUTHOR_*/GIT_COMMITTER_*, which
 // git prefers over any user.name/user.email the agent writes to its config.
-export function agentEnv(base: NodeJS.ProcessEnv = process.env, gitAuthor: GitAuthor | null = null): NodeJS.ProcessEnv {
+// CORRAL_CHECK_SCOPE is the one exception: it's about this run, and a project's
+// check script can honour it (docs/agent-runtime-and-auth.md).
+export function agentEnv(base: NodeJS.ProcessEnv = process.env, gitAuthor: GitAuthor | null = null, checkScope: CheckScope | null = null): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base }
   for (const key of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'NODE_ENV']) delete env[key]
   for (const key of Object.keys(env)) {
@@ -66,6 +69,7 @@ export function agentEnv(base: NodeJS.ProcessEnv = process.env, gitAuthor: GitAu
     env.GIT_AUTHOR_NAME = env.GIT_COMMITTER_NAME = gitAuthor.name
     env.GIT_AUTHOR_EMAIL = env.GIT_COMMITTER_EMAIL = gitAuthor.email
   }
+  if (checkScope) env.CORRAL_CHECK_SCOPE = checkScope
   return env
 }
 
@@ -224,13 +228,13 @@ export function startProcess(
   bin: string,
   args: string[],
   stdin: 'ignore' | 'pipe',
-  options: Pick<RuntimeOptions, 'cwd' | 'gitAuthor' | 'onLine'>,
+  options: Pick<RuntimeOptions, 'cwd' | 'gitAuthor' | 'checkScope' | 'onLine'>,
   parser: { parse(line: string): ParsedLine },
   input?: string
 ): { child: ChildProcess, exited: Promise<AgentExit> } {
   const child = spawn(bin, args, {
     cwd: options.cwd,
-    env: agentEnv(process.env, options.gitAuthor),
+    env: agentEnv(process.env, options.gitAuthor, options.checkScope ?? null),
     // Its own process group, so the whole tree can be killed at once
     detached: true,
     stdio: [stdin, 'pipe', 'pipe']

@@ -1,6 +1,6 @@
 import { HUMAN_DECISIONS_NOTE } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { epicReviewCiSection, epicReviewPrompt, designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask } from './prompts.ts'
+import { epicReviewCiSection, epicReviewPrompt, designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, epicFixPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask, developerCheckScope, epicFixCheckScope } from './prompts.ts'
 
 const guidance = pmPrompt({ text: '', attachedTask: null, projectName: null, prefix: null, fresh: false })
 const turn = { text: 'hi', attachedTask: null, projectName: 'Test app', prefix: 'TA' }
@@ -391,9 +391,8 @@ describe('reviewer gates (D26)', () => {
     const prompt = reviewerPrompt({ ...task, requiredChecks: [] }, 'Rita')
     expect(prompt).toContain('This project has no required CI checks')
     expect(prompt).toContain('Run the project\'s lint, typecheck, tests and build yourself before reporting, without the cache')
-    expect(prompt).toContain('pnpm run check --review')
-    expect(prompt).toContain('TURBO_FORCE=1 pnpm run build')
-    expect(prompt).toContain('Do not add concurrency, worker or timeout flags')
+    expect(prompt).toContain('using the project\'s own commands')
+    expect(prompt).not.toMatch(/pnpm|TURBO/)
     expect(prompt).toContain('cite the earlier check run and commit in your summary')
     expect(prompt).toContain('If you cannot run a check without the cache, explain which check and why in your outcome')
   })
@@ -427,10 +426,9 @@ describe('epic rebase prompts', () => {
 
   it('rules out the gates and a second fetch, and never asks for them', () => {
     const prompt = developerPrompt({ ...task, squashRebase: true }, 'Tam')
-    expect(prompt).toContain('run no lint, typecheck, tests, build, `pnpm run check` or Postgres suites')
+    expect(prompt).toContain('run no lint, typecheck, tests, build or check scripts')
     expect(prompt).toContain('don\'t fetch or rebase again once the conflicts are resolved')
-    expect(prompt.match(/pnpm run check/g)).toHaveLength(1)
-    expect(prompt).not.toContain('Run `pnpm run check`')
+    expect(prompt).not.toMatch(/pnpm|Postgres/)
     expect(prompt).not.toContain('pr_opened')
   })
 
@@ -441,10 +439,78 @@ describe('epic rebase prompts', () => {
   })
 
   it('leaves every other developer task with the same gate instruction', () => {
-    const line = '- Run `pnpm run check` when available for lint, typecheck and tests before reporting. Do not add concurrency, worker or timeout flags; use the repository\'s shared CPU setting.'
+    const line = '- This project has no required CI, so nothing else verifies this work.'
     expect(developerPrompt(task, 'Tam')).toContain(line)
     expect(developerPrompt(task, 'Tam')).not.toContain('Corral-Submission')
     expect(developerRevisionPrompt({ ...task, reviewRounds: 1 }, [])).not.toContain('Postgres')
+  })
+})
+
+describe('how much a developer checks locally', () => {
+  const task: PromptTask = {
+    ref: 'TA-1', title: 'Refactor', description: null, branch: 'corral/ta-1',
+    defaultBranch: 'main', reviewRounds: 0, reviewRoundCap: 3,
+    criteria: [{ id: 'c1', text: 'Preserves behaviour' }], comments: [], attachments: []
+  }
+  const failure = [{ name: 'Test', url: null, step: 'Test', excerpt: 'FAIL src/a.test.ts' }]
+
+  it('follows the project\'s required checks', () => {
+    expect(developerCheckScope([], false)).toBeNull()
+    expect(developerCheckScope([], true)).toBeNull()
+    expect(developerCheckScope(['ci'], false)).toBe('targeted')
+    expect(developerCheckScope(['ci'], true)).toBe('none')
+    expect(epicFixCheckScope('conflict', ['ci'])).toBe('none')
+    expect(epicFixCheckScope('ci', ['ci'])).toBe('targeted')
+    expect(epicFixCheckScope('review', ['ci'])).toBe('targeted')
+    expect(epicFixCheckScope('conflict', [])).toBeNull()
+  })
+
+  it('asks for targeted checks on first attempts and every revision', () => {
+    const targeted = { ...task, checkScope: 'targeted' as const }
+    expect(developerPrompt(targeted, 'Tam')).toContain('run only the fast checks and tests relevant to this change')
+    expect(developerPrompt(targeted, 'Tam')).toContain('Don\'t run the full suite')
+    expect(developerRevisionPrompt({ ...targeted, reviewRounds: 1 }, [])).toContain('run only the fast checks')
+  })
+
+  it('starts a CI fix round from what failed', () => {
+    const prompt = developerRevisionPrompt({ ...task, checkScope: 'targeted', reviewRounds: 1, ciFailures: failure }, [])
+    expect(prompt).toContain('with the project\'s own commands, starting from any test or gate that failed')
+  })
+
+  it('overrules a repository\'s own instructions, and doesn\'t promise when CI runs', () => {
+    const prompt = developerPrompt({ ...task, checkScope: 'targeted' }, 'Tam')
+    expect(prompt).toContain('whatever your general instructions say')
+    expect(prompt).not.toContain('every push')
+  })
+
+  it('tells a spike there\'s nothing to check, and adds no checks to its revisions', () => {
+    const spike = { ...task, spike: true, checkScope: 'targeted' as const }
+    expect(developerPrompt(spike, 'Tam')).toContain('nothing to lint, typecheck or test')
+    expect(developerPrompt(spike, 'Tam')).not.toContain('Don\'t run the full suite')
+    expect(developerRevisionPrompt({ ...spike, reviewRounds: 1 }, [])).not.toMatch(/full suite|type checks/)
+  })
+
+  it('keeps the build on an epic fix with no required CI', () => {
+    const input = { agentName: 'Tam', epicTitle: 'E', goal: '', brief: '', branch: 'c', epicBranch: 'e', target: 'main', ontoSha: 'abc', files: [], failures: [], decisions: [] }
+    expect(epicFixPrompt({ ...input, fix: 'conflict', requiredChecks: [] })).toContain('Then run the project\'s build')
+    expect(epicFixPrompt({ ...input, fix: 'ci', requiredChecks: [] })).toContain('Then run the project\'s build')
+    expect(epicFixPrompt({ ...input, fix: 'ci', requiredChecks: ['ci'] })).not.toContain('project\'s build')
+  })
+
+  it('asks a resolution task for no checks, on its revision rounds too', () => {
+    const resolution = { ...task, checkScope: 'none' as const }
+    expect(developerPrompt(resolution, 'Tam')).toContain('run no lint, typecheck, tests, build or check scripts')
+    expect(developerPrompt(resolution, 'Tam')).not.toContain('Squash the branch')
+    expect(developerRevisionPrompt({ ...resolution, reviewRounds: 2 }, [])).toContain('run no lint, typecheck, tests, build or check scripts')
+    expect(developerPrompt({ ...resolution, rebaseOnly: true }, 'Tam')).not.toContain('project\'s build')
+  })
+
+  it('never names a repository\'s tools', () => {
+    for (const checkScope of [null, 'targeted', 'none'] as const) {
+      for (const prompt of [developerPrompt({ ...task, checkScope }, 'Tam'), developerRevisionPrompt({ ...task, checkScope, reviewRounds: 1 }, []), developerPrompt({ ...task, checkScope, rebaseOnly: true }, 'Tam')]) {
+        expect(prompt).not.toMatch(/pnpm|Postgres|Turbo/)
+      }
+    }
   })
 })
 
@@ -457,8 +523,7 @@ describe('D21 evidence guidance', () => {
 
   it('keeps checks as gates and explains when a developer can use a note', () => {
     const prompt = developerPrompt(task, 'Tam')
-    expect(prompt).toContain('pnpm run check')
-    expect(prompt).toContain('Do not add concurrency, worker or timeout flags')
+    expect(prompt).toContain('Run its lint, type checks and tests before reporting')
     expect(prompt).toContain('screenshots or video for anything visible, real requests and responses for APIs')
     expect(prompt).toContain('Use kind `note` only when there is nothing to show')
     expect(prompt).toContain('what changed and how it was checked, with file and line references')
@@ -549,8 +614,8 @@ describe('rebase-only developer prompts', () => {
       expect(prompt).toContain('origin/epic/release')
       expect(prompt).toContain('Make no other changes')
       expect(prompt).toContain('main\'s')
-      expect(prompt).toContain('pnpm run check')
-      expect(prompt).toContain('then the project\'s build')
+      expect(prompt).toContain('Run its lint, type checks and tests before reporting')
+      expect(prompt).toContain('Then run the project\'s build')
       expect(prompt).toContain('git merge-tree --write-tree HEAD origin/epic/release')
       expect(prompt).toContain('pr_rebased')
       expect(prompt).toContain('conflictedFiles')

@@ -10,6 +10,12 @@ if (review.some(arg => arg !== '--review') || review.length > 1) {
   throw new Error('Usage: pnpm run check [--review]; set CORRAL_CHECK_CPUS to change the worker cap')
 }
 const isReview = review.length === 1
+// Set by the Corral runner for agent runs. Absent, or on a review, runs everything.
+const scope = isReview ? undefined : process.env.CORRAL_CHECK_SCOPE
+if (scope === 'none') {
+  console.log('Skipped: this is an epic rebase run. Required CI covers it, and anything it finds comes back as an epic CI failure.')
+  process.exit(0)
+}
 const env: NodeJS.ProcessEnv = {
   ...process.env,
   CORRAL_CHECK_CPUS: String(cpus),
@@ -53,10 +59,12 @@ if (isReview && await clean()) {
   }
 }
 const startedClean = await clean()
-await run('pnpm', ['exec', 'turbo', 'run', 'lint', 'typecheck', 'test', `--concurrency=${cpus}`])
+const tasks = scope === 'targeted' ? ['lint', 'typecheck'] : ['lint', 'typecheck', 'test']
+await run('pnpm', ['exec', 'turbo', 'run', ...tasks, `--concurrency=${cpus}`])
 // Root scripts aren't workspace Turbo tasks.
 await run('pnpm', ['exec', 'eslint', 'scripts'])
 await run('pnpm', ['exec', 'tsc'])
+if (scope === 'targeted') console.log('Skipped the test suites: required CI runs them. Run the test files relevant to your change.')
 if (isReview && startedClean && await clean() && head === await run('git', ['rev-parse', 'HEAD'], true)) {
   const receipt = { version: 1, head, run: randomUUID(), at: new Date().toISOString() }
   await mkdir(resolve(receiptPath, '..'), { recursive: true })

@@ -7,7 +7,7 @@ import { readCiFailures } from './ci-output.ts'
 import { resolutionContext } from './epic-rebase-approval.ts'
 import { targetFileChanges } from './epic-sync.ts'
 import { slugify } from './projects.ts'
-import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
+import { designerPrompt, designerRevisionPrompt, developerCheckScope, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import { latestRebaseCheckFailures } from './rebase-review.ts'
 import { RUN_TIMEOUT_SECONDS } from './run-lifecycle.ts'
 import { listEvidence } from './runs.ts'
@@ -93,6 +93,8 @@ export class RunJobs {
       : null
     // The server reads what developers can't (D8, D29). This never fails a job.
     const ciFailures = task.ciFix ? await readCiFailures(this.#c.d.github, ctx.project!.repository, task.ciFix) : null
+    const epicRebase = await isEpicRebaseTask(db, task)
+    const checkScope = ctx.run.role === 'developer' ? developerCheckScope(ctx.project!.requiredChecks, epicRebase) : null
     const promptTask = {
       ref,
       title: task.title,
@@ -106,7 +108,8 @@ export class RunJobs {
       reviewRounds: task.reviewRounds,
       rebaseOnly: task.rebaseOnly,
       // A resolution has a brief of its own, on a candidate branch
-      squashRebase: ctx.project!.requiredChecks.length > 0 && !isEpicResolution(task) && await isEpicRebaseTask(db, task),
+      squashRebase: ctx.project!.requiredChecks.length > 0 && !isEpicResolution(task) && epicRebase,
+      checkScope,
       approvedHeadSha: task.approvedHeadSha,
       reviewRoundCap: ctx.project!.reviewRoundCap,
       criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
@@ -147,6 +150,7 @@ export class RunJobs {
       branch: spike ? null : task.branch,
       headSha: spike ? null : task.headSha,
       continueFrom: stoppedRun?.wipSha ?? null,
+      checkScope,
       planSessionId: null,
       agentSessionId: resume,
       fallbackPrompt: resume ? prompt : null,

@@ -8,6 +8,11 @@ import { exec } from './exec.ts'
 const AUTHOR = { name: 'Configured Person', email: 'configured@example.com' }
 
 describe('agentEnv', () => {
+  it('sets the run\'s check scope, and none of the runner\'s own', () => {
+    expect(agentEnv({ CORRAL_CHECK_SCOPE: 'none' }).CORRAL_CHECK_SCOPE).toBeUndefined()
+    expect(agentEnv({}, null, 'targeted').CORRAL_CHECK_SCOPE).toBe('targeted')
+  })
+
   it('keeps GitHub tokens and pushing from the agent', () => {
     const env = agentEnv({ PATH: '/usr/bin', GH_TOKEN: 'secret', GIT_CONFIG_KEY_3: 'x' })
     expect(env.PATH).toBe('/usr/bin')

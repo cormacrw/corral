@@ -702,7 +702,7 @@ Per-runner pairing and revocation come later with hosting. Remote runners run un
 
 ## D26 — Reviewers review the code; required CI runs the gates
 
-**Status:** Accepted 2026-10-30 (COR-254). Amends D21 and D24's requirement that the reviewer reruns the gates without the cache, and the same requirement in D27's integration review.
+**Status:** Accepted 2026-10-30 (COR-254). Amends D21 and D24's requirement that the reviewer reruns the gates without the cache, and the same requirement in D27's integration review. Amended 2026-11-02 (COR-447, COR-444) for what developers check.
 
 **Decision:**
 
@@ -711,7 +711,8 @@ Per-runner pairing and revocation come later with hosting. Remote runners run un
 - **The reviewer's prompt says which case applies**, naming the required checks or stating that there are none. The server builds this from the project's `requiredChecks`. Role instructions, including a repo's override (D13), defer to it.
 - **The review looks at the code.** The reviewer reads the diff for security, efficiency and logic problems and raises them as specific, actionable feedback. It may run a targeted test or the app when that's the best way to check a criterion or a suspected bug. A cached result never counts as verification.
 - **The same rule covers every review of a diff:** agent review, epic integration review (D27) and rebase review (D24). Spike and design reviews have no diff and no gates to run.
-- **Unchanged:** a verdict and concrete note for every criterion, and D21's evidence rules. Developers still run the gates before reporting.
+- **Unchanged:** a verdict and concrete note for every criterion, and D21's evidence rules.
+- **Developers (amended by COR-447 and COR-444).** The same project setting decides what a developer checks. With required checks, first attempts, review rounds, CI fixes and task rebases run fast checks and tests relevant to the change, not the full suite, and a CI fix starts from what failed. Epic conflict fixes, epic rebases and resolution tasks, including their revision rounds, run no checks. Without required checks, nothing else verifies the work, so the full local check stays, and that includes an epic rebase and an epic fix. Spikes change no code and run none. The runner sets `CORRAL_CHECK_SCOPE` to `targeted` or `none`, unset for the full check, so any project's check script can honour it. Required checks still gate every merge.
 
 **Why:** The rerun duplicated CI and was slow: on COR-59 a reviewer's third full test run hit the background time limit. The reviewer's value is the judgement CI can't give, so its time goes on the diff.
 

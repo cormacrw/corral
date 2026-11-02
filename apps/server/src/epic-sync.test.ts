@@ -1102,6 +1102,7 @@ describe('developer runs on the epic', () => {
     const { operation, job, resolved } = await conflictFix(epic)
 
     expect(operation).toMatchObject({ kind: 'rebase', state: 'running', fix: 'conflict', conflictFiles: [epic.file], resolutionTaskId: null })
+    expect(job).toMatchObject({ checkScope: null }) // No required checks here
     expect(job).toMatchObject({ taskId: null, branch: `corral/epic-rebase/${operation.id}`, epicId: epic.id, baseBranch: 'main' })
     expect(job.prompt).toContain(`git rebase ${epic.onto}`)
     expect(job.prompt).toContain('never remove or revert')
@@ -1458,7 +1459,8 @@ describe('developer runs on the epic', () => {
       expect(job.prompt).toContain('FAIL src/app.test.ts')
       expect(job.prompt).toContain('untrusted')
       expect(job.prompt).not.toContain('Post job cleanup')
-      expect(job.prompt).toContain('starting from any test that failed')
+      expect(job.prompt).toContain('starting from any test or gate that failed')
+      expect(job).toMatchObject({ checkScope: 'targeted' })
       expect(job.prompt).not.toContain('run no lint')
       expect(job.continueFrom).toBe(epic.head)
       expect((await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id)))).toHaveLength(1)

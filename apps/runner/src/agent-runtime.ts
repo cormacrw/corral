@@ -1,3 +1,4 @@
+import type { CheckScope } from '@corral/contracts'
 import { claudeCodeRuntime } from './agent.ts'
 import { codexRuntime } from './codex.ts'
 import type { GitAuthor, RunnerConfig } from './config.ts'
@@ -23,6 +24,7 @@ export interface RuntimeOptions {
   // Set on PM follow-up turns: resuming this session adds no "Session started" note
   quietResume?: boolean
   gitAuthor: GitAuthor | null
+  checkScope?: CheckScope | null | undefined
   onLine(raw: string, parsed: ParsedLine): void
 }
 
