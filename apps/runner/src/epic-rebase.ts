@@ -69,30 +69,58 @@ async function renames(bare: string, from: string, to: string): Promise<[string,
 
 const exists = async (bare: string, commit: string, file: string) => (await git(['cat-file', '-e', `${commit}:${file}`], { cwd: bare })).code === 0
 
-// What's wrong with a candidate, if anything. The candidate must sit on the
-// commit it was asked to reach or a later one, stay linear, and leave files only
-// the target changed exactly as the target has them: an agent resolving a
-// conflict has no reason to touch those, so a difference is target work undone.
-// A file the target renamed under the epic's edit carries that edit, so it's
-// both sides' and only has to survive at its new path, unless the epic moved or
-// deleted it too. The epic's own files are the reviewer's to judge.
-async function candidateProblem(bare: string, job: Job<'epic_rebase_push'>): Promise<string | null> {
-  const target = remoteRef(job.targetBranch)
-  if (!await isAncestor(bare, job.ontoSha, job.candidateSha)) return `It isn't rebased onto ${job.ontoSha}.`
-  const base = await required(['merge-base', job.candidateSha, target], bare)
-  const merges = lines(await required(['rev-list', '--merges', `${base}..${job.candidateSha}`], bare))
-  if (merges.length > 0) return `It has merge commits (${merges.join(', ')}). Rebase, never merge.`
+// What a candidate does to the target's work. `undone` holds the files only the
+// target changed that the candidate leaves different from the target. A file the
+// target renamed under the epic's edit carries that edit, so it's both sides'
+// and only has to survive at its new path. The epic's own files don't count.
+// The push guard and the rebase review share this, so a reviewer is shown
+// exactly what the guard would otherwise refuse.
+async function targetChanges(bare: string, job: { targetBranch: string, expectedHeadSha: string, candidateSha: string }) {
+  const base = await required(['merge-base', job.candidateSha, remoteRef(job.targetBranch)], bare)
   const fork = await required(['merge-base', job.expectedHeadSha, base], bare)
   const epicFiles = new Set(await changed(bare, fork, job.expectedHeadSha))
   const carried = (await renames(bare, fork, base)).filter(([from]) => epicFiles.has(from))
-  for (const [from, to] of carried) {
-    if (await exists(bare, job.expectedHeadSha, from) && !await exists(bare, job.candidateSha, to)) return `It undoes the target's rename of ${from} to ${to}. Keep the file at ${to}, with the epic's change in it.`
-  }
   const shared = new Set([...epicFiles, ...carried.map(([, to]) => to)])
   const targetOnly = (await changed(bare, fork, base)).filter(file => !shared.has(file))
   const altered = new Set(await changed(bare, base, job.candidateSha))
-  const undone = targetOnly.filter(file => altered.has(file))
-  return undone.length > 0 ? `It changes target branch work the epic never touched: ${undone.join(', ')}. Keep the target's version of these files.` : null
+  return { base, carried, undone: targetOnly.filter(file => altered.has(file)) }
+}
+
+// What's wrong with a candidate, if anything. The candidate must sit on the
+// commit it was asked to reach or a later one, stay linear, keep the target's
+// renames unless the epic moved or deleted the file too, and leave files only
+// the target changed exactly as the target has them. Git alone has no reason to
+// touch those, so a difference is target work undone. The one exception is a
+// resolution whose reviewer approved this commit having been shown each such
+// change: the epic can force an adaptation there, which is the reviewer's to judge.
+async function candidateProblem(bare: string, job: Job<'epic_rebase_push'>): Promise<string | null> {
+  if (!await isAncestor(bare, job.ontoSha, job.candidateSha)) return `It isn't rebased onto ${job.ontoSha}.`
+  const { base, carried, undone } = await targetChanges(bare, job)
+  const merges = lines(await required(['rev-list', '--merges', `${base}..${job.candidateSha}`], bare))
+  if (merges.length > 0) return `It has merge commits (${merges.join(', ')}). Rebase, never merge.`
+  for (const [from, to] of carried) {
+    if (await exists(bare, job.expectedHeadSha, from) && !await exists(bare, job.candidateSha, to)) return `It undoes the target's rename of ${from} to ${to}. Keep the file at ${to}, with the epic's change in it.`
+  }
+  return undone.length > 0 && !job.reviewed ? `It changes target branch work the epic never touched: ${undone.join(', ')}. Keep the target's version of these files.` : null
+}
+
+// A prompt can hold only so much. The reviewer has the checkout for the rest.
+const MAX_DIFF_CHARS = 20_000
+
+// The changes to files only the target changed, for the rebase reviewer. A throw
+// means the runner couldn't read them, which the server treats as a wait.
+export async function inspectEpicRebase(dataDir: string, job: Job<'epic_rebase_inspect'>): Promise<Result<'epic_rebase_inspect'>> {
+  const error = await syncRepository(dataDir, job.repository)
+  if (error) throw new Error(error)
+  const bare = barePath(dataDir, job.repository)
+  return withRepoLock(bare, async () => {
+    const { base, undone } = await targetChanges(bare, job)
+    const targetFiles = await Promise.all(undone.map(async (path) => {
+      const diff = await required(['diff', base, job.candidateSha, '--', path], bare)
+      return { path, diff: diff.slice(0, MAX_DIFF_CHARS), truncated: diff.length > MAX_DIFF_CHARS }
+    }))
+    return { kind: 'epic_rebase_inspect', targetFiles }
+  })
 }
 
 // A compare-and-swap, as for task integration: the push fails unless the epic

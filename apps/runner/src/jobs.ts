@@ -2,7 +2,7 @@ import { tmpdir } from 'node:os'
 import type { RepoSummary, SetupJob, SetupJobResult } from '@corral/contracts'
 import type { RunnerConfig } from './config.ts'
 import { exec, gh } from './exec.ts'
-import { prepareEpicRebase, pushEpicRebase } from './epic-rebase.ts'
+import { inspectEpicRebase, prepareEpicRebase, pushEpicRebase } from './epic-rebase.ts'
 import { inspectIntegration, prepareIntegration, pushIntegration } from './integration.ts'
 import { barePath, syncRepository } from './repos.ts'
 import { removeWorktree, sweepWorktrees, worktreePath } from './workspace.ts'
@@ -69,6 +69,9 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob, pmTurnRun
 
     case 'epic_rebase_push':
       return pushEpicRebase(config.dataDir, job)
+
+    case 'epic_rebase_inspect':
+      return inspectEpicRebase(config.dataDir, job)
 
     case 'sweep_worktrees':
       return { kind: 'sweep_worktrees', ...await sweepWorktrees(config.dataDir, job, pmTurnRunning, runIsHere) }

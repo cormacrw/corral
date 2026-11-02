@@ -474,6 +474,16 @@ describe('rebase review prompts', () => {
     headSha: 'new-head', prUrl: null, evidence: [], previousFeedback: null, requiredChecks: ['ci']
   }
 
+  it('shows a resolution reviewer each target-only file, with a fence its diff can\'t close and a way to the rest', () => {
+    const epicResolution = { oldHead: 'old', ontoSha: 'onto', conflictFiles: ['a.ts'], approvedHeadSha: null, decisions: [] }
+    const prompt = reviewerPrompt({ ...rebase, rebaseOnly: false, epicResolution: { ...epicResolution, targetFiles: [{ path: 'b.md', diff: '+```\n+`````', truncated: true }] } }, 'Rita')
+    expect(prompt).toContain('- `b.md`')
+    expect(prompt).toContain('``````diff\n+```\n+`````\n``````')
+    expect(prompt).toContain('`git diff onto HEAD -- b.md`')
+    expect(prompt).toContain('`preservesApproval: false`')
+    expect(reviewerPrompt({ ...rebase, rebaseOnly: false, epicResolution: { ...epicResolution, targetFiles: [] } }, 'Rita')).not.toContain('Files only the target changed')
+  })
+
   it('gives the developer\'s choice and files, and says to block for a substantial change', () => {
     const prompt = reviewerPrompt({ ...rebase, rebaseReport: { review: 'trivial', conflictedFiles: ['app.ts'] } }, 'Rita')
     expect(prompt).toContain('Developer review choice: trivial.')

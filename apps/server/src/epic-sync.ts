@@ -11,7 +11,7 @@ import type { GitHubClient } from './github.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { checkTrivialRebase } from './rebase-review.ts'
 import { Backoff } from './retries.ts'
-import { epicResolutionBranch } from './task-base.ts'
+import { EpicBranchError, epicResolutionBranch } from './task-base.ts'
 import { runEndValues } from './run-lifecycle.ts'
 import { applyTransition, createTask, deleteTaskRows, loadTask, lockTask, type ProjectRow } from './tasks.ts'
 
@@ -28,6 +28,7 @@ const EPIC_MOVED = 'The epic branch moved'
 const INTERRUPTED = 'Interrupted before a candidate was ready'
 const EPIC_MERGED = 'The epic PR merged'
 const RETRY_AT_ONCE = [EPIC_MOVED, INTERRUPTED, EPIC_MERGED]
+const RESOLUTION_FAILED = 'The conflict resolution failed and the target has moved on'
 // Failures on the same commits before it takes a human to retry. Each waits a
 // little longer, so one bad minute doesn't use them all.
 const MAX_FAILED_ATTEMPTS = 3
@@ -40,6 +41,7 @@ const CHECKPOINT_IDLE_MS = 120_000
 
 const PREPARE_TIMEOUT_MS = 12 * 60_000
 const PUSH_TIMEOUT_MS = 13 * 60_000
+const INSPECT_TIMEOUT_MS = 2 * 60_000
 
 export interface EpicSyncDeps {
   db: Database
@@ -59,6 +61,20 @@ export async function activeRebase(db: Executor, epicId: string): Promise<Operat
 export async function rebasingEpics(db: Executor, epicIds: string[]): Promise<Set<string>> {
   const rows = await db.select({ epicId: operations.epicId }).from(operations).where(and(inArray(operations.epicId, epicIds), eq(operations.kind, 'rebase'), inArray(operations.state, [...ACTIVE])))
   return new Set(rows.map(r => r.epicId))
+}
+
+// What a resolution candidate changes in files only the target changed, for its
+// reviewer. Only the runner's git can say so exactly as the push guard will, so
+// a runner that can't answer holds the review back rather than failing a run.
+export async function targetFileChanges(runner: RunnerHub, input: { repository: string, targetBranch: string, expectedHeadSha: string, candidateSha: string }) {
+  const runnerId = runner.epicRebaseRunner()
+  if (!runnerId) throw new EpicBranchError('No runner can read the rebase candidate yet', true)
+  try {
+    const { targetFiles } = await runner.requestOn<'epic_rebase_inspect'>(runnerId, { kind: 'epic_rebase_inspect', ...input }, INSPECT_TIMEOUT_MS)
+    return targetFiles
+  } catch (error) {
+    throw new EpicBranchError(`Could not read the rebase candidate: ${message(error)}`, true)
+  }
 }
 
 // Stops synchronizing until a human retries: an operational problem, not a
@@ -243,7 +259,7 @@ export class EpicSynchronizer {
     const taskId = await db.transaction(async (tx) => {
       const id = await createTask(tx, project, {
         type: 'task', title: `Rebase epic: ${epic.title}`.slice(0, 200), description: resolutionBrief(branch, target, operation.ontoSha!, files), epicId: epic.id,
-        acceptanceCriteria: [`${branch} is rebased onto ${operation.ontoSha} of ${target} with no merge commits, and the conflicts in ${files.join(', ') || 'the rebase'} are resolved keeping both sides' intent`, `Nothing newly landed on ${target} is removed or reverted, and the rebase adds no feature changes`]
+        acceptanceCriteria: [`${branch} is rebased onto ${operation.ontoSha} of ${target} with no merge commits, and the conflicts in ${files.join(', ') || 'the rebase'} are resolved keeping both sides' intent`, `Nothing newly landed on ${target} is removed or reverted, any edit to a file only ${target} changed is an adaptation the epic's changes require, and the rebase adds no feature changes`]
         // The epic's approval stands until the publish step has judged the result
       }, server, { epicFix: true, keepEpicReview: true })
       await tx.update(tasks).set({ branch }).where(eq(tasks.id, id))
@@ -262,12 +278,28 @@ export class EpicSynchronizer {
     const { db, runner } = this.#d
     const [task] = await db.select().from(tasks).where(eq(tasks.id, operation.resolutionTaskId!))
     if (!task || task.deletedAt) return this.#fail(operation, ctx, 'The conflict resolution task was deleted')
+    if (task.status === 'failed') return this.#outdateFailed(operation, ctx)
     if (task.status !== 'ready_to_merge' || task.leaseRunId || task.paused || !task.headSha || ctx.epic.syncError) return false
     const runnerId = runner.epicRebaseRunner()
     if (!runnerId) return false
     if (await this.#held(ctx)) return false
-    await this.#checkResolution(operation, ctx, task.headSha)
-    return this.#push(operation, ctx, task.headSha, runnerId, stopped)
+    // Read now: the caller's copy can predate the review that freed the task
+    const [current] = await db.select().from(operations).where(eq(operations.id, operation.id))
+    await this.#checkResolution(current!, ctx, task.headSha)
+    return this.#push(operation, ctx, task.headSha, runnerId, stopped, current!.resolutionReview?.headSha === task.headSha)
+  }
+
+  // A resolution that used up its runs waits on Failed for a human, but only
+  // while its commits are still the ones to rebase onto. Once the target moves
+  // it's solving an old problem, and the lock it holds would stop the epic for
+  // good, so it ends and the next checkpoint starts on the current target. The
+  // failure count is per commits, so this stays bounded by the target moving.
+  async #outdateFailed(operation: OperationRow, ctx: Context): Promise<boolean> {
+    const { epic, project } = ctx
+    if (project.paused || !this.#poll.due(epic.id)) return false
+    this.#poll.later(epic.id)
+    const onto = await this.#d.github.branchHead(project.repository, project.defaultBranch)
+    return onto && onto !== operation.ontoSha ? this.#fail(operation, ctx, RESOLUTION_FAILED) : false
   }
 
   // A rebase can outlast the PR it's for. It keeps its candidate, and its
@@ -283,9 +315,7 @@ export class EpicSynchronizer {
   // the reviewer's. Before the push: afterwards the old head is unreachable.
   async #checkResolution(operation: OperationRow, { epic, project }: Context, candidate: string): Promise<void> {
     const { db, github } = this.#d
-    // Read now: the caller's copy can predate the review that freed the task
-    const [current] = await db.select().from(operations).where(eq(operations.id, operation.id))
-    const review = current?.resolutionReview
+    const review = operation.resolutionReview
     if (review?.headSha !== candidate || !APPROVED_STATES.includes(epic.reviewState)) return
     const check = await checkTrivialRebase(github, project.repository, { baseBranch: project.defaultBranch, approvedHeadSha: operation.expectedTargetSha, newHeadSha: candidate, conflictedFiles: operation.conflictFiles ?? [] })
     const outsideConflicts = check.failures.find(f => f.condition === 'changes_outside_conflicts')?.files ?? []
@@ -296,7 +326,9 @@ export class EpicSynchronizer {
     return !await this.#held(ctx) && this.#push(operation, ctx, candidate, runnerId, stopped)
   }
 
-  async #push(operation: OperationRow, ctx: Context, candidate: string, runnerId: string, stopped: Stopped): Promise<boolean> {
+  // `reviewed` is the server's word that a reviewer approved this exact commit,
+  // and so saw its changes to target-only files. Only then may the runner let them through.
+  async #push(operation: OperationRow, ctx: Context, candidate: string, runnerId: string, stopped: Stopped, reviewed = false): Promise<boolean> {
     const { db, runner } = this.#d
     const { project, epic } = ctx
     // Read now: a candidate can take minutes to prepare. A stopped operation
@@ -314,7 +346,7 @@ export class EpicSynchronizer {
     let error: string | null
     try {
       const result = await runner.requestOn<'epic_rebase_push'>(runnerId, {
-        kind: 'epic_rebase_push', repository: project.repository, epicBranch: epic.branch!, targetBranch: project.defaultBranch, expectedHeadSha: operation.expectedTargetSha, ontoSha: operation.ontoSha!, candidateSha: candidate
+        kind: 'epic_rebase_push', repository: project.repository, epicBranch: epic.branch!, targetBranch: project.defaultBranch, expectedHeadSha: operation.expectedTargetSha, ontoSha: operation.ontoSha!, candidateSha: candidate, reviewed
       }, PUSH_TIMEOUT_MS)
       if (result.rejected) {
         await this.#reject(pushing, ctx, result.rejected)
@@ -450,7 +482,8 @@ function resolutionBrief(branch: string, target: string, ontoSha: string, files:
     paragraph(`Corral could not rebase this epic onto ${target} cleanly. ${branch} is a private candidate holding the epic's commits; the epic branch itself stays untouched until this task is approved, and Corral then publishes your commit with a compare-and-swap. No PR is opened.`),
     paragraph(`Run git fetch origin && git rebase ${ontoSha}. Never merge ${target} in. Resolve the conflicts in ${conflicts}, then run the project's gates and report pr_updated.`),
     paragraph(`Keep both sides' intent. What landed on ${target} stands: never remove or revert it to make the old epic work, and adapt the epic's change around it instead. Make no feature changes. If the two sides can't both be kept, or the target changed a binding decision this work relies on, report stuck with \`decision\`: one focused question, its alternatives, and the changes affected. The human's answer brings this same task back to you.`),
-    paragraph(`Reviewer: use git range-diff against the old epic commits and check each resolved hunk against the ${target} commit that caused it. Request changes if ${target}'s work was dropped or the rebase adds anything new that nobody decided.`)
+    paragraph(`Leave files only ${target} changed as ${target} has them, unless the epic's changes force an edit, such as a test on ${target} that must follow a type the epic changed. Then make the smallest edit that adapts it and name it in your summary. The reviewer is shown every such change and approves only an adaptation that drops none of ${target}'s work.`),
+    paragraph(`Reviewer: use git range-diff against the old epic commits and check each resolved hunk against the ${target} commit that caused it. Request changes if ${target}'s work was dropped or the rebase adds anything new that nobody decided, including in a file only ${target} changed.`)
   ] }
 }
 

@@ -86,6 +86,7 @@ Pausing the project, the kill switch and an update hold all stop new writes, lea
 | Stopped thing | How to resume it |
 |---|---|
 | Epic shows **Rebase stopped** | Fix the cause, then press **Retry**, or `POST /api/epics/<id>/sync/retry`. This restarts the failure count, and a reviewed resolution pushes its same commit |
+| A **Rebase epic** task **Failed** at its run cap | **Retry** it to run on the same commits. Otherwise do nothing: once the target moves, the operation ends with `The conflict resolution failed and the target has moved on`, the task goes, and the next checkpoint rebases afresh |
 | Task **Failed** after three integration failures | Read `error` on its operations, then choose **Retry** on its Inbox item. It goes back to its developer |
 | Task **Blocked** because the epic branch is missing, or checks never finished | Restore the cause, then choose **Answer** on its Inbox item and say what you fixed. It goes back to in progress |
 | Resolution task deleted, or the epic branch moved outside Corral | Nothing. The operation ends, its task and candidate go, and the next checkpoint starts again |

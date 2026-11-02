@@ -4,6 +4,7 @@ import { schema, type Executor } from '@corral/db'
 import { and, asc, desc, eq, gt, inArray, isNotNull, ne } from 'drizzle-orm'
 import { listTaskAttachments } from './attachments.ts'
 import { resolutionContext } from './epic-rebase-approval.ts'
+import { targetFileChanges } from './epic-sync.ts'
 import { slugify } from './projects.ts'
 import { designerPrompt, designerRevisionPrompt, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import { latestRebaseCheckFailures } from './rebase-review.ts'
@@ -214,7 +215,11 @@ export class RunJobs {
       : []
     const pin = await this.#pinnedDesign(ctx.project.prefix, task.id)
     const rebaseCheckFailures = task.rebaseOnly ? await latestRebaseCheckFailures(db, task.id) : []
-    const epicResolution = isEpicResolution(task) && task.epicId ? await resolutionContext(db, task.id, task.epicId) : null
+    const resolution = isEpicResolution(task) && task.epicId ? await resolutionContext(db, task.id, task.epicId) : null
+    const epicResolution = resolution && {
+      ...resolution,
+      targetFiles: await targetFileChanges(this.#c.d.runner, { repository: ctx.project.repository, targetBranch: ctx.project.defaultBranch, expectedHeadSha: resolution.oldHead, candidateSha: task.headSha! })
+    }
     const prFree = task.integrationProtocol > 0
     const submissions = prFree ? await listTaskSubmissions(db, task.id) : []
     return {

@@ -282,7 +282,8 @@ export const setupJobSchema = z.discriminatedUnion('kind', [
   // keeps the target's work, then advances the epic branch only if it's still
   // at the expected head.
   z.object({ kind: z.literal('epic_rebase_prepare'), repository: z.string(), epicBranch: z.string(), expectedHeadSha: z.string(), ontoSha: z.string() }),
-  z.object({ kind: z.literal('epic_rebase_push'), repository: z.string(), epicBranch: z.string(), targetBranch: z.string(), expectedHeadSha: z.string(), ontoSha: z.string(), candidateSha: z.string() }),
+  z.object({ kind: z.literal('epic_rebase_push'), repository: z.string(), epicBranch: z.string(), targetBranch: z.string(), expectedHeadSha: z.string(), ontoSha: z.string(), candidateSha: z.string(), reviewed: z.boolean().optional() }),
+  z.object({ kind: z.literal('epic_rebase_inspect'), repository: z.string(), targetBranch: z.string(), expectedHeadSha: z.string(), candidateSha: z.string() }),
   // Remove every worktree outside this keep set, which covers all projects.
   // Developer worktrees with uncommitted work stay (PRD §7.4), and so does the
   // checkout of a PM turn running on the runner.
@@ -307,6 +308,7 @@ export const setupJobResultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('epic_rebase_prepare'), status: z.enum(['rebased', 'up_to_date', 'moved', 'conflict', 'failed']), commitSha: z.string().nullable(), files: z.array(z.string()), error: z.string().optional() }),
   // `rejected`: the candidate itself is wrong, and nothing was pushed
   z.object({ kind: z.literal('epic_rebase_push'), pushed: z.boolean(), rejected: z.string().nullable(), error: z.string().nullable() }),
+  z.object({ kind: z.literal('epic_rebase_inspect'), targetFiles: z.array(z.object({ path: z.string(), diff: z.string(), truncated: z.boolean() })) }),
   // `kept` is only what stayed because it holds uncommitted changes
   z.object({ kind: z.literal('sweep_worktrees'), removed: z.array(z.string()), kept: z.array(z.string()) }),
   z.object({ kind: z.literal('session_title'), title: z.string() }),

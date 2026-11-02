@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { beforeEach, expect, it, vi } from 'vitest'
-import { prepareEpicRebase, pushEpicRebase } from './epic-rebase.ts'
+import { inspectEpicRebase, prepareEpicRebase, pushEpicRebase } from './epic-rebase.ts'
 import { exec } from './exec.ts'
 import { barePath } from './repos.ts'
 import { createTestDataDir, TEST_REPOSITORY as repository } from './test-repo.ts'
@@ -28,7 +28,8 @@ async function commit(branch: string, file: string, text: string): Promise<strin
 }
 
 const prepare = (expectedHeadSha: string, ontoSha: string) => prepareEpicRebase(dataDir, null, { kind: 'epic_rebase_prepare', repository, epicBranch: 'epic', expectedHeadSha, ontoSha })
-const push = (expectedHeadSha: string, ontoSha: string, candidateSha: string) => pushEpicRebase(dataDir, { kind: 'epic_rebase_push', repository, epicBranch: 'epic', targetBranch: 'main', expectedHeadSha, ontoSha, candidateSha })
+const push = (expectedHeadSha: string, ontoSha: string, candidateSha: string, reviewed?: boolean) => pushEpicRebase(dataDir, { kind: 'epic_rebase_push', repository, epicBranch: 'epic', targetBranch: 'main', expectedHeadSha, ontoSha, candidateSha, ...reviewed !== undefined && { reviewed } })
+const inspect = (expectedHeadSha: string, candidateSha: string) => inspectEpicRebase(dataDir, { kind: 'epic_rebase_inspect', repository, targetBranch: 'main', expectedHeadSha, candidateSha })
 
 beforeEach(async () => {
   vi.stubEnv('GIT_CONFIG_COUNT', '0')
@@ -95,6 +96,64 @@ it('rejects a candidate that drops target work, skips the target or merges it in
   await run('checkout', '--quiet', 'main')
   expect((await push(head, onto, merged)).rejected).toContain('merge commits')
   expect(await run('rev-parse', 'epic')).toBe(head)
+})
+
+// A candidate on the target that edits target.txt, which only the target changed
+async function adaptedTargetFile() {
+  const head = await commit('epic', 'epic.txt', 'epic\n')
+  const onto = await commit('main', 'target.txt', 'read(i.project.id)\n')
+  await run('checkout', '--quiet', '-b', 'candidate', onto)
+  await run('cherry-pick', head)
+  await writeFile(join(origin, 'target.txt'), 'read(i.project?.id)\n')
+  await run('commit', '--quiet', '-am', 'Adapt it')
+  const candidate = await run('rev-parse', 'HEAD')
+  await run('checkout', '--quiet', 'main')
+  return { head, onto, candidate }
+}
+
+it('lets a change to a target-only file through only on a reviewed candidate', async () => {
+  const { head, onto, candidate } = await adaptedTargetFile()
+  expect((await push(head, onto, candidate)).rejected).toContain('target.txt')
+  expect((await push(head, onto, candidate, false)).rejected).toContain('target.txt')
+  expect(await run('rev-parse', 'epic')).toBe(head)
+  expect(await push(head, onto, candidate, true)).toMatchObject({ pushed: true, rejected: null })
+  expect(await run('rev-parse', 'epic')).toBe(candidate)
+})
+
+it('keeps refusing what no review can excuse', async () => {
+  const head = await commit('epic', 'epic.txt', 'epic\n')
+  const onto = await commit('main', 'target.txt', 'target\n')
+  expect((await push(head, onto, head, true)).rejected).toContain(`isn't rebased onto ${onto}`)
+  await run('branch', 'merged', head)
+  await run('checkout', '--quiet', 'merged')
+  await run('merge', '--quiet', '--no-ff', '-m', 'Merge main', 'main')
+  const merged = await run('rev-parse', 'HEAD')
+  await run('checkout', '--quiet', 'main')
+  expect((await push(head, onto, merged, true)).rejected).toContain('merge commits')
+})
+
+it('names each changed target-only file with its diff, and only those', async () => {
+  const { head, candidate } = await adaptedTargetFile()
+  const { targetFiles } = await inspect(head, candidate)
+  expect(targetFiles.map(f => f.path)).toEqual(['target.txt'])
+  expect(targetFiles[0]).toMatchObject({ truncated: false })
+  expect(targetFiles[0]!.diff).toContain('-read(i.project.id)')
+  expect(targetFiles[0]!.diff).toContain('+read(i.project?.id)')
+})
+
+it('finds nothing to show when the candidate leaves the target alone, and cuts a huge diff short', async () => {
+  const head = await commit('epic', 'epic.txt', 'epic\n')
+  const onto = await commit('main', 'target.txt', 'x\n')
+  await run('checkout', '--quiet', '-b', 'candidate', onto)
+  await run('cherry-pick', head)
+  expect(await inspect(head, await run('rev-parse', 'HEAD'))).toEqual({ kind: 'epic_rebase_inspect', targetFiles: [] })
+  await writeFile(join(origin, 'target.txt'), 'y\n'.repeat(30_000))
+  await run('commit', '--quiet', '-am', 'Rewrite it')
+  const big = await run('rev-parse', 'HEAD')
+  await run('checkout', '--quiet', 'main')
+  const { targetFiles } = await inspect(head, big)
+  expect(targetFiles[0]).toMatchObject({ path: 'target.txt', truncated: true })
+  expect(targetFiles[0]!.diff).toHaveLength(20_000)
 })
 
 it('rejects a candidate that undoes a rename only the target made', async () => {

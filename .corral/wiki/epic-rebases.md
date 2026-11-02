@@ -22,6 +22,14 @@ A resolution task never outlives its operation. `#fail` deletes it and its
 candidate branch, ending any run on it, because a Ready to merge resolution with
 no operation would hold the board with nothing to publish it.
 
+A resolution that hits the failed-run cap stays on Failed for a human, whose
+**Retry** resumes it, and it keeps the writer lock. Nobody retries an old problem
+for ever, though, so once the target has moved past its `ontoSha`,
+`#outdateFailed` ends the operation and the next checkpoint rebases onto the
+current target with a new task and a fresh run count. Failures are counted per
+commits, so each target only pays for itself. The Failed task and its candidate go,
+as with any `#fail`.
+
 The clock for pause is the moment of the write, not the start of the step:
 preparing can take minutes, so `#publish` and the conflict path read the project
 again. A conflict found while stopped goes back to `pending` and prepares again.
@@ -42,10 +50,31 @@ waiting to integrate still gets a checkpoint on every pass, and the wait starts
 over after each rebase. It's kept in memory like the merge pass's, so a restart
 just looks sooner.
 
-`candidateProblem` compares with `--no-renames` but reads the target's renames
+`targetChanges` compares with `--no-renames` but reads the target's renames
 separately with `-M`. Without that, a rebase that correctly followed a rename
 looks like an edit of a target-only file, and it fails the same way on every
 retry.
+
+An epic can force an edit to a file only the target changed: main adds a test
+reading `i.project.id`, the epic makes `project` nullable, and no candidate can
+pass the gates without `i.project?.id` (COR-431). So `candidateProblem` refuses
+such a change outright only when `reviewed` isn't set on the push. `#awaitResolution`
+sets it when `resolutionReview` is on this exact commit, so clean candidates
+and anything no reviewer approved stay refused, as do merge commits, a wrong base
+and an undone rename, whatever the review said. Git never touches these
+files by itself, so a clean candidate refused here is a Corral bug.
+
+What makes `reviewed` mean something is that the reviewer saw the changes.
+`reviewerJob` asks the runner with `epic_rebase_inspect`, which runs the same
+`targetChanges` as the guard, so the prompt lists exactly what the guard would
+refuse, with diffs cut at 20,000 characters. It can't come from GitHub's compare,
+which gives up at 300 files and detects renames its own way. A runner that can't
+answer raises a transient `EpicBranchError`, so the review waits instead of
+failing a run; no review means no approval, so nothing is skipped.
+
+The prompt says approving such a change means `preservesApproval: false`. If a
+reviewer says true anyway, `approvalFate` still drops approval, since the file is
+outside the conflicts.
 
 `step` works from the journal alone after a restart. `running` with a result and
 its runner online pushes again; `running` with neither was cut off, and that
