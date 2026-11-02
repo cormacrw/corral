@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { agentStatus, duration, isLiveRun as isLive, plural, ROLE, runBadge, runRef, runTitle, runtimeLabel, timeAgo } from '~/utils/labels'
+import { agentStatus, duration, isLiveRun as isLive, plural, ROLE, runRef, runTitle, runtimeLabel, timeAgo } from '~/utils/labels'
 
 // An agent's page (design/agent.md): the header, stats and runs list, with
 // the transcript in the child route. Mobile shows the agent and its runs at
@@ -56,23 +56,18 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
               {{ agent.name }}
             </h1>
             <UBadge
-              :label="ROLE[agent.role]"
-              color="neutral"
-              variant="subtle"
-            />
-            <UBadge
-              v-if="agentStatus(agent, now)"
-              v-bind="agentStatus(agent, now)"
+              v-if="agentStatus(agent, now, false)"
+              v-bind="agentStatus(agent, now, false)"
               variant="subtle"
             />
           </div>
           <p class="text-sm text-muted">
             {{ ROLE[agent.role] }} · <span data-testid="agent-runtime-label">{{ runtimeLabel(agent.runtime) }}</span> · {{ plural(today.length, 'run') }} today
-            <span v-if="agentStatus(agent, now)?.label === 'Waiting on usage limit'"> · Waiting on usage limit until {{ new Date(agent.pausedUntil!).toLocaleTimeString() }}</span>
+            <span v-if="agentStatus(agent, now, false)?.label === 'Waiting on usage limit'"> · Waiting on usage limit until {{ new Date(agent.pausedUntil!).toLocaleTimeString() }}</span>
           </p>
         </div>
         <UButton
-          v-if="agentStatus(agent, now)?.label === 'Waiting on usage limit'"
+          v-if="agentStatus(agent, now, false)?.label === 'Waiting on usage limit'"
           label="Resume now"
           variant="outline"
           color="neutral"
@@ -132,12 +127,6 @@ useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
               >
                 <span class="flex items-center gap-2">
                   <span class="font-mono text-xs text-muted">{{ runRef(run) }}</span>
-                  <UBadge
-                    :label="runBadge(run).label"
-                    :color="runBadge(run).color"
-                    variant="subtle"
-                    size="xs"
-                  />
                   <span class="ms-auto text-xs text-dimmed">{{ timeAgo(run.queuedAt, now) }}</span>
                 </span>
                 <span class="truncate">{{ runTitle(run) }}</span>

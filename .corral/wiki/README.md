@@ -4,6 +4,7 @@ Short implementation notes written while building. Not binding: `docs/README.md`
 
 - [Actionable Inbox policy](actionable-inbox-policy.md)
 - [Agent activity](agent-activity.md)
+- [Agent headers and run tags](agent-run-tags.md)
 - [Audit log](audit-log.md)
 - [Bounded checks](bounded-checks.md)
 - [Developer claim order](claim-order.md)
