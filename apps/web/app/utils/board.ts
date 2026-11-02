@@ -1,5 +1,6 @@
 import type { Agent, Epic, HumanTransitionInput, Run, Task } from '@corral/contracts'
-import type { AgentRole, TaskPriority, TaskStatus, availableEvents, isTaskDone, parentStage, TASK_PRIORITIES, type ParentStage } from '@corral/core'
+import type { AgentRole, ParentStage, TaskPriority, TaskStatus } from '@corral/core'
+import { availableEvents, isTaskDone, parentStage, TASK_PRIORITIES } from '@corral/core'
 import { epicInProgress, isLiveRun } from './labels.ts'
 
 import { completedAt } from './completion.ts'
