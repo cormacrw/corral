@@ -17,8 +17,8 @@ const actionError = ref<string | null>(null)
 const error = computed(() => actionError.value ?? detail.error.value?.message ?? null)
 const loadingPlan = detail.isPending
 const composer = ref<{ focus: () => void } | null>(null)
-// A question or an unread reply is answered here; a plan is approved instead
-const canReply = computed(() => Boolean(props.item.question || (!props.item.plan && props.item.reply)))
+// A question or a failed turn is answered here; a plan is approved instead
+const canReply = computed(() => Boolean(props.item.question || props.item.failure))
 const messageOf = (e: unknown) => e instanceof Error ? e.message : String(e)
 
 const loadPlan = () => {
@@ -145,8 +145,8 @@ async function deleteThread() {
             />
           </div>
         </template>
-        <!-- An unread reply: Juno's latest message, answered from the composer -->
-        <template v-else-if="item.reply">
+        <!-- A failed turn: why it failed, retried with a message from the composer -->
+        <template v-else-if="item.failure">
           <span class="flex items-center gap-2 text-xs text-muted">
             <AgentAvatar
               :name="item.sender.name"
@@ -154,7 +154,10 @@ async function deleteThread() {
             />
             <span class="font-medium text-default">{{ item.sender.name }}</span> · <TimeAgo :at="item.at" />
           </span>
-          <MarkdownText :text="item.reply" />
+          <p class="text-sm text-highlighted">
+            {{ item.sender.name }}'s turn failed and nothing will retry it. Send a message to try again, or delete the thread.
+          </p>
+          <MarkdownText :text="item.failure" />
         </template>
         <p
           v-if="working"

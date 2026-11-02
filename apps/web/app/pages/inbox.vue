@@ -11,7 +11,7 @@ const device = useDevice()
 const prefetch = useTaskPrefetch()
 useSeoMeta({ title: 'Inbox · Corral' })
 
-const { list, inbox, error, tab, search, items, count, selectedId, selected, itemRoute, deleteThread } = provideInboxView()
+const { list, inbox, error, tab, search, items, count, emptyText, selectedId, selected, itemRoute, deleteThread } = provideInboxView()
 function select(item: InboxItem) {
   void router.push(itemRoute(item))
 }
@@ -111,7 +111,7 @@ const hover = (item: InboxItem) => isTaskItem(item) ? prefetch({ ref: item.taskR
             v-if="items.length === 0"
             class="p-6 text-center text-sm text-muted"
           >
-            All clear. Nothing here right now.
+            {{ emptyText }}
           </li>
         </ul>
       </div>

@@ -34,7 +34,7 @@ describe('plan threads in the inbox', () => {
     await expect.poll(async () => (await t.request('GET', `/api/plan/sessions/${job.planSessionId}`).then(r => r.json()) as PlanSessionDetail).activeRunId).toBeNull()
   }
 
-  it('lists questions, waiting plans and unread replies in one list with tasks, newest first by when each arrived, and counts every listed item', async () => {
+  it('lists questions and waiting plans in one list with tasks, newest first by when each began waiting, and counts every listed item, but not an unread reply', async () => {
     const project = await t.createProject()
     const session = async (title: string, minutes: number, values: Partial<typeof planSessions.$inferInsert> = {}) => {
       const [row] = await t.db.insert(planSessions).values({ projectId: project.id, title, createdBy: t.actor, updatedAt: at(minutes), ...values }).returning()
@@ -70,29 +70,66 @@ describe('plan threads in the inbox', () => {
       { projectId: project.id, taskId: review.id, actor: t.actor, action: 'task.transition', detail: { event: 'head_moved', from: 'human_review', to: 'human_review' }, createdAt: at(4) }
     ])
 
-    const order = ['Needs approval', 'Review task', 'Blocked task', 'Question', 'Unread reply']
+    const order = ['Needs approval', 'Review task', 'Blocked task', 'Question']
     const before = await inbox()
     const mine = before.needsYou.filter(i => i.project.id === project.id)
     expect(mine.map(i => i.subject)).toEqual(order)
     expect(before.needsYou.map(i => i.at)).toEqual([...before.needsYou.map(i => i.at)].sort().reverse())
-    expect(mine.map(i => i.at)).toEqual([at(10), at(15), at(20), at(30), at(40)].map(d => d.toISOString()))
-    expect(mine.find(i => i.id === approval.id)).toMatchObject({ type: 'plan_thread', sessionId: approval.id, status: 'needs_approval', planId: plan!.id, unread: false, taskId: null, preview: 'Plan v2', sender: { role: 'pm' }, reply: null })
-    expect(mine.find(i => i.id === question.id)).toMatchObject({ type: 'plan_thread', status: 'question', planId: null, question: { text: 'Magic links too?', recommendation: 'Email only', options: ['Email only', 'Include magic links'] }, plan: null, reply: null })
+    expect(mine.map(i => i.at)).toEqual([at(10), at(15), at(20), at(30)].map(d => d.toISOString()))
+    expect(mine.find(i => i.id === approval.id)).toMatchObject({ type: 'plan_thread', sessionId: approval.id, status: 'needs_approval', planId: plan!.id, unread: false, taskId: null, preview: 'Plan v2', sender: { role: 'pm' }, failure: null })
+    expect(mine.find(i => i.id === question.id)).toMatchObject({ type: 'plan_thread', status: 'question', planId: null, question: { text: 'Magic links too?', recommendation: 'Email only', options: ['Email only', 'Include magic links'] }, plan: null, failure: null })
     expect(mine.find(i => i.id === approval.id)).toMatchObject({ question: null, plan: { id: plan!.id, version: 2, title: 'Search', summary: 'Find tasks quickly', epicCount: 1, taskCount: 2 } })
-    expect(mine.find(i => i.id === unread.id)).toMatchObject({ type: 'plan_thread', status: 'none', unread: true, question: null, plan: null, reply: 'Finished investigating.' })
+    expect(mine.some(i => i.id === unread.id)).toBe(false)
     expect(mine.filter(i => i.type === 'plan_thread').every(i => !('body' in i))).toBe(true)
     expect(before.count).toBe(before.needsYou.length)
     expect([...before.activity, ...before.resolved].some(i => (i as { type: string }).type === 'plan_thread')).toBe(false)
 
-    // Reading the unread-only thread takes it out of the list and the count
-    const { count } = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
+    // Reading changes nothing listed or counted, here or on a waiting thread
     await t.request('POST', `/api/plan/sessions/${unread.id}/read`)
-    expect(t.events.at(-1)).toMatchObject({ type: 'plan.session', session: { id: unread.id, unread: false }, markedRead: { inboxCount: count - 1 } })
+    expect(t.events.at(-1)).toMatchObject({ type: 'plan.session', session: { id: unread.id, unread: false }, markedRead: true })
+    await t.request('POST', `/api/plan/sessions/${question.id}/read`)
     const after = await inbox()
-    expect(after.count).toBe(before.count - 1)
-    expect(after.count).toBe(after.needsYou.length)
-    expect(after.needsYou.filter(i => i.project.id === project.id).map(i => i.subject)).toEqual(order.slice(0, -1))
+    expect(after.count).toBe(before.count)
+    expect(after.needsYou.filter(i => i.project.id === project.id).map(i => i.subject)).toEqual(order)
     await t.db.delete(planSessions).where(eq(planSessions.id, idleOld.id))
+  })
+
+  it('keeps a question listed after the PM closes its turn, read or not, until the human answers', async () => {
+    const project = await t.createProject()
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan it' }).then(r => r.json()) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
+    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'sess-q' })
+    await sleep(50)
+    await runner.call(job.runId, job.leaseEpoch, 'ask_question', { question: 'Fuzzy matching?' })
+    await endTurn(job, 'Over to you.')
+    const item = async () => (await inbox()).needsYou.find(i => i.id === created.id)
+    expect(await item()).toMatchObject({ status: 'question', question: { text: 'Fuzzy matching?' } })
+    await t.request('POST', `/api/plan/sessions/${created.id}/read`)
+    expect(await item()).toMatchObject({ status: 'question', unread: false })
+    expect((await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Yes' })).status).toBe(201)
+    expect(await item()).toBeUndefined()
+  })
+
+  it('keeps a failed PM turn actionable, read or not, until the human messages the session', async () => {
+    const project = await t.createProject()
+    const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan it' }).then(r => r.json()) as PlanSessionDetail
+    const job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
+    runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 1 }, headSha: null })
+    await expect.poll(async () => (await t.request('GET', `/api/plan/sessions/${created.id}`).then(r => r.json()) as PlanSessionDetail).status).toBe('failed')
+    const thread = async () => {
+      const box = await inbox()
+      return { box, item: box.needsYou.find(i => i.id === created.id) }
+    }
+    expect((await thread()).item).toMatchObject({ type: 'plan_thread', status: 'failed', failure: 'The PM exited with code 1', question: null, plan: null })
+    const { count } = (await thread()).box
+
+    await t.request('POST', `/api/plan/sessions/${created.id}/read`)
+    expect((await thread()).item).toMatchObject({ status: 'failed', unread: false })
+    expect((await thread()).box.count).toBe(count)
+
+    expect((await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Try again' })).status).toBe(201)
+    expect((await thread()).item).toBeUndefined()
+    expect((await thread()).box.count).toBe(count - 1)
   })
 
   it('rejects a human message with question fields, at the start and in a thread', async () => {
@@ -107,7 +144,7 @@ describe('plan threads in the inbox', () => {
     expect(await t.db.select().from(planMessages).where(eq(planMessages.sessionId, row!.id))).toEqual([])
   })
 
-  it('gives every thread the data its status needs, and keeps threads that are only unread listed', async () => {
+  it('gives every thread the data its status needs, and lists no thread that is only unread', async () => {
     const project = await t.createProject()
     const session = async (title: string, values: Partial<typeof planSessions.$inferInsert> = {}) => {
       const [row] = await t.db.insert(planSessions).values({ projectId: project.id, title, createdBy: t.actor, ...values }).returning()
@@ -128,10 +165,31 @@ describe('plan threads in the inbox', () => {
     ])
 
     const threads = (await inbox()).needsYou.filter((item): item is PlanThreadItem => item.type === 'plan_thread' && item.project.id === project.id)
-    expect(threads.find(i => i.sessionId === question.id)).toMatchObject({ status: 'question', question: { text: 'Which one?', recommendation: null, options: null }, plan: null, planId: null, reply: null })
-    expect(threads.find(i => i.sessionId === approval.id)).toMatchObject({ status: 'needs_approval', question: null, plan: { id: plan!.id, title: 'The plan' }, planId: plan!.id, reply: null })
-    expect(threads.find(i => i.sessionId === unread.id)).toMatchObject({ status: 'none', question: null, plan: null, planId: null, reply: 'Done.', unread: true })
+    expect(threads.find(i => i.sessionId === question.id)).toMatchObject({ status: 'question', question: { text: 'Which one?', recommendation: null, options: null }, plan: null, planId: null, failure: null })
+    expect(threads.find(i => i.sessionId === approval.id)).toMatchObject({ status: 'needs_approval', question: null, plan: { id: plan!.id, title: 'The plan' }, planId: plan!.id, failure: null })
+    expect(threads.find(i => i.sessionId === unread.id)).toBeUndefined()
     expect(threads.find(i => i.sessionId === answered.id)).toBeUndefined()
+  })
+
+  it('reads a failure from the last message alone, and a question until the human writes', async () => {
+    const project = await t.createProject()
+    const thread = async (...messages: Pick<typeof planMessages.$inferInsert, 'role' | 'kind'>[]) => {
+      const [row] = await t.db.insert(planSessions).values({ projectId: project.id, title: 'Thread', createdBy: t.actor }).returning()
+      await t.db.insert(planMessages).values(messages.map((m, i) => ({ ...m, sessionId: row!.id, text: 'Text', createdAt: at(messages.length - i) })))
+      const { status } = await t.request('GET', `/api/plan/sessions/${row!.id}`).then(r => r.json()) as PlanSessionDetail
+      return { status, listed: (await inbox()).needsYou.some(i => i.id === row!.id) }
+    }
+    const human = { role: 'human', kind: 'message' } as const
+    const reply = { role: 'pm', kind: 'message' } as const
+    const failure = { role: 'pm', kind: 'error' } as const
+    const question = { role: 'pm', kind: 'question' } as const
+
+    expect(await thread(human, failure)).toEqual({ status: 'failed', listed: true })
+    expect(await thread(human, failure, reply)).toEqual({ status: 'none', listed: false })
+    expect(await thread(human, question, reply)).toEqual({ status: 'question', listed: true })
+    expect(await thread(human, question, failure)).toEqual({ status: 'failed', listed: true })
+    expect(await thread(human, question, failure, reply)).toEqual({ status: 'question', listed: true })
+    expect(await thread(failure, human)).toEqual({ status: 'none', listed: false })
   })
 
   it('reads historical rows from before the constraints, showing a human row as a plain message', async () => {
@@ -210,9 +268,8 @@ describe('plan threads in the inbox', () => {
     expect(await thread(created.id)).toBeUndefined()
     const next = (await runner.next('run.assign', m => m.job.planSessionId === created.id && m.job.runId !== job.runId)).job
     await endTurn(next, 'Noted.')
-    // Juno's unread reply lists it again, until it's read
-    expect(await thread(created.id)).toMatchObject({ status: 'none', unread: true, reply: 'Noted.' })
-    await t.request('POST', `/api/plan/sessions/${created.id}/read`)
+    // Juno's reply is conversation: Plan shows it unread, the Inbox doesn't list it
     expect(await thread(created.id)).toBeUndefined()
+    expect(lastEvent(mark, created.id)).toMatchObject({ session: { unread: true, status: 'none' } })
   })
 })

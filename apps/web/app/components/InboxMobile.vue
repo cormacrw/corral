@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { needsAttention } from '@corral/contracts/client'
 import type { InboxItem } from '@corral/contracts'
 import { useInboxView } from '~/composables/useInboxView'
 import InboxItemRow from '~/components/InboxItemRow.vue'
 
 // The Inbox list on a phone (design/inbox.md, design/mobile.md), a screen of
 // its own at /inbox. The item is InboxMobileItem.
-const { list, inbox, error, tab, search, items } = useInboxView()
+const { list, inbox, error, tab, search, items, emptyText } = useInboxView()
 
 const searching = ref(Boolean(search.value))
 function toggleSearch() {
@@ -20,7 +19,7 @@ const isHidden = (item: InboxItem) => item.type === 'plan_thread' && deleting.pe
 const listed = computed(() => items.value.filter(i => !isHidden(i)))
 // Server order: newest first, task items and threads together (D11)
 const tabs = computed(() => [
-  { label: 'Inbox', value: 'needsYou', icon: 'i-lucide-inbox', count: (inbox.value?.needsYou ?? []).filter(i => !isHidden(i) && needsAttention(i)).length },
+  { label: 'Inbox', value: 'needsYou', icon: 'i-lucide-inbox', count: (inbox.value?.needsYou ?? []).filter(i => !isHidden(i)).length },
   { label: 'Activity', value: 'activity', icon: 'i-lucide-activity', count: null },
   { label: 'Resolved', value: 'resolved', icon: 'i-lucide-circle-check', count: inbox.value?.resolved.length ?? 0 }
 ])
@@ -122,16 +121,16 @@ const tabs = computed(() => [
         class="flex flex-col items-center gap-2 p-8 text-center text-sm text-muted"
       >
         <UIcon
-          name="i-lucide-circle-check"
-          class="size-8 text-success"
+          name="i-lucide-inbox"
+          class="size-8"
         />
-        All clear. Nothing here right now.
+        {{ emptyText }}
       </li>
       <li
         v-else-if="tab === 'needsYou'"
         class="p-6 text-center text-sm text-muted"
       >
-        That's everything in your Inbox.
+        That's every decision waiting on you.
       </li>
     </ul>
   </div>

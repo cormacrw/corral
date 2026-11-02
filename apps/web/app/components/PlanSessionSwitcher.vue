@@ -19,7 +19,7 @@ const others = computed(() => {
   return (allSessions.value ?? []).filter(s => !shown.has(s.id))
 })
 const projectOf = (session: PlanSession) => shell.projects.find(p => p.id === session.projectId) ?? null
-const needsYou = computed(() => sessions.value.some(s => s.unread || s.status === 'question' || s.status === 'needs_approval'))
+const needsYou = computed(() => sessions.value.some(s => s.unread || s.status !== 'none'))
 
 async function go(to: string) {
   open.value = false
@@ -107,6 +107,14 @@ async function go(to: string) {
                     v-else-if="session.status === 'question'"
                     label="Question"
                     color="info"
+                    variant="subtle"
+                    size="xs"
+                    class="shrink-0"
+                  />
+                  <UBadge
+                    v-else-if="session.status === 'failed'"
+                    label="Failed"
+                    color="error"
                     variant="subtle"
                     size="xs"
                     class="shrink-0"

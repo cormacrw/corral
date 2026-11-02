@@ -92,11 +92,10 @@ describe('prototype mock API', () => {
 
   it('derives the inbox from tasks that need the human', async () => {
     const inbox = await mockCall<Inbox>('GET', '/inbox')
-    expect(inbox.count).toBe(inbox.needsYou.filter(i => i.type !== 'release_notes').length)
+    expect(inbox.count).toBe(inbox.needsYou.length)
     const threads = inbox.needsYou.filter(i => i.type === 'plan_thread')
-    expect(threads.map(i => i.sessionId).sort()).toEqual(['s-1', 's-2', 's-3', 's-5'])
+    expect(threads.map(i => i.sessionId).sort()).toEqual(['s-1', 's-2', 's-3'])
     expect(inbox.needsYou.map(i => i.at)).toEqual(inbox.needsYou.map(i => i.at).sort().reverse())
-    expect(threads.find(i => i.sessionId === 's-5')).toMatchObject({ status: 'none', unread: true, question: null, plan: null, reply: expect.stringContaining('SSE reconnect') })
     expect(threads.find(i => i.sessionId === 's-2')).toMatchObject({
       question: { text: 'Which push service should we use?', recommendation: 'Web Push', options: ['Web Push with VAPID keys', 'ntfy'] },
       plan: null
@@ -105,26 +104,25 @@ describe('prototype mock API', () => {
       question: null, plan: { id: 'plan-1', version: 1, epicCount: 1, taskCount: 3 }
     })
     expect(threads.every(i => !('body' in i))).toBe(true)
-    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread' && i.type !== 'release_notes').map(i => i.type).sort()).toEqual(['blocked', 'epic_conflict', 'epic_review', 'failed', 'human_review', 'human_review', 'human_review', 'question'])
+    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'epic_conflict', 'epic_review', 'failed', 'human_review', 'human_review', 'human_review', 'question'])
     expect(threads.some(i => i.sessionId === 's-idle')).toBe(false)
   })
 
-  it('places release notes among the other items by deployment time, read or not', async () => {
-    const ids = async () => (await mockCall<Inbox>('GET', '/inbox')).needsYou.map(i => i.id)
+  it('keeps release notes in Activity by deployment time, read or not', async () => {
+    const ids = async () => (await mockCall<Inbox>('GET', '/inbox')).activity.map(i => i.id)
     const inbox = await mockCall<Inbox>('GET', '/inbox')
-    expect(inbox.needsYou.find(i => i.id === 'release-demo')).toMatchObject({ unread: true })
+    expect(inbox.activity.find(i => i.id === 'release-demo')).toMatchObject({ unread: true })
+    expect(inbox.needsYou.some(i => (i.id as string) === 'release-demo')).toBe(false)
     const before = await ids()
-    const position = before.indexOf('release-demo')
-    expect(position).toBeGreaterThan(0)
-    expect(position).toBeLessThan(before.length - 1)
+    expect(before).toContain('release-demo')
     await mockCall('POST', '/deployments/release-demo/read')
     expect(await ids()).toEqual(before)
     const read = await mockCall<Inbox>('GET', '/inbox')
-    expect(read.needsYou.find(i => i.id === 'release-demo')).toMatchObject({ unread: false })
+    expect(read.activity.find(i => i.id === 'release-demo')).toMatchObject({ unread: false })
     expect(read.count).toBe(inbox.count)
     await mockCall('POST', '/deployments/release-demo/dismiss')
     const dismissed = await mockCall<Inbox>('GET', '/inbox')
-    expect(dismissed.needsYou.some(i => i.id === 'release-demo')).toBe(false)
+    expect(dismissed.activity.some(i => i.id === 'release-demo')).toBe(false)
     expect(dismissed.resolved.find(i => i.id === 'release-demo')).toMatchObject({ unread: false, resolution: 'You dismissed these release notes' })
     expect(dismissed.count).toBe(inbox.count)
   })
@@ -155,11 +153,12 @@ describe('prototype mock API', () => {
     expect(after.resolved[0]).toMatchObject({ taskId: design.id, resolution: 'You approved the design' })
   })
 
-  it('drops an unread-reply thread from the inbox once it is read', async () => {
+  it('leaves an unread reply out of the inbox, read or not', async () => {
+    expect((await mockCall<Inbox>('GET', '/inbox')).needsYou.some(i => i.id === 's-5')).toBe(false)
     await mockCall('POST', '/plan/sessions/s-5/read')
     const inbox = await mockCall<Inbox>('GET', '/inbox')
     expect(inbox.needsYou.some(i => i.id === 's-5')).toBe(false)
-    expect(inbox.count).toBe(inbox.needsYou.filter(i => i.type !== 'release_notes').length)
+    expect(inbox.count).toBe(inbox.needsYou.length)
   })
 
   it('opens a plan session with its messages and plans', async () => {

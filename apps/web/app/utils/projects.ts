@@ -1,4 +1,3 @@
-import { needsAttention } from '@corral/contracts/client'
 import type { Agent, Inbox, Task } from '@corral/contracts'
 import { onBoard } from './board.ts'
 
@@ -12,10 +11,9 @@ export interface ProjectCardSummary {
   working: { agent: string, role: Agent['role'] } | null
 }
 
-// A project's items that need the human. Release notes are in the Inbox but
-// never count as waiting on someone (D11)
+// A project's share of Needs you
 export function projectNeedsYou(inbox: Inbox | null, projectId: string | undefined) {
-  return inbox?.needsYou.filter(i => i.project.id === projectId && needsAttention(i)) ?? []
+  return inbox?.needsYou.filter(i => i.project.id === projectId) ?? []
 }
 
 const VERB: Record<Agent['role'], string> = { pm: 'planning', developer: 'building', designer: 'designing', reviewer: 'reviewing' }

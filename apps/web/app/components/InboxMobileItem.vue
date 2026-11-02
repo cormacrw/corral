@@ -90,17 +90,6 @@ const taskLink = computed(() => props.selected ? inboxItemLink(props.selected) :
       <USkeleton class="h-12 w-full" />
       <USkeleton class="h-32 w-full" />
     </div>
-    <div
-      v-else
-      class="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted"
-    >
-      This item isn't in your Inbox any more.
-      <UButton
-        to="/inbox"
-        label="Back to Inbox"
-        color="neutral"
-        variant="outline"
-      />
-    </div>
+    <InboxEmpty v-else />
   </div>
 </template>
