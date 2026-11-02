@@ -134,10 +134,12 @@ describe('orchestrator', () => {
     runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'sess-1' })
     t.clock.now = new Date(t.clock.now.getTime() + 60_000)
     runner.send({ type: 'heartbeat', activeRuns: [{ runId: job.runId, leaseEpoch: job.leaseEpoch }] })
+    // Heartbeats and run messages have separate processing lanes: renewing the
+    // lease does not mean run.started has finished updating the run yet.
     await eventually(async () => {
       expect((await taskRow(task.id)).leaseExpiresAt!.getTime()).toBeGreaterThan(before.getTime())
+      expect(await runRow(job.runId)).toMatchObject({ state: 'running', agentSessionId: 'sess-1' })
     })
-    expect(await runRow(job.runId)).toMatchObject({ state: 'running', agentSessionId: 'sess-1' })
     await pause(project)
   })
 

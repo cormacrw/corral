@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Plan, PlanThreadItem } from '@corral/contracts'
 import { usePlanThread } from '~/composables/usePlanThread'
+import { usePlanThreadScroll } from '~/composables/usePlanThreadScroll'
 import { approvePlan } from '~/utils/plan-approval'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import TimeAgo from '~/components/TimeAgo.vue'
@@ -16,6 +17,12 @@ const { approval, detail, plan: latest, previous, counts, text, busy, offline, w
 const actionError = ref<string | null>(null)
 const error = computed(() => actionError.value ?? detail.error.value?.message ?? null)
 const loadingPlan = detail.isPending
+const { log, content, onLogScroll } = usePlanThreadScroll(() => ({
+  threadId: props.item.sessionId,
+  messageId: props.item.question ? `${props.item.at}:${props.item.question.text}` : props.item.plan?.id ?? props.item.failure ?? undefined,
+  questionId: props.item.question ? 'inbox-question' : undefined,
+  revision: working.value
+}))
 const composer = ref<{ focus: () => void } | null>(null)
 // A question or a failed turn is answered here; a plan is approved instead
 const canReply = computed(() => Boolean(props.item.question || props.item.failure))
@@ -86,8 +93,15 @@ async function deleteThread() {
         </UDropdownMenu>
       </template>
     </MobilePageHeader>
-    <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
-      <div class="flex flex-col gap-4">
+    <div
+      ref="log"
+      class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
+      @scroll.passive="onLogScroll"
+    >
+      <div
+        ref="content"
+        class="flex flex-col gap-4"
+      >
         <UAlert
           v-if="error"
           color="error"
@@ -97,6 +111,7 @@ async function deleteThread() {
         <PlanQuestion
           v-if="item.question"
           :message="item.question"
+          data-message-id="inbox-question"
           :active="!working"
           stacked
           :disabled="cantSend"
