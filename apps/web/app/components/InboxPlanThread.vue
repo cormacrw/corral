@@ -2,6 +2,7 @@
 import type { PlanThreadItem } from '@corral/contracts'
 import { approvedPlanSummary } from '@corral/core'
 import { usePlanThread } from '~/composables/usePlanThread'
+import { usePlanThreadScroll } from '~/composables/usePlanThreadScroll'
 import { runtimeLabel } from '~/utils/labels'
 import { STOP_ASKING } from '~/utils/plan-questions'
 
@@ -13,6 +14,12 @@ const emit = defineEmits<{ approved: [], delete: [] }>()
 const flyout = useTaskFlyout()
 const toast = useToast()
 const { approval, detail, plan, previous, counts, text, busy, offline: runnerOffline, working, cantSend, send: sendMessage } = usePlanThread(() => props.item)
+const { log, content, onLogScroll } = usePlanThreadScroll(() => ({
+  threadId: props.item.sessionId,
+  messageId: props.item.question ? `${props.item.at}:${props.item.question.text}` : props.item.plan?.id ?? props.item.failure ?? undefined,
+  questionId: props.item.question ? 'inbox-question' : undefined,
+  revision: working.value
+}))
 const composer = ref<{ focus: () => void } | null>(null)
 async function send(message: string): Promise<boolean> {
   if (cantSend.value) return false
@@ -94,11 +101,19 @@ async function approve(to: 'ready' | 'backlog') {
         />
       </header>
 
-      <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
-        <div class="mx-auto flex w-full max-w-[720px] flex-col gap-4">
+      <div
+        ref="log"
+        class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
+        @scroll.passive="onLogScroll"
+      >
+        <div
+          ref="content"
+          class="mx-auto flex w-full max-w-[720px] flex-col gap-4"
+        >
           <template v-if="item.question">
             <PlanQuestion
               :message="item.question"
+              data-message-id="inbox-question"
               :active="!working"
               :disabled="cantSend"
               @answer="send"

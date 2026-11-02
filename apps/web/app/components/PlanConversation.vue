@@ -10,6 +10,7 @@ import { approvePlan } from '~/utils/plan-approval'
 import { STOP_ASKING } from '~/utils/plan-questions'
 import { withoutMessages } from '~/utils/tool-steps'
 import PlanMessages from './PlanMessages.vue'
+import { usePlanThreadScroll } from '~/composables/usePlanThreadScroll'
 
 // A Plan conversation (design/plan.md)
 const props = defineProps<{ sessionId: string }>()
@@ -145,25 +146,15 @@ const transcript = useQuery(computed(() => ({ ...runTranscriptQuery(activeRunId.
 const repliesOf = (runId: string) => session.value?.messages.filter(m => m.role === 'pm' && m.runId === runId).map(m => m.text) ?? []
 const liveEvents = computed(() => activeRunId.value ? withoutMessages(transcript.data.value ?? [], repliesOf(activeRunId.value)) : [])
 
-// Follows the conversation. When the PM's next question arrives it scrolls
-// to the question's top, so a long one isn't cut off above its answers.
-// A reader who has scrolled up stays there, until the conversation changes or
-// they send something.
-const log = ref<HTMLElement | null>(null)
-const NEAR_BOTTOM_PX = 64
-let following = true
-function onLogScroll() {
-  const el = log.value
-  if (el) following = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
-}
-watch([() => session.value?.id, () => session.value?.messages.length, () => liveEvents.value.length], async ([sessionId, count], [lastSession, lastCount]) => {
+const { log, content, onLogScroll } = usePlanThreadScroll(() => {
   const last = session.value?.messages.at(-1)
-  if (sessionId !== lastSession || (count !== lastCount && last?.role === 'human')) following = true
-  await nextTick()
-  if (!log.value) return
-  const question = last?.kind === 'question' ? log.value.querySelector<HTMLElement>(`[data-message-id="${last.id}"]`) : null
-  if (question) log.value.scrollTop = question.offsetTop - 16
-  else if (following) log.value.scrollTop = log.value.scrollHeight
+  return {
+    threadId: session.value?.id,
+    messageId: last?.id,
+    human: last?.role === 'human',
+    questionId: last?.kind === 'question' ? last.id : undefined,
+    revision: liveEvents.value.length
+  }
 })
 </script>
 
@@ -249,7 +240,10 @@ watch([() => session.value?.id, () => session.value?.messages.length, () => live
           class="relative min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
           @scroll.passive="onLogScroll"
         >
-          <div class="mx-auto flex w-full max-w-[768px] flex-col gap-4">
+          <div
+            ref="content"
+            class="mx-auto flex w-full max-w-[768px] flex-col gap-4"
+          >
             <PlanMessages
               :session="session"
               :pm-name="pm?.name ?? 'PM'"
