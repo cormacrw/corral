@@ -30,6 +30,7 @@ describe('runner capacity, runtimes and roles', () => {
 
   const assigns = (runner: FakeRunner) => runner.received.filter(m => m.type === 'run.assign')
   const taskRow = async (id: string) => (await t.db.select().from(tasks).where(eq(tasks.id, id)))[0]!
+  const runRow = async (runId: string) => (await t.db.select().from(runs).where(eq(runs.id, runId)))[0]!
   const transcript = async (runId: string) => t.request('GET', `/api/runs/${runId}/transcript`).then(r => r.json()) as Promise<RunEvent[]>
 
   // Whichever of the runners got the matching assignment, taken off the wire
@@ -173,7 +174,62 @@ describe('runner capacity, runtimes and roles', () => {
     expect(revision.fallbackPrompt).toContain('This is a revision')
     const other = developer === a ? b : a
     expect(assigns(other).some(m => m.type === 'run.assign' && m.job.role === 'developer')).toBe(false)
-    expect(await transcript(revision.runId)).toContainEqual({ type: 'system', text: `Resuming the agent session of run #${first.runNumber} on runner ${developer === a ? 'A' : 'B'}` })
+    expect(await transcript(revision.runId)).toContainEqual({ type: 'system', text: expect.stringContaining(`Resuming the agent session of run #${first.runNumber} on runner ${developer === a ? 'A' : 'B'}: it ended 0 minutes ago`) })
+    expect(await runRow(revision.runId)).toMatchObject({ sessionStart: 'resumed_warm' })
+  }, 60000)
+
+  it.each([
+    ['a developer revision starts fresh with the feedback and the diff', { rebaseOnly: false }],
+    ['a rebase-only round keeps its session', { rebaseOnly: true }]
+  ])('once the cache has expired, %s', async (_, round) => {
+    t = await createTestApp('pglite', { listen: true })
+    const a = await connect('A', { slots: 2 })
+    const project = await t.createProject({ repository: 'cormacrw/test-app' })
+    const task = await readyTask(project)
+    await t.orchestrator.schedule()
+    const [developer, first] = await assignedOn([a], j => j.taskId === task.id)
+    await started(developer, first, 'session-1')
+    const compare = vi.spyOn(t.github, 'compare').mockResolvedValue({ mergeBase: 'base', files: [{ filename: 'a.ts', status: 'modified', sha: 's', patch: '+const a = 1' }] })
+    const developers = eq(schema.agents.role, 'developer')
+    await changesRequested(project, task, developer, first, [a], async () => {
+      await t.db.update(schema.agents).set({ paused: true }).where(developers)
+      await t.db.update(runs).set({ endedAt: new Date(t.clock.now.getTime() - 60 * 60 * 1000) }).where(eq(runs.id, first.runId))
+    })
+    await t.db.update(schema.tasks).set(round).where(eq(schema.tasks.id, task.id))
+    await t.db.update(schema.agents).set({ paused: false }).where(developers)
+    await t.orchestrator.schedule()
+    const revision = (await developer.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
+    compare.mockRestore()
+    const lines = await transcript(revision.runId)
+    if (round.rebaseOnly) {
+      expect(revision.agentSessionId).toBe('session-1')
+      expect(lines[0]).toMatchObject({ type: 'system', text: expect.stringContaining('its prompt cache has expired, but this kind of round keeps its session') })
+      expect(await runRow(revision.runId)).toMatchObject({ sessionStart: 'resumed_cold' })
+      return
+    }
+    expect(revision.agentSessionId).toBeNull()
+    expect(revision.fallbackPrompt).toBeNull()
+    expect(revision.prompt).toContain('This is a revision')
+    expect(revision.prompt).toContain('No message shown')
+    expect(revision.prompt).toContain('## The branch so far')
+    expect(revision.prompt).toContain('+const a = 1')
+    expect(lines[0]).toMatchObject({ type: 'system', text: expect.stringContaining(`Starting a fresh session on runner A: run #${first.runNumber} ended`) })
+    expect(await runRow(revision.runId)).toMatchObject({ sessionStart: 'fresh' })
+  }, 60000)
+
+  it('records a run whose resume failed as fresh', async () => {
+    t = await createTestApp('pglite', { listen: true })
+    const a = await connect('A', { slots: 2 })
+    const project = await t.createProject({ repository: 'cormacrw/test-app' })
+    const task = await readyTask(project)
+    await t.orchestrator.schedule()
+    const [developer, first] = await assignedOn([a], j => j.taskId === task.id)
+    await started(developer, first, 'session-1')
+    await changesRequested(project, task, developer, first, [a])
+    const revision = (await developer.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
+    expect(await runRow(revision.runId)).toMatchObject({ sessionStart: 'resumed_warm' })
+    developer.send({ type: 'run.started', runId: revision.runId, leaseEpoch: revision.leaseEpoch, agentSessionId: 'session-2', resumeFailed: true })
+    await vi.waitFor(async () => expect(await runRow(revision.runId)).toMatchObject({ sessionStart: 'fresh' }))
   }, 60000)
 
   it('starts a revision fresh from the pushed branch on another runner when the previous one is offline', async () => {

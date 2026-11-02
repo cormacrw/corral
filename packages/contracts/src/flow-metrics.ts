@@ -1,5 +1,6 @@
 import type { AgentRole, TaskStatus } from '@corral/core'
 import { z } from 'zod'
+import type { RunSessionStart } from './agents.ts'
 
 // Flow durations are milliseconds; an empty sample has both percentiles zero.
 export const flowMetricsQuery = z.object({ window: z.enum(['7d', '30d', '90d']).default('30d') })
@@ -24,4 +25,7 @@ export interface FlowMetrics {
   epicReviews: { reviews: number, epics: number, perEpic: number }
   // Developer tokens in the window: up to a task's first submission, and after it
   tokens: { firstBuild: number, followUp: number }
+  // Developer runs in the window by how their session began. `weightedCost`
+  // covers only the `costedRuns` that reported cache writes.
+  sessions: { sessionStart: RunSessionStart, runs: number, inputTokens: number, cacheWriteTokens: number, cacheReadTokens: number, outputTokens: number, costedRuns: number, weightedCost: number }[]
 }

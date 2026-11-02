@@ -343,7 +343,8 @@ export const runEventSchema = z.discriminatedUnion('type', [
   // Tool inputs are runtime-specific JSON, validated by the tool boundary.
   z.object({ type: z.literal('tool_call'), id: z.string(), tool: z.string(), input: z.unknown() }),
   z.object({ type: z.literal('tool_result'), id: z.string(), output: z.string(), isError: z.boolean() }),
-  z.object({ type: z.literal('usage'), inputTokens: z.number(), cacheReadTokens: z.number(), outputTokens: z.number() })
+  // Only Claude reports cache writes
+  z.object({ type: z.literal('usage'), inputTokens: z.number(), cacheWriteTokens: z.number().optional(), cacheReadTokens: z.number(), outputTokens: z.number() })
 ])
 
 export const runExitSchema = z.discriminatedUnion('kind', [
@@ -389,7 +390,7 @@ export const runnerMessageSchema = z.discriminatedUnion('type', [
     z.object({ type: z.literal('job.result'), jobId: z.string(), ok: z.literal(true), result: setupJobResultSchema }),
     z.object({ type: z.literal('job.result'), jobId: z.string(), ok: z.literal(false), error: z.string() })
   ]),
-  z.object({ type: z.literal('run.started'), initialHeadSha: z.string().nullish(), sentAt: z.number().optional(), runId: z.string(), leaseEpoch: z.number(), agentSessionId: z.union([z.string(), z.null()]) }),
+  z.object({ type: z.literal('run.started'), initialHeadSha: z.string().nullish(), sentAt: z.number().optional(), runId: z.string(), leaseEpoch: z.number(), agentSessionId: z.union([z.string(), z.null()]), resumeFailed: z.boolean().optional() }),
   z.object({ type: z.literal('run.events'), runId: z.string(), leaseEpoch: z.number(), events: z.array(runEventSchema) }),
   // wipSha: the commit that saved a stopped developer run's work, once pushed
   z.object({ type: z.literal('run.ended'), runId: z.string(), leaseEpoch: z.number(), exit: runExitSchema, headSha: z.union([z.string(), z.null()]), lastActivityAt: z.union([z.string(), z.null()]).optional(), wipSha: z.union([z.string(), z.null()]).optional(), timings: runTimingsSchema.optional() }),

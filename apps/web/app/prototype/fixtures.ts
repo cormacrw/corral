@@ -454,7 +454,7 @@ export const runs: Run[] = [
   {
     runnerId: 'runner-1', runnerName: 'home-server', id: 'r-2', number: 129, agentId: 'a-rev', agentName: 'Rita', agentRuntime: 'claude-code', role: 'reviewer', projectId: 'p-corral',
     planSessionId: null, taskId: at('COR-4').id, taskRef: 'COR-4', taskTitle: at('COR-4').title, epicId: null, epicTitle: null, state: 'running', outcome: null, summary: null,
-    error: null, headSha: '9e71e28', inputTokens: 9_000, cacheReadTokens: 80_000, outputTokens: 1_200, rateLimitResetAt: null,
+    error: null, headSha: '9e71e28', inputTokens: 9_000, cacheWriteTokens: 12_000, sessionStart: 'resumed_warm', cacheReadTokens: 80_000, outputTokens: 1_200, rateLimitResetAt: null,
     queuedAt: ago(8), startedAt: ago(7), endedAt: null, timings: null
   },
   {
@@ -1049,6 +1049,12 @@ export function flowMetrics(slug: string, window: FlowMetricsQuery['window']): F
           { role: 'pm', duration: pair(0.1), queueWait: pair(0.02) }
         ],
     averageDeveloperRuns: empty ? 0 : scale,
+    sessions: empty
+      ? []
+      : [
+          { sessionStart: 'resumed_warm' as const, runs: 6 * scale, inputTokens: 18_000 * scale, cacheWriteTokens: 40_000 * scale, cacheReadTokens: 900_000 * scale, outputTokens: 30_000 * scale, costedRuns: 6 * scale, weightedCost: 1.1 * scale },
+          { sessionStart: 'fresh' as const, runs: 4 * scale, inputTokens: 16_000 * scale, cacheWriteTokens: 240_000 * scale, cacheReadTokens: 400_000 * scale, outputTokens: 24_000 * scale, costedRuns: 4 * scale, weightedCost: 2.48 * scale }
+        ],
     fixes: { reReviewed: empty ? 0 : 2 * scale, skippedReview: empty ? 0 : 5 * scale, epicDeveloperRuns: empty ? 0 : 3 * scale },
     epicReviews: { reviews: empty ? 0 : 5 * scale, epics: empty ? 0 : 3 * scale, perEpic: empty ? 0 : 5 / 3 },
     tokens: { firstBuild: empty ? 0 : 1_400_000 * scale, followUp: empty ? 0 : 450_000 * scale },

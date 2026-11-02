@@ -38,6 +38,8 @@ export interface PromptTask {
   stoppedRun?: StoppedRun | null
   // D29: set on a round started by a CI failure
   ciFailures?: CiFailure[] | null
+  // A developer's revision that starts fresh because its session's cache expired
+  coldRevision?: { feedback: PromptTask['comments'], diff: string | null } | null
 }
 
 export interface StoppedRun {
@@ -566,6 +568,34 @@ export function questionText(m: { text: string, recommendation: string | null, o
 // Every developer outcome carries a one-line note, posted as its comment
 const WORK_NOTE = '- Every `report_outcome` needs a `note` as well: one line of at most 200 characters saying what this run did, e.g. "Rebased onto 6e67d6f; resolved conflict in docs/architecture.md keeping main’s SSE wording". It\'s posted on the task as your comment, so the history shows your work between reviews.'
 
+// Sized to orient a fresh session: the branch itself has the rest
+const MAX_BRANCH_DIFF = 30_000
+
+// The file diffs in full until the cap, then the names of the rest
+export function cappedBranchDiff(files: { filename: string, patch?: string }[]): string {
+  const shown: string[] = []
+  const left: string[] = []
+  let size = 0
+  for (const file of files) {
+    const entry = `--- ${file.filename}\n${file.patch ?? '(no text diff)'}`
+    if (left.length === 0 && size + entry.length <= MAX_BRANCH_DIFF) {
+      shown.push(entry)
+      size += entry.length
+    } else left.push(file.filename)
+  }
+  return [...shown, ...(left.length ? [`Left out for size, so read these on the branch:\n${left.map(name => `- ${name}`).join('\n')}`] : [])].join('\n\n')
+}
+
+function coldRevisionSection(task: PromptTask): string {
+  if (!task.coldRevision) return ''
+  const { feedback, diff } = task.coldRevision
+  const format = (c: PromptTask['comments'][number]) => `- ${c.author} (${c.createdAt.toISOString()}): ${c.body}`
+  return [
+    section('Feedback since your last run', feedback.length > 0 ? feedback.map(format).join('\n') : '(no new comments)'),
+    ...(task.branch ? [section('The branch so far', `This is a new session, and your earlier commits are on this branch. Build on them; don't start again.\n\n${diff ?? `The diff isn't available: compare \`${task.branch}\` with \`${task.defaultBranch}\` yourself.`}`)] : [])
+  ].join('\n')
+}
+
 export function developerPrompt(task: PromptTask, agentName: string): string {
   if (task.rebaseOnly) return rebaseDeveloperPrompt(task, agentName)
   if (task.squashRebase) return epicRebaseDeveloperPrompt(task, agentName)
@@ -579,6 +609,7 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
     '',
     stoppedRunSection(task),
     ciFixSection(task),
+    coldRevisionSection(task),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria', criteriaList(task)),
     commentsSection(task, 'author'),
@@ -613,6 +644,7 @@ function spikeDeveloperPrompt(task: PromptTask, agentName: string): string {
       : 'A spike answers a question. Investigate it so that your findings answer every acceptance criterion.',
     '',
     stoppedRunSection(task),
+    coldRevisionSection(task),
     section('Task', richTextToMarkdown(task.description) || '(no description)'),
     section('Acceptance criteria', criteriaList(task)),
     commentsSection(task, 'author'),

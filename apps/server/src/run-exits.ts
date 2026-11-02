@@ -40,7 +40,7 @@ export class RunExits {
       events.publish({ type: 'run.events', runId: message.runId, offset, events: message.events })
       const usage = message.events.filter((e): e is Extract<RunEvent, { type: 'usage' }> => e.type === 'usage').at(-1)
       if (usage) {
-        await db.update(runs).set({ inputTokens: usage.inputTokens, cacheReadTokens: usage.cacheReadTokens, outputTokens: usage.outputTokens }).where(eq(runs.id, message.runId))
+        await db.update(runs).set({ inputTokens: usage.inputTokens, cacheWriteTokens: usage.cacheWriteTokens ?? null, cacheReadTokens: usage.cacheReadTokens, outputTokens: usage.outputTokens }).where(eq(runs.id, message.runId))
       }
       return
     }
@@ -51,7 +51,7 @@ export class RunExits {
         // Sent while the socket was down: the run really did start, and a
         // retry resumes its session
         if (reconciled(owner.run, message.leaseEpoch)) {
-          await db.update(runs).set({ startedAt: owner.run.startedAt ?? this.#c.now(), agentSessionId: message.agentSessionId }).where(eq(runs.id, owner.run.id))
+          await db.update(runs).set({ startedAt: owner.run.startedAt ?? this.#c.now(), agentSessionId: message.agentSessionId, ...(message.resumeFailed ? { sessionStart: 'fresh' as const } : {}) }).where(eq(runs.id, owner.run.id))
           if (owner.run.role === 'pm' && owner.run.planSessionId) await this.#c.plans?.onRunStarted(owner.run.planSessionId, message.agentSessionId)
         }
         return
@@ -60,6 +60,7 @@ export class RunExits {
       // restart its clock. Still active: the server may have ended the run
       // since it was fenced.
       await db.update(runs).set({ state: 'running', startedAt: this.#c.now(), agentSessionId: message.agentSessionId,
+        ...(message.resumeFailed ? { sessionStart: 'fresh' as const } : {}),
         ...(message.initialHeadSha && ctx.run.retryContext ? { retryContext: { ...ctx.run.retryContext, head: message.initialHeadSha } } : {}) })
         .where(and(eq(runs.id, ctx.run.id), inArray(runs.state, ['queued', 'starting'])))
       this.#c.leases.confirmLease(ctx, message.sentAt)

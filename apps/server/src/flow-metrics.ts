@@ -1,5 +1,6 @@
 import { AGENT_ROLES, TASK_STATUSES, type TaskStatus } from '@corral/core'
 import type { FlowMetrics, FlowMetricsQuery, FlowPercentiles } from '@corral/contracts'
+import { weightedRunCost } from '@corral/contracts/client'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, eq, gte, inArray, isNull, lte, min } from 'drizzle-orm'
 import { auditText } from './audit.ts'
@@ -92,7 +93,7 @@ export async function flowMetrics(db: Executor, project: Pick<typeof schema.proj
     if (queue.length || duration.length) byRole.push({ role, queueWait: percentiles(queue), duration: percentiles(duration) })
   }
   const period = and(eq(schema.runs.projectId, project.id), gte(schema.runs.endedAt, since), lte(schema.runs.endedAt, now))
-  const ended = await db.select({ taskId: schema.runs.taskId, epicId: schema.runs.epicId, number: schema.runs.number, role: schema.runs.role, outcome: schema.runs.outcome, reReviewed: schema.runs.reReviewed, inputTokens: schema.runs.inputTokens, cacheReadTokens: schema.runs.cacheReadTokens, outputTokens: schema.runs.outputTokens }).from(schema.runs)
+  const ended = await db.select({ taskId: schema.runs.taskId, epicId: schema.runs.epicId, number: schema.runs.number, role: schema.runs.role, outcome: schema.runs.outcome, reReviewed: schema.runs.reReviewed, sessionStart: schema.runs.sessionStart, cacheWriteTokens: schema.runs.cacheWriteTokens, inputTokens: schema.runs.inputTokens, cacheReadTokens: schema.runs.cacheReadTokens, outputTokens: schema.runs.outputTokens }).from(schema.runs)
     .where(and(period, inArray(schema.runs.role, ['developer', 'reviewer'])))
   const touched = [...new Set(ended.flatMap(run => run.role === 'developer' && run.taskId ? [run.taskId] : []))]
   // A task's first build ends at its first submission, which may be older
@@ -103,10 +104,24 @@ export async function flowMetrics(db: Executor, project: Pick<typeof schema.proj
   const tokens = { firstBuild: 0, followUp: 0 }
   for (const run of ended) {
     if (run.role !== 'developer') continue
-    const used = (run.inputTokens ?? 0) + (run.cacheReadTokens ?? 0) + (run.outputTokens ?? 0)
+    const used = (run.inputTokens ?? 0) + (run.cacheWriteTokens ?? 0) + (run.cacheReadTokens ?? 0) + (run.outputTokens ?? 0)
     const first = run.taskId ? firstSubmission.get(run.taskId) : undefined
     if (run.taskId && (first === undefined || run.number <= first)) tokens.firstBuild += used
     else tokens.followUp += used
+  }
+  const sessions: FlowMetrics['sessions'] = []
+  for (const sessionStart of ['resumed_warm', 'resumed_cold', 'fresh'] as const) {
+    const group = ended.filter(run => run.role === 'developer' && run.sessionStart === sessionStart)
+    if (group.length === 0) continue
+    const sum = (read: (run: typeof group[number]) => number | null) => group.reduce((total, run) => total + (read(run) ?? 0), 0)
+    const costs = group.flatMap((run) => {
+      const cost = weightedRunCost(run)
+      return cost === null ? [] : [cost]
+    })
+    sessions.push({
+      sessionStart, runs: group.length, inputTokens: sum(run => run.inputTokens), cacheWriteTokens: sum(run => run.cacheWriteTokens),
+      cacheReadTokens: sum(run => run.cacheReadTokens), outputTokens: sum(run => run.outputTokens), costedRuns: costs.length, weightedCost: costs.reduce((total, cost) => total + cost, 0)
+    })
   }
   const epicReviews = ended.filter(run => run.role === 'reviewer' && run.epicId && (run.outcome === 'approved' || run.outcome === 'changes_requested'))
   const reviewedEpics = new Set(epicReviews.map(run => run.epicId)).size
@@ -118,6 +133,7 @@ export async function flowMetrics(db: Executor, project: Pick<typeof schema.proj
     },
     epicReviews: { reviews: epicReviews.length, epics: reviewedEpics, perEpic: reviewedEpics ? epicReviews.length / reviewedEpics : 0 },
     tokens,
+    sessions,
     window, mergedTaskCount: tasks.length,
     leadTime: percentiles(leads), cycleTime: percentiles(cycles),
     timeInStatus: TASK_STATUSES.flatMap((status) => {

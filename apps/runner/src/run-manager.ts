@@ -472,6 +472,7 @@ export class RunManager {
       this.#note(run, 'The previous agent session could not be resumed; starting a fresh one from the saved conversation')
       run.sessionId = null
       run.rateLimit = null
+      run.resumeFailed = true
       await this.#spawn(run, { prompt: job.fallbackPrompt, systemPrompt, mcpConfigPath, resume: null })
     }
     if (!run.started) this.#started(run)
@@ -707,7 +708,7 @@ export class RunManager {
 
   #started(run: ActiveRun): void {
     run.started = true
-    this.#post(run, { type: 'run.started', initialHeadSha: run.initialHeadSha, sentAt: Date.now(), runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, agentSessionId: run.sessionId })
+    this.#post(run, { type: 'run.started', initialHeadSha: run.initialHeadSha, sentAt: Date.now(), runId: run.job.runId, leaseEpoch: run.job.leaseEpoch, agentSessionId: run.sessionId, ...(run.resumeFailed ? { resumeFailed: true } : {}) })
   }
 
   #note(run: ActiveRun, text: string): void {

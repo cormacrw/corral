@@ -7,7 +7,7 @@ import { readCiFailures } from './ci-output.ts'
 import { resolutionContext } from './epic-rebase-approval.ts'
 import { targetFileChanges } from './epic-sync.ts'
 import { slugify } from './projects.ts'
-import { designerPrompt, designerRevisionPrompt, developerCheckScope, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
+import { cappedBranchDiff, designerPrompt, designerRevisionPrompt, developerCheckScope, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import { latestRebaseCheckFailures } from './rebase-review.ts'
 import { RUN_TIMEOUT_SECONDS } from './run-lifecycle.ts'
 import { listEvidence } from './runs.ts'
@@ -26,6 +26,9 @@ export function actorLabel(actor: Actor): string {
     case 'system': return 'Corral'
   }
 }
+
+// Prompt caches are written for an hour; this leaves room for the run to start
+const WARM_SESSION_MS = 55 * 60 * 1000
 
 export class RunJobs {
   #c: RunCore
@@ -119,19 +122,33 @@ export class RunJobs {
       ciFailures
     }
     const prompt = author.prompt(promptTask, ctx.agent.name)
+    const since = previous?.queuedAt ?? null
+    const feedback = since ? notes.filter(c => c.createdAt > since) : []
     // A revision continues the author's own session with
     // the feedback given since, when it runs where that session lives. The
     // full prompt is the fallback when the session can't be resumed, and the
     // prompt on another runner, which starts fresh from the pushed branch.
     const local = previous !== null && (previous.runnerId === null || previous.runnerId === ctx.run.runnerId)
-    const resume = local ? previous.agentSessionId : null
+    const lastActive = previous?.endedAt ?? previous?.startedAt ?? previous?.queuedAt
+    const idleMinutes = lastActive ? Math.round((this.#c.now().getTime() - lastActive.getTime()) / 60_000) : 0
+    const warm = lastActive !== undefined && this.#c.now().getTime() - lastActive.getTime() < WARM_SESSION_MS
+    // Resuming costs a full cache write once the cache has expired, so a
+    // developer's revision starts fresh instead. Rebase rounds and designers
+    // keep their session whatever its age: it holds what they need.
+    const rebaseRound = task.rebaseOnly || promptTask.squashRebase
+    const expired = local && !warm && ctx.run.role === 'developer' && !rebaseRound
+    const resume = local && !expired ? previous.agentSessionId : null
+    const fresh = expired ? author.prompt({ ...promptTask, coldRevision: { feedback, diff: spike ? null : await this.#branchDiff(ctx, task, baseBranch) } }, ctx.agent.name) : prompt
     if (resume) {
-      await this.#c.ending.note(ctx.run.id, `Resuming the agent session of run #${previous!.number} on ${this.runnerName(ctx.run.runnerId)}`)
+      await this.#c.ending.note(ctx.run.id, warm
+        ? `Resuming the agent session of run #${previous!.number} on ${this.runnerName(ctx.run.runnerId)}: it ended ${idleMinutes} minutes ago, so its prompt cache is still warm`
+        : `Resuming the agent session of run #${previous!.number} on ${this.runnerName(ctx.run.runnerId)}: it ended ${idleMinutes} minutes ago, so its prompt cache has expired, but this kind of round keeps its session`)
+    } else if (expired) {
+      await this.#c.ending.note(ctx.run.id, `Starting a fresh session on ${this.runnerName(ctx.run.runnerId)}: run #${previous!.number} ended ${idleMinutes} minutes ago, so resuming it would rewrite an expired prompt cache`)
     } else if (previous) {
       await this.#c.ending.note(ctx.run.id, `Run #${previous.number} ran on ${this.runnerName(previous.runnerId)}, which is offline: starting a fresh session on ${this.runnerName(ctx.run.runnerId)}${spike ? '' : ` from the pushed branch ${task.branch}`}`)
     }
-    const since = previous?.queuedAt ?? null
-    const feedback = since ? notes.filter(c => c.createdAt > since) : []
+    await db.update(runs).set({ sessionStart: !resume ? 'fresh' : warm ? 'resumed_warm' : 'resumed_cold' }).where(eq(runs.id, ctx.run.id))
     return {
       runId: ctx.run.id,
       runNumber: ctx.run.number,
@@ -156,8 +173,16 @@ export class RunJobs {
       fallbackPrompt: resume ? prompt : null,
       model: null,
       timeoutSeconds: RUN_TIMEOUT_SECONDS,
-      prompt: !resume ? prompt : author.revision(promptTask, feedback)
+      prompt: !resume ? fresh : author.revision(promptTask, feedback)
     } as RunJob
+  }
+
+  // What the branch holds so far, for a revision starting without its session.
+  // This never fails a job: the developer can still read the branch.
+  async #branchDiff(ctx: RunContext, task: TaskRow, baseBranch: string): Promise<string | null> {
+    if (!task.branch) return null
+    const comparison = await this.#c.d.github.compare(ctx.project!.repository, baseBranch, task.branch).catch(() => null)
+    return comparison ? cappedBranchDiff(comparison.files) : null
   }
 
   // D27 rollout: only a supporting runner may start the PR-free path, and a
@@ -189,7 +214,7 @@ export class RunJobs {
           .where(and(eq(runs.taskId, taskId), eq(runs.role, 'developer')))
           .orderBy(desc(runs.number)).limit(1)
       : []
-    const [previous] = await db.select({ number: runs.number, runnerId: runs.runnerId, agentSessionId: runs.agentSessionId, queuedAt: runs.queuedAt }).from(runs)
+    const [previous] = await db.select({ number: runs.number, runnerId: runs.runnerId, agentSessionId: runs.agentSessionId, queuedAt: runs.queuedAt, startedAt: runs.startedAt, endedAt: runs.endedAt }).from(runs)
       .where(and(eq(runs.taskId, taskId), eq(runs.role, role), eq(runs.agentId, agentId), legacy ? gt(runs.number, legacy.number) : undefined, exclude ? ne(runs.id, exclude) : undefined, isNotNull(runs.agentSessionId)))
       .orderBy(desc(runs.number)).limit(1)
     return previous ?? null

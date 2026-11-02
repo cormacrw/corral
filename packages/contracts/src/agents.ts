@@ -125,9 +125,15 @@ interface RunFields {
   error: string | null
   headSha: string | null
   inputTokens: number | null
+  // Null when not reported apart: older runs have them inside inputTokens
+  cacheWriteTokens?: number | null
   cacheReadTokens: number | null
+  sessionStart?: RunSessionStart | null
   outputTokens: number | null
   rateLimitResetAt: string | null
   queuedAt: string
   startedAt: string | null
 }
+
+// How an author run's session began: a warm resume still has the prompt cache
+export type RunSessionStart = 'fresh' | 'resumed_warm' | 'resumed_cold'

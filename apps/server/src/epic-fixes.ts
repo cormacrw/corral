@@ -122,6 +122,7 @@ export class EpicFixes {
     // A runner's kept worktree may predate a run on another runner
     const continueFrom = await github.branchHead(project.repository, branch) ?? null
     const failures = operation.fixChecks?.length ? await readCiFailures(github, project.repository, operation.fixChecks) : []
+    await db.update(runs).set({ sessionStart: 'fresh' }).where(eq(runs.id, run.id))
     return {
       runId: run.id, runNumber: run.number, leaseEpoch: run.leaseEpoch!, role: 'developer', runtime: agent.runtime,
       projectId: project.id, repository: project.repository, defaultBranch: project.defaultBranch, baseBranch: project.defaultBranch,

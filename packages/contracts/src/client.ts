@@ -54,3 +54,15 @@ export const PAGE_PATTERNS = [
 
 export const PERF_WINDOWS = ['1h', '24h', '7d'] as const
 export type PerfWindow = (typeof PERF_WINDOWS)[number]
+
+// Dollars per million tokens. Fresh input has no agreed weight, so the weighted
+// cost leaves it out and it's always shown beside the cost.
+export const CACHE_COST_WEIGHTS = { cacheRead: 0.2, cacheWrite: 8, output: 20 } as const
+
+// Null when cache writes weren't reported apart: without them, runs don't compare
+export function weightedRunCost(run: { cacheWriteTokens?: number | null, cacheReadTokens: number | null, outputTokens: number | null }): number | null {
+  if (run.cacheWriteTokens === null || run.cacheWriteTokens === undefined) return null
+  return (run.cacheWriteTokens * CACHE_COST_WEIGHTS.cacheWrite
+    + (run.cacheReadTokens ?? 0) * CACHE_COST_WEIGHTS.cacheRead
+    + (run.outputTokens ?? 0) * CACHE_COST_WEIGHTS.output) / 1_000_000
+}

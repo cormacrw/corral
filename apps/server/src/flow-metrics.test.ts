@@ -129,7 +129,7 @@ describe.each(['pglite', 'postgres'] as const)('flow metrics on %s', (driver) =>
     for (const window of ['7d', '30d', '90d', ''] as const) {
       const response = await t.request('GET', `/api/projects/${p.slug}/metrics/flow${window ? `?window=${window}` : ''}`)
       expect(response.status).toBe(200)
-      expect(await response.json()).toEqual({ window: window || '30d', mergedTaskCount: 0, leadTime: { medianMs: 0, p90Ms: 0 }, cycleTime: { medianMs: 0, p90Ms: 0 }, timeInStatus: [], runsByRole: [], averageDeveloperRuns: 0, slowestTasks: [], fixes: { reReviewed: 0, skippedReview: 0, epicDeveloperRuns: 0 }, epicReviews: { reviews: 0, epics: 0, perEpic: 0 }, tokens: { firstBuild: 0, followUp: 0 } } satisfies FlowMetrics)
+      expect(await response.json()).toEqual({ window: window || '30d', mergedTaskCount: 0, leadTime: { medianMs: 0, p90Ms: 0 }, cycleTime: { medianMs: 0, p90Ms: 0 }, timeInStatus: [], runsByRole: [], averageDeveloperRuns: 0, slowestTasks: [], fixes: { reReviewed: 0, skippedReview: 0, epicDeveloperRuns: 0 }, epicReviews: { reviews: 0, epics: 0, perEpic: 0 }, tokens: { firstBuild: 0, followUp: 0 }, sessions: [] } satisfies FlowMetrics)
     }
     expect((await t.request('GET', `/api/projects/${p.slug}/metrics/flow?window=1d`)).status).toBe(400)
     expect((await t.request('GET', '/api/projects/no-such-project/metrics/flow')).status).toBe(404)

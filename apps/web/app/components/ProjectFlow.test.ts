@@ -26,7 +26,7 @@ const sample = (days: number): FlowMetrics => ({
   timeInStatus: [{ status: 'human_review', medianMs: 3600000, p90Ms: 7200000 }],
   runsByRole: [{ role: 'developer', duration: { medianMs: 60000, p90Ms: 120000 }, queueWait: { medianMs: 0, p90Ms: 60000 } }],
   averageDeveloperRuns: 1, slowestTasks: [{ ref: 'COR-1', leadTimeMs: days * 86400000, dominantStatus: 'human_review' }],
-  fixes: { reReviewed: 2, skippedReview: 5, epicDeveloperRuns: 3 }, epicReviews: { reviews: 6, epics: 4, perEpic: 1.5 }, tokens: { firstBuild: 1_200_000, followUp: 300_000 }
+  fixes: { reReviewed: 2, skippedReview: 5, epicDeveloperRuns: 3 }, epicReviews: { reviews: 6, epics: 4, perEpic: 1.5 }, sessions: [{ sessionStart: 'resumed_warm', runs: 2, inputTokens: 10, cacheWriteTokens: 1000, cacheReadTokens: 500_000, outputTokens: 2000, costedRuns: 1, weightedCost: 0.14 }, { sessionStart: 'fresh', runs: 1, inputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0, costedRuns: 0, weightedCost: 0 }], tokens: { firstBuild: 1_200_000, followUp: 300_000 }
 })
 const mountFlow = () => mount(ProjectFlow, {
   props: { slug: 'corral' },
