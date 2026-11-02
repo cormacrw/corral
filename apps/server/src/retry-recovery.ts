@@ -161,7 +161,7 @@ export async function answerRecovery(db: Database, events: EventBus, sessionId: 
 // The Inbox's way out of an idle stop (D10 covers Failed and Blocked). Failed
 // runs still count, and the human transition starts a fresh repetition streak.
 // False when the task has no idle stop, so the caller's usual action applies.
-export async function releaseStop(db: Database, taskId: string, actor: Actor, options: { to?: 'backlog', comment?: string }): Promise<boolean> {
+export async function releaseStop(db: Database, taskId: string, actor: Actor, options: { to?: 'backlog' | undefined, comment?: string | undefined }): Promise<boolean> {
   return await db.transaction(async (tx) => {
     const { task, project } = await lockTask(tx, taskId)
     if (!idleStop(task)) return false

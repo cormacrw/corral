@@ -861,8 +861,17 @@ it.each(['developer', 'reviewer'] as const)('asks a %s report with no structured
   expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', report)).toMatchObject({ ok: true })
   runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
 
+  // The PM diagnoses it first, and the question returns when triage leaves it open
+  await t.orchestrator.schedule()
+  const recovery = (await taskRow(fix.id)).retryStop!
+  const pm = (await runner.next('run.assign', m => m.job.planSessionId === recovery.sessionId)).job
+  expect((await inbox()).needsYou.filter(i => i.id === fix.id)).toEqual([])
+  runner.send({ type: 'run.events', runId: pm.runId, leaseEpoch: pm.leaseEpoch, events: [{ type: 'message', text: 'Nothing to add.' }] })
+  runner.send({ type: 'run.ended', runId: pm.runId, leaseEpoch: pm.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
+  await expect.poll(async () => (await t.db.select().from(schema.runs).where(eq(schema.runs.id, pm.runId)))[0]!.state).toBe('completed')
+
   const items = (await inbox()).needsYou.filter(i => i.id === fix.id)
-  expect(items).toMatchObject([{ type: 'question', body: summary, decision: { question: summary, alternatives: [], affectedChanges: [], answer: null } }])
+  expect(items).toMatchObject([{ type: 'question', body: expect.stringContaining(summary), decision: { question: summary, alternatives: [], affectedChanges: [], answer: null } }])
   expect(await taskRow(fix.id)).toMatchObject({ status: 'blocked', statusReason: summary })
   expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'deciding', question: summary, taskId: fix.id })
   await capture(`summary-question-${role}.json`, { scenario: `A resolution ${role} reports with no structured decision.`, report, inboxItem: items[0], epicSync: (await epicApi(epic.id)).sync })

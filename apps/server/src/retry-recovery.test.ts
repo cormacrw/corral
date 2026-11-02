@@ -45,7 +45,7 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     const pm = (await runner.next('run.assign', m => m.job.planSessionId === stop.sessionId)).job
     return { ...setup, pm, stop }
   }
-  const mine = async (projectId: string) => (await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project.id === projectId)
+  const mine = async (projectId: string) => (await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project?.id === projectId)
   const act = (taskId: string, input: object) => t.request('POST', `/api/inbox/${taskId}/actions`, input)
 
   it('stops after two unchanged failures, persists one visible PM turn and resumes on a target change', async () => {
@@ -149,12 +149,12 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     }
     const stop = (await row(task.id)).retryStop!
     expect(stop).toMatchObject({ status: 'agent_review', sessionId: expect.any(String) })
-    await finishPm((await runner.next('run.assign', m => m.job.planSessionId === stop.sessionId)).job)
-    return { task, project }
+    return { task, project, stop, pm: (await runner.next('run.assign', m => m.job.planSessionId === stop.sessionId)).job }
   }
 
   it('lists an agent_review stop and retries the reviewer without moving its status', async () => {
-    const { task, project } = await stoppedInReview()
+    const { task, project, pm } = await stoppedInReview()
+    await finishPm(pm)
     expect(await mine(project.id)).toMatchObject([{ id: task.id, type: 'stopped', body: expect.stringContaining('PM triage produced no findings.') }])
     const failedRuns = (await row(task.id)).failedRuns
     expect((await act(task.id, { action: 'retry' })).status).toBe(200)
@@ -163,6 +163,39 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     expect(await mine(project.id)).toEqual([])
     const resolved = (await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).resolved
     expect(resolved.find(i => i.taskId === task.id)?.resolution).toBe('You restarted the stopped task')
+  })
+
+  it('keeps an agent_review stop visible after comment-only triage', async () => {
+    const { task, project, pm } = await stoppedInReview()
+    expect(await runner.call(pm.runId, pm.leaseEpoch, 'add_comment', { taskRef: task.ref, body: 'The review checkout is missing the fixture.' })).toMatchObject({ ok: true })
+    expect(await mine(project.id)).toEqual([])
+    await finishPm(pm)
+    for (let i = 0; i < 2; i++) await t.orchestrator.schedule()
+    expect(await row(task.id)).toMatchObject({ status: 'agent_review', leaseRunId: null, retryStop: { capped: false } })
+    expect(await mine(project.id)).toMatchObject([{ id: task.id, type: 'stopped', body: expect.stringContaining('The review checkout is missing the fixture.') }])
+  })
+
+  it('keeps an agent_review stop visible when triage fails', async () => {
+    const { task, project, pm, stop } = await stoppedInReview()
+    runner.send({ type: 'run.ended', runId: pm.runId, leaseEpoch: pm.leaseEpoch, exit: { kind: 'exited', code: 1 }, headSha: null })
+    await expect.poll(async () => (await t.db.select().from(runs).where(eq(runs.id, pm.runId)))[0]!.state).toBe('failed')
+    await t.orchestrator.schedule()
+    const items = await mine(project.id)
+    expect(items.map(i => i.id).sort()).toEqual([stop.sessionId, task.id].sort())
+    expect(items.find(i => i.id === task.id)).toMatchObject({ type: 'stopped', body: expect.stringContaining('Recommendation: review the failed runs') })
+  })
+
+  it.each([
+    ['backlog', 'backlog'],
+    ['in_progress', 'in_progress'],
+    ['ready', 'in_progress']
+  ] as const)('resolves an idle stop to %s, clearing it', async (to, status) => {
+    const { task, pm } = await stopped()
+    await finishPm(pm)
+    const { failedRuns } = await row(task.id)
+    expect((await act(task.id, { action: 'resolve', to, text: 'Try the target branch.' })).status).toBe(200)
+    expect(await row(task.id)).toMatchObject({ status, failedRuns, retryStop: null })
+    expect(await mine(task.projectId)).toEqual([])
   })
 
   it('sends a stopped task back to the Backlog', async () => {
@@ -237,9 +270,9 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     expect(await row(task.id)).toMatchObject({ status: 'failed', failedRuns: 1, retryStop: { runId: job.runId } })
     expect((await t.db.select().from(runs).where(eq(runs.taskId, task.id))).filter(r => r.role === 'developer')).toHaveLength(1)
     const continuation = (await runner.next('run.assign', m => m.job.planSessionId === stop.sessionId)).job
-    expect((await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project.id === task.projectId)).toMatchObject([{ id: task.id, type: 'failed' }])
+    expect((await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project?.id === task.projectId)).toMatchObject([{ id: task.id, type: 'failed' }])
     await finishPm(continuation)
-    expect((await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project.id === task.projectId)).toMatchObject([{ id: task.id, type: 'failed' }])
+    expect((await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project?.id === task.projectId)).toMatchObject([{ id: task.id, type: 'failed' }])
     // A matching word after the pending question has been answered is not authorization.
     expect((await t.request('POST', `/api/plan/sessions/${stop.sessionId}/messages`, { text: 'Retry' })).status).toBe(201)
     expect((await row(task.id)).status).toBe('failed')
@@ -261,11 +294,11 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     const pm = (await runner.next('run.assign', m => m.job.planSessionId === stop.sessionId)).job
     const findings = 'The parser supports both formats. Resolve the format requirement before another attempt.'
     expect(await runner.call(pm.runId, pm.leaseEpoch, 'add_comment', { taskRef: task.ref, body: findings })).toMatchObject({ ok: true })
-    expect((await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project.id === task.projectId)).toEqual([])
+    expect((await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project?.id === task.projectId)).toEqual([])
     await finishPm(pm)
     for (let i = 0; i < 2; i++) {
       await t.orchestrator.schedule()
-      const mine = (await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project.id === task.projectId)
+      const mine = (await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project?.id === task.projectId)
       expect(mine).toMatchObject([{ id: task.id, taskId: task.id, type: kind === 'capped' ? 'failed' : 'question', body: expect.stringContaining(findings) }])
       expect(mine).toHaveLength(1)
       expect(mine[0]).toMatchObject({ body: expect.stringContaining('Decision needed:') })
@@ -281,7 +314,7 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     const pm = (await runner.next('run.assign', m => m.job.planSessionId === stop.sessionId)).job
     expect(await runner.call(pm.runId, pm.leaseEpoch, 'propose_plan', { title: 'Repair the parser', summary: 'Fix the implementation before retrying.', tasks: [{ key: 'parser', title: 'Repair the parser', type: 'bug', description: 'Read the configured target branch.', acceptanceCriteria: ['Reads the configured target branch.'] }] })).toMatchObject({ ok: true })
     await finishPm(pm)
-    const mine = (await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project.id === task.projectId)
+    const mine = (await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project?.id === task.projectId)
     expect(mine).toMatchObject([{ id: stop.sessionId, type: 'plan_thread', status: 'needs_approval' }])
     expect(mine).toHaveLength(1)
     expect(await row(task.id)).toMatchObject({ status: 'failed', failedRuns: 1, retryStop: { runId: job.runId } })
@@ -294,7 +327,7 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     await t.orchestrator.schedule()
     expect((await row(task.id)).retryStop).toBeNull()
     expect(await t.db.select().from(runs).where(eq(runs.taskId, task.id))).toEqual([])
-    expect((await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project.id === project.id)).toMatchObject([{ id: task.id, type: 'failed' }])
+    expect((await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project?.id === project.id)).toMatchObject([{ id: task.id, type: 'failed' }])
   })
 
   it('records a new cap reached by a reconnected exit and triages it once', async () => {

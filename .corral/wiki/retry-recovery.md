@@ -30,9 +30,9 @@ The PM reads the task, run diagnostics and code, and comments with actionable
 findings or proposes work for human plan approval. Only requirements,
 authority and recovery decisions become `ask_question` items in Needs you,
 with the block, attempted recovery, decision and recommendation. The original
-Failed/Blocked item is suppressed while triage is active or its open recovery
-conversation has a pending question or plan. Comment-only triage restores the
-original task decision to Needs you, including any D27 alternatives, with PM
+Failed, Blocked or stopped item is suppressed while triage is active or its open
+recovery conversation has a pending question or plan. Comment-only or failed
+triage restores the original task decision to Needs you, including any D27 alternatives, with PM
 findings and recovery guidance. A failed or closed recovery conversation cannot
 hide the task permanently. The task
 comment links the conversation and names the triage run.
@@ -40,10 +40,11 @@ comment links the conversation and names the triage run.
 A no-progress stop has no Failed or Blocked status: the task stays In progress
 or Agent review with no lease, so `openTaskFilter` selects it through
 `retryStop.sessionId` under the same suppression rule, as a `stopped` item dated
-by the stopping run's end. D10's `resolve` does not apply to those statuses, so
-`releaseStop` uses the `release_stop` event, which is hidden from the status
-menu and absent from the transition API. Retry and Give direction keep the
-status, and Send back moves to Backlog; none resets the failed-run counter, and
+by the stopping run's end. D10's `resolve` transition does not apply to those
+statuses, so `releaseStop` uses the `release_stop` event, which is hidden from
+the status menu and absent from the transition API. The Inbox's `resolve` action
+routes there too. Retry and Give direction keep the status, and Send back moves
+to Backlog; none resets the failed-run counter, and
 the audited human action starts a fresh streak. Findings are taken only from PM
 comments after this stop's queued-triage comment.
 

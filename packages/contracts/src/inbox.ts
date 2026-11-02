@@ -220,7 +220,7 @@ export const inboxActionInput = z.discriminatedUnion('action', [
   // Blocked on an epic rebase's question: one of its alternatives, or free text
   z.object({ action: z.literal('decide'), alternative: z.number().int().min(0).optional(), text: z.string().trim().min(1).optional() }).refine(d => d.alternative !== undefined || d.text, 'Pick an alternative or write an answer'),
   z.object({ action: z.literal('send_back') }),
-  // Failed or Blocked: resolve to a status (D10)
+  // Failed or Blocked: resolve to a status (D10). Also releases a no-progress stop
   z.object({ action: z.literal('resolve'), to: z.enum(['backlog', 'ready', 'in_progress']), text: z.string().trim().optional() }),
   // Stopped without progress: try again from the status it stopped in
   z.object({ action: z.literal('retry') }),

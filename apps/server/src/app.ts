@@ -190,6 +190,8 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
         break
       }
       case 'resolve':
+        // A stop has no status to resolve from: Ready and In progress both carry on in place
+        if (await releaseStop(db, taskId, actor, { to: input.to === 'backlog' ? 'backlog' : undefined, comment: input.text })) break
         await transitionTask(db, taskId, { type: 'resolve', to: input.to }, actor, { comment: input.text, invalidatedEpics })
         break
       case 'approve': {
