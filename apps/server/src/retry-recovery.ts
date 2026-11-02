@@ -13,6 +13,14 @@ import { addComment, applyTransition, lockTask, loadTask, type TaskRow } from '.
 
 const { agents, auditLog, comments, planSessions, projects, runs, tasks } = schema
 
+export const REPETITION_REASON = 'Two consecutive failures left the head unchanged without fresh human input or a target change'
+
+// A no-progress stop leaves the task in its working status with nothing to
+// claim it, so it waits on the human once its triage has ended.
+export function idleStop(task: Pick<TaskRow, 'status' | 'retryStop' | 'leaseRunId'>): boolean {
+  return Boolean(task.retryStop?.sessionId) && !task.leaseRunId && (task.status === 'in_progress' || task.status === 'agent_review')
+}
+
 // Only human input resets repetition. Agent notes and triage must not do so.
 export async function humanInput(db: Executor, taskId: string): Promise<string> {
   const [comment] = await db.select({ id: comments.id }).from(comments)
@@ -95,7 +103,7 @@ export async function reconcileRecovery(c: RunCore, targetPoll: Backoff): Promis
       const [pm] = await tx.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).limit(1)
       if (!pm) return null
       const ref = taskRef(project.prefix, task.number)
-      const reason = locked.statusReason ?? 'Two consecutive failures left the head unchanged without fresh human input or a target change'
+      const reason = locked.statusReason ?? REPETITION_REASON
       const [session] = await tx.insert(planSessions).values({ projectId: project.id, title: `Recovery: ${ref}`, runtime: pm.runtime, createdBy: server }).returning()
       const job: Omit<PmRunJob, 'runId' | 'runNumber' | 'leaseEpoch'> = {
         role: 'pm', runtime: pm.runtime, projectId: project.id, repository: project.repository, defaultBranch: project.defaultBranch,
@@ -148,4 +156,19 @@ export async function answerRecovery(db: Database, events: EventBus, sessionId: 
     events.publish({ type: 'task.updated', task: await loadTask(db, task.id) })
   }
   return released
+}
+
+// The Inbox's way out of an idle stop (D10 covers Failed and Blocked). Failed
+// runs still count, and the human transition starts a fresh repetition streak.
+// False when the task has no idle stop, so the caller's usual action applies.
+export async function releaseStop(db: Database, taskId: string, actor: Actor, options: { to?: 'backlog', comment?: string }): Promise<boolean> {
+  return await db.transaction(async (tx) => {
+    const { task, project } = await lockTask(tx, taskId)
+    if (!idleStop(task)) return false
+    const to = options.to ?? null
+    await applyTransition(tx, task, project, { type: 'release_stop', to }, actor, { event: 'release_stop' })
+    if (options.comment) await tx.insert(comments).values({ taskId, author: actor, body: options.comment, pinned: true })
+    await tx.update(tasks).set({ retryStop: null }).where(eq(tasks.id, taskId))
+    return true
+  })
 }

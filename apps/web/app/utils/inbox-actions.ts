@@ -12,6 +12,7 @@ export function inboxActions(type: InboxItem['type'], task: Pick<Task, 'type'> |
     case 'question':
     case 'blocked': return [{ value: 'clarify', label: 'Answer', icon: 'i-lucide-message-circle' }, { value: 'send_back', label: 'Send back to Backlog', icon: 'i-lucide-undo-2' }, { value: 'delete', label: 'Delete task', icon: 'i-lucide-trash-2' }]
     case 'failed': return [{ value: 'resolve', label: 'Retry', icon: 'i-lucide-rotate-ccw' }, { value: 'send_back', label: 'Send back to Backlog', icon: 'i-lucide-undo-2' }, { value: 'delete', label: 'Delete task', icon: 'i-lucide-trash-2' }]
+    case 'stopped': return [{ value: 'retry', label: 'Retry', icon: 'i-lucide-rotate-ccw' }, { value: 'clarify', label: 'Give direction', icon: 'i-lucide-message-circle' }, { value: 'send_back', label: 'Send back to Backlog', icon: 'i-lucide-undo-2' }, { value: 'delete', label: 'Delete task', icon: 'i-lucide-trash-2' }]
     default: return []
   }
 }

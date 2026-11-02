@@ -35,6 +35,7 @@ export type TransitionDetail =
   | { event: 'run_failed', runId: string, error: string }
   | { event: 'blocked' | 'stuck', runId: string }
   | { event: 'dependency_deleted', dependency: string }
+  | { event: 'release_stop' }
 
 // Why an epic's approval did or didn't survive a rebase, with every commit
 // involved: the epic's history has to answer that on its own (COR-291)

@@ -181,6 +181,7 @@ export function inboxTypeBadge(type: InboxItem['type']): { label: string, color:
     question: { label: 'Question', color: 'info' as const },
     blocked: { label: 'Blocked', color: 'error' as const },
     failed: { label: 'Failed', color: 'error' as const },
+    stopped: { label: 'Stopped', color: 'warning' as const },
     activity: { label: 'Activity', color: 'neutral' as const },
     plan_thread: { label: 'Plan', color: 'primary' as const }
   })[type]

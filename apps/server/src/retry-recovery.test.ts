@@ -1,4 +1,4 @@
-import type { Inbox, RunJob } from '@corral/contracts'
+import type { Inbox, RunJob, TaskInboxItem } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { databaseFixture } from '@corral/db/testing'
 import { asc, eq } from 'drizzle-orm'
@@ -45,6 +45,8 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     const pm = (await runner.next('run.assign', m => m.job.planSessionId === stop.sessionId)).job
     return { ...setup, pm, stop }
   }
+  const mine = async (projectId: string) => (await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project.id === projectId)
+  const act = (taskId: string, input: object) => t.request('POST', `/api/inbox/${taskId}/actions`, input)
 
   it('stops after two unchanged failures, persists one visible PM turn and resumes on a target change', async () => {
     const { task, project, pm } = await stopped()
@@ -59,7 +61,7 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     expect((await t.db.select().from(runs).where(eq(runs.taskId, task.id))).filter(r => r.role === 'pm')).toHaveLength(1)
     expect(pm.prompt).toContain('Read get_task, list_runs and get_run')
     expect(pm.prompt).toContain('propose concrete follow-up work')
-    expect((await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.some(i => i.taskId === task.id)).toBe(false)
+    expect(await mine(task.projectId)).toMatchObject([{ id: task.id, type: 'stopped' }])
     t.clock.now = new Date(t.clock.now.getTime() + 6 * 60_000)
     t.github.setBranch(project.repository, 'main', 'changed-target')
     await t.orchestrator.schedule()
@@ -88,7 +90,105 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     const { task, pm } = await stopped()
     expect(await runner.call(pm.runId, pm.leaseEpoch, 'get_task', { taskRef: task.ref })).toMatchObject({ ok: true })
     expect(await runner.call(pm.runId, pm.leaseEpoch, 'add_comment', { taskRef: task.ref, body: 'The parser uses the wrong field; propose a fix to read targetBranch before retrying.' })).toMatchObject({ ok: true })
-    expect((await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.some(i => i.project.id === task.projectId)).toBe(false)
+    expect(await mine(task.projectId)).toEqual([])
+    await finishPm(pm)
+    for (let i = 0; i < 3; i++) await t.orchestrator.schedule()
+    expect(await row(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: null, retryStop: { capped: false } })
+    const items = await mine(task.projectId)
+    expect(items).toMatchObject([{ id: task.id, taskId: task.id, type: 'stopped', body: expect.stringContaining('The parser uses the wrong field') }])
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ body: expect.stringContaining('Blocked: Two consecutive failures') })
+    expect(items[0]).toMatchObject({ body: expect.stringContaining('Decision needed: retry, give the developer new direction') })
+    expect(items[0]).toMatchObject({ body: expect.stringContaining('Recommendation: address the PM findings') })
+    expect((await t.db.select().from(runs).where(eq(runs.taskId, task.id)).orderBy(asc(runs.number))).map(r => r.role)).toEqual(['developer', 'developer', 'pm'])
+  })
+
+  it('says triage found nothing when no PM comment exists, and ignores findings from an earlier stop', async () => {
+    const first = await stopped()
+    expect(await runner.call(first.pm.runId, first.pm.leaseEpoch, 'add_comment', { taskRef: first.task.ref, body: 'Findings from the first stop.' })).toMatchObject({ ok: true })
+    await finishPm(first.pm)
+    expect((await act(first.task.id, { action: 'retry' })).status).toBe(200)
+    await t.request('PATCH', `/api/projects/${first.project.slug}`, { failedRunCap: 9 })
+    await t.orchestrator.schedule()
+    await fail((await runner.next('run.assign', m => m.job.taskId === first.task.id)).job)
+    await fail((await runner.next('run.assign', m => m.job.taskId === first.task.id)).job)
+    const stop = (await row(first.task.id)).retryStop!
+    expect(stop.sessionId).not.toBe(first.stop.sessionId)
+    await finishPm((await runner.next('run.assign', m => m.job.planSessionId === stop.sessionId)).job, 'Nothing to add.')
+    const [item] = await mine(first.project.id) as TaskInboxItem[]
+    expect(item).toMatchObject({ type: 'stopped', body: expect.stringContaining('PM triage produced no findings.') })
+    expect(item!.body).toContain('Recommendation: review the failed runs')
+    expect(item!.body).not.toContain('Findings from the first stop')
+    expect(item!.body).not.toContain('address the PM findings')
+  })
+
+  it('keeps a stopped task in Needs you when triage fails', async () => {
+    const { task, pm, stop } = await stopped()
+    runner.send({ type: 'run.ended', runId: pm.runId, leaseEpoch: pm.leaseEpoch, exit: { kind: 'exited', code: 1 }, headSha: null })
+    await expect.poll(async () => (await t.db.select().from(runs).where(eq(runs.id, pm.runId)))[0]!.state).toBe('failed')
+    await t.orchestrator.schedule()
+    const items = await mine(task.projectId)
+    expect(items.map(i => i.id).sort()).toEqual([stop.sessionId, task.id].sort())
+    expect(items.find(i => i.id === task.id)).toMatchObject({ type: 'stopped', body: expect.stringContaining('PM triage produced no findings.') })
+  })
+
+  async function stoppedInReview() {
+    const { task, project, job } = await assigned(6)
+    t.github.setBranch(project.repository, job.branch!, 'reviewed-head')
+    for (const c of task.acceptanceCriteria) await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', { criterionId: c.id, kind: 'note', note: 'Evidence' })
+    expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Done', note: 'Opened the PR', headSha: 'reviewed-head' }))
+      .toMatchObject({ ok: true })
+    await t.orchestrator.schedule()
+    const reviewers: RunJob[] = []
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const reviewer = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'reviewer')).job
+      reviewers.push(reviewer)
+      runner.send({ type: 'run.ended', runId: reviewer.runId, leaseEpoch: reviewer.leaseEpoch, exit: { kind: 'exited', code: 1 }, headSha: reviewer.headSha })
+      await expect.poll(async () => (await t.db.select().from(runs).where(eq(runs.id, reviewer.runId)))[0]!.state).toBe('failed')
+      await t.orchestrator.schedule()
+    }
+    const stop = (await row(task.id)).retryStop!
+    expect(stop).toMatchObject({ status: 'agent_review', sessionId: expect.any(String) })
+    await finishPm((await runner.next('run.assign', m => m.job.planSessionId === stop.sessionId)).job)
+    return { task, project }
+  }
+
+  it('lists an agent_review stop and retries the reviewer without moving its status', async () => {
+    const { task, project } = await stoppedInReview()
+    expect(await mine(project.id)).toMatchObject([{ id: task.id, type: 'stopped', body: expect.stringContaining('PM triage produced no findings.') }])
+    const failedRuns = (await row(task.id)).failedRuns
+    expect((await act(task.id, { action: 'retry' })).status).toBe(200)
+    expect(await row(task.id)).toMatchObject({ status: 'agent_review', failedRuns, retryStop: null })
+    expect((await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'reviewer' && m.job.runId !== undefined)).job.role).toBe('reviewer')
+    expect(await mine(project.id)).toEqual([])
+    const resolved = (await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).resolved
+    expect(resolved.find(i => i.taskId === task.id)?.resolution).toBe('You restarted the stopped task')
+  })
+
+  it('sends a stopped task back to the Backlog', async () => {
+    const { task, pm } = await stopped()
+    await finishPm(pm)
+    expect((await act(task.id, { action: 'send_back' })).status).toBe(200)
+    expect(await row(task.id)).toMatchObject({ status: 'backlog', retryStop: null })
+    await t.orchestrator.schedule()
+    expect(await mine(task.projectId)).toEqual([])
+    expect((await t.db.select().from(runs).where(eq(runs.taskId, task.id)).orderBy(asc(runs.number))).map(r => r.role)).toEqual(['developer', 'developer', 'pm'])
+  })
+
+  it('carries a stopped task on with human direction, leaving the failed-run counter alone', async () => {
+    const { task, pm } = await stopped()
+    await finishPm(pm)
+    const { failedRuns } = await row(task.id)
+    expect((await act(task.id, { action: 'clarify', text: 'Read the configured target branch instead.' })).status).toBe(200)
+    expect(await row(task.id)).toMatchObject({ status: 'in_progress', failedRuns, retryStop: null })
+    await t.orchestrator.schedule()
+    expect((await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job.prompt).toBeDefined()
+  })
+
+  it('refuses retry and the status menu on a task that is not stopped', async () => {
+    const { task, project } = await assigned()
+    expect((await act(task.id, { action: 'retry' })).status).toBe(409)
+    expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'release_stop', to: null })).status).toBe(400)
   })
 
   it('shows a structured PM question in Needs you and resumes after the human answers', async () => {

@@ -242,8 +242,10 @@ input stop automatic retries. A new stop or failed-run cap queues one PM triage
 turn, linked on the task; historical Failed tasks are not replayed on deploy.
 The PM investigates task history and code, proposes implementation follow-up
 or records findings, and asks only for requirements, authority or recovery
-choices. Failed/Blocked work stays actionable after comment-only triage, with
-the original decision, PM findings and a recommendation. Pending PM questions
+choices. Failed, Blocked and no-progress-stopped work stays actionable after
+comment-only or failed triage, with the decision, PM findings and a
+recommendation. A no-progress stop keeps its status and shows as a Stopped item
+with Retry, Give direction, Send back and Delete. Pending PM questions
 and plans own the Inbox item while they await a decision; they do not discard
 that task decision. Only an explicitly retry-authorizing choice on a pending
 recovery question resumes work through the usual human resolution. Refusal or

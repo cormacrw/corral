@@ -101,6 +101,9 @@ export type TaskEvent =
   | { type: 'run_failed' }
   // Blocked or Failed → Backlog, Ready or In progress (In progress keeps the branch and PR)
   | { type: 'resolve', to: 'backlog' | 'ready' | 'in_progress' }
+  // A no-progress stop is not a status: the task keeps it, or goes to Backlog.
+  // The server only applies this to an idle stopped task (never a human API input).
+  | { type: 'release_stop', to: 'backlog' | null }
 
 export type TaskEventType = TaskEvent['type']
 
@@ -130,7 +133,8 @@ export const TRANSITION_RULES: Readonly<Record<TaskEventType, Rule>> = {
   block: { from: ['ready', 'in_progress', 'agent_review', 'human_review', 'ready_to_merge'], actors: ['server'] },
   fail: { from: ['in_progress', 'agent_review', 'ready_to_merge'], actors: ['server'] },
   run_failed: { from: ['in_progress', 'agent_review'], actors: ['server'] },
-  resolve: { from: ['blocked', 'failed'], actors: ['human'] }
+  resolve: { from: ['blocked', 'failed'], actors: ['human'] },
+  release_stop: { from: ['in_progress', 'agent_review'], actors: ['human'] }
 }
 
 export type TransitionError =
@@ -284,6 +288,10 @@ export function transition(
         failedRuns: task.status === 'failed' ? 0 : task.failedRuns,
         reviewRounds: task.status === 'blocked' ? 0 : task.reviewRounds
       })
+
+    case 'release_stop':
+      // The failed-run counter stays: only resolving Failed resets it (D10)
+      return ok({ ...task, status: event.to ?? task.status, reason: null })
   }
 }
 
@@ -295,6 +303,7 @@ export function availableEvents(task: Pick<TaskState, 'status' | 'type'>, actor:
   return (Object.keys(TRANSITION_RULES) as TaskEventType[]).filter((event) => {
     const rule = TRANSITION_RULES[event]
     if (event === 'human_approve' && task.type === 'design') return false
+    if (event === 'release_stop') return false // Offered by the Inbox item, not the status menu
     return rule.from.includes(task.status) && rule.actors.includes(type) && (task.status !== 'approved' || task.type === 'design')
   })
 }

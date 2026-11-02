@@ -54,6 +54,7 @@ import { approveDesign, DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFil
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
 import { epicHistory } from './epic-prs.ts'
 import { answerDecision, waitingDecision } from './epic-rebase-approval.ts'
+import { releaseStop } from './retry-recovery.ts'
 import { getEpic, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
 import type { EventBus } from './events.ts'
 import { loadInbox, withRunnerItems } from './inbox.ts'
@@ -175,10 +176,15 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
           await decide(taskId, { action: 'decide', text: input.text })
           break
         }
+        if (await releaseStop(db, taskId, actor, { comment: input.text })) break
         await transitionTask(db, taskId, { type: 'resolve', to: 'in_progress' }, actor, { comment: input.text, invalidatedEpics })
         break
       }
+      case 'retry':
+        if (!await releaseStop(db, taskId, actor, {})) throw new ApiFailure(409, { code: 'conflict', constraint: null })
+        break
       case 'send_back': {
+        if (await releaseStop(db, taskId, actor, { to: 'backlog' })) break
         const [row] = await db.select({ status: schema.tasks.status }).from(schema.tasks).where(eq(schema.tasks.id, taskId))
         await transitionTask(db, taskId, row?.status === 'ready' ? { type: 'send_back' } : { type: 'resolve', to: 'backlog' }, actor, { invalidatedEpics })
         break

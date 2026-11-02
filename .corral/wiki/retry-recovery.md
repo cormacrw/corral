@@ -37,6 +37,16 @@ findings and recovery guidance. A failed or closed recovery conversation cannot
 hide the task permanently. The task
 comment links the conversation and names the triage run.
 
+A no-progress stop has no Failed or Blocked status: the task stays In progress
+or Agent review with no lease, so `openTaskFilter` selects it through
+`retryStop.sessionId` under the same suppression rule, as a `stopped` item dated
+by the stopping run's end. D10's `resolve` does not apply to those statuses, so
+`releaseStop` uses the `release_stop` event, which is hidden from the status
+menu and absent from the transition API. Retry and Give direction keep the
+status, and Send back moves to Backlog; none resets the failed-run counter, and
+the audited human action starts a fresh streak. Findings are taken only from PM
+comments after this stop's queued-triage comment.
+
 Fresh human task input or a changed target releases a repetition stop. A human
 choice in a pending recovery question resumes work only if the PM explicitly
 listed that exact choice in `ask_question.retryOptions`. The selected retry
