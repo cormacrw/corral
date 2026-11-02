@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 import type { AgentTools } from './agent-tools.ts'
 import type { BlobStore } from './blob-store.ts'
 import type { ReleaseNotes } from './deployments.ts'
+import type { EpicFixes } from './epic-fixes.ts'
 import type { EpicPullRequests } from './epic-prs.ts'
 import type { EventBus } from './events.ts'
 import type { GitHubClient } from './github.ts'
@@ -61,6 +62,7 @@ export interface RunCore {
   plans: PlanService | null
   releaseNotes: ReleaseNotes | null
   epicPrs: EpicPullRequests
+  fixes: EpicFixes
   pmTools: PmTools
   merges: MergeOrchestrator
   sweep: WorktreeSweep
@@ -83,6 +85,9 @@ export const HUMAN_STOP = 'Stopped by a human'
 export const KILL_SWITCH_STOP = 'Stopped: Corral was stopped'
 export const KEEP_WORK_STOPS: ReadonlySet<string> = new Set([HUMAN_STOP, KILL_SWITCH_STOP])
 export const RUNNER_WENT_OFFLINE = 'The runner went offline before the run started'
+export const FIX_NOT_STARTED = 'The fix could not start yet'
+// A developer run on an epic that never reached a runner says nothing about the fix
+export const NEVER_STARTED: ReadonlySet<string> = new Set([RUNNER_WENT_OFFLINE, FIX_NOT_STARTED])
 export const RUNNER_RESTARTED = 'The runner restarted during the run: it shut down before it could report'
 
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

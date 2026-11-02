@@ -56,3 +56,8 @@ commands independent of the runner service mode. The Git origin push guard is
 still inherited: deployment tests push directly to their temporary bare repo's
 path, never by clearing the guard or changing the real origin's configuration.
 `agent.test.ts` proves named-origin pushes fail while a local fixture push works.
+
+The epic review-state retry case waits for the Inbox fallback to persist before
+closing its database. Retry publishes an `epic.updated` arrival whose Inbox
+preparation runs asynchronously; closing PGlite during that query can hang
+inside its WASM protocol handler. Wait for the durable result, not a fixed sleep.

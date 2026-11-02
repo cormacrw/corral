@@ -1,15 +1,25 @@
 <script setup lang="ts">
-import type { TaskInboxItem } from '@corral/contracts'
+import type { EpicRebaseDecision } from '@corral/core'
 import { useMutation } from '@tanstack/vue-query'
+import { computed, ref } from 'vue'
+import { reviewEpic } from '~/queries/epics'
 import { actOnInboxItem } from '~/queries/inbox'
 
 // An epic rebase's question (COR-291): what to choose between and what it
 // touches. Picking one resumes the same rebase; the composer answers in words.
-const props = defineProps<{ item: TaskInboxItem & { decision: NonNullable<TaskInboxItem['decision']> } }>()
+// An epic fix has no task, so its answer goes to the epic (D29).
+const props = defineProps<{ item: { taskId: string | null, epicId?: string | undefined, headSha?: string | undefined, decision: EpicRebaseDecision } }>()
 const deciding = useMutation(actOnInboxItem)
+const decidingEpic = useMutation(reviewEpic)
+const pending = computed(() => deciding.isPending.value || decidingEpic.isPending.value)
+const chosen = ref<number | null>(null)
+const error = computed(() => deciding.error.value?.message ?? decidingEpic.error.value?.message ?? null)
 const toast = useToast()
 async function choose(alternative: number) {
-  await deciding.mutateAsync({ taskId: props.item.taskId, input: { action: 'decide', alternative } })
+  chosen.value = alternative
+  const { taskId, epicId, headSha } = props.item
+  if (taskId) await deciding.mutateAsync({ taskId, input: { action: 'decide', alternative } })
+  else await decidingEpic.mutateAsync({ id: epicId!, input: { action: 'decide', alternative, headSha: headSha! } })
   toast.add({ title: 'Done', description: 'Decision sent; the rebase carries on', color: 'success' })
 }
 </script>
@@ -62,8 +72,8 @@ async function choose(alternative: number) {
           variant="outline"
           class="shrink-0"
           :aria-label="`Choose ${alternative.label}`"
-          :loading="deciding.isPending.value && deciding.variables.value?.input.action === 'decide' && deciding.variables.value.input.alternative === index"
-          :disabled="deciding.isPending.value"
+          :loading="pending && chosen === index"
+          :disabled="pending"
           @click="choose(index)"
         />
       </li>
@@ -82,10 +92,10 @@ async function choose(alternative: number) {
       </ul>
     </div>
     <UAlert
-      v-if="deciding.error.value"
+      v-if="error"
       color="error"
       variant="subtle"
-      :title="deciding.error.value.message"
+      :title="error"
     />
   </section>
 </template>

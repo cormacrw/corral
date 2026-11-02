@@ -1,8 +1,19 @@
 import { schema, type Executor } from '@corral/db'
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray } from 'drizzle-orm'
+import { MAX_CI_FIXES } from './ci-output.ts'
 import { isTransient, type GitHubClient } from './github.ts'
 import { slugify } from './projects.ts'
 import type { ProjectRow, TaskRow } from './tasks.ts'
+
+// Submissions in a row, newest back, that were CI fixes. Any other submission
+// ends the count, and a human's Retry leads to one.
+export async function ciFixesInARow(db: Executor, taskId: string): Promise<number> {
+  const rows = await db.select({ fixKind: schema.runs.fixKind }).from(schema.runs)
+    .where(and(eq(schema.runs.taskId, taskId), eq(schema.runs.role, 'developer'), eq(schema.runs.state, 'completed'), inArray(schema.runs.outcome, ['pr_opened', 'pr_updated', 'pr_rebased', 'commit_submitted'])))
+    .orderBy(desc(schema.runs.number)).limit(MAX_CI_FIXES)
+  const other = rows.findIndex(row => row.fixKind !== 'ci')
+  return other === -1 ? rows.length : other
+}
 
 export class EpicBranchError extends Error {
   // Whether trying again later may work (see isTransient in github.ts)

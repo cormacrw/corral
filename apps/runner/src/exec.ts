@@ -15,6 +15,9 @@ export interface ExecOptions {
   // first. For commands whose helpers would outlive them (git-remote-https, gh
   // as a credential helper) and that clean up locks when asked to stop.
   group?: boolean
+  // Hands stdout here as it arrives and doesn't hold it, so MAX_OUTPUT_CHARS
+  // doesn't apply: for output that's only wanted in part, however long it runs
+  onStdout?: (chunk: string) => void
 }
 
 // Far past anything a command here prints, including a paginated `gh api`
@@ -82,6 +85,10 @@ export function exec(command: string, args: string[], options: ExecOptions = {})
 
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
       if (failure) return
+      if (options.onStdout) {
+        options.onStdout(chunk)
+        return
+      }
       stdout += chunk
       if (stdout.length > MAX_OUTPUT_CHARS) abort(`Stopped: more than ${MAX_OUTPUT_CHARS.toLocaleString('en')} characters of output`)
     })

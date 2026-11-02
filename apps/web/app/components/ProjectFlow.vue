@@ -9,6 +9,7 @@ const window = ref<FlowMetricsQuery['window']>(DEFAULT_FLOW_WINDOW)
 // The project parent route keeps the default window current; events invalidate the rest
 const { data: metrics, error, isPending, isPlaceholderData, refetch } = useQuery(computed(() => ({ ...flowQuery(props.slug, window.value), refetchOnMount: false })))
 const maxStatus = computed(() => Math.max(1, ...metrics.value?.timeInStatus.map(s => s.medianMs) ?? []))
+const formatTokens = (tokens: number) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(tokens)
 function category(status: string) {
   if (status === 'human_review') return 'Human wait'
   if (status === 'in_progress' || status === 'agent_review') return 'Agent time'
@@ -58,6 +59,48 @@ function category(status: string) {
         :actions="[{ label: 'Retry', onClick: () => refetch() }]"
       />
       <template v-else-if="metrics">
+        <section
+          class="mt-4 rounded-md border border-default p-3"
+          aria-label="Rework"
+        >
+          <h3 class="text-sm font-medium">
+            Rework in the last {{ metrics.window }}
+          </h3>
+          <dl class="mt-2 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <dt class="text-xs text-muted">
+                Fixes
+              </dt>
+              <dd class="tabular-nums">
+                {{ metrics.fixes.reReviewed }} reviewed again, {{ metrics.fixes.skippedReview }} kept approval
+              </dd>
+            </div>
+            <div>
+              <dt class="text-xs text-muted">
+                Developer runs on epics
+              </dt>
+              <dd class="tabular-nums">
+                {{ metrics.fixes.epicDeveloperRuns }}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-xs text-muted">
+                Reviews per epic
+              </dt>
+              <dd class="tabular-nums">
+                {{ metrics.epicReviews.perEpic.toFixed(1) }} ({{ metrics.epicReviews.reviews }} across {{ metrics.epicReviews.epics }})
+              </dd>
+            </div>
+            <div>
+              <dt class="text-xs text-muted">
+                Tokens: first build vs follow-up
+              </dt>
+              <dd class="tabular-nums">
+                {{ formatTokens(metrics.tokens.firstBuild) }} vs {{ formatTokens(metrics.tokens.followUp) }}
+              </dd>
+            </div>
+          </dl>
+        </section>
         <p
           v-if="metrics.mergedTaskCount === 0"
           class="py-6 text-sm text-muted"

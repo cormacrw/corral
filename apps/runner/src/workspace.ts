@@ -52,7 +52,7 @@ async function checkOut(dataDir: string, bare: string, job: RunJob): Promise<Pre
     return prepared(path, await checkoutOrAdd(bare, path, `origin/${job.defaultBranch}`))
   }
 
-  const workId = job.taskId ?? (job.role === 'reviewer' && job.epicId ? `epic-${job.epicId}` : null)
+  const workId = job.taskId ?? (job.epicId ? `epic-${job.epicId}` : null)
   if (!workId) return { workspace: null, error: 'The job has no task' }
   const path = worktreePath(dataDir, workId, job.role)
 
@@ -69,6 +69,10 @@ async function checkOut(dataDir: string, bare: string, job: RunJob): Promise<Pre
     if (!job.headSha) return { workspace: null, error: 'The job has no commit to review' }
     return prepared(path, await checkoutOrAdd(bare, path, job.headSha))
   }
+
+  // A developer on an epic works one operation's candidate at a time, and a
+  // later operation's is another branch
+  if (job.taskId === null && await keptWorktree(bare, path) && (await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: path })).stdout.trim() !== job.branch) await discardWorktree(bare, path)
 
   // Developer: reuse the worktree between revisions (D10) so uncommitted
   // work is never lost; otherwise start the branch from origin
@@ -283,7 +287,7 @@ export function removeWorktree(bare: string, path: string, force = false): Promi
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 const TASK_FOLDER = new RegExp(`^(${UUID})(-review)?$`)
 const PM_FOLDER = new RegExp(`^pm-${UUID}-(${UUID})$`)
-const EPIC_FOLDER = new RegExp(`^epic-(${UUID})-review$`)
+const EPIC_FOLDER = new RegExp(`^epic-(${UUID})(?:-review)?$`)
 const RUN_FOLDER = new RegExp(`^${UUID}$`)
 const RUN_SPOOL = new RegExp(`^(${UUID})\\.jsonl$`)
 

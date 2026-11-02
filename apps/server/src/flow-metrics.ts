@@ -1,7 +1,7 @@
 import { AGENT_ROLES, TASK_STATUSES, type TaskStatus } from '@corral/core'
 import type { FlowMetrics, FlowMetricsQuery, FlowPercentiles } from '@corral/contracts'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, eq, gte, inArray, isNull, lte } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray, isNull, lte, min } from 'drizzle-orm'
 import { auditText } from './audit.ts'
 
 // Continuous percentiles: interpolate between adjacent sorted observations.
@@ -15,6 +15,9 @@ export function percentiles(values: number[]): FlowPercentiles {
   }
   return { medianMs: at(0.5), p90Ms: at(0.9) }
 }
+
+// A developer's outcomes that hand work over for review
+const SUBMISSIONS = ['pr_opened', 'commit_submitted', 'findings_reported', 'design_submitted'] as const
 
 const validStatus = (value: unknown): value is TaskStatus => TASK_STATUSES.includes(value as TaskStatus)
 const waiting = (status: TaskStatus) => status === 'draft' || status === 'backlog' || status === 'ready'
@@ -88,7 +91,33 @@ export async function flowMetrics(db: Executor, project: Pick<typeof schema.proj
     }
     if (queue.length || duration.length) byRole.push({ role, queueWait: percentiles(queue), duration: percentiles(duration) })
   }
+  const period = and(eq(schema.runs.projectId, project.id), gte(schema.runs.endedAt, since), lte(schema.runs.endedAt, now))
+  const ended = await db.select({ taskId: schema.runs.taskId, epicId: schema.runs.epicId, number: schema.runs.number, role: schema.runs.role, outcome: schema.runs.outcome, reReviewed: schema.runs.reReviewed, inputTokens: schema.runs.inputTokens, cacheReadTokens: schema.runs.cacheReadTokens, outputTokens: schema.runs.outputTokens }).from(schema.runs)
+    .where(and(period, inArray(schema.runs.role, ['developer', 'reviewer'])))
+  const touched = [...new Set(ended.flatMap(run => run.role === 'developer' && run.taskId ? [run.taskId] : []))]
+  // A task's first build ends at its first submission, which may be older
+  const submitted = touched.length
+    ? await db.select({ taskId: schema.runs.taskId, number: min(schema.runs.number) }).from(schema.runs).where(and(inArray(schema.runs.taskId, touched), eq(schema.runs.role, 'developer'), inArray(schema.runs.outcome, SUBMISSIONS))).groupBy(schema.runs.taskId)
+    : []
+  const firstSubmission = new Map(submitted.map(row => [row.taskId, row.number!]))
+  const tokens = { firstBuild: 0, followUp: 0 }
+  for (const run of ended) {
+    if (run.role !== 'developer') continue
+    const used = (run.inputTokens ?? 0) + (run.cacheReadTokens ?? 0) + (run.outputTokens ?? 0)
+    const first = run.taskId ? firstSubmission.get(run.taskId) : undefined
+    if (run.taskId && (first === undefined || run.number <= first)) tokens.firstBuild += used
+    else tokens.followUp += used
+  }
+  const epicReviews = ended.filter(run => run.role === 'reviewer' && run.epicId && (run.outcome === 'approved' || run.outcome === 'changes_requested'))
+  const reviewedEpics = new Set(epicReviews.map(run => run.epicId)).size
   return {
+    fixes: {
+      reReviewed: ended.filter(run => run.reReviewed === true).length,
+      skippedReview: ended.filter(run => run.reReviewed === false).length,
+      epicDeveloperRuns: ended.filter(run => run.role === 'developer' && run.epicId).length
+    },
+    epicReviews: { reviews: epicReviews.length, epics: reviewedEpics, perEpic: reviewedEpics ? epicReviews.length / reviewedEpics : 0 },
+    tokens,
     window, mergedTaskCount: tasks.length,
     leadTime: percentiles(leads), cycleTime: percentiles(cycles),
     timeInStatus: TASK_STATUSES.flatMap((status) => {

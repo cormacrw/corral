@@ -9,6 +9,7 @@ import { exec } from '../../runner/src/exec.ts'
 import { inspectIntegration, prepareIntegration, pushIntegration } from '../../runner/src/integration.ts'
 import { createTestDataDir, TEST_REPOSITORY } from '../../runner/src/test-repo.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
+import { asResolutionTasks } from './test-resolution-task.ts'
 import { FakeRunner } from './test-runner.ts'
 
 // The whole mixed workflow (D27): a real server, the real runner git code and a
@@ -555,6 +556,7 @@ describe('restarting during an epic rebase', () => {
 // the conflict task names, as `git rebase` and an edit would.
 async function conflictedResolution(epic: { id: string }, onto: string, file: string, text: string) {
   await mergePasses(1)
+  await asResolutionTasks(t.db, t.github)
   const operation = (await ops(epic.id)).filter(o => o.kind === 'rebase').at(-1)
   const fix = await taskRow(operation!.resolutionTaskId!)
   await git('checkout', '--quiet', fix.branch!)

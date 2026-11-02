@@ -13,7 +13,7 @@ Short implementation notes written while building. Not binding: `docs/README.md`
 - [Design bundle archives (D20)](design-bundles.md)
 - [Designer task claims (COR-157)](designer-claims.md)
 - [Designer role and bootstrap (COR-156)](designer-role.md)
-- [Epic fix tasks](epic-fix-tasks.md)
+- [Epic fixes and fix tasks](epic-fix-tasks.md)
 - [Epic rebases](epic-rebases.md)
 - [Evidence videos](evidence-videos.md)
 - [Flow metrics](flow-metrics.md)

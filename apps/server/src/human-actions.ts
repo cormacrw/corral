@@ -4,6 +4,7 @@ import { schema } from '@corral/db'
 import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import { ApiFailure } from './errors.ts'
+import { recordSyncFailure } from './epic-sync.ts'
 import { addComment, deleteTaskRows, loadTask, type TaskContentEdit } from './tasks.ts'
 import { HUMAN_STOP, type RunCore } from './run-context.ts'
 
@@ -17,13 +18,16 @@ export class HumanActions {
   }
 
   // A human stops a run: the process tree is killed, the run is Interrupted
-  // and the task is paused so the scheduler doesn't restart it (flows.md §3)
+  // and holds its task or epic fix until the human resumes it (flows.md §3)
   async stopRun(runId: string, actor: Actor): Promise<void> {
     const ctx = await this.#c.runs.load(runId)
     if (!ctx || !isActiveRun(ctx.run.state)) throw new ApiFailure(409, { code: 'conflict', constraint: 'run_not_active' })
     await this.#c.d.db.transaction(async (tx) => {
-      await this.#c.ending.endRunIn(tx, ctx, { state: 'interrupted', error: HUMAN_STOP })
+      if (!await this.#c.ending.endRunIn(tx, ctx, { state: 'interrupted', error: HUMAN_STOP })) throw new ApiFailure(409, { code: 'conflict', constraint: 'run_not_active' })
       if (ctx.task) await tx.update(tasks).set({ paused: true }).where(eq(tasks.id, ctx.task.id))
+      if (ctx.run.epicId && ctx.run.role === 'developer' && ctx.run.operationId) {
+        await recordSyncFailure(tx, ctx.project, ctx.run.epicId, 'The developer fix was stopped by a human. Retry when ready to continue.', this.#c.now())
+      }
       await appendAudit(tx, { projectId: ctx.project.id, taskId: ctx.task?.id ?? null, actor }, auditEvent('run.stopped', { runId }))
     })
     this.#c.d.runner.send({ type: 'run.stop', runId, reason: 'Stopped by a human', keepWork: true }, ctx.run.runnerId)

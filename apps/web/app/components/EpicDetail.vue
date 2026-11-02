@@ -5,7 +5,7 @@ import type { PatchEpicInput } from '@corral/contracts'
 import { isTaskDone, type EpicReviewMode } from '@corral/core'
 import { ApiError } from '~/queries/client'
 import DetailHeader from './DetailHeader.vue'
-import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicReviewStatus, epicWithLiveCounts, PRIORITY, statusCounts } from '~/utils/labels'
+import { EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicReviewStatus, epicStoppedLabel, epicWithLiveCounts, PRIORITY, statusCounts } from '~/utils/labels'
 
 // An epic: its title, description and progress, and the dependency tree of
 // its tasks. Docked in the flyout, as a page with room for a big tree, or
@@ -174,29 +174,38 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
       <div :class="['flex flex-col gap-5 p-4', props.mode === 'page' && 'w-[360px] shrink-0 overflow-y-auto overscroll-contain border-e border-default max-[900px]:w-full max-[900px]:border-e-0']">
         <UAlert
           v-if="waiting.length"
+          class="shrink-0"
           color="warning"
           variant="subtle"
           :title="`Waiting on ${waiting.map(e => e.title).join(', ')}`"
         />
         <UAlert
           v-if="sync?.state === 'resolving'"
+          class="shrink-0"
           color="info"
           variant="subtle"
           title="Resolving a rebase conflict"
           :description="`${sync.taskRef ?? 'A developer'} is rebasing this epic in private${sync.files.length ? `: ${sync.files.join(', ')}` : ''}. The epic branch moves once a reviewer approves.`"
         />
+        <EpicFixAlert
+          v-else-if="sync?.state === 'fixing'"
+          class="shrink-0"
+          :sync="sync"
+        />
         <UAlert
           v-else-if="sync?.state === 'deciding'"
+          class="shrink-0"
           color="warning"
           variant="subtle"
           title="This rebase needs your decision"
-          :description="`${sync.question} It's in your Inbox on ${sync.taskRef ?? 'the rebase task'}. The rebase resumes when you answer.`"
+          :description="`${sync.question} It's in your Inbox${sync.taskRef ? ` on ${sync.taskRef}` : ''}. The rebase resumes when you answer.`"
         />
         <UAlert
           v-else-if="sync?.state === 'failed'"
+          class="shrink-0"
           color="error"
           variant="subtle"
-          title="Rebase stopped"
+          :title="epicStoppedLabel(sync.fix)"
           :description="sync.error"
           :actions="[{ label: 'Retry', loading: retryMutation.isPending.value, onClick: retrySync }]"
         />
@@ -206,6 +215,11 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           aria-label="Epic title"
           @change="patch({ title: ($event.target as HTMLInputElement).value })"
         >
+
+        <EpicFixRuns
+          v-if="epic.fixes?.length"
+          :runs="epic.fixes"
+        />
 
         <section v-if="history.data.value?.length">
           <h3 class="mb-1 text-xs font-medium text-muted">

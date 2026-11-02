@@ -4,7 +4,9 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, gt, notInArray, notLike
 import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
 import { EpicSynchronizer } from './epic-sync.ts'
 import type { EventBus } from './events.ts'
+import { MAX_CI_FIXES } from './ci-output.ts'
 import type { CheckResult, GitHubClient } from './github.ts'
+import { ciFixesInARow } from './task-base.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { applyTransition, lockTask, type ProjectRow } from './tasks.ts'
 
@@ -246,8 +248,12 @@ export class TaskIntegrator {
     this.#awaitingChecks.delete(operation.id)
     if (verdict.state === 'failed') {
       await this.#fail(operation, ctx, `Required checks failed on candidate ${operation.resultHeadSha}: ${verdict.checks.map(c => c.name).join(', ')}`)
+      if (await ciFixesInARow(db, task.id) >= MAX_CI_FIXES) {
+        await this.#transition(task.id, { type: 'fail', reason: `CI still fails after ${MAX_CI_FIXES} fixes in a row: ${verdict.checks.map(c => c.name).join(', ')}` }, { event: 'ci_failed', checks: verdict.checks.map(c => c.name) })
+        return true
+      }
       await this.#transition(task.id, { type: 'ci_failed' }, { event: 'ci_failed', checks: verdict.checks.map(c => c.name) },
-        ['CI failed on this task\'s work applied to the epic branch, which has not moved. Fix it and report commit_submitted.', '', ...verdict.checks.map(c => `- ${c.name}: failed${c.url ? ` (${c.url})` : ''}`)].join('\n'))
+        ['CI failed on this task\'s work applied to the epic branch, which has not moved. Fix it and report commit_submitted.', '', ...verdict.checks.map(c => `- ${c.name}: failed${c.url ? ` (${c.url})` : ''}`)].join('\n'), { ciFix: verdict.checks.map(c => ({ name: c.name, url: c.url })), approvedHeadSha: task.headSha })
       return true
     }
     if (verdict.state === 'timed_out') {
@@ -371,11 +377,12 @@ export class TaskIntegrator {
     await this.#d.github.deleteBranch(ctx.project.repository, candidateRef(operation)).catch(error => console.error(`Could not delete ${candidateRef(operation)}`, error))
   }
 
-  async #transition(taskId: string, event: Parameters<typeof applyTransition>[3], detail: TransitionDetail, comment?: string): Promise<void> {
+  async #transition(taskId: string, event: Parameters<typeof applyTransition>[3], detail: TransitionDetail, comment?: string, values?: Partial<typeof tasks.$inferInsert>): Promise<void> {
     await this.#d.db.transaction(async (tx) => {
       const { task, project } = await lockTask(tx, taskId)
       if (task.status !== 'ready_to_merge' || task.leaseRunId) return
       await applyTransition(tx, task, project, event, server, detail)
+      if (values) await tx.update(tasks).set(values).where(eq(tasks.id, taskId))
       if (comment) await tx.insert(comments).values({ taskId, author: server, body: comment })
     })
     await this.#settled(taskId)

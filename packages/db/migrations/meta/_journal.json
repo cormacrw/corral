@@ -407,6 +407,13 @@
       "when": 1793581444320,
       "tag": "0057_easy_iron_monger",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1793597488491,
+      "tag": "0058_married_kang",
+      "breakpoints": true
     }
   ]
 }

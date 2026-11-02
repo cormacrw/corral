@@ -19,6 +19,37 @@ export interface ResolutionReview {
   checkError?: string | null
 }
 
+// What a developer run on an epic is fixing, with no task (D29)
+export const EPIC_FIX_KINDS = ['conflict', 'ci', 'review'] as const
+export type EpicFixKind = typeof EPIC_FIX_KINDS[number]
+
+// A failed check, as GitHub named it
+export interface EpicFixCheck {
+  name: string
+  url: string | null
+}
+
+// What the developer reported for a candidate, bound to that commit. Only the
+// server's compare, stored here before publishing, lets a conflict fix keep
+// approval.
+export interface EpicFixReport {
+  runId: string
+  headSha: string
+  behaviourChanged: boolean
+  conflictedFiles: string[]
+  summary: string
+  outsideConflicts?: string[]
+  checkError?: string | null
+  // What it changes in files only the target changed, for the integration review
+  targetFiles?: TargetFileChange[]
+}
+
+export interface TargetFileChange {
+  path: string
+  diff: string
+  truncated: boolean
+}
+
 // A choice of product behaviour that a resolution can't make for itself
 export interface EpicDecisionAlternative {
   label: string

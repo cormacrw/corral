@@ -1,13 +1,14 @@
-import type { Epic, EpicDetail, EpicSync, PatchEpicInput } from '@corral/contracts'
-import { checkEpicDependencies, isTaskDone, taskRef, type CompletionState, type Actor } from '@corral/core'
+import type { Epic, EpicDetail, EpicFixDeveloper, EpicSync, PatchEpicInput } from '@corral/contracts'
+import { ACTIVE_RUN_STATES, checkEpicDependencies, isTaskDone, taskRef, type CompletionState, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, eq, inArray, isNotNull, or } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
-import { waitingOn } from './epic-rebase-approval.ts'
+import { epicFixRuns } from './epic-fixes.ts'
+import { openDecision, waitingOn } from './epic-rebase-approval.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { toTasks, type ProjectRow } from './tasks.ts'
 
-const { epics, epicDependencies, taskDependencies, taskIntegrationOperations, projects, tasks } = schema
+const { agents, epics, epicDependencies, runs, taskDependencies, taskIntegrationOperations, projects, tasks } = schema
 
 type EpicRow = typeof epics.$inferSelect
 
@@ -46,7 +47,7 @@ export async function getEpic(db: Executor, epicId: string): Promise<EpicDetail>
   const edges = await db.select().from(epicDependencies)
     .where(or(eq(epicDependencies.epicId, epicId), eq(epicDependencies.dependsOnEpicId, epicId)))
   const syncs = await epicSyncs(db, project, [row])
-  return { ...toEpic(row, project, taskRows, edges, syncs.get(row.id) ?? null), tasks: await toTasks(db, project, taskRows.filter(t => !t.deletedAt)) }
+  return { ...toEpic(row, project, taskRows, edges, syncs.get(row.id) ?? null), tasks: await toTasks(db, project, taskRows.filter(t => !t.deletedAt)), fixes: await epicFixRuns(db, epicId) }
 }
 
 export async function patchEpic(db: Executor, epicId: string, input: PatchEpicInput, actor: Actor): Promise<Epic> {
@@ -74,15 +75,23 @@ async function epicSyncs(db: Executor, project: ProjectRow, rows: EpicRow[]): Pr
   const active = await db.select({ operation: taskIntegrationOperations, number: tasks.number, status: tasks.status, statusReason: tasks.statusReason }).from(taskIntegrationOperations)
     .leftJoin(tasks, eq(tasks.id, taskIntegrationOperations.resolutionTaskId))
     .where(and(inArray(taskIntegrationOperations.epicId, ids), eq(taskIntegrationOperations.kind, 'rebase'), inArray(taskIntegrationOperations.state, ['pending', 'running', 'reconciling'])))
+  const working = await db.select({ epicId: runs.epicId, agentId: runs.agentId, name: agents.name, runId: runs.id, runNumber: runs.number }).from(runs).innerJoin(agents, eq(agents.id, runs.agentId))
+    .where(and(inArray(runs.epicId, ids), eq(runs.role, 'developer'), inArray(runs.state, [...ACTIVE_RUN_STATES])))
+  const developers = new Map(working.map(({ epicId, ...developer }): [string, EpicFixDeveloper] => [epicId!, developer]))
   for (const { operation, number, status, statusReason } of active) {
     const deciding = status ? waitingOn(operation, { status, statusReason }) : null
-    syncs.set(operation.epicId, operation.resolutionTaskId
-      ? deciding
-        ? { state: 'deciding', question: deciding.question, taskId: operation.resolutionTaskId, taskRef: number === null ? null : taskRef(project.prefix, number) }
-        : { state: 'resolving', files: operation.conflictFiles ?? [], taskId: operation.resolutionTaskId, taskRef: number === null ? null : taskRef(project.prefix, number) }
-      : { state: 'rebasing' })
+    const asking = operation.fix ? openDecision(operation) : null
+    syncs.set(operation.epicId, asking
+      ? { state: 'deciding', question: asking.question, taskId: null, taskRef: null }
+      : operation.fix
+        ? { state: 'fixing', fix: operation.fix, reason: operation.fixBrief ?? '', files: operation.conflictFiles ?? [], developer: developers.get(operation.epicId) ?? null, attempts: operation.fixAttempts }
+        : operation.resolutionTaskId
+          ? deciding
+            ? { state: 'deciding', question: deciding.question, taskId: operation.resolutionTaskId, taskRef: number === null ? null : taskRef(project.prefix, number) }
+            : { state: 'resolving', files: operation.conflictFiles ?? [], taskId: operation.resolutionTaskId, taskRef: number === null ? null : taskRef(project.prefix, number) }
+          : { state: 'rebasing' })
   }
-  for (const row of rows) if (row.syncError) syncs.set(row.id, { state: 'failed', error: row.syncError })
+  for (const row of rows) if (row.syncError) syncs.set(row.id, { state: 'failed', error: row.syncError, fix: active.find(a => a.operation.epicId === row.id)?.operation.fix ?? null })
   return syncs
 }
 

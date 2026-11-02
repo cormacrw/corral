@@ -1,6 +1,6 @@
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createTask, transitionTask } from './tasks.ts'
 import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-state.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
@@ -166,4 +166,7 @@ it('retries the rebase of a conflicted epic without touching its review', async 
   expect(row).toMatchObject({ reviewState: 'conflict', syncRetriedAt: expect.any(Date) })
   expect(interrupted()).toEqual([])
   expect((await t.db.select().from(schema.runs).where(eq(schema.runs.id, run.id)))[0]!.state).toBe('running')
+  // Retry publishes an Inbox arrival asynchronously. Let its fallback persist
+  // before teardown closes PGlite underneath the pending query.
+  await vi.waitFor(async () => expect(await t.db.select().from(schema.inboxMessages)).toHaveLength(1))
 })

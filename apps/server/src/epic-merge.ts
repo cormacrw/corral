@@ -4,13 +4,14 @@ import { and, asc, eq, inArray, isNotNull, ne } from 'drizzle-orm'
 import { appendAudit, auditEvent, type EpicPrDetail } from './audit.ts'
 import { publishEpicDependents } from './dependent-tasks.ts'
 import { loadEpic } from './epics.ts'
-import { complete, createEpicFixTask, epicBoard } from './epic-prs.ts'
+import { openEpicFix } from './epic-fixes.ts'
+import { complete, epicBoard } from './epic-prs.ts'
 import { activeRebase, recordSyncFailure } from './epic-sync.ts'
 import { isTransient, requiredChecks, type CheckResult, type PullRequest } from './github.ts'
 import type { MergeDeps } from './merge.ts'
 import { Backoff, HeadAttempts, MAX_MERGE_ATTEMPTS } from './retries.ts'
 import { runEndValues } from './run-lifecycle.ts'
-import { loadTask, type ProjectRow } from './tasks.ts'
+import type { ProjectRow } from './tasks.ts'
 
 const { epics, projects, runs } = schema
 const server: Actor = { kind: 'system', component: 'server' }
@@ -137,21 +138,21 @@ export class EpicMerger {
       .where(and(eq(runs.epicId, epic.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
   }
 
-  // Like a task's CI failure, but the work to fix it is a task in the epic
+  // Like a task's CI failure, but on the epic: a developer run under the writer
+  // lock, which holds the epic here until its candidate is published (D29)
   async #ciFailed(epic: EpicRow, project: ProjectRow, failed: CheckResult[]): Promise<void> {
     const { db, events } = this.#d
     const lines = failed.map(c => `${c.name}: failed${c.url ? ` (${c.url})` : ''}`).join('; ')
-    const taskId = await db.transaction(async (tx) => {
-      // The pass's copy may be old: one failure makes one fix task
+    const fix = await db.transaction(async (tx) => {
+      // The pass's copy may be old: one failure makes one fix
       const [locked] = await tx.select().from(epics).where(eq(epics.id, epic.id)).for('update')
-      if (locked?.reviewState !== 'ready_to_merge' || locked.prHeadSha !== epic.prHeadSha) return null
-      return createEpicFixTask(tx, project, epic, `CI failed on the epic PR. ${lines}`, server)
+      if (locked?.reviewState !== 'ready_to_merge' || locked.prHeadSha !== epic.prHeadSha || locked.syncError) return null
+      return openEpicFix(tx, project, locked, { fix: 'ci', brief: `CI failed on the epic PR. ${lines}`, headSha: epic.prHeadSha!, checks: failed.map(c => ({ name: c.name, url: c.url })) }, server, this.#now())
     })
-    if (!taskId) return
+    if (!fix) return
     await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'ci_failed', summary: lines }))
-    events.publish({ type: 'task.created', task: await loadTask(db, taskId) })
     events.publish({ type: 'epic.updated', epic: await loadEpic(db, epic.id) })
-    this.#d.wake?.([taskId])
+    this.#d.wake?.([])
   }
 
   // Never records a merge without GitHub showing it, as for tasks. The lock

@@ -98,15 +98,17 @@ export class AgentTools {
       if (tool === 'get_task') {
         const [epic] = await this.#c.d.db.select().from(schema.epics).where(eq(schema.epics.id, ctx.run.epicId))
         if (!epic) throw new ToolError('Epic no longer exists')
-        return epicReviewContext(this.#c.d.db, epic, ctx.project)
+        const context = await epicReviewContext(this.#c.d.db, epic, ctx.project)
+        return ctx.run.role === 'developer' ? { ...context, fix: ctx.run.fixKind, branch: `corral/epic-rebase/${ctx.run.operationId}` } : context
       }
       if (tool === 'get_evidence') return this.#getEvidence(ctx, z.object({ evidenceId: z.string().optional() }).parse(input))
+      if (tool === 'report_outcome' && ctx.run.role === 'developer') return this.#c.fixes.report(ctx, parseReport(outcomeReportSchema, { criteria: [], ...(input as object) }))
       if (tool === 'report_outcome') {
         await this.#c.epicPrs.report(ctx.run, parseReport(epicReviewReportSchema, input))
         this.#c.ending.finished(ctx, 'Epic integration review recorded')
         return { ok: true }
       }
-      throw new ToolError('Epic integration reviews use get_task, get_evidence and report_outcome')
+      throw new ToolError('Runs on an epic use get_task and report_outcome, and an integration review get_evidence too')
     }
     switch (tool) {
       case 'get_task':
