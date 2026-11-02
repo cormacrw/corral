@@ -51,6 +51,7 @@ import { flowMetrics } from './flow-metrics.ts'
 import { DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
 import { epicHistory } from './epic-prs.ts'
+import { getEpicReview } from './epic-review.ts'
 import { getEpic, listEpicHistory, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
 import type { EventBus } from './events.ts'
 import { loadInbox, withRunnerItems } from './inbox.ts'
@@ -311,6 +312,7 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
 
     .post('/epics/:id/sync/retry', async c => c.json(await orchestrator.epicPrs.retrySync(c.req.param('id'), actor)))
     .get('/epics/:id/activity', async c => c.json(await listEpicHistory(db, c.req.param('id'))))
+    .get('/epics/:id/review', async c => c.json(await getEpicReview(db, github, c.req.param('id'))))
 
     .get('/epics/:id', async c => c.json(await getEpic(db, c.req.param('id'))))
 

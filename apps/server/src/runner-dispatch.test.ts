@@ -190,7 +190,7 @@ describe('runner capacity, runtimes and roles', () => {
     await t.orchestrator.schedule()
     const [developer, first] = await assignedOn([a], j => j.taskId === task.id)
     await started(developer, first, 'session-1')
-    const compare = vi.spyOn(t.github, 'compare').mockResolvedValue({ mergeBase: 'base', files: [{ filename: 'a.ts', status: 'modified', sha: 's', patch: '+const a = 1' }] })
+    const compare = vi.spyOn(t.github, 'compare').mockResolvedValue({ mergeBase: 'base', files: [{ filename: 'a.ts', status: 'modified', additions: 1, deletions: 0, sha: 's', patch: '+const a = 1' }] })
     const developers = eq(schema.agents.role, 'developer')
     await changesRequested(project, task, developer, first, [a], async () => {
       await t.db.update(schema.agents).set({ paused: true }).where(developers)

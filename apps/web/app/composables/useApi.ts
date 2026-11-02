@@ -13,6 +13,7 @@ import type {
   Epic,
   EpicDetail,
   EpicHistoryEntry,
+  EpicReview,
   EpicReviewActionInput,
   Evidence,
   GlobalStatus,
@@ -213,6 +214,7 @@ export const api = {
 
   epics: {
     activity: (id: string) => call<AuditEntry[]>('GET', `/epics/${id}/activity`),
+    getReview: (id: string) => call<EpicReview>('GET', `/epics/${id}/review`),
     review: (id: string, input: EpicReviewActionInput) => call<{ ok: boolean }>('POST', `/epics/${id}/review`, input),
     retrySync: (id: string) => call<{ ok: boolean }>('POST', `/epics/${id}/sync/retry`),
     setDependencies: (id: string, dependsOn: string[]) => call<Epic>('PUT', `/epics/${id}/dependencies`, { dependsOn }),

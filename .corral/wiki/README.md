@@ -15,6 +15,7 @@ Short implementation notes written while building. Not binding: `docs/README.md`
 - [Designer role and bootstrap (COR-156)](designer-role.md)
 - [Epic fixes and fix tasks](epic-fix-tasks.md)
 - [Epic rebases](epic-rebases.md)
+- [Epic review in the Inbox](epic-inbox-panel.md)
 - [Evidence videos](evidence-videos.md)
 - [Flow metrics](flow-metrics.md)
 - [Criteria checked by a human](human-checked-criteria.md)

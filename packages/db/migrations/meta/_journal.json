@@ -435,6 +435,13 @@
       "when": 1793610094555,
       "tag": "0061_windy_longshot",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1793613717787,
+      "tag": "0062_gorgeous_expediter",
+      "breakpoints": true
     }
   ]
 }

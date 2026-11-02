@@ -114,7 +114,7 @@ it('counts a PR merged on GitHub, and leaves a closed one to the human', async (
   t.github.pulls.get(closed.pr.number)!.state = 'closed'
   await t.mergePass()
   expect(await reload(closed.epic.id)).toMatchObject({ reviewState: 'open', approvedHeadSha: null, approvedBaseSha: null })
-  expect((await inbox()).activity.find(a => a.epicId === closed.epic.id)!.preview).toBe('Epic PR closed on GitHub')
+  expect((await inbox()).activity.find(a => a.type === 'epic_activity' && a.epicId === closed.epic.id)!.preview).toBe('Epic PR closed on GitHub')
 })
 
 it('holds tasks in a dependent epic until the epic PR merges, though every task is Merged', async () => {

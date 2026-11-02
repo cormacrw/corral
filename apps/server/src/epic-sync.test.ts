@@ -68,7 +68,7 @@ beforeAll(async () => {
   t.github.compare = async (_, base, head) => {
     const mergeBase = await git('merge-base', base, head)
     const names = (await git('diff', '--name-status', '--no-renames', mergeBase, head)).split('\n').filter(Boolean).map(line => line.split('\t') as [string, string])
-    const files = await Promise.all(names.map(async ([status, filename]) => ({ filename, status: status === 'A' ? 'added' : status === 'D' ? 'removed' : 'modified', sha: '', patch: await git('diff', mergeBase, head, '--', filename) })))
+    const files = await Promise.all(names.map(async ([status, filename]) => ({ filename, status: status === 'A' ? 'added' : status === 'D' ? 'removed' : 'modified', additions: 1, deletions: 0, sha: '', patch: await git('diff', mergeBase, head, '--', filename) })))
     return { mergeBase, files }
   }
   runner = await FakeRunner.connect(t.server!.url, [], 'r1', { taskIntegrationProtocols: [TASK_INTEGRATION_PROTOCOL], taskIntegrationExecutor: true, epicRebaseExecutor: true })

@@ -145,6 +145,12 @@ export const epicDecisionInput = z.object({
   })).min(2, 'Give at least two alternatives').max(5),
   affectedChanges: z.array(z.string().trim().min(1)).min(1, 'Name the changes affected').describe('The commits, files or tasks on each side this decision affects')
 })
+export const epicReviewFindingSchema = z.object({
+  level: z.enum(['blocking', 'non_blocking']),
+  text: z.string().trim().min(1),
+  taskRefs: z.array(z.string().trim().min(1))
+})
+export type EpicReviewFinding = z.infer<typeof epicReviewFindingSchema>
 
 // The report_outcome tool's arguments. MCP clients need a plain object as a
 // tool's input, so this stays flat; the schemas below decide which fields each
@@ -158,7 +164,8 @@ export const reportOutcomeInput = z.object({
   note: z.string().trim().optional().describe('Developer only, required: one line of at most 200 characters saying what this run did, posted as a comment on the task, e.g. "Addressed review: dropped idle-thread fixture"'),
   criteria: z.array(criterionVerdict).optional().describe('Reviewer only: a verdict per acceptance criterion'),
   preservesApproval: z.boolean().optional().describe('Reviewer of an epic rebase resolution only, when approving: true only if the approved behaviour is unchanged; false restarts the epic\'s normal review'),
-  decision: epicDecisionInput.optional().describe('Epic rebase resolutions only, with stuck or blocked: the question for the human, with alternatives and the changes affected. Without it the summary is asked as the question and the human can only answer in words')
+  decision: epicDecisionInput.optional().describe('Epic rebase resolutions only, with stuck or blocked: the question for the human, with alternatives and the changes affected. Without it the summary is asked as the question and the human can only answer in words'),
+  findings: z.array(epicReviewFindingSchema).optional().describe('Epic reviewer only: integration problems, marked blocking or non_blocking, with the task refs they concern')
 })
 
 // Set by the runner, never the agent. headSha: the commit a developer's run
@@ -181,7 +188,7 @@ export const rebaseReviewReportSchema = z.discriminatedUnion('outcome', [
 
 // D23: an integration review judges the whole epic, not one task's criteria
 export const epicReviewReportSchema = z.object({
-  ...reportFields, outcome: z.enum(REVIEW_VERDICTS, { error: `must be one of ${REVIEW_VERDICTS.join(', ')}` })
+  ...reportFields, findings: z.array(epicReviewFindingSchema).default([]), outcome: z.enum(REVIEW_VERDICTS, { error: `must be one of ${REVIEW_VERDICTS.join(', ')}` })
 })
 
 export type OutcomeReport = z.infer<typeof outcomeReportSchema> | z.infer<typeof rebaseReviewReportSchema>

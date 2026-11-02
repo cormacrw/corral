@@ -1,6 +1,6 @@
 import { arrivalKey, storedMessages, withMessages, type PreparedItem } from './inbox-message.ts'
-import type { EpicConflictItem, EpicHistoryEntry, EpicReviewActionInput, EpicReviewItem, EpicReviewReport, EpicReviewTask, InboxSince, RunJob } from '@corral/contracts'
-import { ACTIVE_RUN_STATES, isActiveRun, feedbackFixTitle, FIX_TITLE_PREFIX, feedbackPoints, isTaskDone, LEASE_DURATION_MS, markdownToRichText, taskRef, type Actor, type CompletionState, type EpicRebaseDecision } from '@corral/core'
+import type { EpicConflictItem, EpicHistoryEntry, EpicReviewActionInput, EpicReviewItem, EpicReviewReport, EpicReviewRound, EpicReviewTask, InboxSince, RunJob } from '@corral/contracts'
+import { ACTIVE_RUN_STATES, isActiveRun, feedbackFixTitle, feedbackPoints, isTaskDone, LEASE_DURATION_MS, markdownToRichText, taskRef, type Actor, type CompletionState, type EpicRebaseDecision } from '@corral/core'
 import type { TargetFileChange } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm'
@@ -13,7 +13,7 @@ import { loadEpic } from './epics.ts'
 import { ACTIVE_OPERATION, APPROVED_STATES, deferredConflicts, openDecision, shortSha } from './epic-rebase-approval.ts'
 import { activeRebase, rebasingEpics, retrySync } from './epic-sync.ts'
 import { requiredChecks, type PullRequest } from './github.ts'
-import { epicReviewCiSection, epicReviewPrompt, type EpicReviewCi } from './prompts.ts'
+import { epicReviewCiSection, epicReviewPrompt, findingsText, type EpicReviewCi } from './prompts.ts'
 import { Backoff } from './retries.ts'
 import { fileArtifacts, workNotes } from './inbox-changes.ts'
 import { runEndValues, RUN_TIMEOUT_SECONDS } from './run-lifecycle.ts'
@@ -21,7 +21,7 @@ import { listEvidenceFor } from './runs.ts'
 import { thumbnailUrl } from './projects.ts'
 import { commitUrl, createTask, listCommentsFor, loadTask, toTasks, type ProjectRow, type TaskRow } from './tasks.ts'
 
-const { acceptanceCriteria, agents, auditLog, epics, projects, runs, taskIntegrationOperations: operations, tasks } = schema
+const { acceptanceCriteria, agents, auditLog, epicReviewRounds, epics, projects, runs, taskIntegrationOperations: operations, tasks } = schema
 const system: Actor = { kind: 'system', component: 'server' }
 const REVIEW_FAILED = 'Integration review failed'
 type EpicRow = typeof epics.$inferSelect
@@ -173,7 +173,8 @@ export class EpicPullRequests {
         if (!runnerId) return null
         const [run] = await tx.insert(runs).values({ projectId: project.id, epicId: epic.id, agentId, role: 'reviewer', runnerId, leaseEpoch: 1, leaseExpiresAt: new Date(this.now().getTime() + LEASE_DURATION_MS), headSha: epic.prHeadSha, queuedAt: this.now() }).returning()
         const context = await epicReviewContext(tx, epic, project)
-        const [last] = await tx.select({ headSha: runs.headSha, summary: runs.summary, outcome: runs.outcome }).from(runs)
+        const [last] = await tx.select({ id: runs.id, headSha: runs.headSha, summary: runs.summary, outcome: runs.outcome, findings: epicReviewRounds.findings }).from(runs)
+          .leftJoin(epicReviewRounds, eq(epicReviewRounds.runId, runs.id))
           .where(and(eq(runs.epicId, epic.id), eq(runs.role, 'reviewer'), eq(runs.state, 'completed'), inArray(runs.outcome, ['approved', 'changes_requested']), ne(runs.id, run!.id))).orderBy(desc(runs.number)).limit(1)
         const targetFiles = await unreviewedTargetFiles(tx, epic.id)
         const fixes = last?.headSha ? await tx.select({ summary: runs.summary, kind: runs.fixKind }).from(runs).where(and(eq(runs.epicId, epic.id), eq(runs.role, 'developer'), eq(runs.outcome, 'pr_updated'))).orderBy(desc(runs.number)).limit(5) : []
@@ -182,7 +183,7 @@ export class EpicPullRequests {
           projectId: project.id, repository: project.repository, defaultBranch: project.defaultBranch, baseBranch: project.defaultBranch,
           taskId: null, taskRef: null, epicId: epic.id, branch: epic.branch, headSha: epic.prHeadSha,
           planSessionId: null, agentSessionId: null, fallbackPrompt: null, model: null, timeoutSeconds: RUN_TIMEOUT_SECONDS,
-          prompt: epicReviewPrompt({ agentName: agent.name, title: epic.title, context, target: project.defaultBranch, headSha: epic.prHeadSha, requiredChecks: project.requiredChecks, targetFiles, lastReview: last?.headSha ? { headSha: last.headSha, summary: last.summary ?? '', outcome: last.outcome!, fixes: fixes.map(f => f.summary ?? '').filter(Boolean) } : null })
+          prompt: epicReviewPrompt({ agentName: agent.name, title: epic.title, context, target: project.defaultBranch, headSha: epic.prHeadSha, requiredChecks: project.requiredChecks, targetFiles, lastReview: last?.headSha ? { headSha: last.headSha, findings: last.findings ?? [], summary: last.summary ?? '', outcome: last.outcome!, fixes: fixes.map(f => f.summary ?? '').filter(Boolean) } : null })
         }
       }
       return null
@@ -221,10 +222,17 @@ export class EpicPullRequests {
       // Nothing else should hold the lock here, and a fix needs it
       if (report.outcome === 'changes_requested' && await activeOperation(tx, epic.id)) throw new Error('Epic changed during review; this verdict is stale')
       const actor: Actor = { kind: 'agent', role: 'reviewer', runId: run.id }
+      const [previous] = await tx.select({ round: epicReviewRounds.round }).from(epicReviewRounds)
+        .where(eq(epicReviewRounds.epicId, epic.id)).orderBy(desc(epicReviewRounds.round)).limit(1)
+      await tx.insert(epicReviewRounds).values({
+        epicId: epic.id, runId: run.id, reviewerId: run.agentId,
+        round: (previous?.round ?? 0) + 1, headSha: run.headSha!,
+        verdict: outcome, summary: report.summary, findings: report.findings, createdAt: this.now()
+      })
       await tx.update(runs).set(runEndValues({ state: 'completed', outcome, summary: report.summary }, this.now())).where(eq(runs.id, run.id))
       await tx.update(epics).set({ reviewState: report.outcome === 'approved' ? 'human_review' : 'changes_requested', ...report.outcome === 'approved' ? await this.snapshot(project, run.headSha!) : { approvedHeadSha: null, approvedBaseSha: null }, updatedAt: this.now() }).where(eq(epics.id, epic.id))
       await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId: epic.id, event: outcome, headSha: run.headSha, summary: report.summary }))
-      if (report.outcome === 'changes_requested') await openEpicFix(tx, project, epic, { fix: 'review', brief: report.summary, headSha: run.headSha! }, actor, this.now())
+      if (report.outcome === 'changes_requested') await openEpicFix(tx, project, epic, { fix: 'review', brief: report.findings.length ? `${report.summary}\n\n${findingsText(report.findings)}` : report.summary, headSha: run.headSha! }, actor, this.now())
     })
     await this.publish(run.epicId!)
   }
@@ -280,7 +288,8 @@ export class EpicPullRequests {
       }
       await tx.update(epics).set({ reviewState: input.action === 'approve' ? 'ready_to_merge' : 'changes_requested', ...input.action === 'approve' ? await this.snapshot(project, input.headSha) : { approvedHeadSha: null, approvedBaseSha: null }, updatedAt: this.now() }).where(eq(epics.id, epic.id))
       if (input.action === 'request_changes') fixId = await createEpicFixTask(tx, project, epic, input.text!.trim(), actor)
-      await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId, event: input.action === 'approve' ? 'human_approved' : 'human_changes_requested', headSha: input.headSha, summary: input.text ?? '', ...(input.action === 'approve' && { confirmedCriteria: required.flatMap(r => r.humanChecks), confirmedTasks: required.filter(r => r.humanReview).map(r => r.taskId) }) }))
+      const [fix] = fixId ? await tx.select().from(tasks).where(eq(tasks.id, fixId)) : []
+      await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.pr', { epicId, ...(fix && { fixTasks: [{ id: fix.id, ref: taskRef(project.prefix, fix.number), title: fix.title }] }), event: input.action === 'approve' ? 'human_approved' : 'human_changes_requested', headSha: input.headSha, summary: input.text ?? '', ...(input.action === 'approve' && { confirmedCriteria: required.flatMap(r => r.humanChecks), confirmedTasks: required.filter(r => r.humanReview).map(r => r.taskId) }) }))
     })
     if (fixId) this.d.events.publish({ type: 'task.created', task: await loadTask(this.d.db, fixId) })
     await this.publish(epicId)
@@ -328,7 +337,7 @@ export async function epicHistory(db: Executor, epicId: string): Promise<EpicHis
 
 // A human's change request: new work with its own criteria (D29)
 export async function createEpicFixTask(tx: Executor, project: ProjectRow, epic: EpicRow, feedback: string, actor: Actor) {
-  return createTask(tx, project, { type: 'task', title: feedbackFixTitle(feedback), description: markdownToRichText(feedback), epicId: epic.id, acceptanceCriteria: feedbackPoints(feedback) }, actor, { epicFix: true })
+  return createTask(tx, project, { type: 'task', title: feedbackFixTitle(feedback), description: markdownToRichText(feedback), epicId: epic.id, acceptanceCriteria: feedbackPoints(feedback) }, actor, { epicFix: true, kind: 'fix' })
 }
 
 function humanCriteria(db: Executor, board: Awaited<ReturnType<typeof epicBoard>>) {
@@ -385,6 +394,25 @@ async function epicEntries(db: Executor, epicIds: string[]) {
   return Map.groupBy(rows, r => r.epicId!)
 }
 
+// The human's latest request for changes on the epic PR, if any. Its detail
+// is a snapshot; older records have no fix task links.
+export async function lastChangesRequest(db: Executor, epicId: string) {
+  const [action] = await db.select({ detail: auditLog.detail, createdAt: auditLog.createdAt }).from(auditLog)
+    .where(and(eq(auditLog.action, 'epic.pr'), sql`${auditText('epic.pr', 'epicId')} = ${epicId}`, sql`${auditText('epic.pr', 'event')} = ${CHANGES_EVENT}`))
+    .orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(1)
+  return action
+}
+
+export async function listEpicRounds(db: Executor, epicId: string): Promise<EpicReviewRound[]> {
+  const rounds = await db.select({ review: epicReviewRounds, reviewer: { id: agents.id, name: agents.name } })
+    .from(epicReviewRounds).innerJoin(agents, eq(agents.id, epicReviewRounds.reviewerId))
+    .where(eq(epicReviewRounds.epicId, epicId)).orderBy(asc(epicReviewRounds.round))
+  return rounds.map(({ review: r, reviewer }) => ({
+    round: r.round, verdict: r.verdict, reviewer, headSha: r.headSha,
+    summary: r.summary, findings: r.findings, at: r.createdAt.toISOString()
+  }))
+}
+
 type EpicEntry = NonNullable<ReturnType<Awaited<ReturnType<typeof epicEntries>>['get']>>[number]
 
 // What's new on an epic since the human last requested changes on its PR
@@ -395,8 +423,9 @@ function epicChanges(entries: EpicEntry[], board: EpicBoard, comments: Awaited<R
   const newArtifacts = board.flatMap(({ task, evidence }) => fileArtifacts(evidence, at, task.ref))
   if (!action || !at) return { since: null, newArtifacts }
   const notes = board.flatMap(({ task }) => workNotes(comments.get(task.id) ?? [], at, task.ref))
-  // The fix task the request created shares its transaction, and so its time
-  const fixTasks = board.filter(({ task }) => task.title.startsWith(FIX_TITLE_PREFIX) && task.createdAt >= at).map(({ task }) => ({ id: task.id, ref: task.ref, title: task.title }))
+  // Snapshot the request's tasks, even if later renamed or removed. Older
+  // audit records have no links; never guess them from a title or timestamp.
+  const fixTasks = readAudit(action.detail).fixTasks ?? []
   const since: InboxSince = { at, text: readAudit(action.detail).summary || null, notes: notes.sort((a, b) => a.at.localeCompare(b.at)), fixTasks }
   return { since, newArtifacts }
 }
@@ -452,6 +481,7 @@ async function prepareEpicItems(db: Executor, epicId?: string): Promise<Prepared
   const boards = await boardsWithEvidence(db, waiting.map(({ project, board }) => ({ project, rows: board })))
   const changed = waiting.flatMap(({ epic }, i) => entries.get(epic.id)?.some(e => e.event === CHANGES_EVENT) ? boards[i]!.map(b => b.task.id) : [])
   const comments = await listCommentsFor(db, changed)
+  const rounds = await Promise.all(waiting.map(({ epic }) => listEpicRounds(db, epic.id)))
   const items = waiting.map(({ epic, project, review, failure, decision, stopped }, i): PreparedItem<EpicReviewItem | EpicConflictItem> => {
     const type = decision || stopped || epic.reviewState === 'conflict' ? 'epic_conflict' : 'epic_review'
     const all = entries.get(epic.id) ?? []
@@ -465,7 +495,7 @@ async function prepareEpicItems(db: Executor, epicId?: string): Promise<Prepared
     }
     if (type === 'epic_review') {
       const verdict = failure ?? review?.summary ?? 'Integration approved'
-      return { item: { ...shared, type, preview: verdict, body: verdict, sender: failure || !review ? { name: 'Corral', role: 'system' } : { name: review.agent, role: 'reviewer' }, tasks: boards[i]! }, arrival: arrivalKey({ id: epic.id, type, at }, arrivals) }
+      return { item: { ...shared, type, preview: verdict, body: verdict, sender: failure || !review ? { name: 'Corral', role: 'system' } : { name: review.agent, role: 'reviewer' }, tasks: boards[i]!, reviewRounds: rounds[i]!, findings: rounds[i]!.at(-1)?.findings ?? [] }, arrival: arrivalKey({ id: epic.id, type, at }, arrivals) }
     }
     const files = epic.conflictFiles ?? []
     if (decision) {

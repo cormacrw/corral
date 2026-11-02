@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import type { InboxActionInput, InboxArtifact, ServerEvent } from '@corral/contracts'
+import type { EpicActivityItem, InboxActionInput, InboxArtifact, ServerEvent } from '@corral/contracts'
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -10,6 +10,8 @@ import { applyEvent, invalidateKeys } from '~/queries/dependencies'
 import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
 import PromptComposer from '~/components/PromptComposer.vue'
+import InboxEpicPanel from '~/components/InboxEpicPanel.vue'
+import { readDraft, writeDraft } from '~/composables/useDraft'
 import InboxPanel from '~/components/InboxPanel.vue'
 import InboxPanelActions from '~/components/InboxPanelActions.vue'
 import InboxPanelArtifacts from '~/components/InboxPanelArtifacts.vue'
@@ -121,7 +123,7 @@ async function mountInbox(type: 'human_review' | 'failed' | 'question', taskRef?
   const NuxtPage = vue.defineComponent({ setup: () => () => params.itemId ? vue.h(InboxItemPage, { key: params.itemId }) : vue.h(InboxIndexPage) })
   const wrapper = mount(InboxPage, { global: {
     plugins: [[VueQueryPlugin, { queryClient: client }]],
-    components: { NuxtPage, InboxPanel, ...(mobile && { InboxMobileItem, MobilePageHeader: plain }), InboxPanelThumbBar, InboxPanelActions, InboxPanelArtifacts, InboxPanelDetails, InboxPanelDiff, InboxPanelMeta, InboxPanelTray, InboxPanelVerdict, InboxReleaseNotes, EvidenceList: evidenceStub, PromptComposer: realComposer ? PromptComposer : composerStub, UChatPrompt: vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', [slots.header?.(), slots.footer?.()]) }), UAlert: alertStub, UButton: buttonStub, UTabs: tabsStub, UDashboardPanel: plain },
+    components: { NuxtPage, InboxEpicPanel, InboxPanel, ...(mobile && { InboxMobileItem, MobilePageHeader: plain }), InboxPanelThumbBar, InboxPanelActions, InboxPanelArtifacts, InboxPanelDetails, InboxPanelDiff, InboxPanelMeta, InboxPanelTray, InboxPanelVerdict, InboxReleaseNotes, EvidenceList: evidenceStub, PromptComposer: realComposer ? PromptComposer : composerStub, UChatPrompt: vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', [slots.header?.(), slots.footer?.()]) }), UAlert: alertStub, UButton: buttonStub, UTabs: tabsStub, UDashboardPanel: plain },
     stubs: { UModal: true, EvidenceViewer: true, InboxMessage: true, InboxDesignReviewLink: true, UBadge: true, UInput: true, UIcon: true, USkeleton: true, USelectMenu: true, MarkdownText: true, TaskFlyout: true, AgentAvatar: true, ProjectThumbnail: true, PlanThreadRow: true, NuxtLink: true, InboxMobile: true, ...(!mobile && { InboxMobileItem: true }) }
   } })
   await flushPromises()
@@ -1014,6 +1016,57 @@ describe('on a phone', () => {
       expect(view.wrapper.find('[data-testid="inbox-thumb-bar"]').exists()).toBe(false)
     }
   })
+})
+
+it.each([false, true])('opens epic history with an epic link and no task load or actions (mobile=%s)', async (mobile) => {
+  const { wrapper, params, refresh, closeFlyout } = await mountInbox('failed', undefined, 'COR-1', true, t => t, false, mobile)
+  try {
+    const epic: EpicActivityItem = {
+      id: 'epic-100', type: 'epic_activity', event: 'human_changes_requested', epicId: 'epic-id',
+      project: projects[0]!, subject: 'Epic history', preview: 'You requested changes', body: 'You requested changes: Cover the empty epic',
+      sender: { name: 'You', role: 'system' }, at: '2026-10-31T12:00:00.000Z',
+      taskId: null, taskRef: null, prUrl: null, resolution: 'You requested changes: Cover the empty epic'
+    }
+    vi.mocked(api.inbox.get).mockResolvedValue({ needsYou: [], activity: [], resolved: [epic], count: 0 })
+    vi.mocked(api.tasks.byRef).mockClear()
+    closeFlyout.mockClear()
+    params.itemId = epic.id
+    await refresh()
+    await flushPromises()
+    expect(wrapper.getComponent(InboxEpicPanel).props('item')).toEqual(epic)
+    expect(wrapper.get('[data-testid="inbox-epic-panel"]').text()).toContain('Resolved')
+    expect(wrapper.get('[data-testid="inbox-epic-panel"]').html()).toContain('/epics/epic-id')
+    expect(wrapper.findComponent(InboxPanel).exists()).toBe(false)
+    expect(wrapper.findComponent(composerStub).exists()).toBe(false)
+    expect(api.tasks.byRef).not.toHaveBeenCalled()
+    expect(closeFlyout).toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
+it('stays on an epic item that leaves the Inbox while open, keeping what was typed', async () => {
+  const { wrapper, params, refresh } = await mountInbox('failed', undefined, 'COR-1', true, t => t, false, false)
+  try {
+    const epic = inbox().needsYou.find(i => i.type === 'epic_review')!
+    vi.mocked(api.inbox.get).mockResolvedValue({ needsYou: [epic], activity: [], resolved: [], count: 1 } as never)
+    params.itemId = epic.id
+    await refresh()
+    await flushPromises()
+    expect(wrapper.getComponent(InboxEpicPanel).props('gone')).toBe(false)
+    writeDraft(`inbox:${epic.id}`, 'Rename the sheet')
+    // The head moved: review restarts, and the next read has no item
+    vi.mocked(api.inbox.get).mockResolvedValue({ needsYou: [], activity: [], resolved: [], count: 0 })
+    await refresh()
+    await flushPromises()
+    const panel = wrapper.getComponent(InboxEpicPanel)
+    expect(panel.props('item')).toMatchObject({ id: epic.id })
+    expect(panel.props('gone')).toBe(true)
+    expect(panel.text()).toContain('This epic changed while you had it open')
+    expect(readDraft(`inbox:${epic.id}`)).toBe('Rename the sheet')
+  } finally {
+    wrapper.unmount()
+  }
 })
 
 it('leaves the flyout alone on a live refresh, so a task opened from the message stays', async () => {

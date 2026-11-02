@@ -1,5 +1,5 @@
 import { EPIC_REVIEW_STATES } from '@corral/core'
-import type { Agent, DraftSession, Epic, EpicDetail, Inbox, PerfSummary, PlanSessionDetail, Project, PullRequestDetail, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
+import type { Agent, DraftSession, Epic, EpicDetail, EpicReview, Inbox, PerfSummary, PlanSessionDetail, Project, PullRequestDetail, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '~/composables/useApi'
 import { STOP_ASKING } from '~/utils/plan-questions'
@@ -33,6 +33,19 @@ describe('prototype mock API', () => {
     expect(await mockCall<EpicDetail>('GET', '/epics/e-exports')).toMatchObject({ reviewMode: 'each_task', reviewModeLocked: false })
     await expect(mockCall('PATCH', '/epics/e-alerts', { reviewMode: 'direct' })).rejects.toThrow('opened a PR')
     await expect(mockCall('PATCH', '/epics/e-alerts', { title: 'Renamed' })).resolves.toMatchObject({ title: 'Renamed', reviewMode: 'epic' })
+  })
+
+  it('serves an epic review in the server\'s shape', async () => {
+    const review = await mockCall<EpicReview>('GET', '/epics/e-alerts/review')
+    expect(review).toMatchObject({ reviewMode: 'epic', state: 'human_review', targetBranch: 'main', targetMovedBy: 3, seenByHuman: 0, lastFeedback: null, pr: { number: 214 } })
+    expect(review.rounds[0]!.findings[0]).toMatchObject({ level: 'non_blocking' })
+    expect(review.tasks.map(t => [t.humanReview, t.humanChecks, t.prNumber, t.integratedCommit?.sha])).toEqual([
+      [true, [], null, '41bd07e6c2aa'],
+      [false, ['c-alert-phone'], null, '7ce2951fb03d']
+    ])
+    expect((await mockCall<EpicReview>('GET', '/epics/e-webhooks/review')).lastFeedback).toMatchObject({ fixTasks: [{ ref: 'COR-25' }], truncated: false })
+    await expect(mockCall('GET', '/epics/nope/review')).rejects.toMatchObject({ status: 404 })
+    await expect(mockCall('GET', '/epics/e-mobile/review')).rejects.toMatchObject({ status: 409, message: expect.stringContaining('no epic review') })
   })
 
   it('has an epic in every epic PR review state, and an Inbox item for review and conflict', async () => {
@@ -125,7 +138,7 @@ describe('prototype mock API', () => {
       question: null, plan: { id: 'plan-1', version: 1, epicCount: 1, taskCount: 3 }
     })
     expect(threads.every(i => !('body' in i))).toBe(true)
-    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'epic_conflict', 'epic_review', 'failed', 'human_review', 'human_review', 'human_review', 'question'])
+    expect(inbox.needsYou.filter(i => i.type !== 'plan_thread').map(i => i.type).sort()).toEqual(['blocked', 'epic_conflict', 'epic_review', 'epic_review', 'epic_review', 'epic_review', 'epic_review', 'failed', 'human_review', 'human_review', 'human_review', 'question'])
     expect(threads.some(i => i.sessionId === 's-idle')).toBe(false)
   })
 

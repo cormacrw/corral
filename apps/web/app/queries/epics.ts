@@ -28,4 +28,5 @@ export const retryEpicSync = defineMutation<{ ok: boolean }, { id: string }>({
   invalidates: (_, { id }) => [keys.inbox(), keys.epics.lists(), keys.epics.detail(id)]
 })
 
+export const epicReviewQuery = (id: string) => queryOptions({ queryKey: keys.epics.review(id), queryFn: () => api.epics.getReview(id) })
 export const epicActivityQuery = (id: string) => queryOptions({ queryKey: keys.epics.activity(id), queryFn: () => api.epics.activity(id) })

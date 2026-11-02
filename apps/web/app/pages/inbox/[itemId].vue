@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import type { EpicConflictItem, EpicReviewItem, InboxActionInput, InboxItem, PmActivityItem, ReleaseNotesItem, TaskInboxItem } from '@corral/contracts'
+import type { EpicActivityItem, EpicConflictItem, EpicReviewItem, InboxActionInput, InboxItem, PmActivityItem, ReleaseNotesItem, TaskInboxItem } from '@corral/contracts'
 import { reactive } from 'vue'
 import { clearDraftsExcept, useDraft } from '~/composables/useDraft'
 import { actionOpensComposer, type InboxPanelContext, type InboxPanelTab, type ResolveTo } from '~/composables/useInboxPanel'
@@ -84,7 +84,15 @@ const placeholder = computed(() => {
 const submitLabel = computed(() => action.value ? (actions.value.find(a => a.value === action.value)?.label ?? 'Send') : '')
 
 // What the phone's screen shows, by kind
-const isEpicItem = (item: InboxItem | null): item is EpicReviewItem | EpicConflictItem => item?.type === 'epic_review' || item?.type === 'epic_conflict'
+const isEpicItem = (item: InboxItem | null): item is EpicReviewItem | EpicConflictItem | EpicActivityItem => item?.type === 'epic_review' || item?.type === 'epic_conflict' || item?.type === 'epic_activity'
+// An epic item can leave the list while it's open: its head moved, or someone
+// else acted. Stay on it, with what the human typed, until they move on.
+const openedEpic = shallowRef<EpicReviewItem | EpicConflictItem | EpicActivityItem | null>(null)
+watch(selected, (item) => {
+  if (isEpicItem(item)) openedEpic.value = item
+}, { immediate: true })
+const epicItem = computed(() => isEpicItem(selected.value) ? selected.value : openedEpic.value?.id === selectedId.value ? openedEpic.value : null)
+const epicGone = computed(() => epicItem.value !== null && !isEpicItem(selected.value))
 const mobileItem = computed(() => selected.value?.type === 'plan_thread' || selected.value?.type === 'runner_update' || isEpicItem(selected.value) ? null : selected.value as TaskInboxItem | ReleaseNotesItem | null)
 
 // Resolves false when not sent, so the composer keeps its images
@@ -188,7 +196,8 @@ const panel = reactive({
     v-if="device.isMobile.value"
     ref="panelView"
     :plan-thread="selected?.type === 'plan_thread' ? selected : null"
-    :epic-item="isEpicItem(selected) ? selected : null"
+    :epic-item="epicItem"
+    :epic-gone="epicGone"
     :runner-item="selected?.type === 'runner_update' ? selected : null"
     :inbox="inbox"
     :error="error"
@@ -197,14 +206,11 @@ const panel = reactive({
     :on-retry="list.refetch"
     :on-resolved="moveToNext"
   />
-  <InboxEpicReview
-    v-else-if="selected?.type === 'epic_review'"
-    :item="selected"
-    @resolved="moveToNext"
-  />
-  <InboxEpicConflict
-    v-else-if="selected?.type === 'epic_conflict'"
-    :item="selected"
+  <InboxEpicPanel
+    v-else-if="epicItem"
+    :key="epicItem.id"
+    :item="epicItem"
+    :gone="epicGone"
     @resolved="moveToNext"
   />
   <InboxRunnerUpdate

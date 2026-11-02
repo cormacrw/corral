@@ -212,10 +212,10 @@ describe('a rebase-only round', () => {
     const rebased = `rebased-${task.number}`
     t.github.setBranch(project.repository, branch, rebased)
     t.github.setBranch(project.repository, 'main', `main-${task.number}`)
-    const change = (patch: string) => ({ filename: 'app.ts', status: 'modified', sha: 'x', patch })
+    const change = (patch: string) => ({ filename: 'app.ts', status: 'modified', additions: 1, deletions: 0, sha: 'x', patch })
     return { task, dev, head, rebased, compare: (before: string, after: string, other: string) => {
-      t.github.setComparison(`main-${task.number}`, head, { mergeBase: 'old-base', files: [change(before), { filename: 'other.ts', status: 'modified', sha: 'y', patch: 'same' }] })
-      t.github.setComparison(`main-${task.number}`, rebased, { mergeBase: 'new-base', files: [change(after), { filename: 'other.ts', status: 'modified', sha: 'y', patch: other }] })
+      t.github.setComparison(`main-${task.number}`, head, { mergeBase: 'old-base', files: [change(before), { filename: 'other.ts', status: 'modified', additions: 1, deletions: 0, sha: 'y', patch: 'same' }] })
+      t.github.setComparison(`main-${task.number}`, rebased, { mergeBase: 'new-base', files: [change(after), { filename: 'other.ts', status: 'modified', additions: 1, deletions: 0, sha: 'y', patch: other }] })
       t.github.setComparison('old-base', 'new-base', { mergeBase: 'old-base', files: [] })
     } }
   }

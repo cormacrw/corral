@@ -1,4 +1,4 @@
-import type { CheckScope } from '@corral/contracts'
+import type { CheckScope, EpicReviewFinding } from '@corral/contracts'
 import { attachmentIdsInMarkdown, HUMAN_DECISIONS_NOTE, richTextToMarkdown } from '@corral/core'
 import type { EpicFixKind, TargetFileChange } from '@corral/core'
 import type { CiFailure } from './ci-output.ts'
@@ -334,15 +334,19 @@ export interface EpicReviewInput {
   // What fixes since the last approval changed in files only the target changed
   targetFiles: TargetFileChange[]
   // The last verdict on this epic, which makes this a repeat review
-  lastReview: { headSha: string, summary: string, outcome: string, fixes: string[] } | null
+  lastReview: { headSha: string, summary: string, outcome: string, fixes: string[], findings?: EpicReviewFinding[] } | null
 }
 
 // An integration review judges the combined change. A repeat one has already
 // done that, so it looks at what moved since (D29).
+// An integration review's findings, for whoever acts on them next
+export const findingsText = (findings: EpicReviewFinding[]) => findings
+  .map(f => `- ${f.level === 'blocking' ? 'Blocking' : 'Non-blocking'}: ${f.text}${f.taskRefs.length ? ` (${f.taskRefs.join(', ')})` : ''}`).join('\n')
+
 export function epicReviewPrompt(input: EpicReviewInput): string {
   const { lastReview: last, target, headSha } = input
   const scope = last
-    ? `This is a repeat review. The last integration review (${last.outcome}) was of commit ${last.headSha}. Its summary:\n\n${last.summary || '(none recorded)'}\n\nReview what changed since that commit, plus anything those changes could affect, and don't review the rest of the epic again: \`git diff ${last.headSha}..HEAD\`, at commit ${headSha}. If a rebase rewrote that commit, compare with \`git range-diff\` against \`origin/${target}\`, or read \`git log origin/${target}..HEAD\`, and say so in your summary.${last.fixes.length ? `\n\nThe developer's recent fixes:\n${last.fixes.map(f => `- ${f}`).join('\n')}` : ''}`
+    ? `This is a repeat review. The last integration review (${last.outcome}) was of commit ${last.headSha}. Its summary:\n\n${last.summary || '(none recorded)'}${last.findings?.length ? `\n\nIts findings:\n${findingsText(last.findings)}` : ''}\n\nReview what changed since that commit, plus anything those changes could affect, and don't review the rest of the epic again: \`git diff ${last.headSha}..HEAD\`, at commit ${headSha}. If a rebase rewrote that commit, compare with \`git range-diff\` against \`origin/${target}\`, or read \`git log origin/${target}..HEAD\`, and say so in your summary.${last.fixes.length ? `\n\nThe developer's recent fixes:\n${last.fixes.map(f => `- ${f}`).join('\n')}` : ''}`
     : `Review the whole combined diff with git diff origin/${target}...HEAD at commit ${headSha}. Check the epic goal and every task's criteria, looking for integration problems between tasks (API/UI mismatches, inconsistent docs, duplicate helpers).`
   return [
     `You are ${input.agentName}, reviewing the integration of epic "${input.title}".`,
@@ -352,7 +356,7 @@ export function epicReviewPrompt(input: EpicReviewInput): string {
     section('Scope', scope),
     gatesSection({ requiredChecks: input.requiredChecks, prFree: false }),
     epicTargetFilesSection(input.targetFiles, target),
-    section('How to review', `This is a read-only checkout: do not edit, commit or push. The evidence is context; do not re-judge individual task evidence. Criteria checked by a human and tasks flagged humanReview wait for the human at this epic's approval: do not attempt them, produce evidence or verdicts for them, or request changes over them. Use get_task for the whole epic and get_evidence to fetch any listed evidence ID. Always finish with report_outcome, outcome approved or changes_requested, and specific reasoning in summary. No per-task criteria verdicts are required. Changes requested go to a developer as a brief, with no task, and the epic comes back to you; approval sends the epic PR to human review.`)
+    section('How to review', `This is a read-only checkout: do not edit, commit or push. The evidence is context; do not re-judge individual task evidence. Criteria checked by a human and tasks flagged humanReview wait for the human at this epic's approval: do not attempt them, produce evidence or verdicts for them, or request changes over them. Use get_task for the whole epic and get_evidence to fetch any listed evidence ID. Always finish with report_outcome, outcome approved or changes_requested, specific reasoning in summary, and any integration problems in findings, each with level blocking or non_blocking, its text and the taskRefs it concerns. No per-task criteria verdicts are required. Changes requested go to a developer as a brief, with no task, and the epic comes back to you; approval sends the epic PR to human review.`)
   ].join('\n')
 }
 

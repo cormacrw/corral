@@ -5,7 +5,7 @@ import type { PatchEpicInput } from '@corral/contracts'
 import { isTaskDone, type EpicReviewMode } from '@corral/core'
 import { ApiError } from '~/queries/client'
 import DetailHeader from './DetailHeader.vue'
-import { EPIC_CONFLICT_PENDING, EPIC_REVIEW_MODE, EPIC_REVIEW_STATE, EPIC_STATUS_TEXT, epicHistoryText, epicReviewStatus, epicStoppedLabel, epicWithLiveCounts, PRIORITY, statusCounts } from '~/utils/labels'
+import { EPIC_CONFLICT_PENDING, EPIC_REVIEW_MODE, EPIC_STATUS_TEXT, epicHistoryText, epicReviewStatus, epicStoppedLabel, epicWithLiveCounts, PRIORITY, statusCounts } from '~/utils/labels'
 
 // An epic: its title, description and progress, and the dependency tree of
 // its tasks. Docked in the flyout, as a page with room for a big tree, or
@@ -306,53 +306,40 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
           <h3 class="text-sm font-medium">
             Review
           </h3>
-          <USelect
-            :model-value="epic.reviewMode"
-            :items="reviewModes"
-            :disabled="epic.reviewModeLocked"
-            aria-label="Epic review mode"
-            :aria-describedby="epic.reviewModeLocked ? 'epic-review-mode-note' : undefined"
-            class="w-full"
-            @update:model-value="patch({ reviewMode: $event as EpicReviewMode })"
+          <EpicPrBlock
+            v-if="epic.prUrl && epic.reviewMode !== 'direct'"
+            :epic="epic"
           />
-          <p
-            v-if="epic.reviewModeLocked"
-            id="epic-review-mode-note"
-            class="text-xs text-muted"
-          >
-            Locked because a task in this epic has submitted work.
-          </p>
-          <p
-            v-else
-            class="text-xs text-muted"
-          >
-            {{ EPIC_REVIEW_MODE[epic.reviewMode].description }}. You can change this until a task opens a PR.
-          </p>
-          <div
-            v-if="epic.prUrl"
-            class="flex flex-wrap items-center gap-2 text-sm"
-            data-testid="epic-pr"
-          >
-            <a
-              :href="epic.prUrl"
-              target="_blank"
-              rel="noopener"
-              class="text-primary hover:underline"
-            >Epic PR #{{ epic.prNumber }}</a>
-            <UBadge
-              v-if="epic.reviewState"
-              :label="EPIC_REVIEW_STATE[epic.reviewState].label"
-              :color="EPIC_REVIEW_STATE[epic.reviewState].color"
-              variant="subtle"
-              size="sm"
+          <template v-else>
+            <USelect
+              :model-value="epic.reviewMode"
+              :items="reviewModes"
+              :disabled="epic.reviewModeLocked"
+              aria-label="Epic review mode"
+              :aria-describedby="epic.reviewModeLocked ? 'epic-review-mode-note' : undefined"
+              class="w-full"
+              @update:model-value="patch({ reviewMode: $event as EpicReviewMode })"
             />
-          </div>
-          <p
-            v-else-if="epic.reviewMode !== 'direct'"
-            class="text-xs text-muted"
-          >
-            The epic PR opens once every task is complete. Human checks are confirmed there.
-          </p>
+            <p
+              v-if="epic.reviewModeLocked"
+              id="epic-review-mode-note"
+              class="text-xs text-muted"
+            >
+              Locked because a task in this epic has submitted work.
+            </p>
+            <p
+              v-else
+              class="text-xs text-muted"
+            >
+              {{ EPIC_REVIEW_MODE[epic.reviewMode].description }}. You can change this until a task opens a PR.
+            </p>
+            <p
+              v-if="epic.reviewMode !== 'direct'"
+              class="text-xs text-muted"
+            >
+              The epic PR opens once every task is complete. Human checks are confirmed there.
+            </p>
+          </template>
         </section>
 
         <section class="space-y-3">
@@ -452,7 +439,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
             />
           </div>
           <p
-            v-if="reviewStatus"
+            v-if="reviewStatus && !(epic.prUrl && epic.reviewMode !== 'direct' && !sync)"
             :class="['mt-2 text-sm font-medium', EPIC_STATUS_TEXT[reviewStatus.color]]"
           >
             {{ reviewStatus.label }}

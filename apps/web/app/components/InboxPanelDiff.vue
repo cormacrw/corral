@@ -5,7 +5,9 @@ import { PULL_REQUEST_LINE_LIMIT } from '@corral/contracts/client'
 // A PR's diff in the Inbox (design/inbox.md, the Code diff tab): the changed
 // files with their line counts, each opening to its unified diff. The first
 // file starts open; a diff over the server's cap says so and links to the rest.
-const props = defineProps<{ pr: PullRequestDetail }>()
+// `githubUrl` replaces the PR's files page, for a diff that isn't the whole PR
+const props = defineProps<{ pr: PullRequestDetail, githubUrl?: string }>()
+const github = computed(() => props.githubUrl ?? `${props.pr.url}/files`)
 const open = ref<string[]>([])
 watch(() => props.pr.number, () => {
   open.value = props.pr.files.slice(0, 1).map(f => f.path)
@@ -40,7 +42,7 @@ const lineClass = (line: string) => line.startsWith('@@')
       </template>
       <span class="min-w-0 truncate">{{ pr.headBranch }} → {{ pr.baseBranch }}</span>
       <UButton
-        :to="`${pr.url}/files`"
+        :to="github"
         target="_blank"
         label="Open on GitHub"
         trailing-icon="i-lucide-arrow-up-right"
@@ -56,7 +58,7 @@ const lineClass = (line: string) => line.startsWith('@@')
       variant="subtle"
       icon="i-lucide-scissors"
       :title="`${shown}, up to ${PULL_REQUEST_LINE_LIMIT.toLocaleString('en')} changed lines`"
-      :actions="[{ label: 'See the full diff on GitHub', to: `${pr.url}/files`, target: '_blank', trailingIcon: 'i-lucide-arrow-up-right' }]"
+      :actions="[{ label: 'See the full diff on GitHub', to: github, target: '_blank', trailingIcon: 'i-lucide-arrow-up-right' }]"
       data-testid="inbox-diff-truncated"
     />
     <div

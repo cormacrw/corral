@@ -205,10 +205,24 @@ route('GET', '/projects/:slug/tasks/:number/pull-request', ([slug, number]) => {
   return detail
 })
 route('GET', '/projects/:slug/epics', ([slug]) => f.epics.filter(e => e.projectId === project(slug!).id))
+route('GET', '/epics/:id/review', ([id]) => {
+  const review = f.epicReview(id!) ?? notFound()
+  if (review.reviewMode === 'direct') {
+    const message = 'This epic merges its tasks straight to the target branch, so it has no epic review'
+    throw new ApiError(409, { code: 'invalid_input', issues: [{ message }] }, message)
+  }
+  return review
+})
 route('POST', '/epics/:id/review', ([id], body) => {
   const epic = f.epics.find(e => e.id === id) ?? notFound()
-  const { action } = body as EpicReviewActionInput
+  const { action, headSha } = body as EpicReviewActionInput
   if (action === 'decide') return { ok: true }
+  // As on the server: a moved head loses review, so the item leaves the Inbox
+  if (headSha === 'stale-head') {
+    Object.assign(epic, { reviewState: 'in_review', prHeadSha: 'moved-head' })
+    emit({ type: 'epic.updated', epic })
+    throw new ApiError(409, { code: 'conflict', constraint: 'epic_review_changed' }, 'epic_review_changed')
+  }
   epic.reviewState = action === 'approve' ? 'ready_to_merge' : action === 'request_changes' ? 'changes_requested' : 'open'
   emit({ type: 'epic.updated', epic })
   return { ok: true }
