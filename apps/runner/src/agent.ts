@@ -54,7 +54,7 @@ export function agentArgs(options: ArgOptions & ({ prompt: string } | { input: '
 // git prefers over any user.name/user.email the agent writes to its config.
 export function agentEnv(base: NodeJS.ProcessEnv = process.env, gitAuthor: GitAuthor | null = null): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base }
-  for (const key of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT']) delete env[key]
+  for (const key of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'NODE_ENV']) delete env[key]
   for (const key of Object.keys(env)) {
     if (key.startsWith('GIT_CONFIG_') || key.startsWith('CORRAL_')) delete env[key]
   }

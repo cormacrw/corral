@@ -16,6 +16,9 @@ const env: NodeJS.ProcessEnv = {
   // Vitest's environment override takes precedence over its config file.
   VITEST_MAX_WORKERS: String(cpus)
 }
+// The runner is a production service; its mode must not select production
+// React/Vue builds in tests. Also covers sessions started by older runners.
+delete env.NODE_ENV
 if (isReview) env.TURBO_FORCE = '1'
 
 async function run(command: string, args: string[], capture = false): Promise<string> {
