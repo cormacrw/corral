@@ -18,7 +18,7 @@ describe('parent task edges', () => {
   beforeAll(async () => {
     t = await createTestApp('pglite', { listen: true })
     await t.db.update(agents).set({ concurrency: 50 })
-    runner = await FakeRunner.connect(t.server!.url)
+    runner = await FakeRunner.connect(t.server!.url, [], 'r1', { slots: 100 })
   })
   afterAll(async () => {
     runner?.close()
@@ -93,6 +93,46 @@ describe('parent task edges', () => {
       expect(await propose({ parents: [{ key: 'p', ref: `${project.prefix}-${parent.number}` }], tasks: [item('c', { parent: 'p' })] })).toMatchObject({ ok: true })
       expect((await approve(plans)).status).toBe(200)
       expect(await t.db.select().from(epicDependencies).where(eq(epicDependencies.epicId, delivery.id))).toHaveLength(1)
+    })
+
+    it('keeps a Draft and its comments when a revision makes it a parent', async () => {
+      const { project, propose, plans } = await start()
+      await propose({ tasks: [item('a')] })
+      const [draft] = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))
+      await t.db.insert(comments).values({ taskId: draft!.id, author: t.actor, body: 'Keep me' })
+      expect(await propose({ parents: [{ key: 'p', ref: `${project.prefix}-${draft!.number}` }], tasks: [item('s1', { parent: 'p' }), item('s2', { parent: 'p' })] })).toMatchObject({ ok: true })
+      expect((await t.db.select().from(tasks).where(eq(tasks.id, draft!.id)))[0]).toMatchObject({ deletedAt: null })
+      expect((await approve(plans)).status).toBe(200)
+      expect((await t.db.select().from(tasks).where(eq(tasks.id, draft!.id)))[0]).toMatchObject({ status: 'parent' })
+      expect(await t.db.select().from(comments).where(eq(comments.taskId, draft!.id))).toHaveLength(1)
+      expect((await list(project.slug)).filter(task => task.parentTask?.id === draft!.id)).toHaveLength(2)
+    })
+
+    it('fails approval loudly when the task it would promote has gone', async () => {
+      const { project, propose, plans } = await start()
+      const big = await t.createTask(project.slug)
+      await propose({ parents: [{ key: 'p', ref: big.ref }], tasks: [item('a', { parent: 'p' }), item('b', { parent: 'p' })] })
+      await t.db.delete(tasks).where(eq(tasks.id, big.id))
+      expect((await approve(plans)).status).toBe(409)
+    })
+
+    it('leaves what a human added to a Draft alone through a PM revision', async () => {
+      const { project, propose, plans } = await start()
+      await propose({ tasks: [item('a')] })
+      const [draft] = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))
+      const sub = await addSub(project.slug, draft!.number, { title: 'Mine' }).then(r => r.json()) as Task
+      expect(await propose({ tasks: [item('other', { title: 'Something else' })] })).toMatchObject({ ok: true })
+      expect((await t.db.select().from(tasks).where(eq(tasks.id, sub.id)))[0]).toMatchObject({ title: 'Mine', status: 'draft', deletedAt: null })
+      expect((await t.db.select().from(tasks).where(eq(tasks.id, draft!.id)))[0]).toMatchObject({ status: 'parent' })
+      expect((await approve(plans)).status).toBe(200)
+      expect((await list(project.slug)).find(task => task.id === sub.id)).toMatchObject({ parentTask: { id: draft!.id } })
+    })
+
+    it('refuses at propose time a promotion that would make a cycle', async () => {
+      const { project, propose } = await start()
+      const big = await t.createTask(project.slug)
+      const result = await propose({ parents: [{ key: 'p', ref: big.ref }], tasks: [item('a', { parent: 'p', dependsOn: [big.ref] }), item('b', { parent: 'p' })] })
+      expect(JSON.stringify(result)).toContain('The plan was not saved')
     })
 
     it('refuses a second plan promoting the same task in words', async () => {
@@ -182,6 +222,31 @@ describe('parent task edges', () => {
   })
 
   describe('delivery', () => {
+    it('refuses to delete a parent with an unmerged branch, and keeps one with comments', async () => {
+      const { project, delivery, parent, a, b } = await parentSetup()
+      for (const sub of [a, b]) await t.db.update(tasks).set({ deletedAt: new Date() }).where(eq(tasks.id, sub.id))
+      await t.db.update(epics).set({ branch: 'corral/epic-x' }).where(eq(epics.id, delivery.id))
+      const refused = await t.request('DELETE', `/api/projects/${project.slug}/tasks/${parent.number}`)
+      expect(refused.status).toBe(409)
+      expect(await refused.text()).toContain('corral/epic-x')
+      await t.db.update(epics).set({ branch: null }).where(eq(epics.id, delivery.id))
+      await t.db.insert(comments).values({ taskId: parent.id, author: t.actor, body: 'Keep me' })
+      expect((await t.request('DELETE', `/api/projects/${project.slug}/tasks/${parent.number}`)).status).toBeLessThan(300)
+      expect((await t.db.select().from(tasks).where(eq(tasks.id, parent.id)))[0]!.deletedAt).toBeInstanceOf(Date)
+      expect(await t.db.select().from(comments).where(eq(comments.taskId, parent.id))).toHaveLength(1)
+    })
+
+    it('gives a sub-task\'s run its parent\'s pinned comments', async () => {
+      const { project, parent, a } = await parentSetup()
+      await t.db.insert(comments).values([{ taskId: parent.id, author: t.actor, body: 'Pinned on the parent', pinned: true }, { taskId: parent.id, author: t.actor, body: 'Not pinned' }])
+      await t.request('PATCH', `/api/projects/${project.slug}`, { paused: false })
+      await t.db.update(tasks).set({ status: 'ready' }).where(eq(tasks.id, a.id))
+      await t.orchestrator.schedule()
+      const { job } = await runner.next('run.assign', m => m.job.taskId === a.id)
+      expect(job.prompt).toContain('Pinned on the parent')
+      expect(job.prompt).not.toContain('Not pinned')
+    })
+
     it('holds a dependent of a direct parent while a sub-task is in Backlog', async () => {
       const { project, parent, a } = await parentSetup('direct')
       await t.db.update(tasks).set({ status: 'merged' }).where(eq(tasks.id, a.id))

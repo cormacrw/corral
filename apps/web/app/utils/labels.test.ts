@@ -137,7 +137,7 @@ it('labels completed rebase developer runs', () => {
 describe('epic review status', () => {
   const epic = { reviewMode: 'epic' as const, branch: 'corral/epic-1', reviewState: null, taskCount: 2, mergedCount: 2 }
 
-  it('says all tasks complete and awaiting review for an parent PR with the human', () => {
+  it('says all tasks complete and awaiting review for a parent PR with the human', () => {
     expect(epicReviewStatus({ ...epic, reviewState: 'human_review' })?.label).toBe('All tasks complete, awaiting your review')
   })
 

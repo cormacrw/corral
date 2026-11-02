@@ -277,7 +277,7 @@ describe('completed designs', () => {
 
 describe('columnEntries', () => {
   const finished = (ref: string, mergedAt: string) => ({ ref, type: 'task', status: 'merged', mergedAt, updatedAt: mergedAt }) as Task
-  const card = (mergedAt: string) => ({ epic: { mergedAt, updatedAt: '2020-01-01T00:00:00Z' } })
+  const card = (mergedAt: string) => ({ epic: { mergedAt, createdAt: '2020-01-01T00:00:00Z' } })
 
   it('lists Complete by when each finished, parents and tasks together', () => {
     const { entries } = columnEntries('complete', [finished('T-1', '2026-01-03T00:00:00Z'), finished('T-2', '2026-01-01T00:00:00Z')], [card('2026-01-02T00:00:00Z')])
@@ -393,7 +393,7 @@ describe('epicOnBoard', () => {
 
   it('counts the window from the epic PR merge when that came later', () => {
     const merged = { reviewState: 'merged' as const }
-    expect(epicOnBoard(epic({ ...merged, updatedAt: new Date(now - DAY).toISOString() }), [old], now)).toBe(true)
+    expect(epicOnBoard(epic({ ...merged, mergedAt: new Date(now - DAY).toISOString() }), [old], now)).toBe(true)
     expect(epicOnBoard(epic(merged), [old], now)).toBe(false)
   })
 

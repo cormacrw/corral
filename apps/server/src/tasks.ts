@@ -24,7 +24,7 @@ import {
   type TaskStatus
 } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, desc, eq, inArray, isNull, max, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, max, ne, or, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { ApiFailure, notFound } from './errors.ts'
 import { ensureParent, parentFacts, parentHolds, refuseOnParent, syncDeliveryContent } from './parents.ts'
@@ -442,6 +442,9 @@ export async function promoteToParent(tx: Executor, project: ProjectRow, task: T
   await checkParentCycles(tx, project)
 }
 
+// Plan items and parents a human added, which a PM's revision never touches
+export const HUMAN_PLAN_KEY = 'human-'
+
 // A Draft belongs to its plan, so sub-tasks made from one stay Drafts in that
 // plan: approving it adds them to the board and discarding it removes them.
 // The plan's item for the Draft moves to `subId`, or `subId` joins as new.
@@ -452,11 +455,11 @@ async function joinDraftPlan(tx: Executor, epicId: string, subId: string, draftI
   if (!plan) return false
   if (draftId === subId) return true
   const [{ next } = { next: 0 }] = await tx.select({ next: sql<number>`coalesce(max(${planTasks.position}) + 1, 0)` }).from(planTasks).where(eq(planTasks.planId, plan.planId))
-  await tx.insert(planTasks).values({ planId: plan.planId, taskId: subId, key: `sub-${subId}`, change: 'added', position: next })
+  await tx.insert(planTasks).values({ planId: plan.planId, taskId: subId, key: `${HUMAN_PLAN_KEY}${subId}`, change: 'added', position: next })
   const [known] = await tx.select({ key: planEpics.key }).from(planEpics).where(and(eq(planEpics.planId, plan.planId), eq(planEpics.epicId, epicId)))
   if (!known) {
     const [{ position } = { position: 0 }] = await tx.select({ position: sql<number>`coalesce(max(${planEpics.position}) + 1, 0)` }).from(planEpics).where(eq(planEpics.planId, plan.planId))
-    await tx.insert(planEpics).values({ planId: plan.planId, key: `parent-${epicId}`, epicId, position })
+    await tx.insert(planEpics).values({ planId: plan.planId, key: `${HUMAN_PLAN_KEY}parent-${epicId}`, epicId, position })
   }
   return true
 }
@@ -486,11 +489,11 @@ export async function addSubtask(db: Executor, project: ProjectRow, taskId: stri
     await promoteToParent(tx, project, task, subId, actor)
     if (task.status === 'draft') {
       await tx.update(tasks).set({ status: 'draft' }).where(eq(tasks.id, subId))
-      await tx.update(planTasks).set({ taskId: subId }).where(and(eq(planTasks.taskId, taskId), inArray(planTasks.planId, tx.select({ id: plans.id }).from(plans).where(eq(plans.status, 'proposed')))))
+      await tx.update(planTasks).set({ taskId: subId, key: `${HUMAN_PLAN_KEY}${subId}` }).where(and(eq(planTasks.taskId, taskId), inArray(planTasks.planId, tx.select({ id: plans.id }).from(plans).where(eq(plans.status, 'proposed')))))
       const [plan] = await tx.select({ planId: planTasks.planId }).from(planTasks).where(eq(planTasks.taskId, subId)).limit(1)
       if (plan) {
         const [{ position } = { position: 0 }] = await tx.select({ position: sql<number>`coalesce(max(${planEpics.position}) + 1, 0)` }).from(planEpics).where(eq(planEpics.planId, plan.planId))
-        await tx.insert(planEpics).values({ planId: plan.planId, key: `parent-${delivery!.id}`, epicId: delivery!.id, position })
+        await tx.insert(planEpics).values({ planId: plan.planId, key: `${HUMAN_PLAN_KEY}parent-${delivery!.id}`, epicId: delivery!.id, position })
       } else await tx.update(tasks).set({ status: 'backlog' }).where(eq(tasks.id, subId))
     }
     if (task.status === 'ready') await transitionTask(tx, subId, { type: 'approve' }, actor)
@@ -717,9 +720,9 @@ async function setDependencies(tx: Executor, project: ProjectRow, task: TaskRow,
 // A cycle can run through a parent, which waits on its sub-tasks and its
 // delivery record: task edges, parent edges and sub-tasks are one graph (D31).
 // `changed` holds edges this write is about to replace.
-export async function checkParentCycles(tx: Executor, project: ProjectRow, changed: ReadonlyMap<string, readonly string[]> = new Map()): Promise<void> {
+export async function checkParentCycles(tx: Executor, project: ProjectRow, changed: ReadonlyMap<string, readonly string[]> = new Map(), promoting: ReadonlySet<string> = new Set()): Promise<void> {
   const rows = await tx.select({ id: tasks.id, epicId: tasks.epicId, status: tasks.status, type: tasks.type, parentOf: epics.id }).from(tasks)
-    .leftJoin(epics, and(eq(epics.taskId, tasks.id), eq(tasks.status, 'parent')))
+    .leftJoin(epics, and(eq(epics.taskId, tasks.id), or(eq(tasks.status, 'parent'), inArray(tasks.id, [...promoting, '00000000-0000-0000-0000-000000000000']))))
     .where(and(eq(tasks.projectId, project.id), isNull(tasks.deletedAt)))
   const edges = await tx.select({ taskId: taskDependencies.taskId, dependsOnId: taskDependencies.dependsOnId }).from(taskDependencies).where(eq(taskDependencies.projectId, project.id))
   const parentEdges = await tx.select().from(epicDependencies).where(eq(epicDependencies.projectId, project.id))
@@ -774,14 +777,19 @@ export async function listHistory(db: Executor, taskId: string): Promise<AuditEn
 export async function deleteTaskRows(db: Executor, taskId: string, actor: Actor, reason: string | null, options: { soft?: boolean, detachDependents?: boolean } = {}): Promise<string[]> {
   return db.transaction(async (tx) => {
     const { task, project } = await lockTask(tx, taskId)
-    const mode = options.soft && task.status === 'draft' ? 'soft' : deletionFor(task)
+    let mode = options.soft && task.status === 'draft' ? 'soft' : deletionFor(task)
     if (mode === 'not_allowed') throw new ApiFailure(409, { code: 'conflict', constraint: 'merged_tasks_are_immutable' })
     const [delivery] = task.status === 'parent' ? await tx.select().from(epics).where(eq(epics.taskId, taskId)).for('update') : []
     if (delivery) {
       // A parent goes once it has nothing left: its sub-tasks are deleted first
       const [sub] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.epicId, delivery.id), isNull(tasks.deletedAt))).limit(1)
       if (sub) throw new ApiFailure(409, { code: 'conflict', constraint: 'parent_has_subtasks' })
-      if (delivery.reviewState === 'merged' || delivery.prNumber) throw new ApiFailure(409, { code: 'conflict', constraint: 'parent_delivered' })
+      if (delivery.reviewState === 'merged') throw new ApiFailure(409, { code: 'conflict', constraint: 'parent_delivered' })
+      if (delivery.branch) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: `${delivery.branch} isn't merged, so deleting this parent would lose its work. Close its PR and delete the branch first.` }] })
+      // Comments and history stay with the record
+      const [comment] = await tx.select({ id: comments.id }).from(comments).where(eq(comments.taskId, taskId)).limit(1)
+      const [history] = await tx.select({ id: auditLog.id }).from(auditLog).where(and(eq(auditLog.taskId, taskId), ne(auditLog.action, 'task.created'))).limit(1)
+      if (comment || history) mode = 'soft'
     }
     // A soft-deleted sub-task that submitted commits keeps its epicId (tasks_integration_protocol)
     const [kept] = delivery ? await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.epicId, delivery.id), sql`${tasks.integrationProtocol} > 0`)).limit(1) : []
@@ -798,7 +806,8 @@ export async function deleteTaskRows(db: Executor, taskId: string, actor: Actor,
       await applyTransition(tx, dependent, project, { type: 'block', reason: DEPENDENCY_DELETED_REASON }, { kind: 'system', component: 'server' }, { event: 'dependency_deleted', dependency: taskRef(project.prefix, task.number) })
     }
     await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.deleted', { mode, number: task.number, title: task.title, reason }))
-    if (delivery && !kept) await tx.delete(epics).where(eq(epics.id, delivery.id))
+    if (delivery && kept) await tx.update(epics).set({ taskId: null }).where(eq(epics.id, delivery.id))
+    else if (delivery) await tx.delete(epics).where(eq(epics.id, delivery.id))
     if (mode === 'hard') await tx.delete(tasks).where(eq(tasks.id, taskId))
     // No run keeps a lease on a hidden task: it would pass every fence
     else await tx.update(tasks).set({ deletedAt: new Date(), updatedAt: new Date(), leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null }).where(eq(tasks.id, taskId))

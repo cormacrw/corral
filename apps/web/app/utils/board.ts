@@ -47,10 +47,10 @@ export const parentColumn = (stage: ParentStage): string => stage === 'done' ? '
 
 // A column's tasks and parent cards. Complete lists both by when they finished;
 // elsewhere a column's parents lead.
-export function columnEntries<C extends { epic: Pick<Epic, 'mergedAt' | 'updatedAt'> }, T extends Pick<Task, 'ref' | 'type' | 'status' | 'mergedAt' | 'updatedAt'>>(key: string, tasks: T[], cards: C[]) {
+export function columnEntries<C extends { epic: Pick<Epic, 'mergedAt' | 'createdAt'> }, T extends Pick<Task, 'ref' | 'type' | 'status' | 'mergedAt' | 'updatedAt'>>(key: string, tasks: T[], cards: C[]) {
   const sorted = sortColumn(key, tasks)
   const entries: { card?: C, task?: T, at: number }[] = [
-    ...cards.map(card => ({ card, at: new Date(card.epic.mergedAt ?? card.epic.updatedAt).getTime() })),
+    ...cards.map(card => ({ card, at: new Date(card.epic.mergedAt ?? card.epic.createdAt).getTime() })),
     ...sorted.map(task => ({ task, at: new Date(completedAt(task) ?? 0).getTime() }))
   ]
   return { tasks: sorted, cards, entries: key === 'complete' ? entries.sort((a, b) => b.at - a.at) : entries }
@@ -94,11 +94,11 @@ export function matchesOverviewEpicFilter(epic: StageEpic, tasks: Pick<Task, 'st
 
 // Whether an epic belongs on the Board: it has work left or tasks on the Board.
 // A finished epic stays while one of its done tasks is still in Complete, and
-// updatedAt covers an epic PR that merged after the tasks' window closed.
-export function epicOnBoard(epic: StageEpic & Pick<Epic, 'updatedAt' | 'mergedAt'>, tasks: Pick<Task, 'type' | 'status' | 'mergedAt' | 'updatedAt'>[], now = Date.now()): boolean {
+// mergedAt covers a PR that merged after the tasks' window closed.
+export function epicOnBoard(epic: StageEpic & Pick<Epic, 'mergedAt'>, tasks: Pick<Task, 'type' | 'status' | 'mergedAt' | 'updatedAt'>[], now = Date.now()): boolean {
   if (epicInProgress(epic)) return true
   if (epic.taskCount === 0) return false
-  const finished = (epic.mergedAt !== null || (epic.reviewMode !== 'direct' && epic.reviewState === 'merged')) && now - new Date(epic.mergedAt ?? epic.updatedAt).getTime() <= COMPLETE_WINDOW_MS
+  const finished = epic.mergedAt !== null && now - new Date(epic.mergedAt).getTime() <= COMPLETE_WINDOW_MS
   return finished || tasks.some(t => isTaskDone(t) && onBoard(t, now))
 }
 

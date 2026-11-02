@@ -2,7 +2,7 @@
 
 Code and branch names still say epic: see [Parent tasks](parent-tasks.md). The `epics` row is a parent's delivery record.
 
-`EpicSynchronizer` (`apps/server/src/epic-sync.ts`) keeps an parent branch on its
+`EpicSynchronizer` (`apps/server/src/epic-sync.ts`) keeps a parent branch on its
 target (D27, COR-290). It runs inside `TaskIntegrator`'s per-epic pass, so a
 checkpoint is the moment between two integrations. Don't start a rebase from
 anywhere else: `EpicMerger` and `EpicPullRequests.reconcile` only wait, and the

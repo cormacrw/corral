@@ -45,10 +45,18 @@ const waiting = computed(() => prerequisites.value.filter(e => e.mergedCount < e
 const choices = computed(() => related.value.filter(e => e.id !== epic.value?.id && !epic.value?.dependsOn.includes(e.id)).map(e => ({ label: e.title, value: e.id })))
 
 const removing = useMutation(removeTask)
+const confirmDelete = ref(false)
+const deleteError = ref<string | null>(null)
 async function removeParent() {
   if (!epic.value?.taskRef || !project.value) return
-  await removing.mutateAsync({ task: { slug: project.value.slug, number: Number(epic.value.taskRef.split('-').at(-1)), ref: epic.value.taskRef } })
-  emit('close')
+  deleteError.value = null
+  try {
+    await removing.mutateAsync({ task: { slug: project.value.slug, number: Number(epic.value.taskRef.split('-').at(-1)), ref: epic.value.taskRef } })
+    confirmDelete.value = false
+    emit('close')
+  } catch (e) {
+    deleteError.value = e instanceof Error ? e.message : String(e)
+  }
 }
 
 async function setDependencies(ids: string[]) {
@@ -471,15 +479,43 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
         >
           <span class="shrink-0 font-mono text-xs text-muted">{{ epic.taskRef }}</span>
           <UButton
-            v-if="epic.tasks.length === 0 && !epic.prNumber"
+            v-if="epic.tasks.length === 0"
             label="Delete"
             icon="i-lucide-trash-2"
             size="sm"
             variant="ghost"
             color="error"
-            :loading="removing.isPending.value"
-            @click="removeParent"
+            @click="confirmDelete = true"
           />
+          <UModal
+            v-model:open="confirmDelete"
+            :title="`Delete ${epic.taskRef}?`"
+            description="It has no sub-tasks left. Any comments and history are kept with the record."
+          >
+            <template #body>
+              <p
+                v-if="deleteError"
+                class="text-sm text-error"
+                role="alert"
+              >
+                {{ deleteError }}
+              </p>
+            </template>
+            <template #footer>
+              <UButton
+                label="Cancel"
+                variant="outline"
+                color="neutral"
+                @click="confirmDelete = false"
+              />
+              <UButton
+                label="Delete"
+                color="error"
+                :loading="removing.isPending.value"
+                @click="removeParent"
+              />
+            </template>
+          </UModal>
           <AddSubtask
             v-if="!epic.mergedAt"
             :slug="project.slug"

@@ -1,7 +1,7 @@
 import { TASK_INTEGRATION_PROTOCOL, type RunJob } from '@corral/contracts'
 import { taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, asc, desc, eq, gt, inArray, isNotNull, ne } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNotNull, ne, or } from 'drizzle-orm'
 import { listTaskAttachments } from './attachments.ts'
 import { readCiFailures } from './ci-output.ts'
 import { resolutionContext } from './epic-rebase-approval.ts'
@@ -17,7 +17,7 @@ import type { TaskRow } from './tasks.ts'
 import { type AgentRow, type RunContext, type RunCore } from './run-context.ts'
 import { feedbackComment } from './run-outcomes.ts'
 
-const { acceptanceCriteria, comments, designVersions, reviews, runs, taskDesignPins, tasks } = schema
+const { acceptanceCriteria, comments, designVersions, epics, reviews, runs, taskDesignPins, tasks } = schema
 
 export function actorLabel(actor: Actor): string {
   switch (actor.kind) {
@@ -313,8 +313,11 @@ export class RunJobs {
     }
   }
 
+  // A sub-task's run also reads what a human pinned on its parent (D31)
   async comments(taskId: string) {
-    const rows = await this.#c.d.db.select().from(comments).where(eq(comments.taskId, taskId)).orderBy(asc(comments.createdAt))
+    const { db } = this.#c.d
+    const [parent] = await db.select({ id: epics.taskId }).from(tasks).innerJoin(epics, eq(epics.id, tasks.epicId)).where(eq(tasks.id, taskId))
+    const rows = await db.select().from(comments).where(or(eq(comments.taskId, taskId), parent?.id ? and(eq(comments.taskId, parent.id), eq(comments.pinned, true)) : undefined)).orderBy(asc(comments.createdAt))
     return rows.map(c => ({ author: actorLabel(c.author), body: c.body, pinned: c.pinned, createdAt: c.createdAt }))
   }
 }

@@ -53,7 +53,7 @@ describe('pmPrompt', () => {
     expect(intro).toContain('Task IDs look like TA-12')
     expect(intro).toContain('list_tasks shows it live')
     expect(intro).toContain('`bug` for a fix to wrong behaviour, `spike` for an investigation whose deliverable is written findings, and `task` for everything else')
-    expect(intro).toContain('a big feature is always one parent, even with a single task')
+    expect(intro).toContain('never a parent with one sub-task')
     expect(intro).toContain('Plan each independent fix, such as a Bug Bash item, as a standalone task with no parent and its own PR')
     expect(intro).toContain('Descriptions in markdown, verifiable acceptance criteria, explicit dependencies')
     expect(intro).toContain('To refine an existing Backlog task or an unclaimed Ready task, read it with get_task and include it in the plan with its `ref`')
@@ -72,7 +72,7 @@ describe('pmPrompt', () => {
     const intro = pmPrompt({ ...turn, ...project, fresh: true })
     expect(intro).toContain('Split a feature into tasks only when the parts can run in parallel on different code')
     expect(intro).toContain('Work that would run in sequence or change the same files is one task')
-    expect(intro).toContain('a big feature is always one parent, even with a single task, so it appears in the parent views')
+    expect(intro).toContain('never a parent with one sub-task')
     expect(intro).toContain('Plan each independent fix, such as a Bug Bash item, as a standalone task with no parent')
     expect(intro).not.toMatch(/small tasks|split the build across several epics/i)
   })
@@ -742,5 +742,17 @@ describe('cappedBranchDiff', () => {
     expect(diff).toContain('+after')
     expect(diff).toContain('Left out for size, so read these on the branch:\n- huge.ts')
     expect(diff).not.toContain('\n- after.ts')
+  })
+})
+
+describe('the word people see', () => {
+  it.each([
+    { fresh: true, projectName: 'Test app', prefix: 'TA' },
+    { fresh: true, projectName: null, prefix: null },
+    { fresh: false, projectName: 'Test app', prefix: 'TA' }
+  ])('keeps it out of the PM prompt: %o', (turn) => {
+    const prompt = pmPrompt({ text: 'Hello', attachedTask: null, ...turn })
+    expect(prompt.replaceAll('corral/epic-', '')).not.toMatch(/\bepics?\b|update_epic/i)
+    if (turn.fresh && turn.projectName) expect(prompt).toContain('never a parent with one sub-task')
   })
 })

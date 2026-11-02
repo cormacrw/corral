@@ -10,7 +10,7 @@ Runs are global, like agents (D13): these reads span every project, whichever pr
 
 ## Getting a new tool to a PM session
 
-A tool reaches the PM only once it's on `main`, because `main` is what deploys. A task merged into an parent branch shows as Merged but stays off `main` until the parent PR merges (D27). That is why these tools were missing though COR-241 and COR-269 were done.
+A tool reaches the PM only once it's on `main`, because `main` is what deploys. A task merged into a parent branch shows as Merged but stays off `main` until the parent PR merges (D27). That is why these tools were missing though COR-241 and COR-269 were done.
 
 The server and the runner both have to run the new commit: the server's list decides what may be called and the runner's decides what's advertised. Check each runner's commit in Settings or `/runner/version`.
 

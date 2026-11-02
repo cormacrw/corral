@@ -12,7 +12,7 @@ export function deletionFor(task: CompletionState): Deletion {
   switch (task.status) {
     case 'draft':
     case 'backlog':
-    case 'parent': return 'hard' // Nothing to stop or close: only an empty parent gets here
+    case 'parent': return 'hard' // Only an empty one gets here; the server keeps one with a history
     default: return 'soft'
   }
 }

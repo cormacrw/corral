@@ -34,7 +34,7 @@ PR, or any of its tasks, deleted ones included, has a PR or is Merged. It's a 40
 after that. Plan revisions set `reviewMode` directly and aren't checked here.
 Because `taskBase` resolves at every boundary, a task already running follows the
 new mode when it opens its PR; `#submit` prepares the parent's branch if there's none,
-and an parent branch left by moving to `direct` stays on GitHub, unused.
+and a parent branch left by moving to `direct` stays on GitHub, unused.
 
 ## Parent PR integration review
 

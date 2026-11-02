@@ -65,7 +65,7 @@ Each card is a parent, and no task cards are shown. Tasks with no parent don't a
 
 The columns are shown in the order Ready, In progress, Agent review, Human review, Ready to merge, Blocked, Done. `direct` parents have no parent PR, so they go from In progress to Done.
 
-A parent is shown under `epicOnBoard`: it has work left, or it finished within `COMPLETE_WINDOW_DAYS`, counted from its latest task completion (a merge or a design approval, the same rule as the Complete column) or, for an parent PR, the PR's merge. A parent waiting on its PR stays however old its tasks are.
+A parent is shown under `epicOnBoard`: it has work left, or it finished within `COMPLETE_WINDOW_DAYS`, counted from its latest task completion (a merge or a design approval, the same rule as the Complete column) or, for a parent PR, the PR's merge. A parent waiting on its PR stays however old its tasks are.
 
 **Card** (`components/BoardEpicCard.vue`): the title and the meter with "N of M merged". Tags, review mode and the PR link stay in the parent flyout. An unfinished parent held by unfinished prerequisite parents shows the amber `i-lucide-ban` icon beside the title. It opens a "Waiting on" popover listing each prerequisite with its progress, and clicking a row opens that parent. Clicking the icon doesn't open the card's own flyout.
 

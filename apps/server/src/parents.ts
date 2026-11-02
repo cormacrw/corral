@@ -61,8 +61,8 @@ export async function deleteEpicWithParent(tx: Executor, epicId: string): Promis
   const [parent] = epic?.taskId ? await tx.select({ status: tasks.status }).from(tasks).where(eq(tasks.id, epic.taskId)) : []
   if (epic?.taskId && parent?.status === 'parent' && await hasComments(tx, epic.taskId)) return
   await tx.delete(epics).where(eq(epics.id, epicId))
-  // A task the plan would have promoted stays as it was
-  if (epic?.taskId) await tx.delete(tasks).where(and(eq(tasks.id, epic.taskId), eq(tasks.status, 'parent')))
+  // A task the plan would have promoted stays as it was, unless it was the plan's own Draft
+  if (epic?.taskId) await tx.delete(tasks).where(and(eq(tasks.id, epic.taskId), inArray(tasks.status, ['parent', 'draft'])))
 }
 
 // A plan that shrinks an unstarted epic to one task has no parent left to show
@@ -122,8 +122,9 @@ export async function markDelivered(db: Executor, epicId: string): Promise<void>
   if (live.length > 0 && live.every(isTaskDone)) await db.update(epics).set({ mergedAt: new Date(), updatedAt: new Date() }).where(eq(epics.id, epicId))
 }
 
-// When a parent landed. Older merged rows have only updatedAt.
-export const deliveredAt = (delivery: Pick<EpicRow, 'mergedAt' | 'reviewState' | 'updatedAt'>): Date | null => delivery.mergedAt ?? (delivery.reviewState === 'merged' ? delivery.updatedAt : null)
+// When a parent landed. updatedAt moves with any edit, so a merged row with no
+// time of its own uses when it began, and sorts the same every time.
+export const deliveredAt = (delivery: Pick<EpicRow, 'mergedAt' | 'reviewState' | 'createdAt'>): Date | null => delivery.mergedAt ?? (delivery.reviewState === 'merged' ? delivery.createdAt : null)
 
 type SubRow = Pick<TaskRow, 'epicId' | 'status' | 'type' | 'deletedAt'>
 

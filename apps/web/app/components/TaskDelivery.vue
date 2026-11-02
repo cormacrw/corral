@@ -8,7 +8,8 @@ import { EPIC_REVIEW_MODE, epicReviewStatus } from '~/utils/labels'
 // The delivery state of a task in a collapsed one-task epic (D31): it has no
 // parent page, so its PR, sync state and review mode show on the task.
 const props = defineProps<{ epic: Epic }>()
-const patch = useMutation(patchEpic)
+const toast = useToast()
+const patch = useMutation({ ...patchEpic, onError: (e: Error) => toast.add({ title: 'Could not change the review mode', description: e.message, color: 'error' }) })
 const modes = (Object.keys(EPIC_REVIEW_MODE) as EpicReviewMode[]).map(value => ({ value, label: EPIC_REVIEW_MODE[value].label }))
 const status = computed(() => epicReviewStatus(props.epic))
 </script>

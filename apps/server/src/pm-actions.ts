@@ -1,4 +1,4 @@
-import { isPmGatedTool, requiresPmConfirmation, type PlanMessage } from '@corral/contracts'
+import { isPmGatedTool, neutralPmCall, requiresPmConfirmation, type PlanMessage } from '@corral/contracts'
 import type { Actor, PmAction } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, eq, sql } from 'drizzle-orm'
@@ -32,6 +32,9 @@ function oneLine(text: string): string {
 
 // Every confirm-required tool uses this lifecycle. Its message is also the
 // durable pending-action record, so the card survives reloads and restarts.
+// What a card agreed to, whichever names it was saved under
+const neutralSummary = (summary: string) => summary.replaceAll(/\bepicId\b/g, 'parentId').replaceAll(/\bepic\b/g, 'parent')
+
 export class PmActions {
   #d: Deps
   constructor(deps: Deps) { this.#d = deps }
@@ -96,13 +99,14 @@ export class PmActions {
     } else {
       try {
         if (session.closedAt) throw new Error('This conversation is closed')
-        if (!requiresPmConfirmation(action.tool, action.input) && !isPmGatedTool(action.tool)) throw new Error('This tool is no longer available for confirmation')
-        const prepared = await this.#d.prepare(sessionId, action.tool, action.input)
+        const { tool, input } = neutralPmCall(action.tool, action.input)
+        if (!requiresPmConfirmation(tool, input) && !isPmGatedTool(tool)) throw new Error('This tool is no longer available for confirmation')
+        const prepared = await this.#d.prepare(sessionId, tool, input)
         actionProjectId = prepared.projectId
         // The summary is what the human agreed to, so it also catches a task
         // that moved on and came back, such as a new head on a reviewed PR.
-        if (prepared.targetId !== action.targetId || oneLine(prepared.summary) !== action.summary) throw new Error('The target of this action has changed')
-        action.result = await this.#d.execute(sessionId, action.tool, prepared, { ...actor, viaPm: { sessionId, runId: row.runId } })
+        if (prepared.targetId !== action.targetId || neutralSummary(oneLine(prepared.summary)) !== neutralSummary(action.summary)) throw new Error('The target of this action has changed')
+        action.result = await this.#d.execute(sessionId, tool, prepared, { ...actor, viaPm: { sessionId, runId: row.runId } })
         action.status = 'confirmed'
       } catch (error) {
         action.status = 'failed'
