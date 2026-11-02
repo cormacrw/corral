@@ -82,7 +82,7 @@ describe('plan sessions', () => {
     expect(changed.acceptanceCriteria[0]).toMatchObject({ id: task.acceptanceCriteria[0]!.id, checkedByHuman: false })
   })
 
-  it.each(['draft', 'backlog'] as const)('preserves a human-set flag when re-proposing a %s with strings or omitted flags, but accepts an explicit false', async (status) => {
+  it.each(['draft', 'backlog'] as const)('preserves a human-set flag when re-proposing a %s with strings or omitted flags, and only a Draft takes an explicit false', async (status) => {
     const project = await t.createProject()
     await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
     const start = async () => {
@@ -121,12 +121,21 @@ describe('plan sessions', () => {
       }
       expect((await getTask()).acceptanceCriteria[0]).toMatchObject({ id: criterion.id, checkedByHuman: true })
     }
-    await propose([{ text: criterion.text, checkedByHuman: false }, 'Shows playback controls', 'Shows elapsed time'], ref)
-    if (status === 'backlog') await approve()
+    const clearing = [{ text: criterion.text, checkedByHuman: false }, 'Shows playback controls', 'Shows elapsed time']
+    if (status === 'backlog') {
+      // Lowering a gate on existing work takes update_task's card (D30)
+      expect(await runner.call(pm.job.runId, pm.job.leaseEpoch, 'propose_plan', {
+        title: 'Device playback', tasks: [{ key: 'playback', ref, title: 'Playback', description: 'Support playback', type: 'task', acceptanceCriteria: clearing }]
+      })).toMatchObject({ ok: false, error: expect.stringContaining('update_task') })
+      expect((await getTask()).acceptanceCriteria[0]).toMatchObject({ id: criterion.id, checkedByHuman: true })
+      await endTurn(pm.job, 'Plan refused')
+      return
+    }
+    await propose(clearing, ref)
     const changed = await getTask()
     expect(changed.acceptanceCriteria[0]).toMatchObject({ id: criterion.id, checkedByHuman: false })
     expect(changed.acceptanceCriteria[2]).toMatchObject({ text: 'Shows elapsed time', checkedByHuman: false })
-    if (status === 'draft') await endTurn(pm.job, 'Plan proposed')
+    await endTurn(pm.job, 'Plan proposed')
   })
 
   it('stores current and legacy wire plans with the same content', async () => {
