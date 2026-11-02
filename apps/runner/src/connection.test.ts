@@ -67,6 +67,20 @@ describe('runner update status on the wire', () => {
     await vi.waitFor(async () => expect(await status()).toMatchObject({ commit: 'old', serverCommit: 'new', behind: true, draining: true }))
   })
 
+  it('asks the host updater after a protocol refusal, with auto-update off', async () => {
+    await start(false, socket => socket.close(4000, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION + 1, commit: 'new' })))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ commit: 'old', serverCommit: 'new', behind: true, draining: true }))
+  })
+
+  it('leaves a failed update for a human after a protocol refusal', async () => {
+    await start(false, socket => socket.close(4000, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION + 1, commit: 'new' })))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ serverCommit: 'new', draining: true }))
+    await writeFile(join(dataDir, 'updater-result.json'), JSON.stringify({ target: 'new', state: 'failed', error: 'Build failed', attempt: '1' }))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ updateState: 'failed', updateError: 'Build failed', draining: false }), { timeout: 3000 })
+    connection.updateStatus!.refused('new')
+    expect(connection.updateStatus!.draining).toBe(false)
+  })
+
   it('releases a failed host build drain and reports the failure without stopping live work', async () => {
     active = [{ runId: 'run-1', leaseEpoch: 1 }]
     await start(true, socket => socket.send(JSON.stringify({ type: 'welcome', runnerId: 'r1', commit: 'new', draining: true, updateRequested: true } satisfies ServerMessage)))

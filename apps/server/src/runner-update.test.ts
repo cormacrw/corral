@@ -1,7 +1,7 @@
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { RUNNER_UPDATE_GRACE_MS } from '@corral/contracts/client'
-import { type Inbox, type RunnerInfo } from '@corral/contracts'
+import { RUNNER_PROTOCOL_VERSION, type Inbox, type RunnerInfo } from '@corral/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runnerUpdateItems } from './inbox.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
@@ -126,6 +126,26 @@ describe('runner updates', () => {
     const later = Date.now() + RUNNER_UPDATE_GRACE_MS + 1000
     expect(runnerUpdateItems(await status(), later).map(i => i.id).sort()).toEqual(['runner-failed', 'runner-stalled'])
     expect(runnerUpdateItems(await status(), later).find(i => i.id === 'runner-stalled')!.body).toContain('No update attempt')
+  }, 60000)
+
+  it('reports a runner refused at the protocol check with no update attempt, timed from its first refusal', async () => {
+    t = await createTestApp('pglite', { listen: true })
+    const refuse = (updateState = '') => t.runner.connect({ send: () => {}, close: () => {} }).onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION - 1, commit: 'old', runnerId: 'M', name: 'old-mini', activeRuns: [], updateState }))
+    await refuse()
+    expect(await needsYou()).toEqual([])
+    const first = (await status()).find(r => r.id === 'M')!.connectedAt
+    await sleep(5)
+    await refuse()
+    const refused = (await status()).find(r => r.id === 'M')!
+    expect(refused).toMatchObject({ needsUpdate: true, online: false, connectedAt: first })
+    const later = Date.now() + RUNNER_UPDATE_GRACE_MS + 1000
+    expect(runnerUpdateItems([refused], later)).toMatchObject([{ id: 'runner-M', online: false, body: expect.stringContaining('refuses its protocol version') }])
+    // An update under way is what the wait is for
+    await refuse('building')
+    expect(runnerUpdateItems(await status(), later)).toEqual([])
+    await refuse('failed')
+    expect((await status()).find(r => r.id === 'M')).toMatchObject({ updateState: 'failed' })
+    expect(await needsYou()).toMatchObject([{ id: 'runner-M', online: false }])
   }, 60000)
 
   it('returns a failed build runner to placement and keeps the failure visible across reconnect', async () => {

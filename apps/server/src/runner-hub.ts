@@ -233,7 +233,8 @@ export class RunnerHub {
         updateRequested: false,
         updateState: message.updateState ?? '',
         updateError: message.updateError ?? '',
-        connectedAt: now,
+        // It retries every few seconds: the first refusal is when it began waiting
+        connectedAt: old?.status.needsUpdate ? old.status.connectedAt : now,
         lastHeartbeatAt: now,
         // An older hello may not carry capacity; keep what it last said
         ...parseCapacity(message, old?.status)

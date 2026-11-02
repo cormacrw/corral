@@ -25,13 +25,15 @@ export const PULL_REQUEST_LINE_LIMIT = 1000
 export const RUNNER_UPDATE_GRACE_MS = 5 * 60_000
 
 // What a human has to look at for this runner, or null. A failed attempt says
-// why; a runner that needs an update and shows no attempt has nothing updating it.
+// why. A runner kept from work that shows no attempt has nothing updating it:
+// tools that differ, or a protocol the server refused, whose runner is offline.
 export function runnerUpdateProblem(runner: RunnerInfo, now = Date.now()): string | null {
-  if (!runner.behind && !runner.toolContractReason) return null
+  if (!runner.behind && !runner.toolContractReason && !runner.needsUpdate) return null
   if (runner.updateState === 'failed') return runner.updateError || 'The host updater failed without saying why.'
-  if (runner.toolContractReason && runner.online && !runner.updateState && now - Date.parse(runner.connectedAt) > RUNNER_UPDATE_GRACE_MS) {
-    return `No update attempt since it connected. ${runner.toolContractReason} Check the host updater timer (corral-runner-update), or update it by hand.`
-  }
+  if (runner.updateState || now - Date.parse(runner.connectedAt) <= RUNNER_UPDATE_GRACE_MS) return null
+  const fix = 'Check the host updater timer (corral-runner-update), or update it by hand.'
+  if (runner.needsUpdate) return `The server refuses its protocol version (${runner.protocol}), and no update attempt has started. ${fix}`
+  if (runner.toolContractReason && runner.online) return `No update attempt since it connected. ${runner.toolContractReason} ${fix}`
   return null
 }
 

@@ -167,7 +167,7 @@ export class ServerConnection {
       if (code === 4000) {
         try {
           const detail = JSON.parse(reason.toString()) as { commit?: string }
-          if (typeof detail.commit === 'string') this.updateStatus?.server(detail.commit)
+          if (typeof detail.commit === 'string') this.updateStatus?.refused(detail.commit)
         } catch { /* Older servers may only send a readable protocol error. */ }
       }
       void this.refreshUpdateStatus()

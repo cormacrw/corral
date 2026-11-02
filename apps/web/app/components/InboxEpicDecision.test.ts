@@ -37,7 +37,7 @@ it('sends the chosen alternative', async () => {
 
 it('asks for words when the agent gave no alternatives', () => {
   const wrapper = render({ ...item, decision: { ...decision, alternatives: [], affectedChanges: [] } })
-  expect(wrapper.text()).toContain('Reply with your answer')
+  expect(wrapper.text()).toContain('Choose Answer and write your decision')
   expect(wrapper.find('ul').exists()).toBe(false)
   expect(wrapper.text()).not.toContain('Affected changes')
 })

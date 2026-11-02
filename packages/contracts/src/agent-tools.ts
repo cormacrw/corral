@@ -152,4 +152,6 @@ export function agentToolManifest() {
   }]))
 }
 
-export const AGENT_TOOL_CONTRACT = createHash('sha256').update(JSON.stringify(agentToolManifest())).digest('hex').slice(0, 16)
+export const toolContractHash = (manifest: unknown) => createHash('sha256').update(JSON.stringify(manifest)).digest('hex').slice(0, 16)
+
+export const AGENT_TOOL_CONTRACT = toolContractHash(agentToolManifest())

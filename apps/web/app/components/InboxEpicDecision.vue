@@ -34,7 +34,7 @@ async function choose(alternative: number) {
       v-if="!item.decision.alternatives.length"
       class="text-sm text-muted"
     >
-      The agent gave no alternatives. Reply with your answer: the rebase carries on from it, and review starts again.
+      The agent gave no alternatives. Choose Answer and write your decision: the rebase carries on from it, and review starts again.
     </p>
     <ul
       v-if="item.decision.alternatives.length"

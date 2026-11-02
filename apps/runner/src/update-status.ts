@@ -42,6 +42,14 @@ export class UpdateStatus {
     if (this.behind && this.autoUpdate && this.updateState !== 'failed') this.draining = true
   }
 
+  // A protocol refusal (4000) means no work until this runner has updated, so it
+  // asks the host updater itself, whatever autoUpdate says. A failed attempt at
+  // this target stays failed for a human, rather than retrying on each refusal.
+  refused(commit: string): void {
+    this.server(commit)
+    if (this.behind && this.updateState !== 'failed') this.draining = true
+  }
+
   drain(updateRequested: boolean): void {
     this.updateState = ''
     this.updateError = ''
