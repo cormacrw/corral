@@ -1099,6 +1099,22 @@ describe('developer runs on the epic', () => {
     await capture('fix-conflict-kept.json', { history: (await history(epic.id)).map(e => e.text), fixes })
   })
 
+  // COR-434: an epic's change can force an edit to a file only the target changed
+  it('publishes a target-only edit only when the fix sends the epic back to review', async () => {
+    const base = await humanApproved(await conflicted())
+    const epic = { ...base, onto: await commitOn('main', 'target-only.md', 'target\n') }
+    const { job } = await conflictFix(epic)
+    const adapted = await commitOn(job.branch!, 'target-only.md', 'adapted\n')
+    expect(await fixReport(job, { behaviourChanged: false, headSha: adapted, conflictedFiles: [epic.file] })).toMatchObject({ ok: true })
+    await pass()
+    expect(await git('rev-parse', epic.branch)).toBe(epic.head)
+    const retry = await fixJob(epic.id)
+    expect(await fixReport(retry, { behaviourChanged: true, headSha: adapted, conflictedFiles: [epic.file] })).toMatchObject({ ok: true })
+    await pass()
+    expect(await git('rev-parse', epic.branch)).toBe(adapted)
+    expect(await reload(epic.id)).toMatchObject({ reviewState: 'open', approvedHeadSha: null })
+  })
+
   it('returns the epic to integration review when the developer reports a behaviour change', async () => {
     const epic = await humanApproved(await conflicted())
     const { job, resolved } = await conflictFix(epic)

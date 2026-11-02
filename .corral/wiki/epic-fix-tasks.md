@@ -20,6 +20,10 @@ A CI fix with `behaviourChanged: false` keeps approval while the PR's head can r
 stale just after the push. The merge pass must not take that as an unknown head,
 so `startReview` compares with the branch before it drops approval.
 
+A fix has no reviewer before it publishes, so the push guard's target-only rule
+(`epic-rebases.md`) lets an edit through only on a review fix or one reported with
+`behaviourChanged: true`: those send the epic back to integration review.
+
 `fixAttempts` counts refused publishes, failed developer runs and non-human
 interruptions (including lease expiry, runner shutdown and reconnect loss). The
 run's conditional terminal write counts each interruption once, so a replayed
