@@ -140,7 +140,8 @@ export const askQuestionInput = z.object({
   recommendation: z.string().trim().min(1).optional().describe('Your suggested answer, in a few words'),
   options: z.array(z.string().trim().min(1, 'An option can’t be empty').max(120, 'An option can be at most 120 characters'))
     .min(2, 'Give 2–5 options, or leave options out').max(5, 'Give 2–5 options, or leave options out')
-    .optional().describe('2–5 short answer choices')
+    .optional().describe('2–5 short answer choices'),
+  retryOptions: z.array(z.string().trim().min(1)).max(5).optional().describe('Recovery questions only: exact options (or recommendation) that explicitly authorize resuming the stopped task. Omit for clarification, refusal or leaving stopped.')
 })
 export type AskQuestionInput = z.infer<typeof askQuestionInput>
 

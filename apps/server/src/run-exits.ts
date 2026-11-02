@@ -7,9 +7,10 @@ import { runEndValues } from './run-lifecycle.ts'
 import { listAgents } from './runs.ts'
 import { applyTransition, lockTask } from './tasks.ts'
 import { RUNNER_RESTARTED, UUID, server, type RunContext, type RunCore, type RunRow } from './run-context.ts'
+import { stopRepeated } from './retry-recovery.ts'
 import { lastPmReply } from './run-ending.ts'
 
-const { agents, runs } = schema
+const { agents, runs, tasks } = schema
 
 // How long to wait after a usage limit with no known reset time (D3)
 const RATE_LIMIT_BACKOFF_MS = 30 * 60 * 1000
@@ -125,6 +126,8 @@ export class RunExits {
           const locked = ctx.task ? await lockTask(tx, ctx.task.id).catch(() => null) : null
           if (locked && !locked.task.leaseRunId && locked.task.leaseEpoch === ctx.run.leaseEpoch && ['in_progress', 'agent_review'].includes(locked.task.status)) {
             await applyTransition(tx, locked.task, locked.project, { type: 'run_failed' }, server, { event: 'run_failed', runId: ctx.run.id, error })
+            const [failed] = await tx.select().from(tasks).where(eq(tasks.id, locked.task.id))
+            await stopRepeated(tx, { ...ctx, run: { ...ctx.run, retryContext: null } }, failed!, null)
           }
           await tx.update(runs).set({ ...runEndValues({ state: 'failed', outcome: 'failed', error }, ended), retryContext: null }).where(reconciledRun)
         })

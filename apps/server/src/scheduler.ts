@@ -26,9 +26,11 @@ export class Scheduler {
   #placing: Promise<unknown> = Promise.resolve()
   // Tasks whose job couldn't be prepared because GitHub didn't answer
   #assignRetry: Backoff
+  #recoveryTargets: Backoff
 
   constructor(core: RunCore) {
     this.#c = core
+    this.#recoveryTargets = new Backoff(60_000, 5 * 60_000, () => core.now())
     this.#assignRetry = new Backoff(ASSIGN_RETRY_MS, ASSIGN_RETRY_MAX_MS, () => core.now())
   }
 
@@ -117,7 +119,7 @@ export class Scheduler {
   async #schedulePass(urgent: readonly string[]): Promise<void> {
     const { db, runner } = this.#c.d
     if (this.#c.stopped) return
-    await reconcileRecovery(this.#c)
+    await reconcileRecovery(this.#c, this.#recoveryTargets)
     if (!runner.online) return
     // PM turns aren't claimed; they run when the human writes (D9), and
     // only wait here while the PM was paused or the runner was away

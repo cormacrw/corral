@@ -6,7 +6,7 @@ import { waitingDecisions } from './epic-rebase-approval.ts'
 import { fileArtifacts, isNew, workNotes } from './inbox-changes.ts'
 import type { ActionableInboxItem, Comment, Evidence, Inbox, PlanThreadAttention, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { arrivalKey, storedMessages, withMessages, type PreparedItem } from './inbox-message.ts'
-import { designPreviewUrl, humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
+import { ACTIVE_RUN_STATES, designPreviewUrl, humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm'
 import { actorLabel } from './orchestrator.ts'
@@ -200,7 +200,7 @@ function threadAttention(attention: Exclude<SessionAttention, { status: 'none' }
 }
 
 function openTaskFilter(taskId?: string) {
-  return and(isNull(tasks.retryStop), inArray(tasks.status, ['human_review', 'blocked', 'failed']), isNull(tasks.deletedAt), taskId ? eq(tasks.id, taskId) : undefined)
+  return and(inArray(tasks.status, ['human_review', 'blocked', 'failed']), isNull(tasks.deletedAt), taskId ? eq(tasks.id, taskId) : undefined)
 }
 
 type OpenTask = typeof tasks.$inferSelect
@@ -220,9 +220,23 @@ async function taskTransitions(db: Executor, taskIds: string[]) {
 // its status: updates that keep the status (a PR head moving, an edit) don't
 // move it.
 async function openTasks(db: Executor, taskId?: string) {
-  const open = await db.select({ task: tasks, project: projects }).from(tasks)
+  const candidates = await db.select({ task: tasks, project: projects }).from(tasks)
     .innerJoin(projects, eq(projects.id, tasks.projectId))
     .where(openTaskFilter(taskId))
+  const recoveryIds = [...new Set(candidates.flatMap(({ task }) => task.retryStop?.sessionId ? [task.retryStop.sessionId] : []))]
+  const sessions = recoveryIds.length ? await db.select().from(planSessions).where(inArray(planSessions.id, recoveryIds)) : []
+  const recovery = new Map((await sessionStates(db, sessions)).map(state => [state.session.id, state]))
+  const activeTriage = recoveryIds.length
+    ? await db.select({ taskId: runs.taskId, sessionId: runs.planSessionId }).from(runs)
+        .where(and(eq(runs.role, 'pm'), inArray(runs.planSessionId, recoveryIds), inArray(runs.state, [...ACTIVE_RUN_STATES]), inArray(runs.taskId, candidates.map(c => c.task.id))))
+    : []
+  const triaging = new Set(activeTriage.map(run => `${run.taskId}:${run.sessionId}`))
+  const open = candidates.filter(({ task }) => {
+    if (!task.retryStop) return true
+    if (!task.retryStop.sessionId) return false // Durable triage awaiting creation.
+    const state = recovery.get(task.retryStop.sessionId)
+    return !state || state.session.closed || (!triaging.has(`${task.id}:${task.retryStop.sessionId}`) && !['question', 'needs_approval'].includes(state.attention.status))
+  })
   const histories = await taskTransitions(db, open.map(o => o.task.id))
   const decisions = await waitingDecisions(db, open.filter(o => o.task.status === 'blocked').map(o => o.task.id))
   return open.map(({ task, project }) => {
@@ -268,7 +282,7 @@ async function prepareTaskItems(db: Executor, open: Open[]): Promise<PreparedIte
     db.selectDistinctOn([runs.taskId], { taskId: runs.taskId, name: agents.name, role: agents.role }).from(runs).innerJoin(agents, eq(agents.id, runs.agentId))
       .where(inArray(runs.taskId, ids)).orderBy(runs.taskId, desc(runs.number)),
     listEvidenceFor(db, ids),
-    listCommentsFor(db, open.filter(o => actions.get(o.task.id) || (o.task.status === 'human_review' && o.task.type === 'spike')).map(o => o.task.id)),
+    listCommentsFor(db, open.filter(o => o.task.retryStop || actions.get(o.task.id) || (o.task.status === 'human_review' && o.task.type === 'spike')).map(o => o.task.id)),
     designs.length > 0
       ? db.select({ id: schema.designVersions.id, taskId: schema.designVersions.taskId, version: schema.designVersions.version, status: schema.designVersions.status, createdAt: schema.designVersions.createdAt })
           .from(schema.designVersions).where(inArray(schema.designVersions.taskId, designs)).orderBy(desc(schema.designVersions.version))
@@ -293,7 +307,11 @@ async function prepareTaskItems(db: Executor, open: Open[]): Promise<PreparedIte
     // criteria and evidence sit right under it (design/inbox.md)
     const body = task.status === 'human_review'
       ? humanReviewNote(task, notes, taskVersions, approvalOf.get(task.id), humanCriteriaOf.get(task.id) ?? [])
-      : (task.statusReason ?? '')
+      : task.retryStop?.sessionId
+        ? [`Blocked: ${task.statusReason}`, notes.filter(note => note.author.kind === 'agent' && note.author.role === 'pm').at(-1)?.body,
+            'Decision needed: resolve the block and explicitly retry, or leave this task stopped.',
+            'Recommendation: address the PM findings before authorizing another attempt.'].filter(Boolean).join('\n\n')
+        : (task.statusReason ?? '')
     const item: TaskInboxItem = {
       id: task.id,
       type,

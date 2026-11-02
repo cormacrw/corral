@@ -83,7 +83,7 @@ export const toolDefinitions = {
     input: { agent: z.string().min(1).optional().describe('An agent\'s name, e.g. Jack; leave out for the whole team') }
   },
   ask_question: {
-    description: 'Ask the human a question in the Plan conversation. Add `recommendation` with the answer you suggest, and `options` (2–5 short choices) when the answer is one of a few.',
+    description: 'Ask the human a question in the Plan conversation. Add `recommendation` with the answer you suggest, and `options` (2–5 short choices) when the answer is one of a few. For a stopped task, mark only choices explicitly authorizing retry in retryOptions; other replies never restart work.',
     input: askQuestionInput.shape
   },
   propose_plan: {

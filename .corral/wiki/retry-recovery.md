@@ -30,13 +30,19 @@ The PM reads the task, run diagnostics and code, and comments with actionable
 findings or proposes work for human plan approval. Only requirements,
 authority and recovery decisions become `ask_question` items in Needs you,
 with the block, attempted recovery, decision and recommendation. The original
-Failed/Blocked item is suppressed once its recovery conversation exists, so
-implementation diagnosis does not demand a duplicate human decision. The task
+Failed/Blocked item is suppressed while triage is active or its open recovery
+conversation has a pending question or plan. Comment-only triage restores the
+original task decision to Needs you, including any D27 alternatives, with PM
+findings and recovery guidance. A failed or closed recovery conversation cannot
+hide the task permanently. The task
 comment links the conversation and names the triage run.
 
 Fresh human task input or a changed target releases a repetition stop. A human
-answer in its recovery conversation is copied to a pinned task comment and
-resolves Failed/Blocked through D10, with the usual counter reset. Epic rebase
+choice in a pending recovery question resumes work only if the PM explicitly
+listed that exact choice in `ask_question.retryOptions`. The selected retry
+choice is copied to a pinned task comment and resolves Failed/Blocked through
+D10, with the usual counter reset. Refusal, clarification, stale answers and
+unmarked free text never resume work or reset caps. Epic rebase
 answers also go through D27's decision journal: exact alternative labels keep
 the recorded choice's semantics, and other free text conservatively counts as
 a behaviour change. Routine comments and target changes cannot bypass
@@ -46,3 +52,10 @@ second automatic triage turn for the previous episode.
 
 The existing `outcome-retries.md` covers the runner's separate one-time resume
 to obtain a missing outcome; it is unchanged by this policy.
+
+Only new stops create recovery episodes. The scheduler never scans historical
+Failed tasks to enqueue triage; reconnect replay records a new cap at the point
+its failed-run counter reaches the limit. Target polling uses the scheduler's
+per-task backoff: 60 seconds initially, doubling to five minutes on unchanged
+or unavailable targets. Human input is checked on every pass without waiting
+for GitHub. A server restart may perform one fresh target check.

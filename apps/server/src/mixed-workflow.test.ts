@@ -636,7 +636,7 @@ describe('a target update that conflicts', () => {
     const pm = (await runner.next('run.assign', m => m.job.planSessionId === recovery.sessionId)).job
     expect(await runner.call(pm.runId, pm.leaseEpoch, 'get_task', { taskRef: `${project.prefix}-${fix.number}` })).toMatchObject({ ok: true })
     const question = `Blocked: the target changed a binding decision; both behaviours cannot stand. Decision needed: ${decision.question}`
-    expect(await runner.call(pm.runId, pm.leaseEpoch, 'ask_question', { question, recommendation: 'Follow the target', options: decision.alternatives.map(a => a.label) })).toMatchObject({ ok: true })
+    expect(await runner.call(pm.runId, pm.leaseEpoch, 'ask_question', { question, recommendation: 'Follow the target', options: decision.alternatives.map(a => a.label), retryOptions: decision.alternatives.map(a => a.label) })).toMatchObject({ ok: true })
     runner.send({ type: 'run.events', runId: pm.runId, leaseEpoch: pm.leaseEpoch, events: [{ type: 'message', text: 'This binding decision needs human authority.' }] })
     runner.send({ type: 'run.ended', runId: pm.runId, leaseEpoch: pm.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
     await expect.poll(async () => (await t.db.select().from(schema.runs).where(eq(schema.runs.id, pm.runId)))[0]!.state).toBe('completed')

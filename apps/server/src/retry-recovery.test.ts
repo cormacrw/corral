@@ -4,6 +4,7 @@ import { databaseFixture } from '@corral/db/testing'
 import { asc, eq } from 'drizzle-orm'
 import { afterAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
+import { RUNNER_RESTARTED } from './run-context.ts'
 import { FakeRunner } from './test-runner.ts'
 
 const { tasks, runs, agents } = schema
@@ -59,6 +60,7 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     expect(pm.prompt).toContain('Read get_task, list_runs and get_run')
     expect(pm.prompt).toContain('propose concrete follow-up work')
     expect((await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.some(i => i.taskId === task.id)).toBe(false)
+    t.clock.now = new Date(t.clock.now.getTime() + 6 * 60_000)
     t.github.setBranch(project.repository, 'main', 'changed-target')
     await t.orchestrator.schedule()
     const resumed = (await runner.next('run.assign', m => m.job.taskId === task.id)).job
@@ -69,6 +71,7 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
 
   it('keeps the PM triage lease independent when resumed worker work expires', async () => {
     const { task, project, pm } = await stopped()
+    t.clock.now = new Date(t.clock.now.getTime() + 6 * 60_000)
     t.github.setBranch(project.repository, 'main', 'new-target')
     await t.orchestrator.schedule()
     await runner.next('run.assign', m => m.job.taskId === task.id)
@@ -90,7 +93,7 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
 
   it('shows a structured PM question in Needs you and resumes after the human answers', async () => {
     const { task, pm, stop } = await stopped()
-    const question = { question: 'Blocked: the repository is archived. Recovery cannot write to it. Decision: unarchive or move the work?', recommendation: 'Unarchive the test repository and retry.', options: ['Unarchive and retry', 'Cancel the work'] }
+    const question = { question: 'Blocked: the repository is archived. Recovery cannot write to it. Decision: unarchive or move the work?', recommendation: 'Unarchive the test repository and retry.', options: ['Unarchive and retry', 'Cancel the work'], retryOptions: ['Unarchive and retry'] }
     expect(await runner.call(pm.runId, pm.leaseEpoch, 'ask_question', question)).toMatchObject({ ok: true })
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
     expect(inbox.needsYou.find(i => i.id === stop.sessionId)).toMatchObject({ question: expect.objectContaining({ text: question.question, recommendation: question.recommendation }) })
@@ -98,9 +101,125 @@ describe.each(['pglite', 'postgres'] as const)('no-progress recovery on %s', (dr
     runner.send({ type: 'run.ended', runId: pm.runId, leaseEpoch: pm.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
     // Wait for the server to finish the PM turn before answering.
     await expect.poll(async () => (await t.db.select().from(runs).where(eq(runs.id, pm.runId)))[0]!.state).toBe('completed')
-    expect((await t.request('POST', `/api/plan/sessions/${stop.sessionId}/messages`, { text: 'Unarchived; retry now.' })).status).toBe(201)
+    expect((await t.request('POST', `/api/plan/sessions/${stop.sessionId}/messages`, { text: 'Unarchive and retry' })).status).toBe(201)
     await t.orchestrator.schedule()
     expect((await runner.next('run.assign', m => m.job.taskId === task.id)).job.role).toBe('developer')
+  })
+
+  async function finishPm(pm: RunJob, text = 'PM findings are on the task; no plan or question.') {
+    runner.send({ type: 'run.events', runId: pm.runId, leaseEpoch: pm.leaseEpoch, events: [{ type: 'message', text }] })
+    runner.send({ type: 'run.ended', runId: pm.runId, leaseEpoch: pm.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
+    await expect.poll(async () => (await t.db.select().from(runs).where(eq(runs.id, pm.runId)))[0]!.state).toBe('completed')
+  }
+
+  it('resolves a cap only after an explicitly authorized pending retry choice', async () => {
+    const { task, job } = await assigned(1)
+    await fail(job)
+    const stop = (await row(task.id)).retryStop!
+    const pm = (await runner.next('run.assign', m => m.job.planSessionId === stop.sessionId)).job
+    expect(await runner.call(pm.runId, pm.leaseEpoch, 'ask_question', { question: 'Blocked by exhausted recovery. Retry after the repair?', options: ['Retry', 'Leave stopped'], retryOptions: ['Retry'] })).toMatchObject({ ok: true })
+    await finishPm(pm)
+    expect((await t.request('POST', `/api/plan/sessions/${stop.sessionId}/messages`, { text: 'Retry' })).status).toBe(201)
+    await t.orchestrator.schedule()
+    expect(await row(task.id)).toMatchObject({ status: 'in_progress', failedRuns: 0, retryStop: null })
+    expect((await runner.next('run.assign', m => m.job.taskId === task.id)).job.role).toBe('developer')
+  })
+
+  it.each(['Leave stopped', 'Why did it fail?'])('keeps capped work stopped when the human says %s', async (text) => {
+    const { task, job } = await assigned(1)
+    await fail(job)
+    const stop = (await row(task.id)).retryStop!
+    const pm = (await runner.next('run.assign', m => m.job.planSessionId === stop.sessionId)).job
+    expect(await runner.call(pm.runId, pm.leaseEpoch, 'ask_question', { question: 'Blocked by exhausted recovery. Decision: retry or leave stopped?', recommendation: 'Retry', options: ['Retry', 'Leave stopped'], retryOptions: ['Retry'] })).toMatchObject({ ok: true })
+    await finishPm(pm)
+    expect((await t.request('POST', `/api/plan/sessions/${stop.sessionId}/messages`, { text })).status).toBe(201)
+    await t.orchestrator.schedule()
+    expect(await row(task.id)).toMatchObject({ status: 'failed', failedRuns: 1, retryStop: { runId: job.runId } })
+    expect((await t.db.select().from(runs).where(eq(runs.taskId, task.id))).filter(r => r.role === 'developer')).toHaveLength(1)
+    const continuation = (await runner.next('run.assign', m => m.job.planSessionId === stop.sessionId)).job
+    expect((await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project.id === task.projectId)).toMatchObject([{ id: task.id, type: 'failed' }])
+    await finishPm(continuation)
+    expect((await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project.id === task.projectId)).toMatchObject([{ id: task.id, type: 'failed' }])
+    // A matching word after the pending question has been answered is not authorization.
+    expect((await t.request('POST', `/api/plan/sessions/${stop.sessionId}/messages`, { text: 'Retry' })).status).toBe(201)
+    expect((await row(task.id)).status).toBe('failed')
+  })
+
+  it.each(['capped', 'stuck'] as const)('returns unresolved %s work to Needs you after comment-only triage', async (kind) => {
+    const { task, job } = await assigned(1)
+    if (kind === 'capped') await fail(job)
+    else {
+      expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Need a format decision', summary: 'CSV or JSON?' })).toMatchObject({ ok: true })
+      await t.orchestrator.schedule()
+    }
+    const stop = (await row(task.id)).retryStop!
+    const pm = (await runner.next('run.assign', m => m.job.planSessionId === stop.sessionId)).job
+    const findings = 'The parser supports both formats. Resolve the format requirement before another attempt.'
+    expect(await runner.call(pm.runId, pm.leaseEpoch, 'add_comment', { taskRef: task.ref, body: findings })).toMatchObject({ ok: true })
+    expect((await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project.id === task.projectId)).toEqual([])
+    await finishPm(pm)
+    for (let i = 0; i < 2; i++) {
+      await t.orchestrator.schedule()
+      const mine = (await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project.id === task.projectId)
+      expect(mine).toMatchObject([{ id: task.id, taskId: task.id, type: kind === 'capped' ? 'failed' : 'question', body: expect.stringContaining(findings) }])
+      expect(mine).toHaveLength(1)
+      expect(mine[0]!.body).toContain('Decision needed:')
+      expect(mine[0]!.body).toContain('Recommendation:')
+    }
+    expect((await t.db.select().from(runs).where(eq(runs.taskId, task.id))).filter(r => r.role === 'pm')).toHaveLength(1)
+  })
+
+  it('keeps a pending follow-up plan actionable instead of duplicating its capped task', async () => {
+    const { task, job } = await assigned(1)
+    await fail(job)
+    const stop = (await row(task.id)).retryStop!
+    const pm = (await runner.next('run.assign', m => m.job.planSessionId === stop.sessionId)).job
+    expect(await runner.call(pm.runId, pm.leaseEpoch, 'propose_plan', { title: 'Repair the parser', summary: 'Fix the implementation before retrying.', tasks: [{ key: 'parser', title: 'Repair the parser', type: 'bug', description: 'Read the configured target branch.', acceptanceCriteria: ['Reads the configured target branch.'] }] })).toMatchObject({ ok: true })
+    await finishPm(pm)
+    const mine = (await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project.id === task.projectId)
+    expect(mine).toMatchObject([{ id: stop.sessionId, type: 'plan_thread', status: 'needs_approval' }])
+    expect(mine).toHaveLength(1)
+    expect(await row(task.id)).toMatchObject({ status: 'failed', failedRuns: 1, retryStop: { runId: job.runId } })
+  })
+
+  it('does not triage historic capped tasks just because the scheduler starts', async () => {
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug)
+    await t.db.update(tasks).set({ status: 'failed', statusReason: 'Failed-run cap reached (3)', failedRuns: 3 }).where(eq(tasks.id, task.id))
+    await t.orchestrator.schedule()
+    expect((await row(task.id)).retryStop).toBeNull()
+    expect(await t.db.select().from(runs).where(eq(runs.taskId, task.id))).toEqual([])
+    expect((await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox).needsYou.filter(i => i.project.id === project.id)).toMatchObject([{ id: task.id, type: 'failed' }])
+  })
+
+  it('records a new cap reached by a reconnected exit and triages it once', async () => {
+    const { project, task, job } = await assigned(1)
+    await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
+    await t.db.update(runs).set({ state: 'interrupted', endedAt: t.clock.now, error: RUNNER_RESTARTED }).where(eq(runs.id, job.runId))
+    await t.db.update(tasks).set({ leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null }).where(eq(tasks.id, task.id))
+    await t.orchestrator.onRunMessage({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 1 }, headSha: null }, 'recovery')
+    await t.orchestrator.schedule()
+    expect(await row(task.id)).toMatchObject({ status: 'failed', failedRuns: 1, retryStop: { capped: true, sessionId: expect.any(String) } })
+    await t.orchestrator.schedule()
+    expect((await t.db.select().from(runs).where(eq(runs.taskId, task.id))).filter(r => r.role === 'pm')).toHaveLength(1)
+  })
+
+  it('backs off unchanged-target polling while human task input remains immediate', async () => {
+    const { task, project } = await stopped()
+    await t.orchestrator.schedule()
+    const polls = () => t.github.calls.filter(call => call.method === 'branchHead' && call.args[0] === project.repository).length
+    const before = polls()
+    for (let i = 0; i < 5; i++) await t.orchestrator.schedule()
+    expect(polls()).toBe(before)
+    t.clock.now = new Date(t.clock.now.getTime() + 61_000)
+    await t.orchestrator.schedule()
+    expect(polls()).toBe(before + 1)
+    t.clock.now = new Date(t.clock.now.getTime() + 61_000)
+    await t.orchestrator.schedule()
+    expect(polls()).toBe(before + 1)
+    await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/comments`, { body: 'Use the alternative implementation.' })
+    await t.orchestrator.schedule()
+    expect((await row(task.id)).retryStop).toBeNull()
   })
 
   it('releases repetition on new human task input and starts a fresh streak', async () => {

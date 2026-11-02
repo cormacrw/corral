@@ -761,6 +761,28 @@ it('refuses to carry approval with no compare on record, and when the compare fa
   expect(approvalFate({ ...operation!, resolutionReview: uncompared }, approvedEpic, headSha)).toMatchObject({ kept: false, reason: expect.stringContaining('never compared') })
 })
 
+it('restores an epic decision to Needs you after comment-only PM triage', async () => {
+  const epic = await humanApproved(await conflicted())
+  const { fix } = await resolutionOf(epic)
+  await t.orchestrator.schedule()
+  const dev = (await runner.next('run.assign', m => m.job.role === 'developer' && m.job.taskId === fix.id)).job
+  expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Need a binding decision', summary: decision.question, decision })).toMatchObject({ ok: true })
+  await t.orchestrator.schedule()
+  const recovery = (await taskRow(fix.id)).retryStop!
+  const pm = (await runner.next('run.assign', m => m.job.planSessionId === recovery.sessionId)).job
+  expect((await inbox()).needsYou.filter(i => i.id === fix.id)).toEqual([])
+  const findings = 'The target and approved implementation disagree. The binding decision still needs the human.'
+  expect(await runner.call(pm.runId, pm.leaseEpoch, 'add_comment', { taskRef: `${project.prefix}-${fix.number}`, body: findings })).toMatchObject({ ok: true })
+  runner.send({ type: 'run.events', runId: pm.runId, leaseEpoch: pm.leaseEpoch, events: [{ type: 'message', text: findings }] })
+  runner.send({ type: 'run.ended', runId: pm.runId, leaseEpoch: pm.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
+  await expect.poll(async () => (await t.db.select().from(schema.runs).where(eq(schema.runs.id, pm.runId)))[0]!.state).toBe('completed')
+  for (let i = 0; i < 2; i++) {
+    await t.orchestrator.schedule()
+    expect((await inbox()).needsYou.filter(i => i.id === fix.id)).toMatchObject([{ id: fix.id, type: 'question', body: expect.stringContaining(findings), decision: { question: decision.question, alternatives: decision.alternatives } }])
+  }
+  expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'deciding', question: decision.question })
+})
+
 it('asks the newest question after an earlier one was closed from the board', async () => {
   const epic = await humanApproved(await conflicted())
   const { fix, resolved } = await resolutionOf(epic)
