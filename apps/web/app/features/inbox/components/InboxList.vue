@@ -12,9 +12,9 @@ const prefetch = useTaskPrefetch()
 const { list, inbox, error, tab, search, items, count, emptyText, selectedId, itemRoute, deleteThread } = useInboxView()
 
 const tabs = computed(() => [
-  { label: `Inbox (${count.value})`, value: 'needsYou', icon: 'i-ri-inbox-line' },
-  { label: 'Activity', value: 'activity', icon: 'i-ri-pulse-line' },
-  { label: `Resolved (${inbox.value?.resolved.length ?? 0})`, value: 'resolved', icon: 'i-ri-checkbox-circle-line' }
+  { label: `Inbox (${count.value})`, value: 'needsYou', icon: 'i-hugeicons-inbox' },
+  { label: 'Activity', value: 'activity', icon: 'i-hugeicons-pulse-01' },
+  { label: `Resolved (${inbox.value?.resolved.length ?? 0})`, value: 'resolved', icon: 'i-hugeicons-checkmark-circle-02' }
 ])
 function select(item: InboxItem) {
   void router.push(itemRoute(item))
@@ -38,7 +38,7 @@ const hover = (item: InboxItem) => isTaskItem(item) ? prefetch({ ref: item.taskR
       <AppInput
         v-model="search"
         placeholder="Search"
-        icon="i-ri-search-line"
+        icon="i-hugeicons-search-01"
         size="sm"
         class="w-full"
       />
@@ -85,7 +85,7 @@ const hover = (item: InboxItem) => isTaskItem(item) ? prefetch({ ref: item.taskR
         </button>
         <AppButton
           v-if="item.type === 'plan_thread'"
-          icon="i-ri-delete-bin-line"
+          icon="i-hugeicons-delete-02"
           variant="soft"
           color="error"
           size="xs"

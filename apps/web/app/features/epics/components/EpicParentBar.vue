@@ -32,7 +32,7 @@ async function remove() {
     <AppButton
       v-if="empty"
       label="Delete"
-      icon="i-ri-delete-bin-line"
+      icon="i-hugeicons-delete-02"
       size="sm"
       variant="ghost"
       color="error"

@@ -38,10 +38,10 @@ async function close() {
   <template v-if="!session.closed">
     <AppDropdownMenu
       v-if="menu"
-      :items="[{ label: 'Close thread', icon: 'i-ri-close-line', color: 'error', onSelect: () => { open = true } }]"
+      :items="[{ label: 'Close thread', icon: 'i-hugeicons-cancel-01', color: 'error', onSelect: () => { open = true } }]"
     >
       <AppButton
-        icon="i-ri-more-line"
+        icon="i-hugeicons-more-horizontal"
         variant="ghost"
         color="neutral"
         :aria-label="`Thread menu: ${session.title}`"

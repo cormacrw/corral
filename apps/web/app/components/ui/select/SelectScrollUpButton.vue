@@ -2,7 +2,8 @@
 import type { SelectScrollUpButtonProps } from 'reka-ui'
 
 import type { HTMLAttributes } from 'vue'
-import { RiArrowUpSLine } from '@remixicon/vue'
+import { HugeiconsIcon } from '@hugeicons/vue'
+import { ArrowUp01Icon } from '@hugeicons/core-free-icons'
 import { reactiveOmit } from '@vueuse/core'
 import { cn } from 'cn'
 import { SelectScrollUpButton, useForwardProps } from 'reka-ui'
@@ -21,7 +22,7 @@ const forwardedProps = useForwardProps(delegatedProps)
     :class="cn('bg-popover z-10 flex cursor-default items-center justify-center py-1 [&_svg:not([class*=size-])]:size-4', props.class)"
   >
     <slot>
-      <RiArrowUpSLine />
+      <HugeiconsIcon :icon="ArrowUp01Icon" :stroke-width="2" />
     </slot>
   </SelectScrollUpButton>
 </template>

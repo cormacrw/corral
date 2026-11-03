@@ -23,13 +23,13 @@ const emit = defineEmits<{ resume: [] }>()
     data-testid="task-paused"
   >
     <Icon
-      name="i-ri-pause-line"
+      name="i-hugeicons-pause"
       class="size-4 shrink-0 text-warning"
     />
     <span class="min-w-0 flex-1"><span class="font-medium">Paused.</span> <span class="text-muted-foreground">Its run was stopped, so nothing picks it up until you resume it.</span></span>
     <AppButton
       label="Resume"
-      icon="i-ri-play-line"
+      icon="i-hugeicons-play"
       size="sm"
       :class="mobile && 'min-h-11'"
       :loading="resuming"

@@ -47,7 +47,7 @@ const graphTasks = computed<Record<string, Task[]>>(() => Object.fromEntries(gra
     <header class="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
       <AppButton
         v-if="flyout.canGoBack.value"
-        icon="i-ri-arrow-left-line"
+        icon="i-hugeicons-arrow-left-02"
         variant="ghost"
         color="neutral"
         size="sm"
@@ -68,7 +68,7 @@ const graphTasks = computed<Record<string, Task[]>>(() => Object.fromEntries(gra
         size="sm"
       />
       <AppButton
-        icon="i-ri-close-line"
+        icon="i-hugeicons-cancel-01"
         variant="ghost"
         color="neutral"
         size="sm"
@@ -109,7 +109,7 @@ const graphTasks = computed<Record<string, Task[]>>(() => Object.fromEntries(gra
         <div class="flex flex-wrap gap-2">
           <AppButton
             label="Add to board"
-            icon="i-ri-kanban-view"
+            icon="i-hugeicons-kanban"
             :class="props.sheet && 'flex-1 justify-center'"
             :loading="props.busy"
             :disabled="props.disabled"
@@ -117,7 +117,7 @@ const graphTasks = computed<Record<string, Task[]>>(() => Object.fromEntries(gra
           />
           <AppButton
             label="Add to backlog"
-            icon="i-ri-list-unordered"
+            icon="i-hugeicons-left-to-right-list-bullet"
             variant="outline"
             color="neutral"
             :class="props.sheet && 'flex-1 justify-center'"

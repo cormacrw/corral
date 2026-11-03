@@ -23,7 +23,7 @@ const { moving, dragged, canDrag, canDrop, startDrag, allowDrop, dropTask } = us
       <AppButton
         v-if="single"
         label="Parent details"
-        icon="i-ri-node-tree"
+        icon="i-hugeicons-hierarchy"
         size="xs"
         variant="outline"
         color="neutral"

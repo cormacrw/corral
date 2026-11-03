@@ -13,7 +13,7 @@ const bannerClass = 'flex flex-wrap items-center gap-2 rounded-lg border border-
     class="flex items-center gap-1.5 text-xs text-muted-foreground"
   >
     <Icon
-      name="i-ri-lock-line"
+      name="i-hugeicons-square-lock-02"
       class="size-3.5"
     />
     Complete, so read-only. You can still comment.
@@ -28,7 +28,7 @@ const bannerClass = 'flex flex-wrap items-center gap-2 rounded-lg border border-
     <AppButton
       v-if="task.draftSession?.id"
       label="Open plan session"
-      trailing-icon="i-ri-arrow-right-line"
+      trailing-icon="i-hugeicons-arrow-right-02"
       variant="link"
       size="sm"
       :to="`/plan/${task.draftSession.id}`"
@@ -42,7 +42,7 @@ const bannerClass = 'flex flex-wrap items-center gap-2 rounded-lg border border-
     <span class="me-auto text-muted-foreground">In the Backlog, so never scheduled until you move it.</span>
     <AppButton
       label="Move to board"
-      icon="i-ri-kanban-view"
+      icon="i-hugeicons-kanban"
       size="sm"
       :loading="placing"
       @click="emit('place')"

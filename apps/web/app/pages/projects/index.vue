@@ -35,7 +35,7 @@ useSeoMeta({ title: 'Projects · Corral' })
       </AppButton>
       <AppButton
         to="/setup?step=repo&add=1"
-        icon="i-ri-add-line"
+        icon="i-hugeicons-add-01"
         label="Add project"
         variant="ghost"
         color="neutral"

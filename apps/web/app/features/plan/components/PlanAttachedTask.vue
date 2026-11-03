@@ -16,7 +16,7 @@ const emit = defineEmits<{ remove: [] }>()
       />
     </AppBadge>
     <AppButton
-      icon="i-ri-close-line"
+      icon="i-hugeicons-cancel-01"
       size="xs"
       variant="ghost"
       color="neutral"

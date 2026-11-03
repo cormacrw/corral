@@ -2,7 +2,8 @@
 import type { DialogContentEmits, DialogContentProps } from 'reka-ui'
 
 import type { HTMLAttributes } from 'vue'
-import { RiCloseLine } from '@remixicon/vue'
+import { HugeiconsIcon } from '@hugeicons/vue'
+import { Cancel01Icon } from '@hugeicons/core-free-icons'
 import { reactiveOmit } from '@vueuse/core'
 import { cn } from 'cn'
 import {
@@ -44,7 +45,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
         as-child
       >
         <Button variant="ghost" class="absolute top-4 right-4" size="icon-sm">
-          <RiCloseLine />
+          <HugeiconsIcon :icon="Cancel01Icon" :stroke-width="2" />
           <span class="sr-only">Close</span>
         </Button>
       </DialogClose>

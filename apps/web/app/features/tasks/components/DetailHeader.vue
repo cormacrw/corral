@@ -16,7 +16,7 @@ const copyLink = () => copy(`${location.origin}${props.path}`, 'Link copied')
     <template v-if="mode === 'flyout'">
       <AppButton
         v-if="flyout.canGoBack.value"
-        icon="i-ri-arrow-left-line"
+        icon="i-hugeicons-arrow-left-02"
         variant="ghost"
         color="neutral"
         size="sm"
@@ -32,7 +32,7 @@ const copyLink = () => copy(`${location.origin}${props.path}`, 'Link copied')
       <div class="ms-auto flex shrink-0 items-center gap-1">
         <AppTooltip text="Copy link">
           <AppButton
-            icon="i-ri-link"
+            icon="i-hugeicons-link-01"
             variant="ghost"
             color="neutral"
             size="sm"
@@ -43,7 +43,7 @@ const copyLink = () => copy(`${location.origin}${props.path}`, 'Link copied')
         <AppTooltip text="Open full page">
           <AppButton
             :to="path"
-            icon="i-ri-expand-diagonal-line"
+            icon="i-hugeicons-arrow-expand-01"
             variant="ghost"
             color="neutral"
             size="sm"
@@ -52,7 +52,7 @@ const copyLink = () => copy(`${location.origin}${props.path}`, 'Link copied')
         </AppTooltip>
         <AppTooltip text="Close">
           <AppButton
-            icon="i-ri-close-line"
+            icon="i-hugeicons-cancel-01"
             variant="ghost"
             color="neutral"
             size="sm"
@@ -64,7 +64,7 @@ const copyLink = () => copy(`${location.origin}${props.path}`, 'Link copied')
     </template>
     <template v-else-if="mode === 'mobile'">
       <AppButton
-        icon="i-ri-arrow-left-line"
+        icon="i-hugeicons-arrow-left-02"
         variant="ghost"
         color="neutral"
         aria-label="Back"
@@ -75,7 +75,7 @@ const copyLink = () => copy(`${location.origin}${props.path}`, 'Link copied')
         <slot />
       </div>
       <AppButton
-        icon="i-ri-link"
+        icon="i-hugeicons-link-01"
         variant="ghost"
         color="neutral"
         aria-label="Copy link"

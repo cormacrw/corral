@@ -689,6 +689,9 @@ export const evidence: Record<string, Evidence[]> = {
   }],
   [reviewTask.id]: [
     fileEvidence('ev-shot', 0, 'screenshot', 'approved-version.svg', 'image/svg+xml', screenshotUrl),
+    // Enough screenshots to page the Inbox's evidence carousel
+    fileEvidence('ev-shot-2', 1, 'screenshot', 'superseded-versions.svg', 'image/svg+xml', screenshotUrl),
+    fileEvidence('ev-shot-3', 2, 'screenshot', 'approval-response.svg', 'image/svg+xml', screenshotUrl),
     fileEvidence('ev-log', 0, 'log', 'approval.log', 'text/plain', logUrl),
     { id: 'ev-note', taskId: reviewTask.id, criterionId: criterionId(1), runId: 'r-2', round: 0, kind: 'note', createdAt: ago(20), fileName: null, contentType: null, url: null, size: 0, note: '**Earlier versions are superseded.** The approval transaction updates previous versions atomically. See `approveDesignVersion` in the design service.' },
     { ...fileEvidence('ev-request', 2, 'request', 'approval-response.txt', 'text/plain', requestUrl), createdAt: ago(40) },

@@ -45,7 +45,7 @@ const lineClass = (line: string) => line.startsWith('@@')
         :to="github"
         target="_blank"
         label="Open on GitHub"
-        trailing-icon="i-ri-arrow-right-up-line"
+        trailing-icon="i-hugeicons-arrow-up-right-01"
         variant="link"
         color="neutral"
         size="sm"
@@ -56,9 +56,9 @@ const lineClass = (line: string) => line.startsWith('@@')
       v-if="pr.truncated"
       color="warning"
       variant="subtle"
-      icon="i-ri-scissors-line"
+      icon="i-hugeicons-scissor-01"
       :title="`${shown}, up to ${PULL_REQUEST_LINE_LIMIT.toLocaleString('en')} changed lines`"
-      :actions="[{ label: 'See the full diff on GitHub', to: github, target: '_blank', trailingIcon: 'i-ri-arrow-right-up-line' }]"
+      :actions="[{ label: 'See the full diff on GitHub', to: github, target: '_blank', trailingIcon: 'i-hugeicons-arrow-up-right-01' }]"
       data-testid="inbox-diff-truncated"
     />
     <div
@@ -74,7 +74,7 @@ const lineClass = (line: string) => line.startsWith('@@')
         @click="toggle(file.path)"
       >
         <Icon
-          :name="open.includes(file.path) ? 'i-ri-arrow-down-s-line' : 'i-ri-arrow-right-s-line'"
+          :name="open.includes(file.path) ? 'i-hugeicons-arrow-down-01' : 'i-hugeicons-arrow-right-01'"
           class="size-4 shrink-0 text-muted-foreground/70"
         />
         <span class="min-w-0 flex-1 truncate font-mono text-xs">{{ file.path }}</span>

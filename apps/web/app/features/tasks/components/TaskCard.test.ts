@@ -6,6 +6,7 @@ import { computed } from 'vue'
 import { projects, task as fixture } from '~/prototype/fixtures'
 import TaskCard from '~/features/tasks/components/TaskCard.vue'
 import TaskCardAssignee from '~/features/tasks/components/TaskCardAssignee.vue'
+import TaskCardMeta from '~/features/tasks/components/TaskCardMeta.vue'
 
 const navigate = vi.fn()
 vi.stubGlobal('computed', computed)
@@ -22,6 +23,7 @@ const render = (props: { task: Task, epic?: string | null, to?: string, pressed?
   global: {
     components: {
       TaskCardAssignee,
+      TaskCardMeta,
       TaskCardBlockers: { template: '<span />' },
       BorderGlow: { template: '<div><slot /></div>' },
       AppTooltip: { props: ['text'], template: '<span :data-tooltip="text"><slot /></span>' },
@@ -34,14 +36,19 @@ const render = (props: { task: Task, epic?: string | null, to?: string, pressed?
 
 describe('TaskCard', () => {
   it('shows the title, epic and priority and no line for a missing epic', () => {
-    expect(render({ task: task({ status: 'ready', priority: 'urgent' }), epic: 'Login' }).text()).toBe('Fix the loginLoginUrgent')
-    expect(render({ task: task({ status: 'ready', priority: 'low' }), epic: null }).text()).toBe('Fix the loginLow')
+    const withEpic = render({ task: task({ status: 'ready', priority: 'urgent' }), epic: 'Login' }).text()
+    expect(withEpic).toContain('Fix the loginLogin')
+    expect(withEpic).toContain('Urgent')
+    expect(render({ task: task({ status: 'ready', priority: 'low' }), epic: null }).text()).not.toContain('Login')
   })
 
-  it('leaves the status detail to the flyout', () => {
-    const text = render({ task: task({ status: 'blocked', statusReason: 'Review-round limit reached', reviewRounds: 5, pr: { number: 66, url: 'https://example.test/pull/66' }, paused: true }) })
-    expect(text.text()).toBe('Fix the loginMedium')
-    expect(text.find('a').exists()).toBe(false)
+  it('shows the ref and PR number, and leaves the status detail to the flyout', () => {
+    const card = render({ task: task({ status: 'blocked', statusReason: 'Review-round limit reached', reviewRounds: 5, pr: { number: 66, url: 'https://example.test/pull/66' }, paused: true }) })
+    const meta = card.get('[data-testid=card-meta]').text()
+    expect(meta).toContain(card.props('task').ref)
+    expect(meta).toContain('#66')
+    expect(card.text()).not.toContain('Review-round limit reached')
+    expect(card.find('a').exists()).toBe(false)
   })
 
   it('opens from anywhere on the card, once, and marks a pressed title', async () => {

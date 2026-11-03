@@ -14,9 +14,9 @@ function toggleSearch() {
 
 // Server order: newest first, task items and threads together (D11)
 const tabs = computed(() => [
-  { label: 'Inbox', value: 'needsYou', icon: 'i-ri-inbox-line', count: count.value },
-  { label: 'Activity', value: 'activity', icon: 'i-ri-pulse-line', count: null },
-  { label: 'Resolved', value: 'resolved', icon: 'i-ri-checkbox-circle-line', count: inbox.value?.resolved.length ?? 0 }
+  { label: 'Inbox', value: 'needsYou', icon: 'i-hugeicons-inbox', count: count.value },
+  { label: 'Activity', value: 'activity', icon: 'i-hugeicons-pulse-01', count: null },
+  { label: 'Resolved', value: 'resolved', icon: 'i-hugeicons-checkmark-circle-02', count: inbox.value?.resolved.length ?? 0 }
 ])
 </script>
 
@@ -30,7 +30,7 @@ const tabs = computed(() => [
         v-if="searching"
         v-model="search"
         placeholder="Search"
-        icon="i-ri-search-line"
+        icon="i-hugeicons-search-01"
         autofocus
       />
       <div class="flex items-center gap-2">
@@ -50,7 +50,7 @@ const tabs = computed(() => [
           </template>
         </AppTabs>
         <AppButton
-          icon="i-ri-search-line"
+          icon="i-hugeicons-search-01"
           variant="ghost"
           color="neutral"
           aria-label="Search the Inbox"
@@ -115,7 +115,7 @@ const tabs = computed(() => [
         class="flex flex-col items-center gap-2 p-8 text-center text-sm text-muted-foreground"
       >
         <Icon
-          name="i-ri-inbox-line"
+          name="i-hugeicons-inbox"
           class="size-8"
         />
         {{ emptyText }}

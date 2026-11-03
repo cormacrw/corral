@@ -131,7 +131,7 @@ const rows = computed(() => {
           @click="flyout.plan.value ? flyout.close() : flyout.openPlan()"
         >
           <Icon
-            name="i-ri-list-check-2"
+            name="i-hugeicons-task-done-01"
             class="size-4 shrink-0 text-muted-foreground"
           />
           <span class="min-w-0 truncate">

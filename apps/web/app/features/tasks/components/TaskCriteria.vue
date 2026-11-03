@@ -80,7 +80,7 @@ async function addCriterion() {
         </div>
         <AppButton
           v-if="!readonly"
-          icon="i-ri-close-line"
+          icon="i-hugeicons-cancel-01"
           size="xs"
           variant="ghost"
           color="neutral"

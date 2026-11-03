@@ -51,7 +51,7 @@ const flyout = useTaskFlyout()
       <AppTabs
         v-if="props.group.id"
         :model-value="props.view"
-        :items="[{ label: 'List', value: 'list', icon: 'i-ri-list-unordered' }, { label: 'Graph', value: 'graph', icon: 'i-ri-node-tree' }]"
+        :items="[{ label: 'List', value: 'list', icon: 'i-hugeicons-left-to-right-list-bullet' }, { label: 'Graph', value: 'graph', icon: 'i-hugeicons-hierarchy' }]"
         variant="link"
         :content="false"
         :aria-label="`Show ${props.group.title} as`"
@@ -83,7 +83,7 @@ const flyout = useTaskFlyout()
               <span :class="priorityText(task)">{{ PRIORITY[task.priority].label }}</span>
               <template v-if="task.humanReview">
                 · <Icon
-                  name="i-ri-user-follow-line"
+                  name="i-hugeicons-user-check-01"
                   class="size-3 align-[-2px]"
                 /> Human review
               </template>
@@ -99,7 +99,7 @@ const flyout = useTaskFlyout()
           />
           <Icon
             v-if="task.ref"
-            name="i-ri-arrow-right-s-line"
+            name="i-hugeicons-arrow-right-01"
             class="size-4 shrink-0 text-muted-foreground/70"
           />
         </button>

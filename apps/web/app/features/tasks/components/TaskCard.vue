@@ -62,6 +62,11 @@ function onClick(event: MouseEvent) {
         v-if="epic"
         class="truncate text-xs text-muted-foreground"
       >{{ epic }}</span>
+      <TaskCardMeta
+        :task-ref="task.ref"
+        :pr-number="task.pr?.number ?? null"
+        :at="task.updatedAt"
+      />
       <span class="flex items-center gap-2 text-xs">
         <span :class="priorityClass">{{ PRIORITY[task.priority].label }}</span>
         <span class="ms-auto flex items-center gap-2">

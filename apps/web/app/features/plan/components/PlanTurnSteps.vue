@@ -35,13 +35,13 @@ function toggle() {
       @click="toggle"
     >
       <Icon
-        :name="open ? 'i-ri-arrow-down-s-line' : 'i-ri-arrow-right-s-line'"
+        :name="open ? 'i-hugeicons-arrow-down-01' : 'i-hugeicons-arrow-right-01'"
         class="size-3.5 shrink-0 text-muted-foreground/70"
       />
       {{ label }}
       <Icon
         v-if="loading"
-        name="i-ri-loader-4-line"
+        name="i-hugeicons-loading-03"
         class="size-3.5 shrink-0 animate-spin text-muted-foreground/70 motion-reduce:animate-none"
       />
     </button>

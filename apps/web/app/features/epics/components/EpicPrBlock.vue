@@ -43,7 +43,7 @@ const item = computed(() => inbox.data.value?.needsYou.find(i => i.id === props.
       <AppButton
         :to="`/inbox/${epic.id}`"
         :label="item.type === 'epic_review' ? 'Review in the Inbox' : 'Open in the Inbox'"
-        icon="i-ri-inbox-line"
+        icon="i-hugeicons-inbox"
         size="sm"
         class="max-sm:min-h-11"
       />

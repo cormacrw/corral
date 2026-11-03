@@ -18,7 +18,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
       <div class="flex min-h-14 items-center gap-2 px-2 py-1">
         <AppButton
           :to="`/agents/${name}`"
-          icon="i-ri-arrow-left-line"
+          icon="i-hugeicons-arrow-left-02"
           variant="ghost"
           color="neutral"
           aria-label="Back"
@@ -47,7 +47,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
         <AppButton
           v-if="selected?.taskRef"
           :to="`/tasks/${selected.taskRef}`"
-          icon="i-ri-list-check-2"
+          icon="i-hugeicons-task-done-01"
           variant="ghost"
           color="neutral"
           aria-label="Open task"
@@ -71,7 +71,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
         <AppButton
           v-if="live"
           label="Stop run"
-          icon="i-ri-checkbox-blank-line"
+          icon="i-hugeicons-square"
           color="error"
           variant="subtle"
           block

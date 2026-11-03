@@ -15,7 +15,7 @@ const { search, showCompleted, collapsed, groups, summary, planTo, pmName, inPla
     <MobilePageHeader>
       <template #actions>
         <AppButton
-          icon="i-ri-add-line"
+          icon="i-hugeicons-add-01"
           variant="ghost"
           color="neutral"
           aria-label="New task"
@@ -29,7 +29,7 @@ const { search, showCompleted, collapsed, groups, summary, planTo, pmName, inPla
       <AppInput
         v-model="search"
         placeholder="Search Backlog"
-        icon="i-ri-search-line"
+        icon="i-hugeicons-search-01"
         size="lg"
         variant="soft"
       />
@@ -81,7 +81,7 @@ const { search, showCompleted, collapsed, groups, summary, planTo, pmName, inPla
             <AppButton
               :to="planTo"
               :label="`Plan with ${pmName}`"
-              icon="i-ri-message-2-line"
+              icon="i-hugeicons-message-01"
               variant="outline"
               color="neutral"
               block
@@ -89,7 +89,7 @@ const { search, showCompleted, collapsed, groups, summary, planTo, pmName, inPla
             <AppButton
               v-if="movableRows(group).length > 0"
               :label="moveGroupLabel(group)"
-              icon="i-ri-kanban-view"
+              icon="i-hugeicons-kanban"
               variant="outline"
               color="neutral"
               block
@@ -128,7 +128,7 @@ const { search, showCompleted, collapsed, groups, summary, planTo, pmName, inPla
             </NuxtLink>
             <AppButton
               v-if="task.status === 'backlog'"
-              icon="i-ri-kanban-view"
+              icon="i-hugeicons-kanban"
               variant="ghost"
               color="neutral"
               :loading="moving.has(task.id)"

@@ -31,7 +31,7 @@ const expected = computed(() => status.value?.protocol)
       data-testid="runner-row"
     >
       <Icon
-        name="i-ri-server-line"
+        name="i-hugeicons-server-stack-01"
         class="mt-0.5 size-5 shrink-0 text-muted-foreground"
       />
       <div class="min-w-0 flex-1">

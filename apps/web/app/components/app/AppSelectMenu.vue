@@ -83,7 +83,7 @@ function choose(item: Item) {
           :data-testid="labelTestid"
         >{{ summary || placeholder }}</span>
         <Icon
-          :name="loading ? 'i-ri-loader-4-line' : 'i-ri-arrow-down-s-line'"
+          :name="loading ? 'i-hugeicons-loading-03' : 'i-hugeicons-arrow-down-01'"
           :class="['size-4 shrink-0 text-muted-foreground', loading && 'animate-spin motion-reduce:animate-none']"
         />
       </Button>
@@ -119,7 +119,7 @@ function choose(item: Item) {
               <span class="min-w-0 flex-1 truncate">{{ labelOf(item) }}</span>
               <Icon
                 v-if="isSelected(item)"
-                name="i-ri-check-line"
+                name="i-hugeicons-tick-02"
                 class="ms-auto size-4"
               />
             </CommandItem>

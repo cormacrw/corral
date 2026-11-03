@@ -102,7 +102,7 @@ const placeholder = computed(() => {
               value-key="value"
               size="xs"
               variant="ghost"
-              icon="i-ri-cpu-line"
+              icon="i-hugeicons-cpu"
               :search-input="false"
               aria-label="Runtime"
               data-testid="plan-runtime"
@@ -110,17 +110,13 @@ const placeholder = computed(() => {
               class="w-auto max-w-40"
               @update:model-value="lastRuntime = $event as AgentRuntime"
             />
-            <PlanRefineMenu
-              v-model="taskRef"
-              :project="project"
-            />
             <AppSelectMenu
               v-if="!device.isMobile.value"
               :items="sessionItems"
               value-key="value"
               size="xs"
               variant="ghost"
-              icon="i-ri-history-line"
+              icon="i-hugeicons-history"
               placeholder="Resume"
               :search-input="{ placeholder: 'Search sessions' }"
               aria-label="Resume a session"

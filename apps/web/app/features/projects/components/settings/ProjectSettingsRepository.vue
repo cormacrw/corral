@@ -26,7 +26,7 @@ function addCustomCheck() {
   <ProjectSettingsSection title="Repository">
     <div class="flex items-center gap-2 rounded-md bg-muted/50 p-3 text-sm">
       <Icon
-        name="i-ri-git-branch-line"
+        name="i-hugeicons-git-branch"
         class="size-4 text-muted-foreground"
       />
       <span class="font-mono">github.com/{{ project.repository }}</span>

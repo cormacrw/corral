@@ -45,7 +45,7 @@ function remove(ref: string) {
         />
         <AppButton
           v-if="!readonly"
-          icon="i-ri-close-line"
+          icon="i-hugeicons-cancel-01"
           size="xs"
           variant="ghost"
           color="neutral"
@@ -68,7 +68,7 @@ function remove(ref: string) {
       :items="choices"
       value-key="value"
       placeholder="Add dependency"
-      icon="i-ri-add-line"
+      icon="i-hugeicons-add-01"
       variant="ghost"
       size="sm"
       class="mt-1 -ms-2.5"

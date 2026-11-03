@@ -27,7 +27,7 @@ const { palette, setPalette } = useDarkNeutral()
       <span class="capitalize">{{ option }}</span>
       <Icon
         v-if="palette === option"
-        name="i-ri-check-line"
+        name="i-hugeicons-tick-02"
         class="size-3"
       />
     </AppButton>

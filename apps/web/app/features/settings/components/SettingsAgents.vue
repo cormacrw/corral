@@ -12,7 +12,7 @@ const adding = ref(false)
         <template #actions>
           <AppButton
             label="Add agent"
-            icon="i-ri-add-line"
+            icon="i-hugeicons-add-01"
             data-testid="add-agent"
             @click="adding = true"
           />

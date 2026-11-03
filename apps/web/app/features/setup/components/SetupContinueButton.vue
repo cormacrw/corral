@@ -8,7 +8,7 @@ const { continueLabel, finalStep, canContinue, busy, next } = props.setup
 <template>
   <AppButton
     :label="continueLabel"
-    :trailing-icon="finalStep ? 'i-ri-check-line' : 'i-ri-arrow-right-line'"
+    :trailing-icon="finalStep ? 'i-hugeicons-tick-02' : 'i-hugeicons-arrow-right-02'"
     :disabled="!canContinue"
     :loading="busy"
     @click="next"

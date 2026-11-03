@@ -62,7 +62,7 @@ async function requestChanges(text: string): Promise<boolean> {
       <span class="me-auto text-sm">{{ reopenable ? 'Design approved. Reopen with feedback to request a new version.' : `v${selected.version} is waiting on your review.` }}</span>
       <AppButton
         :label="reopenable ? 'Reopen design' : 'Request changes'"
-        icon="i-ri-pencil-line"
+        icon="i-hugeicons-pencil-edit-02"
         variant="outline"
         color="neutral"
         size="sm"
@@ -71,7 +71,7 @@ async function requestChanges(text: string): Promise<boolean> {
       <AppButton
         v-if="decidable"
         :label="`Approve v${selected.version}`"
-        icon="i-ri-check-line"
+        icon="i-hugeicons-tick-02"
         size="sm"
         :loading="approval.isPending.value"
         @click="approve"

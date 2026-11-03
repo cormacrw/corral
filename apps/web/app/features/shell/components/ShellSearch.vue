@@ -9,7 +9,7 @@ const lists = useAllProjectLists(() => shell.projects)
 const groups = computed(() => open.value
   ? [
       { id: 'pages', label: 'Go to', items: searchPages(shell.projects, shell.agents) },
-      { id: 'tasks', label: 'Tasks', items: Object.values(lists.searchable.value).flatMap(tasks => tasks ?? []).map(t => ({ label: `${t.ref} ${t.title}`, icon: 'i-ri-checkbox-line', to: `/tasks/${t.ref}` })) }
+      { id: 'tasks', label: 'Tasks', items: Object.values(lists.searchable.value).flatMap(tasks => tasks ?? []).map(t => ({ label: `${t.ref} ${t.title}`, icon: 'i-hugeicons-checkmark-square-02', to: `/tasks/${t.ref}` })) }
     ]
   : [])
 

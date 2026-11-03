@@ -36,7 +36,7 @@ const taskLink = computed(() => {
           v-if="taskLink"
           :to="taskLink.to"
           :label="taskLink.label"
-          icon="i-ri-list-unordered"
+          icon="i-hugeicons-left-to-right-list-bullet"
           class="tap-target"
           variant="ghost"
           color="neutral"

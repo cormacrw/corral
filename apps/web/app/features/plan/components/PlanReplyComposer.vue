@@ -57,7 +57,7 @@ defineExpose({ focus: () => composer.value?.focus() })
           >
             <AppButton
               :label="runtimeLabel(props.session.runtime)"
-              icon="i-ri-lock-line"
+              icon="i-hugeicons-square-lock-02"
               size="xs"
               variant="ghost"
               color="neutral"

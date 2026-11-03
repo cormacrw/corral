@@ -53,9 +53,9 @@ const back = computed(() => subPage.value
         ? { to: '/settings', label: 'Back to Settings' }
         : null)
 const action = computed(() => agentPage.value
-  ? { to: '/settings/agents', icon: 'i-ri-equalizer-2-line', label: 'Agent settings' }
+  ? { to: '/settings/agents', icon: 'i-hugeicons-sliders-horizontal', label: 'Agent settings' }
   : overviewPage.value
-    ? { to: `/projects/${parts.value[1]}/settings`, icon: 'i-ri-equalizer-2-line', label: 'Project settings' }
+    ? { to: `/projects/${parts.value[1]}/settings`, icon: 'i-hugeicons-sliders-horizontal', label: 'Project settings' }
     : null)
 
 // The header names the page
@@ -88,7 +88,7 @@ const title = computed(() => {
       <AppButton
         v-if="back"
         :to="back.to"
-        icon="i-ri-arrow-left-line"
+        icon="i-hugeicons-arrow-left-02"
         variant="ghost"
         color="neutral"
         :aria-label="back.label"

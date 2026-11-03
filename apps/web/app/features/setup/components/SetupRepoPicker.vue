@@ -25,7 +25,7 @@ const { isMobile } = useDevice()
       :size="isMobile ? 'md' : 'xs'"
       variant="ghost"
       color="neutral"
-      icon="i-ri-refresh-line"
+      icon="i-hugeicons-refresh"
       @click="loadRepos()"
     />
   </div>
@@ -33,7 +33,7 @@ const { isMobile } = useDevice()
     <AppInput
       v-model="repoSearch"
       :placeholder="`Search ${repos?.signedIn ? repos.repos.length : ''} repositories`"
-      icon="i-ri-search-line"
+      icon="i-hugeicons-search-01"
       variant="none"
       :size="isMobile ? 'lg' : 'md'"
       :class="['w-full border-b border-border', isMobile && 'bg-muted/50']"

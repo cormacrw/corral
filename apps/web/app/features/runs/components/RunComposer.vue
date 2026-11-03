@@ -48,7 +48,7 @@ async function send(text: string): Promise<boolean> {
       data-testid="run-composer-reason"
     >
       <Icon
-        name="i-ri-information-line"
+        name="i-hugeicons-information-circle"
         class="mt-0.5 size-3 shrink-0"
       />
       {{ state.reason }}
@@ -65,7 +65,7 @@ async function send(text: string): Promise<boolean> {
     class="text-xs text-muted-foreground"
   >
     <Icon
-      name="i-ri-lock-line"
+      name="i-hugeicons-square-lock-02"
       class="size-3"
     /> Read-only. This run finished {{ timeAgo(props.run.endedAt, now) }}. To change the work, comment on the task.
   </p>

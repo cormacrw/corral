@@ -22,7 +22,7 @@ const { agents, patchAgent, saveAvatar } = props.settings
         </div>
         <AppButton
           label="Add agent"
-          icon="i-ri-add-line"
+          icon="i-hugeicons-add-01"
           size="sm"
           data-testid="add-agent"
           @click="$emit('add')"

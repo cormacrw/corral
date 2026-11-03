@@ -2,7 +2,8 @@
 import type { ListboxFilterProps } from 'reka-ui'
 
 import type { HTMLAttributes } from 'vue'
-import { RiSearchLine } from '@remixicon/vue'
+import { HugeiconsIcon } from '@hugeicons/vue'
+import { Search01Icon } from '@hugeicons/core-free-icons'
 import { reactiveOmit } from '@vueuse/core'
 import { cn } from 'cn'
 import { ListboxFilter, useForwardProps } from 'reka-ui'
@@ -38,7 +39,7 @@ const { filterState } = useCommand()
         :class="cn('w-full text-sm outline-hidden disabled:cursor-not-allowed disabled:opacity-50', props.class)"
       />
       <InputGroupAddon>
-        <RiSearchLine class="size-4 shrink-0 opacity-50" />
+        <HugeiconsIcon :icon="Search01Icon" :stroke-width="2" class="size-4 shrink-0 opacity-50" />
       </InputGroupAddon>
     </InputGroup>
   </div>

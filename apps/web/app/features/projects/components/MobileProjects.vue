@@ -7,10 +7,10 @@ import { projectCardSummary, projectNeedsYou } from '~/features/projects/utils/p
 // The mobile Projects tab (design/mobile.md, frame "Projects"): a card per
 // project that opens its overview, with shortcuts to Board, Backlog and Settings
 const PAGES = [
-  { label: 'Board', icon: 'i-ri-kanban-view-2', to: 'board' },
-  { label: 'Backlog', icon: 'i-ri-list-unordered', to: 'backlog' },
-  { label: 'PRs', icon: 'i-ri-git-pull-request-line', to: 'pull-requests' },
-  { label: 'Settings', icon: 'i-ri-equalizer-2-line', to: 'settings' }
+  { label: 'Board', icon: 'i-hugeicons-layout-03', to: 'board' },
+  { label: 'Backlog', icon: 'i-hugeicons-left-to-right-list-bullet', to: 'backlog' },
+  { label: 'PRs', icon: 'i-hugeicons-git-pull-request', to: 'pull-requests' },
+  { label: 'Settings', icon: 'i-hugeicons-sliders-horizontal', to: 'settings' }
 ] as const
 const shell = useShell()
 const lists = useAllProjectLists(() => shell.projects)
@@ -66,7 +66,7 @@ const cards = computed(() => shell.projects.map((project) => {
           <span class="block truncate font-mono text-xs text-muted-foreground">{{ card.project.repository }} · {{ card.project.prefix }}</span>
         </span>
         <Icon
-          name="i-ri-arrow-right-s-line"
+          name="i-hugeicons-arrow-right-01"
           class="size-4 shrink-0 text-muted-foreground/70"
         />
       </NuxtLink>
@@ -106,7 +106,7 @@ const cards = computed(() => shell.projects.map((project) => {
     </article>
     <AppButton
       to="/setup?step=repo&add=1"
-      icon="i-ri-add-line"
+      icon="i-hugeicons-add-01"
       label="Add project"
       variant="outline"
       color="neutral"

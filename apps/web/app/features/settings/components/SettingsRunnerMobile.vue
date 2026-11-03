@@ -38,7 +38,7 @@ const copy = useCopy()
       <RunnerList />
       <AppButton
         label="Reconnect"
-        icon="i-ri-refresh-line"
+        icon="i-hugeicons-refresh"
         color="neutral"
         variant="outline"
         size="lg"
@@ -73,7 +73,7 @@ const copy = useCopy()
           :data-testid="`cli-${cli.id}`"
         >
           <Icon
-            name="i-ri-terminal-box-line"
+            name="i-hugeicons-command-line"
             class="size-5 shrink-0 text-muted-foreground"
           />
           <div class="min-w-0 flex-1">
@@ -105,7 +105,7 @@ const copy = useCopy()
       >
         <code class="min-w-0 flex-1 overflow-x-auto overscroll-x-contain font-mono text-xs whitespace-nowrap">{{ command }}</code>
         <AppButton
-          icon="i-ri-file-copy-line"
+          icon="i-hugeicons-copy-01"
           variant="ghost"
           color="neutral"
           size="sm"
@@ -115,7 +115,7 @@ const copy = useCopy()
         />
       </div>
       <AppAlert
-        icon="i-ri-shield-line"
+        icon="i-hugeicons-shield-01"
         color="info"
         variant="subtle"
         title="Corral shows whether you're signed in. It never reads, stores or sends your credentials."

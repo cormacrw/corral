@@ -24,7 +24,7 @@ defineProps<{ item: PlanThreadItem, mobile?: boolean }>()
       <span class="ms-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
         <Icon
           v-if="item.activeRunId"
-          name="i-ri-loader-4-line"
+          name="i-hugeicons-loading-03"
           class="size-3 animate-spin"
           aria-label="PM working"
         />

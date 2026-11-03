@@ -30,7 +30,7 @@ const { confirmOpen, confirmEpic, confirmMove } = backlog
         />
         <AppButton
           label="Move to board"
-          icon="i-ri-kanban-view"
+          icon="i-hugeicons-kanban"
           @click="confirmMove"
         />
       </template>

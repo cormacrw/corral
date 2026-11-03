@@ -51,7 +51,7 @@ const details = computed(() => openTab.value as Exclude<InboxPanelTab, 'overview
         </div>
         <AppButton
           v-if="!mobile && ctx.task"
-          icon="i-ri-side-bar-line"
+          icon="i-hugeicons-sidebar-left"
           aria-label="Task details"
           title="Task details"
           variant="ghost"
@@ -61,10 +61,7 @@ const details = computed(() => openTab.value as Exclude<InboxPanelTab, 'overview
           @click="ctx.toggleTask"
         />
       </div>
-      <InboxItemSummary
-        :item="ctx.item"
-        :evidence="ctx.evidence"
-      />
+      <InboxItemSummary :item="ctx.item" />
       <InboxPanelEpicContext
         v-if="p.isReview.value"
         :task="ctx.task"

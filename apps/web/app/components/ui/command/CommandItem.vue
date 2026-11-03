@@ -2,7 +2,8 @@
 import type { ListboxItemEmits, ListboxItemProps } from 'reka-ui'
 
 import type { HTMLAttributes } from 'vue'
-import { RiCheckLine } from '@remixicon/vue'
+import { HugeiconsIcon } from '@hugeicons/vue'
+import { Tick02Icon } from '@hugeicons/core-free-icons'
 import { reactiveOmit, useCurrentElement } from '@vueuse/core'
 import { cn } from 'cn'
 import { ListboxItem, useForwardPropsEmits, useId } from 'reka-ui'
@@ -74,6 +75,6 @@ onUnmounted(() => {
     }"
   >
     <slot />
-    <RiCheckLine class="ml-auto opacity-0 group-has-data-[slot=command-shortcut]/command-item:hidden group-data-[checked=true]/command-item:opacity-100" />
+    <HugeiconsIcon :icon="Tick02Icon" :stroke-width="2" class="ml-auto opacity-0 group-has-data-[slot=command-shortcut]/command-item:hidden group-data-[checked=true]/command-item:opacity-100" />
   </ListboxItem>
 </template>

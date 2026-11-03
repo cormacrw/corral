@@ -50,7 +50,7 @@ describe('PlanDrafts', () => {
       'COR-13Design review screenHigh',
       'COR-14Approve a design versionUrgent'
     ])
-    expect(groups[0]!.findAll('[data-testid="plan-drafts-draft"] [data-icon]').map(i => i.attributes('data-icon'))).toEqual(['i-ri-palette-line', 'i-ri-checkbox-line'])
+    expect(groups[0]!.findAll('[data-testid="plan-drafts-draft"] [data-icon]').map(i => i.attributes('data-icon'))).toEqual(['i-hugeicons-paint-board', 'i-hugeicons-checkmark-square-02'])
     expect(groups[1]!.find('[data-badge]').exists()).toBe(false)
     expect(groups[1]!.findAll('[data-testid="plan-drafts-draft"]').map(d => d.text())).toEqual(['COR-16Cards jump when a run startsMedium'])
   })

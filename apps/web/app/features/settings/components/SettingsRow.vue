@@ -25,7 +25,7 @@ const NuxtLink = resolveComponent('NuxtLink')
     </span>
     <slot name="trailing" />
     <Icon
-      name="i-ri-arrow-right-s-line"
+      name="i-hugeicons-arrow-right-01"
       class="size-4 shrink-0 text-muted-foreground/70"
     />
   </component>

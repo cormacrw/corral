@@ -34,7 +34,7 @@ function chosen(event: Event) {
         class="absolute inset-0 flex items-center justify-center rounded-lg bg-background/80"
       >
         <Icon
-          name="i-ri-loader-4-line"
+          name="i-hugeicons-loading-03"
           class="size-5 animate-spin"
         />
       </span>

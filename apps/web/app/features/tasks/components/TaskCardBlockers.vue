@@ -31,7 +31,7 @@ function openTask(ref: string) {
       @click.stop
     >
       <Icon
-        name="i-ri-prohibited-line"
+        name="i-hugeicons-unavailable"
         class="size-4"
       />
     </button>

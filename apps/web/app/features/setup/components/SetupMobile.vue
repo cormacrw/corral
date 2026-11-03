@@ -16,7 +16,7 @@ const { adding, steps, step, index, heading, back } = props.setup
         <SetupBrand v-if="index === 0 && !adding" />
         <template v-else>
           <AppButton
-            icon="i-ri-arrow-left-line"
+            icon="i-hugeicons-arrow-left-02"
             variant="ghost"
             color="neutral"
             aria-label="Back"

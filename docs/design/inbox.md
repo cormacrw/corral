@@ -33,8 +33,8 @@ There are three columns. The list divider can be resized (280–560px, default 3
   - the sender name and time (bold when unread)
   - the subject, which is the task title (bold when unread)
   - a two-line preview
-  - a type badge and the project tag (a colour dot and project name)
-- **Plan thread rows** have the same layout with a status badge for the type badge; see [Plan threads](#plan-threads).
+  - the project tag (a colour dot and project name)
+- **Plan thread rows** have the same layout, with a status badge beside the project tag; see [Plan threads](#plan-threads).
 - The selected row uses `bg-muted`.
 - **Empty state:** the Inbox tab says "No decisions are waiting on you. Agents may still be working; their updates are in Activity." It never implies that background work has finished. The detail pane says the same with **Open Activity**. Activity, Resolved and a search with no matches each have their own line.
 - **Live updates:** an informational item arriving adds no Inbox row, doesn't change the count or badge, and doesn't move the selection. It appears under Activity.
@@ -47,11 +47,11 @@ Task items (human review, question, blocked, failed, stopped, Activity and Resol
 - **Top block**, which fits at 1280×800 without scrolling:
   - one quiet line (`InboxPanelMeta`): kind (Code, Design or Spike review, Question, Blocked, Failed, Stopped, Activity, Resolved) · project · ref · sender · time
   - the title, and a **Task details** icon button (`aria-pressed`). The flyout is closed whenever an item opens, and one click opens it.
-  - shared `InboxMessage` in place of a TL;DR: the short `message` clamped to three lines, and its **New** row on one line that scrolls sideways. Items with no message show **TL;DR** and the first paragraph of the body, cut to two lines.
+  - shared `InboxMessage` in place of a TL;DR: the short `message` clamped to three lines. Items with no message show **TL;DR** and the first paragraph of the body, cut to two lines.
   - the verdict on reviews (`InboxPanelVerdict`): reviewer and round, gates passed, criteria met. It's red only when a criterion is unmet; a human check waiting for its tick isn't unmet.
   - the actions (`InboxPanelActions`) on the left, and the links (`InboxPanelArtifacts`) on the right: **PR #n**, or **Preview vN** and **Review design** on a design, or **Open task** or **Open parent** on Activity. Spikes have no PR link.
 - **Tabs:** **Overview · Criteria n/m · Review · PR description · Code diff N · Message**. Criteria and Review show on reviews that have them. The tab resets when another item opens.
-  - **Overview:** on a review, a screenshot grid and the other files; one click opens either in the evidence viewer. On other items, or a review with no evidence, what each action does. A read-only item shows its resolution, or "For your information. Nothing to do."
+  - **Overview:** on a review, a screenshot carousel (`InboxEvidenceCarousel`): one large screenshot at a time, with "n of m", arrows and a swipe on phones. The other files follow it. One click opens any of them in the evidence viewer, which flips through all of the review's files, screenshots first, with its own arrows, the arrow keys or a swipe. Closing it leaves the carousel, and focus, on the last screenshot viewed. The Criteria tab's viewer flips through its files the same way. On other items, or a review with no evidence, what each action does. A read-only item shows its resolution, or "For your information. Nothing to do."
   - **Criteria:** `EvidenceList`, with its notes, evidence and human checks.
   - **Review:** every round's verdict and summary, newest first.
   - **Message:** the full `body`, including spike findings.
@@ -71,8 +71,7 @@ Task items (human review, question, blocked, failed, stopped, Activity and Resol
 
 ### What each kind shows
 
-- **New row:** needs-you task and parent items show the short `message` from shared `InboxMessage`, then a **New** row directly below it when `newArtifacts` is nonempty. Screenshots are thumbnails; other files use icons and names. One click opens the same evidence viewer used by the criteria list. Design versions link directly to that version's preview. Parent artifacts include their task ref. Evidence is untrusted, so the viewer never frames HTML: images, video and text show in the app, a PDF in an iframe, and anything else is a download link.
-- The row uses only the server's `newArtifacts`, already filtered since the human's last review or answer. Older files remain in the evidence list without a New marker. With no new artifacts there is no row.
+- Needs-you task and parent items show the short `message` from shared `InboxMessage`, with no row of files under it: a review's files are in the Overview tab's carousel and the Criteria tab. Evidence is untrusted, so the viewer never frames HTML: images, video and text show in the app, a PDF in an iframe, and anything else is a download link.
 - The complete `body`, including spike findings, is in the **Message** tab, and the tab resets when another item opens. Items without `message` keep their existing rendering, including Plan threads, release notes, Activity and Resolved.
 - **Spikes always stop in Human review**, whatever their human-review flag says. They appear under Needs you and add one to its count. The **Message** tab renders the latest `## Findings` comment as markdown; criteria verdicts and evidence remain below it. Desktop and mobile label approval **Accept findings**, keep **Request changes**, and hide PR links and check badges. The success toast and Resolved entry say **You accepted the findings**. The preview is the start of the short message; approval finishes the spike in Merged; requesting changes returns it to the developer with the feedback.
 - **Designs** use **Approve design** on desktop and mobile. Approval marks the latest submitted version Approved, supersedes earlier versions and moves the task to Approved, then advances to the next item. There is no PR to merge; approval opens a Plan session and starts the PM’s build-planning turn.
@@ -164,7 +163,7 @@ A parent rebase's question (D27, COR-291) is a task question whose Overview lead
 
 Every parent item uses `InboxEpicPanel`, Option D for a parent, on desktop and mobile: a parent PR waiting on the human, what stopped a parent, and the read-only moments in Activity and Resolved. It reads `GET /api/epics/:id/review`. The top block shows at once, from the item, with skeletons in the tab body until the review arrives.
 
-- **Up front:** the kind, project, sender and time, the parent's name linking to it, and `InboxMessage` with its **New** row (a TL;DR with no message). On a review the verdict reads **Rita approved the parent · lint, test passed · 3 of 3 tasks merged · You saw 1 of 3**, or says there's no reviewer approval on this head when the review stopped or a merge was refused. *You saw* counts tasks that had their own human review. Then the actions and the parent PR's link. A line under the actions names the target branch, how many commits it has moved when it has, and that approving runs CI and squash-merges; with a pending conflict (D27) it says approving sends the conflict to a developer first.
+- **Up front:** the kind, project, sender and time, the parent's name linking to it, and `InboxMessage` (a TL;DR with no message). On a review the verdict reads **Rita approved the parent · lint, test passed · 3 of 3 tasks merged · You saw 1 of 3**, or says there's no reviewer approval on this head when the review stopped or a merge was refused. *You saw* counts tasks that had their own human review. Then the actions and the parent PR's link. A line under the actions names the target branch, how many commits it has moved when it has, and that approving runs CI and squash-merges; with a pending conflict (D27) it says approving sends the conflict to a developer first.
 - **Tabs:** Overview · Tasks n/m · Review · PR description · Code diff N · Message.
 - **Overview:** a later round leads with **Since your last review**, quoting the human's feedback and naming its fix tasks, with **See only these changes**. Then non-blocking notes, screenshots labelled by task, then the review mode and size. With no screenshots, only the notes and the size. A first review has no such block.
 - **Tasks:** one row per task with who passed it, criteria met, its PR or, for a PR-free task, its commit, and whether it's a **Fix task** or **Conflict task**. A row opens the task. Owed human checks are ticked here. Conflict and CI fixes have no task (D29), so these labels come from a human's Request changes, or from before D29.

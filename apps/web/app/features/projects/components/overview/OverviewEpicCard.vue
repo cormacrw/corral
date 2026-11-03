@@ -13,7 +13,7 @@ const expanded = ref(false)
         <EpicProgressRow v-bind="group" />
       </div>
       <AppButton
-        :icon="expanded ? 'i-ri-arrow-up-s-line' : 'i-ri-arrow-down-s-line'"
+        :icon="expanded ? 'i-hugeicons-arrow-up-01' : 'i-hugeicons-arrow-down-01'"
         :aria-label="`${expanded ? 'Collapse' : 'Expand'} ${group.title}`"
         :aria-expanded="expanded"
         :aria-controls="`epic-tasks-${group.id}`"

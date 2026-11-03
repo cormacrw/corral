@@ -16,7 +16,7 @@ const noteId = useId()
 const retryNote = computed(() => props.ctx.item.type === 'failed' && props.ctx.action === 'resolve')
 const composer = ref<{ focus: () => void, send: () => Promise<boolean>, uploading: boolean, hasImages: boolean } | null>(null)
 const replying = computed(() => !!props.offerReply && props.ctx.item.type === 'failed' && props.ctx.action === null)
-const chosen = computed(() => replying.value ? { label: 'Reply', icon: 'i-ri-reply-line' } : props.ctx.composerChosen ? props.ctx.actions.find(a => a.value === props.ctx.action) ?? null : null)
+const chosen = computed(() => replying.value ? { label: 'Reply', icon: 'i-hugeicons-arrow-turn-backward' } : props.ctx.composerChosen ? props.ctx.actions.find(a => a.value === props.ctx.action) ?? null : null)
 // Choosing an action focuses it; an item that opens with one chosen doesn't
 watch(() => props.ctx.action, () => {
   if (chosen.value) void nextTick(() => composer.value?.focus())

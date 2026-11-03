@@ -34,7 +34,7 @@ watch(mode, (next) => {
         <template v-if="device.isMobile.value">
           <div class="flex justify-end ps-4 pe-1">
             <AppButton
-              icon="i-ri-close-line"
+              icon="i-hugeicons-cancel-01"
               variant="ghost"
               color="neutral"
               size="lg"
@@ -49,7 +49,7 @@ watch(mode, (next) => {
           >
             <span class="flex size-16 items-center justify-center rounded-[14px] bg-primary text-background">
               <Icon
-                name="i-ri-shield-star-line"
+                name="i-hugeicons-shield-energy"
                 class="size-9"
               />
             </span>
@@ -73,7 +73,7 @@ watch(mode, (next) => {
             <li class="flex items-center gap-3 text-foreground">
               <span class="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[13px] font-semibold text-foreground">1</span>
               <span>Tap <Icon
-                name="i-ri-share-forward-line"
+                name="i-hugeicons-share-04"
                 class="size-4 align-[-3px]"
                 aria-label="Share"
                 role="img"
@@ -96,7 +96,7 @@ watch(mode, (next) => {
         >
           <span class="text-xs font-semibold text-muted-foreground">On Android (Chrome)</span>
           <AppButton
-            icon="i-ri-add-box-line"
+            icon="i-hugeicons-add-square"
             label="Install app"
             size="xl"
             block

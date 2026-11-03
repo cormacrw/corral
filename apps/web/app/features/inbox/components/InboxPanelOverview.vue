@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Evidence } from '@corral/contracts'
 import type { InboxPanel, InboxPanelContext } from '~/features/inbox/composables/useInboxPanel'
-import InboxEvidenceGrid from '~/features/inbox/components/InboxEvidenceGrid.vue'
+import InboxEvidenceCarousel from '~/features/inbox/components/InboxEvidenceCarousel.vue'
 
 // The panel's Overview tab: a decision's options, a review's evidence, or what
 // each action does when there's nothing else to show
@@ -9,6 +9,8 @@ const props = defineProps<{ ctx: InboxPanelContext, p: InboxPanel, mobile?: bool
 const viewing = ref<Evidence | null>(null)
 
 const shots = computed(() => props.p.images.value.map(evidence => ({ evidence, caption: evidence.fileName })))
+// The viewer flips through every file here, screenshots first
+const files = computed(() => [...props.p.images.value, ...props.p.others.value])
 const hasEvidence = computed(() => props.p.images.value.length > 0 || props.p.others.value.length > 0)
 // Approval can't be taken without its task, so there's nothing to explain
 const actionHelp = computed(() => props.ctx.actions.filter(a => !(a.value === 'approve' && props.ctx.taskLoadFailed)))
@@ -46,10 +48,10 @@ const loading = computed(() => props.ctx.taskLoading || (props.p.isReview.value 
     >
       {{ p.readOnlyNote.value }}
     </p>
-    <InboxEvidenceGrid
+    <InboxEvidenceCarousel
       v-if="p.isReview.value && shots.length"
       :shots="shots"
-      :mobile="mobile"
+      :current="viewing?.id"
       @open="viewing = $event"
     />
     <div
@@ -59,7 +61,7 @@ const loading = computed(() => props.ctx.taskLoading || (props.p.isReview.value 
       <AppButton
         v-for="e in p.others.value"
         :key="e.id"
-        :icon="e.contentType?.startsWith('video/') ? 'i-ri-video-on-line' : 'i-ri-file-text-line'"
+        :icon="e.contentType?.startsWith('video/') ? 'i-hugeicons-video-01' : 'i-hugeicons-file-01'"
         color="neutral"
         variant="ghost"
         size="xs"
@@ -87,6 +89,9 @@ const loading = computed(() => props.ctx.taskLoading || (props.p.isReview.value 
         <span class="text-muted-foreground">{{ p.explanations.value[a.value] }}</span>
       </li>
     </ul>
-    <EvidenceViewer v-model="viewing" />
+    <EvidenceViewer
+      v-model="viewing"
+      :files="files"
+    />
   </div>
 </template>

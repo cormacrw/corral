@@ -192,10 +192,10 @@ export function hasFilters(filters: BoardFilters): boolean {
 // The four filters and their options, for both Boards' controls
 export function boardFilterGroups(epics: { id: string, label: string }[], agents: { id: string, name: string }[]) {
   return [
-    { key: 'epics', name: 'Parent', plural: 'parents', icon: 'i-ri-node-tree', items: epics.map(e => ({ value: e.id, label: e.label })) },
-    { key: 'statuses', name: 'Status', plural: 'statuses', icon: 'i-ri-layout-column-line', items: BOARD_COLUMNS.map(c => ({ value: c.key, label: c.label })) },
-    { key: 'priorities', name: 'Priority', plural: 'priorities', icon: 'i-ri-signal-tower-line', items: Object.entries(PRIORITY).map(([value, p]) => ({ value, label: p.label })) },
-    { key: 'agents', name: 'Agent', plural: 'agents', icon: 'i-ri-robot-2-line', items: agents.map(a => ({ value: a.id, label: a.name })) }
+    { key: 'epics', name: 'Parent', plural: 'parents', icon: 'i-hugeicons-hierarchy', items: epics.map(e => ({ value: e.id, label: e.label })) },
+    { key: 'statuses', name: 'Status', plural: 'statuses', icon: 'i-hugeicons-layout-2-column', items: BOARD_COLUMNS.map(c => ({ value: c.key, label: c.label })) },
+    { key: 'priorities', name: 'Priority', plural: 'priorities', icon: 'i-hugeicons-wifi-01', items: Object.entries(PRIORITY).map(([value, p]) => ({ value, label: p.label })) },
+    { key: 'agents', name: 'Agent', plural: 'agents', icon: 'i-hugeicons-robot-01', items: agents.map(a => ({ value: a.id, label: a.name })) }
   ] as const
 }
 

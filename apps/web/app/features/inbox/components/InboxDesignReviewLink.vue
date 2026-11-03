@@ -9,7 +9,7 @@ defineProps<{ task: Pick<Task, 'type' | 'status' | 'ref'> | null, size?: 'sm' | 
     v-if="task?.type === 'design' && task.status === 'human_review'"
     :to="`/tasks/${task.ref}`"
     label="Review design"
-    icon="i-ri-layout-top-2-line"
+    icon="i-hugeicons-layout-01"
     variant="outline"
     :size="size"
   />

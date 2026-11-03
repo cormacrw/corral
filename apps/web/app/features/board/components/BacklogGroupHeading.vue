@@ -14,7 +14,7 @@ const emit = defineEmits<{ toggle: [] }>()
     @click="emit('toggle')"
   >
     <Icon
-      name="i-ri-arrow-right-s-line"
+      name="i-hugeicons-arrow-right-01"
       :class="['size-4 shrink-0 transition-transform', !collapsed && 'rotate-90']"
     />
     <span class="truncate">{{ group.title }}</span>

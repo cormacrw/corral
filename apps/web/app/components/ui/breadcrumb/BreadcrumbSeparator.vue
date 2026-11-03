@@ -1,7 +1,8 @@
 <script lang="ts" setup>
 import type { HTMLAttributes } from 'vue'
 
-import { RiArrowRightSLine } from '@remixicon/vue'
+import { HugeiconsIcon } from '@hugeicons/vue'
+import { ArrowRight01Icon } from '@hugeicons/core-free-icons'
 import { cn } from 'cn'
 
 const props = defineProps<{
@@ -17,7 +18,7 @@ const props = defineProps<{
     :class="cn('[&>svg]:size-3.5', props.class)"
   >
     <slot>
-      <RiArrowRightSLine class="cn-rtl-flip" />
+      <HugeiconsIcon :icon="ArrowRight01Icon" :stroke-width="2" class="cn-rtl-flip" />
     </slot>
   </li>
 </template>

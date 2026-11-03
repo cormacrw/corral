@@ -77,18 +77,18 @@ export function useInboxPanel(ctx: InboxPanelContext) {
   const canAct = computed(() => item.value.type !== 'activity' && !item.value.resolution && !ctx.alreadyResolved)
 
   const kind = computed<InboxItemKind>(() => {
-    if (item.value.resolution) return { label: 'Resolved', icon: 'i-ri-checkbox-circle-line', color: 'text-success' }
+    if (item.value.resolution) return { label: 'Resolved', icon: 'i-hugeicons-checkmark-circle-02', color: 'text-success' }
     switch (item.value.type) {
       case 'human_review': return {
         label: isDesign.value ? 'Design review' : isSpike.value ? 'Spike review' : task.value ? 'Code review' : 'Human review',
-        icon: isDesign.value ? 'i-ri-palette-line' : isSpike.value ? 'i-ri-search-eye-line' : 'i-ri-git-pull-request-line',
+        icon: isDesign.value ? 'i-hugeicons-paint-board' : isSpike.value ? 'i-hugeicons-search-visual' : 'i-hugeicons-git-pull-request',
         color: 'text-brand'
       }
-      case 'question': return { label: 'Question', icon: 'i-ri-question-line', color: 'text-info' }
-      case 'blocked': return { label: 'Blocked', icon: 'i-ri-pause-circle-line', color: 'text-warning' }
-      case 'failed': return { label: 'Failed', icon: 'i-ri-close-circle-line', color: 'text-destructive' }
-      case 'stopped': return { label: 'Stopped', icon: 'i-ri-stop-circle-line', color: 'text-warning' }
-      default: return { label: 'Activity', icon: 'i-ri-pulse-line', color: 'text-muted-foreground' }
+      case 'question': return { label: 'Question', icon: 'i-hugeicons-help-circle', color: 'text-info' }
+      case 'blocked': return { label: 'Blocked', icon: 'i-hugeicons-pause-circle', color: 'text-warning' }
+      case 'failed': return { label: 'Failed', icon: 'i-hugeicons-cancel-circle', color: 'text-destructive' }
+      case 'stopped': return { label: 'Stopped', icon: 'i-hugeicons-stop-circle', color: 'text-warning' }
+      default: return { label: 'Activity', icon: 'i-hugeicons-pulse-01', color: 'text-muted-foreground' }
     }
   })
 

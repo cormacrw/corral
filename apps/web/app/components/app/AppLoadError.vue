@@ -7,7 +7,7 @@ defineProps<{ title: string, description?: string, retry?: () => unknown, retryi
   <AppAlert
     color="error"
     variant="subtle"
-    icon="i-ri-error-warning-line"
+    icon="i-hugeicons-alert-circle"
     :title="title"
     :description="description"
     :actions="retry ? [{ label: 'Retry', loading: retrying, onClick: retry }] : []"

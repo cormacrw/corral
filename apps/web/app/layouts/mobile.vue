@@ -50,12 +50,12 @@ const planUnread = computed(() => shell.planSessions.some(s => s.unread))
 const isActive = (...paths: string[]) => paths.some(path => route.path === path || route.path.startsWith(`${path}/`))
 
 const tabs = computed(() => [
-  { label: 'Home', icon: 'i-ri-layout-grid-line', to: '/home', active: isActive('/home') || route.path === '/' },
-  { label: 'Plan', icon: 'i-ri-message-2-line', to: '/plan', active: isActive('/plan'), dot: planUnread.value },
-  { label: 'Inbox', icon: 'i-ri-inbox-line', to: '/inbox', active: isActive('/inbox'), badge: shell.inboxCount },
+  { label: 'Home', icon: 'i-hugeicons-dashboard-square-02', to: '/home', active: isActive('/home') || route.path === '/' },
+  { label: 'Plan', icon: 'i-hugeicons-message-01', to: '/plan', active: isActive('/plan'), dot: planUnread.value },
+  { label: 'Inbox', icon: 'i-hugeicons-inbox', to: '/inbox', active: isActive('/inbox'), badge: shell.inboxCount },
   // Tasks and epics belong to a project
-  { label: 'Projects', icon: 'i-ri-folder-line', to: '/projects', active: isActive('/projects', '/tasks', '/epics') },
-  { label: 'Settings', icon: 'i-ri-settings-3-line', to: '/settings', active: isActive('/settings') }
+  { label: 'Projects', icon: 'i-hugeicons-folder-01', to: '/projects', active: isActive('/projects', '/tasks', '/epics') },
+  { label: 'Settings', icon: 'i-hugeicons-settings-01', to: '/settings', active: isActive('/settings') }
 ])
 
 const tabRoot = computed(() => ['/home', '/plan', '/inbox', '/projects', '/settings'].includes(route.path))
@@ -83,9 +83,12 @@ const focused = computed(() => ['plan', 'inbox'].includes(parts.value[0] ?? '') 
 
     <!-- Panels with default-slot content scroll above the tab bar, including
          sub-page headers. Focused screens scroll only their inner body,
-         leaving the compact title row and composer in place. -->
+         leaving the compact title row and composer in place. A flex row, so
+         each page is exactly the body's height: as a block, a page grows to
+         its content and the whole body scrolls, taking a page's footer (such
+         as the Inbox action bar) off the bottom of the screen. -->
     <div
-      class="relative inset-auto min-h-0 flex-1 overflow-x-auto overscroll-contain *:min-h-0 *:overflow-y-auto *:overscroll-contain"
+      class="relative inset-auto flex min-h-0 flex-1 overflow-x-auto overscroll-contain *:min-h-0 *:overflow-y-auto *:overscroll-contain"
       :class="tabRoot && 'pt-(--shell-top)'"
       data-testid="mobile-body"
     >

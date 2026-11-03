@@ -92,7 +92,7 @@ function click(e: MouseEvent) {
         @pointerdown.stop="swiped = false"
       >
         <Icon
-          name="i-ri-delete-bin-line"
+          name="i-hugeicons-delete-02"
           class="size-4"
         />
         Delete

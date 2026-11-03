@@ -42,20 +42,20 @@ async function attempt(failure: string, action: () => Promise<unknown>) {
 // At most one shows, the most urgent
 const banner = computed<InstanceType<typeof AppAlert>['$props'] & { 'data-testid'?: string } | null>(() => {
   if (status.value?.stopped) {
-    return { color: 'error', variant: 'solid', icon: 'i-ri-spam-3-line', title: 'Corral is stopped. No runs will start until you resume.', actions: [{ label: 'Resume everything', color: 'neutral', variant: 'solid', onClick: () => attempt('Could not resume', () => resuming.mutateAsync()) }] }
+    return { color: 'error', variant: 'solid', icon: 'i-hugeicons-alert-diamond', title: 'Corral is stopped. No runs will start until you resume.', actions: [{ label: 'Resume everything', color: 'neutral', variant: 'solid', onClick: () => attempt('Could not resume', () => resuming.mutateAsync()) }] }
   }
   if (status.value?.updating) {
-    return { color: 'info', variant: 'subtle', icon: 'i-ri-download-line', title: 'Corral is waiting to update', actions: [{ label: 'Lift', color: 'neutral', variant: 'solid', onClick: () => attempt('Could not lift update hold', () => lifting.mutateAsync()) }] }
+    return { color: 'info', variant: 'subtle', icon: 'i-hugeicons-download-04', title: 'Corral is waiting to update', actions: [{ label: 'Lift', color: 'neutral', variant: 'solid', onClick: () => attempt('Could not lift update hold', () => lifting.mutateAsync()) }] }
   }
   const project = currentProject.value
   if (project?.paused) {
-    return { color: 'warning', variant: 'solid', icon: 'i-ri-pause-line', title: `${project.name} is paused. No new runs will start; work already running will finish.`, actions: [{ label: 'Resume', color: 'neutral', variant: 'solid', onClick: () => attempt('Could not resume', () => patching.mutateAsync({ slug: project.slug, input: { paused: false } })) }] }
+    return { color: 'warning', variant: 'solid', icon: 'i-hugeicons-pause', title: `${project.name} is paused. No new runs will start; work already running will finish.`, actions: [{ label: 'Resume', color: 'neutral', variant: 'solid', onClick: () => attempt('Could not resume', () => patching.mutateAsync({ slug: project.slug, input: { paused: false } })) }] }
   }
   if (runner.value && !runner.value.online) {
-    return { 'color': 'warning', 'variant': 'subtle', 'icon': 'i-ri-server-line', 'title': runnerBanner.value, 'data-testid': 'runner-offline-banner', 'actions': [{ label: 'Runners', color: 'neutral', variant: 'outline', to: '/settings/runner' }] }
+    return { 'color': 'warning', 'variant': 'subtle', 'icon': 'i-hugeicons-server-stack-01', 'title': runnerBanner.value, 'data-testid': 'runner-offline-banner', 'actions': [{ label: 'Runners', color: 'neutral', variant: 'outline', to: '/settings/runner' }] }
   }
   if (connection.value === 'reconnecting') {
-    return { color: 'neutral', variant: 'subtle', icon: 'i-ri-refresh-line', title: 'Reconnecting to Corral…' }
+    return { color: 'neutral', variant: 'subtle', icon: 'i-hugeicons-refresh', title: 'Reconnecting to Corral…' }
   }
   return null
 })

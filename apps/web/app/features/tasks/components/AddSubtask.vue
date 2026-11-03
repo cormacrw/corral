@@ -29,7 +29,7 @@ async function submit() {
     <AppButton
       v-if="!open"
       label="Add sub-task"
-      icon="i-ri-play-list-add-line"
+      icon="i-hugeicons-play-list-add"
       size="sm"
       variant="outline"
       color="neutral"

@@ -62,17 +62,17 @@ function onImagePicked(event: Event) {
 }
 const toolbarItems = [
   [
-    { kind: 'bold', icon: 'i-ri-bold', label: 'Bold' },
-    { kind: 'italic', icon: 'i-ri-italic', label: 'Italic' },
-    { kind: 'code', icon: 'i-ri-code-line', label: 'Inline code' }
+    { kind: 'bold', icon: 'i-hugeicons-text-bold', label: 'Bold' },
+    { kind: 'italic', icon: 'i-hugeicons-text-italic', label: 'Italic' },
+    { kind: 'code', icon: 'i-hugeicons-source-code', label: 'Inline code' }
   ],
   [
-    { kind: 'heading', icon: 'i-ri-h-2', label: 'Heading' },
-    { kind: 'bulletList', icon: 'i-ri-list-unordered', label: 'Bulleted list' },
-    { kind: 'orderedList', icon: 'i-ri-list-ordered', label: 'Numbered list' },
-    { kind: 'codeBlock', icon: 'i-ri-code-block', label: 'Code block' },
-    { kind: 'link', icon: 'i-ri-link', label: 'Link' },
-    { icon: 'i-ri-image-line', label: 'Insert image', onClick: () => imageInput.value?.click() }
+    { kind: 'heading', icon: 'i-hugeicons-heading-02', label: 'Heading' },
+    { kind: 'bulletList', icon: 'i-hugeicons-left-to-right-list-bullet', label: 'Bulleted list' },
+    { kind: 'orderedList', icon: 'i-hugeicons-left-to-right-list-number', label: 'Numbered list' },
+    { kind: 'codeBlock', icon: 'i-hugeicons-source-code-square', label: 'Code block' },
+    { kind: 'link', icon: 'i-hugeicons-link-01', label: 'Link' },
+    { icon: 'i-hugeicons-image-01', label: 'Insert image', onClick: () => imageInput.value?.click() }
   ]
 ] as const
 </script>
