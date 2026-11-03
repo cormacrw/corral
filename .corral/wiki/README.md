@@ -18,6 +18,7 @@ Short implementation notes written while building. Not binding: `docs/README.md`
 - [Parent review in the Inbox](epic-inbox-panel.md)
 - [Evidence videos](evidence-videos.md)
 - [Flow metrics](flow-metrics.md)
+- [Frontend structure](frontend-structure.md)
 - [Criteria checked by a human](human-checked-criteria.md)
 - [Inbox quick actions](inbox-quick-actions.md)
 - [Inbox review changes](inbox-review-changes.md)

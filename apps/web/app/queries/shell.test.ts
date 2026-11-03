@@ -39,7 +39,7 @@ const useState = vi.fn((_key: string, init: () => unknown) => ref(init()))
 vi.stubGlobal('useState', useState)
 
 const { useLive } = await import('~/composables/useLive')
-const { useShell } = await import('~/composables/useShell')
+const { useShell } = await import('~/features/shell/composables/useShell')
 
 const run = { id: 'r1', projectId: 'p1', taskId: 't1' }
 const task = { id: 't1', ref: 'TA-1', projectId: 'p1', status: 'ready', epicId: null }

@@ -13,7 +13,7 @@ useSeoMeta({ title: () => `${ref.value} · Corral` })
 </script>
 
 <template>
-  <UDashboardPanel :ui="{ body: 'p-0' }">
+  <AppPanel>
     <main class="flex h-full min-h-0 flex-col">
       <TaskDetail
         :task-ref="ref"
@@ -21,5 +21,5 @@ useSeoMeta({ title: () => `${ref.value} · Corral` })
         @close="back"
       />
     </main>
-  </UDashboardPanel>
+  </AppPanel>
 </template>

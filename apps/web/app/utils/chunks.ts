@@ -2,10 +2,10 @@ import { defineAsyncComponent, type Component } from 'vue'
 
 // The heavy parts of a page, loaded when they are first shown: the task's rich
 // text editor (Tiptap, ProseMirror) and the epic graph (Vue Flow).
-export const loadTaskDetail = () => import('~/components/TaskDetail.vue')
-export const loadTaskDescription = () => import('~/components/TaskDescription.vue')
-export const loadEpicDetail = () => import('~/components/EpicDetail.vue')
-export const loadEpicGraph = () => import('~/components/EpicGraph.vue')
+export const loadTaskDetail = () => import('~/features/tasks/components/TaskDetail.vue')
+export const loadTaskDescription = () => import('~/features/tasks/components/TaskDescription.vue')
+export const loadEpicDetail = () => import('~/features/epics/components/EpicDetail.vue')
+export const loadEpicGraph = () => import('~/features/epics/components/EpicGraph.vue')
 
 // Doesn't hold up the page around it, as a Lazy component would: the page shows
 // and this part fills in. A chunk that fails has usually been replaced by a

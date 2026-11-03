@@ -1,7 +1,7 @@
 # App shell
 
 **Canvas frames:** `App shell · Corral overview` plus every `App shell · …` frame
-**Component:** `UDashboardGroup` + `UDashboardSidebar` (collapsible, resizable off) + `UDashboardPanel` for the page.
+**Component:** `layouts/default.vue`: shadcn `Sidebar` (collapses to icons, not resizable) in `ShellSidebar`, with an `AppPanel` for the page.
 
 ## Purpose
 
@@ -32,19 +32,19 @@ There is no top header on desktop; every page owns the full height. Below 1024px
      - **Settings**
    - The expanded or collapsed state of each project is remembered per user.
 5. **Agents:** Juno · PM, Atlas · Developer and Vera · Reviewer.
-   - Each has an avatar with a status dot: `success` with the ping animation when working, `text-dimmed` when idle.
+   - Each has an avatar with a status dot: `success` with the ping animation when working, `text-muted-foreground/70` when idle.
    - Each shows a status label on the right only for Paused or Waiting on usage limit, from the shared `agentStatus(agent, now, false)` helper. Idle agents, including those with expired usage cooldowns, have no marker.
    - Clicking one opens that agent's page.
 6. **Settings:** pinned to the bottom of the scroll area. Global settings.
 
 ### Sidebar footer
 
-- **Runner card** (`bg-elevated`): server icon, "Runner online" while any runner is online, then the runner's name when there's one, or "{online} of {total} online" when there are several, and a status dot (`success`, `warning` while reconnecting, `error` when no runner is online). Settings · Runner lists each one ([settings.md](settings.md)).
-- **User row:** avatar and name (not a menu), a colour-mode button (`UColorModeButton`) and a collapse button (`UDashboardSidebarCollapse`).
+- **Runner card** (`bg-muted`): server icon, "Runner online" while any runner is online, then the runner's name when there's one, or "{online} of {total} online" when there are several, and a status dot (`success`, `warning` while reconnecting, `error` when no runner is online). Settings · Runner lists each one ([settings.md](settings.md)).
+- **User row:** avatar and name (not a menu), a colour-mode button (`AppColorModeButton`) and a collapse button (`UiSidebarTrigger`).
 
 ### Active state
 
-The active item has `bg-elevated` and `text-primary`, with its icon in `primary`. When a project page is active, its project row gets `text-highlighted` and the matching sub-item gets the active style.
+The active item has `bg-muted` and `text-primary`, with its icon in `primary`. When a project page is active, its project row gets `text-foreground` and the matching sub-item gets the active style.
 
 ### Collapsed (72px)
 
@@ -79,7 +79,7 @@ Everything stays live over the existing SSE connection.
 
 ## Theme
 
-Primary colour and font come from `app.config.ts` and `main.css`. The design canvas exposes them as Tweaks: the 17 Nuxt UI primary colours, and a set of Google fonts with Public Sans as the default.
+Primary colour and font come from `assets/css/theme.css` (D32).
 
 ## Open questions
 

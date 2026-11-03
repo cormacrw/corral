@@ -4,7 +4,7 @@
 **Mobile:** `SetupMobile.vue`, see [mobile.md](mobile.md#setup)
 **Route:** `/setup`, one step per query (`/setup?step=repo`). Shown on first run, before the app shell exists. The shell isn't rendered here.
 
-Onboarding is done once the server has a project, on every browser and device; nothing in the browser (localStorage, cookies) decides it. With no projects, every page leads here. With one, `/` and any `/setup` visit go to the first project, except the add-project flow (`/setup?step=repo&add=1`). If the project list can't be fetched, nothing redirects (`middleware/setup.global.ts`, `utils/onboarding.ts`).
+Onboarding is done once the server has a project, on every browser and device; nothing in the browser (localStorage, cookies) decides it. With no projects, every page leads here. With one, `/` and any `/setup` visit go to the first project, except the add-project flow (`/setup?step=repo&add=1`). If the project list can't be fetched, nothing redirects (`middleware/setup.global.ts`, `features/setup/utils/onboarding.ts`).
 
 ## Purpose
 
@@ -14,7 +14,7 @@ Take a new user from nothing to a working first project in four steps. Setup che
 
 - **Top bar** (64px, bottom border): Corral logo and name on the left, a "Self-hosted" neutral badge on the right.
 - **Content column:** centred, `max-w-3xl`, 48px top padding.
-  1. **Stepper** (`UStepper`, horizontal): You → Repository → Agents → Names. Completed steps show a check and can be clicked to go back. The current step's indicator is filled `primary`. Future steps use `bg-elevated` with `text-muted`. Step descriptions hide below 640px.
+  1. **Stepper** (`UStepper`, horizontal): You → Repository → Agents → Names. Completed steps show a check and can be clicked to go back. The current step's indicator is filled `primary`. Future steps use `bg-muted` with `text-muted`. Step descriptions hide below 640px.
   2. **Heading:** `text-2xl` semibold, with a one-line `text-muted` description under it.
   3. **Card** (`UCard`): a body, then a footer with Back (outline neutral) on the left and Continue (solid primary, trailing arrow) on the right.
 
@@ -38,7 +38,7 @@ Take a new user from nothing to a working first project in four steps. Setup che
     - already used by another project (D13): "Used by {project}"
   - **Fallback:** a "Can't find it? Paste a GitHub URL" link reveals a URL input and **Check access**, for repos the list doesn't show (for example an org that hasn't granted the `gh` app access).
 - **Task ID prefix**, shown after picking a repo in setup and Add project (desktop and mobile): prefilled with the first three letters of the repo name, extended or varied to avoid existing prefixes. Input uppercases and strips non A–Z; 2–5 letters are required, with “Use 2–5 letters, A–Z.” and Continue/Finish disabled otherwise. Shows “Task IDs: ABC-1”. Creation uses the edited prefix. A server prefix conflict returns to Repository with “Another project uses this prefix.” on the field so it can be corrected.
-- **After a repo is picked**, two selects (`USelectMenu`):
+- **After a repo is picked**, two selects (`AppSelectMenu`):
   - **Default branch:** prefilled from GitHub's `defaultBranchRef`. "From GitHub. Agents branch from it and merge back into it."
   - **Merge method:** Squash and merge, Merge commit, or Rebase and merge.
 - **Setup checks for {owner/name}:** a list, each item with an icon, title and detail.
@@ -46,7 +46,7 @@ Take a new user from nothing to a working first project in four steps. Setup che
   - ✓ Not used by another project, and not claimed by another Corral instance
   - ✓ Cloned on the runner: the default branch is fetched into the runner's data volume
   - ℹ No `.corral/` yet: it will be added on finish, and existing files are left alone
-- **Runner not signed in to GitHub:** the picker is replaced by a `warning` `UAlert`, "The runner isn't signed in to GitHub", with the command `docker exec -it corral-runner gh auth login` in a code block and **Check again**. Corral never sees the token. The canvas `github` tweak shows this state.
+- **Runner not signed in to GitHub:** the picker is replaced by a `warning` `AppAlert`, "The runner isn't signed in to GitHub", with the command `docker exec -it corral-runner gh auth login` in a code block and **Check again**. Corral never sees the token. The canvas `github` tweak shows this state.
 - **Continue:** disabled until a repo is picked and every check passes. Info items don't block.
 
 ### 3. Confirm agent CLIs
@@ -56,7 +56,7 @@ Take a new user from nothing to a working first project in four steps. Setup che
   - **Claude Code:** the detected path, a **Ready** success badge, "Signed in. Will run your PM, developer and reviewer agents." Checked by default.
   - **Codex CLI:** the same row as Claude Code when detected and signed in (D18); when it isn't signed in, show the `docker exec -it … codex login --device-auth` step.
   - **Gemini CLI:** "not found", a **Coming later** neutral badge, disabled.
-- **Info alert** (`UAlert`, subtle info, shield icon): "Your credentials stay with your CLI. Corral never sees, stores or sends your model-provider login." (D1–D2)
+- **Info alert** (`AppAlert`, subtle info, shield icon): "Your credentials stay with your CLI. Corral never sees, stores or sends your model-provider login." (D1–D2)
 - **Continue** ("Confirm and continue") needs at least one ready CLI selected.
 
 ### 4. Name your agents

@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import type { Project } from '@corral/contracts'
 import { keys } from '~/queries/keys'
 import { fetchProjectsOnce, projectsQuery } from '~/queries/projects'
-import { isSetupPath, onboardingRedirect } from '~/utils/onboarding'
+import { isSetupPath, onboardingRedirect } from '~/features/setup/utils/onboarding'
 
 // First run: with no projects, everything leads to onboarding; once the
 // server has one, onboarding is over on every device (design/onboarding.md)

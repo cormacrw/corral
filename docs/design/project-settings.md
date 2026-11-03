@@ -27,9 +27,9 @@ The page scrolls, in a column up to 880px wide.
 | Setting | Control | Notes |
 |---|---|---|
 | Repository | A `bg-muted` panel with the branch icon, `github.com/owner/name` in mono, "Cloned on the runner · fetched 2 minutes ago", and **Change** | **Change** opens the same repo picker as onboarding, inline below the panel, and its label becomes **Done**. The current repo is selected. Repos used by other projects show "Used by {project}" and are disabled; read-only repos are disabled too. Picking a different repo shows a `warning` note: "Saving stops running work on this project, reruns the setup checks against {repo}, and keeps existing tasks. Open PRs on the old repository are left as they are." It only takes effect on Save |
-| Default branch | `USelectMenu` | "Agents branch from here and merge back into it." |
-| Parent review mode | `USelectMenu`: Parent PR, Each task, Direct | "For new parents a plan doesn't set a mode for", followed by the chosen mode's description. The default for each new parent's review mode (D27); existing parents keep theirs |
-| Merge method | `USelectMenu`: Squash and merge, Merge commit, Rebase and merge | |
+| Default branch | `AppSelectMenu` | "Agents branch from here and merge back into it." |
+| Parent review mode | `AppSelectMenu`: Parent PR, Each task, Direct | "For new parents a plan doesn't set a mode for", followed by the chosen mode's description. The default for each new parent's review mode (D27); existing parents keep theirs |
+| Merge method | `AppSelectMenu`: Squash and merge, Merge commit, Rebase and merge | |
 | Required checks | Toggle chips (`aria-pressed`): Lint, Typecheck, Tests, Build | "With no checks, unflagged tasks merge on the reviewer's approval alone." |
 
 ### Automation
@@ -45,7 +45,7 @@ The page scrolls, in a column up to 880px wide.
 A card with an `error`-tinted border.
 
 - **Remove project:** the button reads "Remove {name}" in an `error` outline. The help reads "Stops every run and removes the project from Corral. Your repository, branches and PRs on GitHub are left alone."
-- It needs a confirmation `UModal` where you type the project name.
+- It needs a confirmation `AppModal` where you type the project name.
 
 ## Data
 

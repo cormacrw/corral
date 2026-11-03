@@ -13,9 +13,9 @@ useSeoMeta({ title: 'Projects · Corral' })
   >
     <MobileProjects />
   </div>
-  <UDashboardPanel v-else>
+  <AppPanel v-else>
     <div class="flex flex-col gap-2 p-4">
-      <UButton
+      <AppButton
         v-for="project in shell.projects"
         :key="project.id"
         :to="`/projects/${project.slug}`"
@@ -32,15 +32,15 @@ useSeoMeta({ title: 'Projects · Corral' })
           v-if="project.paused"
           class="ms-auto text-xs text-warning"
         >Paused</span>
-      </UButton>
-      <UButton
+      </AppButton>
+      <AppButton
         to="/setup?step=repo&add=1"
-        icon="i-lucide-plus"
+        icon="i-ri-add-line"
         label="Add project"
         variant="ghost"
         color="neutral"
         class="self-start"
       />
     </div>
-  </UDashboardPanel>
+  </AppPanel>
 </template>

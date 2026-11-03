@@ -4,9 +4,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { useTaskFlyout } from '~/composables/useTaskFlyout'
+import { useTaskFlyout } from '~/features/tasks/composables/useTaskFlyout'
 import { testQueryClient } from '~/queries/mount-with-query'
-import PlanSheets from '~/components/PlanSheets.vue'
+import PlanNewSession from '~/features/plan/components/PlanNewSession.vue'
+import PlanSheets from '~/features/plan/components/PlanSheets.vue'
 import PlanPage from './index.vue'
 
 vi.mock('~/composables/useApi', () => ({
@@ -25,7 +26,7 @@ const EpicDetail = vue.defineComponent({
   props: ['epicId', 'mode'],
   setup: props => () => vue.h('section', { 'data-epic': props.epicId, 'data-mode': props.mode })
 })
-const UDrawer = vue.defineComponent({
+const AppDrawer = vue.defineComponent({
   props: ['open', 'title'],
   emits: ['update:open'],
   setup: (props, { slots, emit }) => () => props.open
@@ -35,7 +36,7 @@ const UDrawer = vue.defineComponent({
       ])
     : null
 })
-const UDashboardPanel = vue.defineComponent({
+const AppPanel = vue.defineComponent({
   setup: (_props, { slots }) => () => vue.h('div', slots.default?.())
 })
 const mounted: { unmount: () => void }[] = []
@@ -62,8 +63,8 @@ async function render(url: string) {
   const wrapper = mount(PlanPage, {
     global: {
       plugins: [router, [VueQueryPlugin, { queryClient: testQueryClient() }]],
-      components: { AsyncTaskDetail: TaskDetail, AsyncEpicDetail: EpicDetail, PlanSheets, UDrawer, UDashboardPanel },
-      stubs: { AgentAvatar: true, UAlert: true, PromptComposer: true, PlanDrafts: true, TaskFlyout: true }
+      components: { AsyncTaskDetail: TaskDetail, AsyncEpicDetail: EpicDetail, PlanNewSession, PlanSheets, AppDrawer, AppPanel },
+      stubs: { AgentAvatar: true, PlanRunnerOffline: true, PromptComposer: true, PlanDrafts: true, TaskFlyout: true }
     }
   })
   mounted.push(wrapper)

@@ -14,14 +14,13 @@ vi.stubGlobal('useRouter', () => ({ replace, options: { history: { go } } }))
 
 const { default: Mobile } = await import('./mobile.vue')
 const { recordAppHistoryPosition, resetAppHistory, stepsToAppStart } = await import('~/utils/app-history')
-const Slot = defineComponent({ name: 'PanelStub', setup: (_, { slots }) => () => slots.default?.() })
 const Link = defineComponent({
   name: 'LinkStub',
   props: ['to'],
   setup: (props, { slots }) => () => slots.default?.({ href: props.to })
 })
 function shell() {
-  return mount(Mobile, { global: { components: { NuxtLink: Link, UDashboardGroup: Slot }, stubs: { ShellBanners: true, UIcon: true } } })
+  return mount(Mobile, { global: { components: { NuxtLink: Link }, stubs: { ShellBanners: true, Icon: true } } })
 }
 
 beforeEach(() => {

@@ -1,6 +1,6 @@
 # Board task card
 
-`apps/web/app/components/TaskCard.vue` is the one card for the desktop Board and
+`apps/web/app/features/tasks/components/TaskCard.vue` is the one card for the desktop Board and
 `BoardMobile`. `docs/design/board.md` has the layout. The things that aren't
 obvious from it:
 
@@ -14,12 +14,12 @@ obvious from it:
 - The focus ring is drawn on the card with a `has-[...]` variant keyed on
   `data-card-title`, so a later button in the footer doesn't ring the whole card.
 - The green dot compares `task.lease.agentId` with the displayed agent
-  (`cardAssignee` in `utils/board.ts`). A leased task can show no dot, such as an
+  (`cardAssignee` in `features/board/utils/board.ts`). A leased task can show no dot, such as an
   In progress card whose lease is held by someone other than `task.developer`.
 - `task.statusReason` used to reach the human through the card's note. It's now
   the Reason row in `TaskProperties`, in the flyout and on the task page.
 
-- `TaskCardBlockers` uses `utils/taskBlockers.ts` with the full project list passed
+- `TaskCardBlockers` uses `features/tasks/utils/taskBlockers.ts` with the full project list passed
   through both Board layouts. Only Ready cards get the amber ban button; merged
   tasks and approved designs are done. Waiting parents also appear, linking to
   their parent pages. Task rows use `useTaskFlyout.open`, which handles phones.

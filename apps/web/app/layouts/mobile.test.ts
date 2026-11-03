@@ -38,19 +38,18 @@ vi.stubGlobal('useRouter', () => ({ replace: vi.fn(), options: { history: { go: 
 const mobileHeader = ref<{ title: string, eyebrow: string } | null>(null)
 vi.stubGlobal('useMobileHeader', () => mobileHeader)
 
-const { default: MobilePageHeader } = await import('../components/MobilePageHeader.vue')
+const { default: MobilePageHeader } = await import('~/features/shell/components/MobilePageHeader.vue')
 const { default: MobileLayout } = await import('./mobile.vue')
 
-// UDashboardGroup and UDashboardPanel render their roots with Nuxt UI's
+// AppPanel renders its root with the shell's
 // classes; Home puts its content in the panel's default slot, not #body
-const UDashboardGroup = defineComponent({ setup: (_, { slots }) => () => h('div', { class: 'fixed inset-0 flex overflow-hidden' }, slots.default?.()) })
-const UDashboardPanel = defineComponent({ setup: (_, { slots }) => () => h('div', { 'class': 'relative flex flex-col min-w-0 min-h-svh shrink-0 flex-1', 'data-testid': 'panel' }, slots.default?.()) })
+const AppPanel = defineComponent({ setup: (_, { slots }) => () => h('div', { 'class': 'relative flex flex-col min-w-0 min-h-svh shrink-0 flex-1', 'data-testid': 'panel' }, slots.default?.()) })
 const Plain = defineComponent({ setup: (_, { slots }) => () => h('span', slots.default?.()) })
 const Link = defineComponent({ props: ['to', 'custom'], setup: (props, { slots }) => () => props.custom !== undefined ? slots.default?.({ href: props.to }) : h('a', { href: props.to }, slots.default?.()) })
-const global = { components: { UDashboardGroup, UDashboardPanel, UButton: Link, UIcon: Plain, NuxtLink: Link, ShellBanners: Plain, MobilePageHeader } }
+const global = { components: { AppPanel, AppButton: Link, Icon: Plain, NuxtLink: Link, ShellBanners: Plain, MobilePageHeader } }
 
 const Home = defineComponent({
-  setup: () => () => h(UDashboardPanel, () => [h('div', { class: 'flex flex-col gap-4 p-4' }, Array.from({ length: 30 }, (_, i) => h('p', { class: 'h-20' }, `Item ${i}`)))])
+  setup: () => () => h(AppPanel, () => [h('div', { class: 'flex flex-col gap-4 p-4' }, Array.from({ length: 30 }, (_, i) => h('p', { class: 'h-20' }, `Item ${i}`)))])
 })
 
 afterEach(() => {
@@ -62,7 +61,7 @@ afterEach(() => {
 describe('mobile layout', () => {
   it.each(['/settings', '/settings/runner'])('selects the Settings tab on %s', (path) => {
     route.path = route.fullPath = path
-    const wrapper = mount(MobileLayout, { global, slots: { default: () => h(UDashboardPanel, () => h(MobilePageHeader)) } })
+    const wrapper = mount(MobileLayout, { global, slots: { default: () => h(AppPanel, () => h(MobilePageHeader)) } })
     const tabs = wrapper.findAll('nav a')
     expect(tabs.map(tab => tab.text())).toEqual(['Home', 'Plan', 'Inbox', 'Projects', 'Settings'])
     expect(tabs.map(tab => tab.attributes('href'))).toEqual(['/home', '/plan', '/inbox', '/projects', '/settings'])
@@ -74,7 +73,7 @@ describe('mobile layout', () => {
 
   it.each(['/home', '/plan', '/inbox', '/projects', '/settings', '/settings/runner', '/agents/atlas', '/projects/corral', '/projects/corral/board', '/projects/corral/backlog'])('has no global search or settings action on %s', (path) => {
     route.path = route.fullPath = path
-    const wrapper = mount(MobileLayout, { global, slots: { default: () => h(UDashboardPanel, () => h(MobilePageHeader)) } })
+    const wrapper = mount(MobileLayout, { global, slots: { default: () => h(AppPanel, () => h(MobilePageHeader)) } })
     expect(wrapper.find('[data-testid="mobile-page-header"] [aria-label="Search"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="mobile-page-header"] [aria-label="Settings"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="open-search"]').exists()).toBe(false)
@@ -86,7 +85,7 @@ describe('mobile layout', () => {
 
   it('returns from an agent to Home without selecting a tab and keeps Agent settings', () => {
     route.path = route.fullPath = '/agents/atlas'
-    const wrapper = mount(MobileLayout, { global, slots: { default: () => h(UDashboardPanel, () => h(MobilePageHeader)) } })
+    const wrapper = mount(MobileLayout, { global, slots: { default: () => h(AppPanel, () => h(MobilePageHeader)) } })
     expect(wrapper.get('[data-testid="mobile-page-header"] [aria-label="Back to Home"]').attributes('href')).toBe('/home')
     expect(wrapper.get('[data-testid="mobile-page-header"] [aria-label="Agent settings"]').attributes('href')).toBe('/settings/agents')
     expect(wrapper.find('nav [aria-current="page"]').exists()).toBe(false)
@@ -95,7 +94,7 @@ describe('mobile layout', () => {
 
   it('keeps Project settings on the project overview', () => {
     route.path = route.fullPath = '/projects/corral'
-    const wrapper = mount(MobileLayout, { global, slots: { default: () => h(UDashboardPanel, () => h(MobilePageHeader)) } })
+    const wrapper = mount(MobileLayout, { global, slots: { default: () => h(AppPanel, () => h(MobilePageHeader)) } })
     expect(wrapper.get('[data-testid="mobile-page-header"] [aria-label="Project settings"]').attributes('href')).toBe('/projects/corral/settings')
     wrapper.unmount()
   })
@@ -140,10 +139,10 @@ describe('mobile layout', () => {
 
   it.each(['Home', 'Plan', 'Inbox', 'Projects', 'Settings'])('pads the %s tab root without adding a title', (title) => {
     route.path = route.fullPath = `/${title.toLowerCase()}`
-    const wrapper = mount(MobileLayout, { global, slots: { default: () => h(UDashboardPanel, () => h('p', 'Content')) } })
+    const wrapper = mount(MobileLayout, { global, slots: { default: () => h(AppPanel, () => h('p', 'Content')) } })
     expect(wrapper.find('h1').exists()).toBe(false)
     expect(wrapper.get('nav [aria-current="page"]').text()).toBe(title)
-    expect(wrapper.get('[storage-key="mobile-dashboard"]').classes()).toContain('pt-(--shell-top)')
+    expect(wrapper.get('[data-testid="mobile-body"]').classes()).toContain('pt-(--shell-top)')
     wrapper.unmount()
   })
 

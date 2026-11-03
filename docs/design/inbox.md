@@ -35,7 +35,7 @@ There are three columns. The list divider can be resized (280–560px, default 3
   - a two-line preview
   - a type badge and the project tag (a colour dot and project name)
 - **Plan thread rows** have the same layout with a status badge for the type badge; see [Plan threads](#plan-threads).
-- The selected row uses `bg-elevated`.
+- The selected row uses `bg-muted`.
 - **Empty state:** the Inbox tab says "No decisions are waiting on you. Agents may still be working; their updates are in Activity." It never implies that background work has finished. The detail pane says the same with **Open Activity**. Activity, Resolved and a search with no matches each have their own line.
 - **Live updates:** an informational item arriving adds no Inbox row, doesn't change the count or badge, and doesn't move the selection. It appears under Activity.
 - **A link to an item:** an informational item opens with the list on Activity, and a resolved one on Resolved. A link to something no longer listed shows "This isn't waiting on you any more", with **Open Activity** and, when known, its source: **Open in Plan**, **Open task** or **Open parent**. It's never presented as a new request.
@@ -130,7 +130,7 @@ The selected message column shows only what needs you, **not the conversation**.
 | **Delete thread** | Always, in the header and on the row | Removes the thread at once with an Undo toast, then closes the session (below). |
 
 - Only a human can approve (D9).
-- After approving, the pane shows a green "Resolved" `UAlert` ("✓ 4 tasks on the board.") and selection moves to the next item that needs you.
+- After approving, the pane shows a green "Resolved" `AppAlert` ("✓ 4 tasks on the board.") and selection moves to the next item that needs you.
 
 ### Delete thread
 

@@ -1,0 +1,159 @@
+/* Generated once from Tailwind's palettes: the dark background picker.
+ * `--dark-neutral-*` keep every swatch in production; each [data-dark-neutral]
+ * rule points the dark surface ramp in theme.css at one palette. */
+@theme static {
+  --dark-neutral-slate-900: var(--color-slate-900);
+  --dark-neutral-slate-950: var(--color-slate-950);
+  --dark-neutral-slate-800: var(--color-slate-800);
+  --dark-neutral-slate-700: var(--color-slate-700);
+  --dark-neutral-gray-900: var(--color-gray-900);
+  --dark-neutral-gray-950: var(--color-gray-950);
+  --dark-neutral-gray-800: var(--color-gray-800);
+  --dark-neutral-gray-700: var(--color-gray-700);
+  --dark-neutral-zinc-900: var(--color-zinc-900);
+  --dark-neutral-zinc-950: var(--color-zinc-950);
+  --dark-neutral-zinc-800: var(--color-zinc-800);
+  --dark-neutral-zinc-700: var(--color-zinc-700);
+  --dark-neutral-neutral-900: var(--color-neutral-900);
+  --dark-neutral-neutral-950: var(--color-neutral-950);
+  --dark-neutral-neutral-800: var(--color-neutral-800);
+  --dark-neutral-neutral-700: var(--color-neutral-700);
+  --dark-neutral-stone-900: var(--color-stone-900);
+  --dark-neutral-stone-950: var(--color-stone-950);
+  --dark-neutral-stone-800: var(--color-stone-800);
+  --dark-neutral-stone-700: var(--color-stone-700);
+  --dark-neutral-mauve-900: var(--color-mauve-900);
+  --dark-neutral-mauve-950: var(--color-mauve-950);
+  --dark-neutral-mauve-800: var(--color-mauve-800);
+  --dark-neutral-mauve-700: var(--color-mauve-700);
+  --dark-neutral-olive-900: var(--color-olive-900);
+  --dark-neutral-olive-950: var(--color-olive-950);
+  --dark-neutral-olive-800: var(--color-olive-800);
+  --dark-neutral-olive-700: var(--color-olive-700);
+  --dark-neutral-mist-900: var(--color-mist-900);
+  --dark-neutral-mist-950: var(--color-mist-950);
+  --dark-neutral-mist-800: var(--color-mist-800);
+  --dark-neutral-mist-700: var(--color-mist-700);
+  --dark-neutral-taupe-900: var(--color-taupe-900);
+  --dark-neutral-taupe-950: var(--color-taupe-950);
+  --dark-neutral-taupe-800: var(--color-taupe-800);
+  --dark-neutral-taupe-700: var(--color-taupe-700);
+}
+
+.dark[data-dark-neutral="slate"] {
+  --surface-50: var(--color-slate-50);
+  --surface-100: var(--color-slate-100);
+  --surface-200: var(--color-slate-200);
+  --surface-300: var(--color-slate-300);
+  --surface-400: var(--color-slate-400);
+  --surface-500: var(--color-slate-500);
+  --surface-700: var(--color-slate-700);
+  --surface-800: var(--color-slate-800);
+  --surface-900: var(--color-slate-900);
+  --surface-950: var(--color-slate-950);
+}
+
+.dark[data-dark-neutral="gray"] {
+  --surface-50: var(--color-gray-50);
+  --surface-100: var(--color-gray-100);
+  --surface-200: var(--color-gray-200);
+  --surface-300: var(--color-gray-300);
+  --surface-400: var(--color-gray-400);
+  --surface-500: var(--color-gray-500);
+  --surface-700: var(--color-gray-700);
+  --surface-800: var(--color-gray-800);
+  --surface-900: var(--color-gray-900);
+  --surface-950: var(--color-gray-950);
+}
+
+.dark[data-dark-neutral="zinc"] {
+  --surface-50: var(--color-zinc-50);
+  --surface-100: var(--color-zinc-100);
+  --surface-200: var(--color-zinc-200);
+  --surface-300: var(--color-zinc-300);
+  --surface-400: var(--color-zinc-400);
+  --surface-500: var(--color-zinc-500);
+  --surface-700: var(--color-zinc-700);
+  --surface-800: var(--color-zinc-800);
+  --surface-900: var(--color-zinc-900);
+  --surface-950: var(--color-zinc-950);
+}
+
+.dark,
+.dark[data-dark-neutral="neutral"] {
+  --surface-50: var(--color-neutral-50);
+  --surface-100: var(--color-neutral-100);
+  --surface-200: var(--color-neutral-200);
+  --surface-300: var(--color-neutral-300);
+  --surface-400: var(--color-neutral-400);
+  --surface-500: var(--color-neutral-500);
+  --surface-700: var(--color-neutral-700);
+  --surface-800: var(--color-neutral-800);
+  --surface-900: var(--color-neutral-900);
+  --surface-950: var(--color-neutral-950);
+}
+
+.dark[data-dark-neutral="stone"] {
+  --surface-50: var(--color-stone-50);
+  --surface-100: var(--color-stone-100);
+  --surface-200: var(--color-stone-200);
+  --surface-300: var(--color-stone-300);
+  --surface-400: var(--color-stone-400);
+  --surface-500: var(--color-stone-500);
+  --surface-700: var(--color-stone-700);
+  --surface-800: var(--color-stone-800);
+  --surface-900: var(--color-stone-900);
+  --surface-950: var(--color-stone-950);
+}
+
+.dark[data-dark-neutral="mauve"] {
+  --surface-50: var(--color-mauve-50);
+  --surface-100: var(--color-mauve-100);
+  --surface-200: var(--color-mauve-200);
+  --surface-300: var(--color-mauve-300);
+  --surface-400: var(--color-mauve-400);
+  --surface-500: var(--color-mauve-500);
+  --surface-700: var(--color-mauve-700);
+  --surface-800: var(--color-mauve-800);
+  --surface-900: var(--color-mauve-900);
+  --surface-950: var(--color-mauve-950);
+}
+
+.dark[data-dark-neutral="olive"] {
+  --surface-50: var(--color-olive-50);
+  --surface-100: var(--color-olive-100);
+  --surface-200: var(--color-olive-200);
+  --surface-300: var(--color-olive-300);
+  --surface-400: var(--color-olive-400);
+  --surface-500: var(--color-olive-500);
+  --surface-700: var(--color-olive-700);
+  --surface-800: var(--color-olive-800);
+  --surface-900: var(--color-olive-900);
+  --surface-950: var(--color-olive-950);
+}
+
+.dark[data-dark-neutral="mist"] {
+  --surface-50: var(--color-mist-50);
+  --surface-100: var(--color-mist-100);
+  --surface-200: var(--color-mist-200);
+  --surface-300: var(--color-mist-300);
+  --surface-400: var(--color-mist-400);
+  --surface-500: var(--color-mist-500);
+  --surface-700: var(--color-mist-700);
+  --surface-800: var(--color-mist-800);
+  --surface-900: var(--color-mist-900);
+  --surface-950: var(--color-mist-950);
+}
+
+.dark[data-dark-neutral="taupe"] {
+  --surface-50: var(--color-taupe-50);
+  --surface-100: var(--color-taupe-100);
+  --surface-200: var(--color-taupe-200);
+  --surface-300: var(--color-taupe-300);
+  --surface-400: var(--color-taupe-400);
+  --surface-500: var(--color-taupe-500);
+  --surface-700: var(--color-taupe-700);
+  --surface-800: var(--color-taupe-800);
+  --surface-900: var(--color-taupe-900);
+  --surface-950: var(--color-taupe-950);
+}

@@ -1008,3 +1008,14 @@ Sessions can be **global** as well as tied to a project. A global session has **
 
 **Why:** Two kinds of work item meant two of every list, page and rule, for one difference: some work has parts.
 
+## D32 — The web app uses shadcn-nuxt, not Nuxt UI
+
+**Context:** D7 chose Nuxt UI. Cormac replaced it with shadcn-nuxt, using shadcn preset `a31Y6GXo`, and asked for the frontend to be reorganised at the same time. The server and runner are unaffected.
+
+**Decision:** `apps/web` is built on shadcn-vue through the `shadcn-nuxt` module. This overrides D7's Nuxt UI choice; the rest of D7 stands.
+
+- **The look is the preset:** `reka-vega`, neutral base, emerald primary, Geist and Remix icons. It replaces the teal and slate theme. The dark palette picker stays and now defaults to `neutral`, the preset's base. A palette a device already saved is kept.
+- **Layers:** `components/ui` is stock shadcn-vue and is never edited, so `shadcn-vue diff` keeps working. `components/app` holds the `App*` composites, the only layer features build on for common controls. `features/<name>` owns each product area. `app/queries` stays the only code that talks to the server.
+- **No network at runtime:** Geist is bundled with `@fontsource-variable/geist` instead of the Google Fonts import `shadcn-vue init` adds, and icons stay bundled by `@nuxt/icon`, as D12 and D20 need.
+
+**Why:** Owning the component code gives Corral control of every control's markup and removes a large dependency that also supplied its fonts, icons, colour mode and editor. The composites keep one typed API for tone, icons and loading, so that handling isn't repeated across the app.

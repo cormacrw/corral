@@ -17,7 +17,7 @@ Three processes. In development they're all started together by `turbo dev`; whe
                                moves to hosting later                                   always on hardware the user controls
 ```
 
-### `apps/web`: Nuxt + Nuxt UI
+### `apps/web`: Nuxt + shadcn-nuxt
 
 - UI only. **No business logic in Nuxt server routes.**
 - `ssr: false` for now; everything shown is live data from the server.
@@ -27,7 +27,7 @@ Three processes. In development they're all started together by `turbo dev`; whe
 - Plan renders sessions through `PlanConversation`. The Inbox reuses its question card, composer, approval actions and plan flyout (via its `inbox` prop) for Plan threads (D11). Inbox actions hold the list and selection until the mutation completes, then advance to the item at the same position in the refetched list.
 - The one exception is `pnpm --filter web prototype` (D20): a static build of the same app on fixtures from `app/prototype/`, with no server, API or SSE. How to use it is in `.corral/agents/designer.md`.
 - Types come from the Hono typed client (`hc`) and `packages/contracts`.
-- Theme: `app/app.config.ts` (colors) and `app/assets/css/main.css` (tokens, fonts). After `pnpm install`, `.nuxt/ui/<component>.ts` contains the exact Tailwind classes for every Nuxt UI component, slot and variant. Use these as the reference when designing or matching components.
+- Theme: `app/assets/css/theme.css` (tokens) and `dark-neutrals.css` (the dark palette picker). Layers, from the bottom: `components/ui` (stock shadcn-vue, never edited), `components/app` (the `App*` composites everything else uses), `components/shared`, and `features/<name>` (components, composables, utils). Pages only handle the route. See `.corral/wiki/frontend-structure.md`.
 
 ### `apps/server`: control plane
 
@@ -114,7 +114,7 @@ states and requests updates through the existing runner update endpoint.
 
 ```
 apps/
-  web/         Nuxt + Nuxt UI
+  web/         Nuxt + shadcn-nuxt
   server/      Hono API, scheduler, orchestrator, GitHub client, SSE, runner WS
   runner/      daemon: worktrees, AgentRuntime adapters (claude, codex), per-run MCP
 packages/
@@ -132,7 +132,7 @@ packages/
 | Concern | Choice | Notes |
 |---|---|---|
 | Monorepo | Turborepo + pnpm workspaces | |
-| Frontend | Nuxt + Nuxt UI | |
+| Frontend | Nuxt + shadcn-nuxt (shadcn-vue on Reka UI) | D32 |
 | Server framework | Hono on Node | WebSocket + SSE helpers; typed client for Nuxt |
 | Database | Drizzle (Postgres dialect). Postgres in Docker when deployed; PGlite (embedded Postgres) in development and tests (D14) | One schema, two drivers, picked by `CORRAL_DATABASE_URL`. Supports atomic `UPDATE … WHERE status = 'ready' RETURNING` claims. PGlite is single-connection, so concurrency is only proven against Postgres in CI. Only the server opens the database, whichever driver. |
 | Runner | Node/TypeScript | Resolves PRD §8.2 "Rust or Node". Shares `contracts`. |

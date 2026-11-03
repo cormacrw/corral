@@ -8,7 +8,7 @@
 
 ## Layout
 
-- **Section menu** (left, 200–240px): "Settings" as the title, then a vertical `UNavigationMenu` (Profile, Agents, Runner, Performance, Appearance), and the note "Settings here apply to every project. Each project has its own settings in the sidebar." The active item uses `bg-elevated` with `text-primary`.
+- **Section menu** (left, 200–240px): "Settings" as the title, then a vertical `UNavigationMenu` (Profile, Agents, Runner, Performance, Appearance), and the note "Settings here apply to every project. Each project has its own settings in the sidebar." The active item uses `bg-muted` with `text-primary`.
 - **Content** (up to 880px): one bordered card per section. Rows use the same two-column pattern as project settings. Below about 800px the menu stacks on top.
 
 ## Sections
@@ -22,7 +22,7 @@
 
 - **Header:** "Agents" with "Shared by every project. Each runs through your local CLI login; Corral never sees your credentials." (D1–D2), and **Add agent**.
 - **One row per agent:** the name, a role badge (PM, Developer, Designer or Reviewer; D23), "{runtime} · concurrency 1 · `.corral/agents/<role>.md`", the agent's picture with **Upload picture** / **Remove**, and its name, concurrency, wake interval and paused controls. The wake interval, in minutes, is how often the scheduler may start waiting work for that agent; blank means every tick. Events such as plan approval or a pushed PR still start the task they're about right away. The PM's row says "one turn per session" instead and has no concurrency or wake interval control: PM turns are limited only to one per Plan session (D9, D13), and the API refuses a PM concurrency or wake interval.
-- **Add agent** opens a dialog: name, role (Developer, Designer or Reviewer; D23), runtime (`USelectMenu`, offering only the CLIs the runner detected, labelled "Claude" and "Codex", never "Claude Code"; D18) and concurrency. The new agent appears in the list live. Each developer, designer and reviewer row also has a runtime menu, disabled while the agent has active runs.
+- **Add agent** opens a dialog: name, role (Developer, Designer or Reviewer; D23), runtime (`AppSelectMenu`, offering only the CLIs the runner detected, labelled "Claude" and "Codex", never "Claude Code"; D18) and concurrency. The new agent appears in the list live. Each developer, designer and reviewer row also has a runtime menu, disabled while the agent has active runs.
 - **Edit screen** (to design): instructions file, and the caps that apply per role.
 
 ### Profile pictures
@@ -51,7 +51,7 @@ Pictures are optional; without one, an avatar shows initials. The browser crops 
 - **Colour mode:** a segmented control (System / Light / Dark), which maps to `useColorMode()`.
 - **Dark background:** swatch buttons for slate (default), gray, zinc, neutral, stone, mauve, olive, mist and taupe. Remaps neutral tokens only in dark mode; light mode stays slate. Shared by desktop and mobile, saved per device in `localStorage` (`corral.device.darkNeutral`) and restored in the static head before paint.
 - **Layout:** a segmented control (Auto / Desktop / Mobile), saved per device. See [mobile.md](mobile.md).
-- **Primary colour and font:** "Coming soon". For now they're set in `app.config.ts` and `main.css`.
+- **Primary colour and font:** "Coming soon". For now they're set in `assets/css/theme.css`.
 
 ## Open questions
 

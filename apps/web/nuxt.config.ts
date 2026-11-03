@@ -1,4 +1,5 @@
-import { darkNeutralInit } from './app/utils/dark-neutral'
+import tailwindcss from '@tailwindcss/vite'
+import { darkNeutralInit } from './app/features/settings/utils/dark-neutral'
 
 // https://nuxt.com/docs/api/configuration/nuxt-config
 
@@ -12,11 +13,22 @@ const viewport = { name: 'viewport', content: 'width=device-width, initial-scale
 export default defineNuxtConfig({
   modules: [
     '@nuxt/eslint',
-    '@nuxt/ui'
+    '@nuxt/icon',
+    '@nuxtjs/color-mode',
+    'shadcn-nuxt'
   ],
 
   // UI only; all data is live from apps/server (docs/architecture.md)
   ssr: false,
+
+  // Feature folders own their components and composables; names stay global
+  // and unique, so a feature can be reorganised without touching its callers
+  components: [
+    { path: '~/components/app', pathPrefix: false },
+    { path: '~/components/shared', pathPrefix: false },
+    { path: '~/features', pattern: '*/components/**/*.{vue,ts}', ignore: ['**/*.test.ts'], pathPrefix: false }
+  ],
+  imports: { dirs: ['features/*/composables'] },
 
   devtools: {
     enabled: true
@@ -48,12 +60,14 @@ export default defineNuxtConfig({
         }
   },
 
-  css: ['~/assets/css/main.css'],
+  css: ['~/assets/css/main.css', 'vue-sonner/style.css'],
 
   // A sub-path inside a sandbox can't use history routes or a server
   router: {
     options: { hashMode: prototype }
   },
+
+  colorMode: { classSuffix: '' },
 
   routeRules: prototype
     ? {}
@@ -77,6 +91,7 @@ export default defineNuxtConfig({
   // Swaps the API for fixtures (app/prototype); a constant, so dev and
   // production builds drop the fixtures entirely
   vite: {
+    plugins: [tailwindcss()],
     define: { 'import.meta.prototype': JSON.stringify(prototype) }
   },
 
@@ -85,6 +100,12 @@ export default defineNuxtConfig({
   icon: { provider: 'none', clientBundle: { scan: { globInclude: ['app/**/*.{vue,ts}'] }, sizeLimitKb: 0 } },
 
   ...(prototype && { plugins: ['~/prototype/storage.client.ts'] }),
+
+  // A misspelled or unregistered component fails typecheck instead of
+  // rendering as an empty unknown element
+  typescript: {
+    tsConfig: { vueCompilerOptions: { checkUnknownComponents: true } }
+  },
 
   hooks: {
     // Lint can't see an auto-import, so what only app/queries may use isn't one
@@ -101,5 +122,8 @@ export default defineNuxtConfig({
         braceStyle: '1tbs'
       }
     }
-  }
+  },
+
+  // Stock shadcn-vue primitives, auto-imported as <UiButton> and so on
+  shadcn: { prefix: 'Ui', componentDir: '@/components/ui' }
 })

@@ -4,6 +4,8 @@ import betterTailwindcss from 'eslint-plugin-better-tailwindcss'
 import { getDefaultAttributes } from 'eslint-plugin-better-tailwindcss/api/defaults'
 
 export default withNuxt(
+  // Vendored from shadcn-vue, kept stock so `shadcn-vue diff` stays meaningful
+  { ignores: ['app/components/ui/**'] },
   betterTailwindcss.configs['correctness-error'],
   {
     files: ['app/**/*.{ts,vue}'],
@@ -35,7 +37,8 @@ export default withNuxt(
         entryPoint: 'app/assets/css/main.css',
         attributes: [
           ...getDefaultAttributes(),
-          ['^v-bind:ui$', [{ match: 'objectValues' }]]
+          ['-class$', [{ match: 'strings' }]],
+          ['^v-bind:.*-class$', [{ match: 'strings' }]]
         ]
       }
     }

@@ -1,9 +1,11 @@
+import { TONE_TEXT } from '~/lib/tone'
+import type { Tone } from '~/lib/tone'
 import { isTaskDone } from '@corral/core'
 import { AGENT_RUNTIMES, cacheWritesUnknown, weightedRunCost } from '@corral/contracts/client'
 import type { Agent, AgentRuntime, AuditEntry, CliStatus, Epic, EpicFixRun, RunnerInfo, RunnerRole, RunnerStatus, InboxItem, PlanStatus, Project, Run, RunSessionStart, Task } from '@corral/contracts'
 import type { AgentRole, DesignVersionStatus, EpicFixKind, EpicReviewMode, EpicReviewState, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
 
-export type Color = 'primary' | 'secondary' | 'success' | 'info' | 'warning' | 'error' | 'neutral'
+export type Color = Tone
 
 // Status colours from design/README.md (D10). Always shown with the label.
 export const STATUS: Record<TaskStatus, { label: string, color: Color }> = {
@@ -68,10 +70,6 @@ export const EPIC_REVIEW_STATE: Record<EpicReviewState, { label: string, color: 
   ready_to_merge: { label: 'Ready to merge', color: 'success' },
   conflict: { label: 'Rebase conflict', color: 'warning' },
   merged: { label: 'Merged', color: 'success' }
-}
-
-export const EPIC_STATUS_TEXT: Record<Color, string> = {
-  primary: 'text-primary', secondary: 'text-secondary', neutral: 'text-muted', info: 'text-info', warning: 'text-warning', success: 'text-success', error: 'text-error'
 }
 
 // Epic PR audit events, worded to follow the actor's name in the Activity tab.
@@ -232,21 +230,21 @@ export const TASK_TYPE: Record<Task['type'], string> = {
 }
 // The badge on Board and Backlog cards (D19, D20). Plain tasks get none.
 export function taskTypeBadge(type: Task['type']): { label: string, color: Color, icon: string } | null {
-  if (type === 'bug') return { label: TASK_TYPE.bug, color: 'error', icon: 'i-lucide-bug' }
-  if (type === 'spike') return { label: TASK_TYPE.spike, color: 'info', icon: 'i-lucide-flask-conical' }
-  if (type === 'design') return { label: TASK_TYPE.design, color: 'secondary', icon: 'i-lucide-palette' }
+  if (type === 'bug') return { label: TASK_TYPE.bug, color: 'error', icon: 'i-ri-bug-line' }
+  if (type === 'spike') return { label: TASK_TYPE.spike, color: 'info', icon: 'i-ri-flask-line' }
+  if (type === 'design') return { label: TASK_TYPE.design, color: 'info', icon: 'i-ri-palette-line' }
   return null
 }
 // The muted icon on a Board card, which leaves colour to the priority. Plain tasks get none.
 export function cardTypeIcon(type: Task['type']): { name: string, label: string } | null {
-  if (type === 'bug') return { name: 'i-lucide-bug', label: TASK_TYPE.bug }
-  if (type === 'design') return { name: 'i-lucide-paintbrush', label: TASK_TYPE.design }
-  if (type === 'spike') return { name: 'i-lucide-flask-conical', label: TASK_TYPE.spike }
+  if (type === 'bug') return { name: 'i-ri-bug-line', label: TASK_TYPE.bug }
+  if (type === 'design') return { name: 'i-ri-brush-line', label: TASK_TYPE.design }
+  if (type === 'spike') return { name: 'i-ri-flask-line', label: TASK_TYPE.spike }
   return null
 }
 // Every type's icon, plain tasks included, for rows that show it on its own
 export function taskTypeIcon(type: Task['type']): string {
-  return taskTypeBadge(type)?.icon ?? 'i-lucide-square-check'
+  return taskTypeBadge(type)?.icon ?? 'i-ri-checkbox-line'
 }
 
 // A run that hasn't finished yet
@@ -291,7 +289,7 @@ export function runBadge(run: Pick<Run, 'state' | 'outcome' | 'role'>): { label:
 }
 
 // The dot beside a status, spelled out so Tailwind sees every class
-export const STATUS_DOT: Record<Color, string> = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-error', success: 'bg-success', secondary: 'bg-secondary' }
+export const STATUS_DOT: Record<Color, string> = { neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-destructive', success: 'bg-success' }
 
 // Where an Inbox item's task lives: an epic's activity is about the epic, and
 // its taskRef is only one of the epic's tasks
@@ -407,3 +405,8 @@ export function taskCounts(tasks: Pick<Task, 'status'>[]): { board: number, back
     backlog: tasks.filter(t => t.status === 'backlog').length
   }
 }
+
+// The number in a task ref: COR-123 is 123
+export const taskNumber = (ref: string) => Number(ref.split('-').at(-1))
+
+export const priorityText = (task: Pick<Task, 'priority'>) => TONE_TEXT[PRIORITY[task.priority].color]

@@ -26,7 +26,7 @@ Open sessions appear as indented sub-items under **Plan** in the left sidebar, i
 
 Everything is centred vertically and horizontally, in a column up to 720px wide:
 
-1. **Greeting:** the PM’s avatar at 96px (a `primary`-tinted circle) and a tagline as the page's `h1`, one of ten picked at random each time the page opens and kept until you leave it (`utils/plan-taglines.ts`).
+1. **Greeting:** the PM’s avatar at 96px (a `primary`-tinted circle) and a tagline as the page's `h1`, one of ten picked at random each time the page opens and kept until you leave it (`features/plan/utils/plan-taglines.ts`).
 2. **Composer** (large; see shared pattern): a 3-row minimum and 15px text, with a soft shadow. Toolbar, left to right:
    - **Attach** (paperclip).
    - **Project picker:** the project's colour dot, name and a chevron. Opens a listbox of projects, each with thumbnail, name, prefix and a check on the current one. It includes **Global**, which has no repository checkout. It remembers the last scope picked, defaulting to Global. The scope is locked once a session has messages.
@@ -41,7 +41,7 @@ Everything is centred vertically and horizontally, in a column up to 720px wide:
 - **Header** (48px): the project dot and name (or **Global**), the session title, a neutral badge naming the session's runtime ("Claude" or "Codex"), **Close thread** (ghost) and a **New session** ghost button.
 - **Close thread:** asks for confirmation ("Close this thread?", with **Close thread** in `error` and **Cancel**), then discards the session's Draft tasks and its unapproved plan, stops a running Juno turn and closes the session, the same action as in the Inbox ([inbox.md](inbox.md#close-thread)). The thread leaves the side nav and the Inbox at once; closing the current session navigates to `/plan` (the new-session view). Closing another session from its side nav menu keeps the current page open. Sending a message to a closed session reopens it, without the discarded drafts and plan. Tasks already added to the board or Backlog are left as they are; any dependency they had on a discarded draft is dropped rather than blocking them. It's hidden on a session that's already closed.
 - **Message log** (`UChatMessages`, `role="log"`), centred and up to 768px wide:
-  - **Your messages:** right-aligned, in a `bg-elevated` bubble.
+  - **Your messages:** right-aligned, in a `bg-muted` bubble.
   - **Juno's messages:** left-aligned with the avatar and "Juno · PM".
     - **Live turn:** while Juno is working, the turn's transcript streams in at the bottom of the log as it arrives (SSE `run.events`), in the agent page's style ([agent.md](agent.md)): messages, and tool calls with their input and output collapsed into step groups. The log follows the bottom unless you've scrolled up to read, until you come back down or send something. Until the first event arrives, a working line reads "Reading the code, wiki and board…".
     - **Past turns:** a finished turn's first message has a collapsed "Steps" disclosure above it. Opening it loads that run's saved transcript (`GET /runs/:id/transcript`) and the label becomes "N steps". The count isn't stored anywhere, so it's only known once loaded.
@@ -101,7 +101,7 @@ On the mobile layout ([mobile.md](mobile.md)) the same two routes keep their beh
 ## States
 
 - **Runner offline:** the composer is disabled, with "Plan needs the runner. It's offline." and Reconnect (D9).
-- **Juno errors mid-turn:** an inline `UAlert` in the log with Retry.
+- **Juno errors mid-turn:** an inline `AppAlert` in the log with Retry.
 - **No drafts:** the Drafts section is hidden.
 
 ## Accessibility

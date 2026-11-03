@@ -86,7 +86,7 @@ describe('taskTypeBadge', () => {
     expect(taskTypeBadge('task')).toBeNull()
     expect(taskTypeBadge('bug')).toMatchObject({ label: 'Bug', color: 'error' })
     expect(taskTypeBadge('spike')).toMatchObject({ label: 'Spike', color: 'info' })
-    expect(taskTypeBadge('design')).toMatchObject({ label: 'Design', color: 'secondary' })
+    expect(taskTypeBadge('design')).toMatchObject({ label: 'Design', color: 'info' })
   })
 })
 
@@ -125,9 +125,9 @@ it('excludes Approved designs from open board work', () => {
 
 it('gives a Board card an icon for every type but a plain task', () => {
   expect(cardTypeIcon('task')).toBeNull()
-  expect(cardTypeIcon('bug')).toEqual({ name: 'i-lucide-bug', label: 'Bug' })
-  expect(cardTypeIcon('design')).toEqual({ name: 'i-lucide-paintbrush', label: 'Design' })
-  expect(cardTypeIcon('spike')).toEqual({ name: 'i-lucide-flask-conical', label: 'Spike' })
+  expect(cardTypeIcon('bug')).toEqual({ name: 'i-ri-bug-line', label: 'Bug' })
+  expect(cardTypeIcon('design')).toEqual({ name: 'i-ri-brush-line', label: 'Design' })
+  expect(cardTypeIcon('spike')).toEqual({ name: 'i-ri-flask-line', label: 'Spike' })
 })
 
 it('labels completed rebase developer runs', () => {

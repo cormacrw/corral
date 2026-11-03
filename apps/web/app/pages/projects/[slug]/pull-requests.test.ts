@@ -7,16 +7,21 @@ import type { PullRequestStatus } from '@corral/contracts'
 import { testQueryClient } from '~/queries/mount-with-query'
 import { PULL_REQUESTS_POLL_MS, pullRequestsQuery } from '~/queries/projects'
 
+import ProjectPullRequests from '~/features/projects/components/pull-requests/ProjectPullRequests.vue'
+import PullRequestCards from '~/features/projects/components/pull-requests/PullRequestCards.vue'
+import PullRequestMerge from '~/features/projects/components/pull-requests/PullRequestMerge.vue'
+import { usePullRequests } from '~/features/projects/composables/usePullRequests'
+
 const pullRequests = vi.hoisted(() => vi.fn())
 vi.mock('~/composables/useApi', () => ({ api: { projects: { pullRequests } } }))
-vi.mock('~/utils/pull-requests', () => {
+vi.mock('~/features/projects/utils/pull-requests', () => {
   const cell = () => ({ label: '', color: 'neutral', detail: '' })
   return { ciCell: cell, evidenceCell: cell, mergeCell: cell, rebaseCell: cell, reviewCell: cell }
 })
 
 const route = reactive({ params: { slug: 'corral' } })
 for (const [name, value] of Object.entries({
-  computed, ref, useSeoMeta: vi.fn(),
+  computed, ref, useSeoMeta: vi.fn(), usePullRequests,
   useProject: () => ({ slug: computed(() => route.params.slug), project: ref({ slug: route.params.slug }) }),
   useTaskFlyout: () => ({ ref: ref(null) }), useDevice: () => ({ isMobile: ref(true) })
 })) vi.stubGlobal(name, value)
@@ -36,8 +41,8 @@ let client: ReturnType<typeof testQueryClient>
 const mountPage = () => mount(PullRequests, {
   global: {
     plugins: [[VueQueryPlugin, { queryClient: client }]],
-    components: { UDashboardPanel: defineComponent({ setup: (_, { slots }) => () => h('div', slots.default?.()) }) },
-    stubs: { MobilePageHeader: true, USkeleton: true, UAlert: true, UButton: true, UBadge: true, UIcon: true, StatusBadge: true, TaskFlyout: true }
+    components: { ProjectPullRequests, PullRequestCards, PullRequestMerge, AppPanel: defineComponent({ setup: (_, { slots }) => () => h('div', slots.default?.()) }) },
+    stubs: { MobilePageHeader: true, UiSkeleton: true, AppLoadError: true, AppButton: true, AppBadge: true, Icon: true, StatusBadge: true, TaskFlyout: true }
   }
 })
 

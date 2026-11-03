@@ -9,6 +9,6 @@ export default defineConfig({
   test: { maxWorkers: checkCpus() },
   plugins: [vue()],
   resolve: {
-    alias: { '~': fileURLToPath(new URL('./app', import.meta.url)) }
+    alias: { '~': fileURLToPath(new URL('./app', import.meta.url)), '@': fileURLToPath(new URL('./app', import.meta.url)) }
   }
 })

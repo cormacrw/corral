@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import SettingsProfile from './profile.vue'
-
 const device = useDevice()
 </script>
 

@@ -8,7 +8,7 @@ The page specs in this folder still set the behaviour. This page covers the shel
 
 ## Mobile or web
 
-`app.vue` picks the layout at the root, through `useDevice()` (`app/composables/useDevice.ts`):
+`app.vue` picks the layout at the root, through `useDevice()` (`composables/useDevice.ts`):
 
 - **Mobile** when the screen is small and touch-first, `(max-width: 767px) and (pointer: coarse)`, or when Corral runs as an installed app, `(display-mode: standalone)`.
 - **Web** otherwise. A narrow desktop window stays on the web layout, because its pointer is fine.
@@ -54,7 +54,7 @@ From top to bottom:
 
 - Tapping any tab goes back to Corral's first history entry in the browser tab and replaces it with that tab root, including when arriving on a deep link. It never goes past that entry, so pages from other sites earlier in the browser tab are left alone. Back or an iOS edge swipe at a tab root cannot revisit earlier tabs or details. Links into projects, tasks and threads still push normally, so Back walks through detail screens until the tab root. Desktop navigation is unchanged.
 - Tab-root content, sub-page headers and the tab bar pad themselves with `env(safe-area-inset-*)`, and the viewport uses `viewport-fit=cover`, so nothing sits under a notch or the home indicator.
-- Toasts appear at the top centre on mobile, 1rem below `env(safe-area-inset-top)`, keeping the tab bar and composers clear. Desktop keeps Nuxt UI's default bottom-right position. Dismissal and automatic closing use Nuxt UI's defaults.
+- Toasts appear at the top centre on mobile, 1rem below `env(safe-area-inset-top)`, keeping the tab bar and composers clear. Desktop keeps the bottom-right position. Dismissal and automatic closing use the toast library's defaults.
 - Home’s runner status and the Inbox count come from the shell queries (`useShell()`), which the app's one live connection keeps current, so they update without a reload.
 
 On the web, `/projects` renders in the normal shell as a plain project list.
@@ -65,7 +65,7 @@ On the web, `/projects` renders in the normal shell as a plain project list.
 
 - **Runner status** ("Runner online", or "{online} of {total} runners online" with several) and a project filter (**All projects** or one project) · **Today**. Runner status is shown only here.
 - **Tiles:** **To do** (Ready), **In progress** (In progress, Agent review, Human review and Ready to merge) and **Completed today** (tasks merged and designs approved since local midnight) with how many merged tasks were first-pass (no changes requested).
-- **Today totals**, immediately after the count tiles: **Runs** and **Usage**, from `todayStats` (`utils/agents.ts`), counting today’s queued runs and their input plus output tokens. Both respect the project filter. The note reads "Usage is in tokens from your own subscription." Completed today already covers PRs merged.
+- **Today totals**, immediately after the count tiles: **Runs** and **Usage**, from `todayStats` (`features/agents/utils/agents.ts`), counting today’s queued runs and their input plus output tokens. Both respect the project filter. The note reads "Usage is in tokens from your own subscription." Completed today already covers PRs merged.
 - **In progress by stage:** a bar and counts per stage, and a link to the Inbox with the blocked (Blocked and Failed) and waiting-for-your-review (Human review) counts.
 - **Agents:** each agent with small muted text only for Paused or Waiting on usage limit; working agents first, indicated by their border, ring and animated avatar, with each active run's task, project, status, run number (PR number for reviews) and elapsed time. Runs come from `GET /api/runs`, refetched on `run.updated`; the cards show only active runs. Tapping an agent opens its agent page.
 
@@ -102,7 +102,7 @@ The mobile `/plan` tab starts directly with the planning prompt, with no title r
 Built from the frames **Projects**, **Project overview** and **Project settings**. The behaviour is [project-overview.md](project-overview.md) and [project-settings.md](project-settings.md).
 
 - **Projects** (`/projects`, `MobileProjects.vue`): no title row or header Add project icon. One card per project: the thumbnail, name, Paused badge only while paused, and `owner/repo · PREFIX`, which opens the overview. Under it, one line: the agent holding a lease ("Atlas building COR-35", with the working dot), or for a paused project "No new runs start while paused." and how many items need you. The card ends in four cells: **Board** with the count of tasks on the board that are not complete (recently completed work still shows in the Board's Complete column but is left out of this count), **Backlog** with the Backlog count, **PRs** (the Pull requests page), and **Settings**. An outlined **Add project** button follows the cards.
-- **Project overview** (`/projects/:slug`, `MobileProjectOverview.vue`): header "Overview" with Back (to Projects) and a Project settings button. The web page's layout in one column: the project header with **Plan with Juno** and **Open board** side by side, Active now, stat tiles that scroll sideways, then tabs **Needs you** (default), **Parents**, **Flow**, **Activity**, following [project-overview.md](project-overview.md#layout). Needs you has full-width rows (ref and title over the type badge and time) and **Open Inbox**; Parents has collapsible cards, filters and **Open Backlog**. The tabs and their content use a 16px inset; Needs you row borders span the full width, with row content inset 16px. It shares its data with the web page through `useProjectOverview()`. The overview root is the single vertical scroller bounded by the layout above the tab bar and its bottom safe-area padding; its header and sections flow together without an inner scroller.
+- **Project overview** (`/projects/:slug`, `ProjectOverview.vue`): header "Overview" with Back (to Projects) and a Project settings button. The web page's layout in one column: the project header with **Plan with Juno** and **Open board** side by side, Active now, stat tiles that scroll sideways, then tabs **Needs you** (default), **Parents**, **Flow**, **Activity**, following [project-overview.md](project-overview.md#layout). Needs you has full-width rows (ref and title over the type badge and time) and **Open Inbox**; Parents has collapsible cards, filters and **Open Backlog**. The tabs and their content use a 16px inset; Needs you row borders span the full width, with row content inset 16px. It shares its data with the web page through `useProjectOverview()`. The overview root is the single vertical scroller bounded by the layout above the tab bar and its bottom safe-area padding; its header and sections flow together without an inner scroller.
 - **Project settings** (`/projects/:slug/settings`): the web page's cards, stacked, under the project page header (the project name over "Settings", Back to the overview) with the "Saved" note and **Save**, which follows the same rules as Save changes on the web.
 
 ## Inbox
@@ -124,7 +124,7 @@ Built from the **Install Corral** frame. Corral is an installable PWA, served by
 
 - **Manifest** (`public/manifest.webmanifest`): name and short name "Corral", 192 and 512 px icons plus a maskable 512, `display: standalone`, white theme and background, `start_url` and `scope` of `/`. Every path is relative to the origin, because Corral runs behind whatever hostname the Cloudflare Tunnel gives it (D12). The manifest link, `theme-color` (light and dark) and the iOS tags (`apple-mobile-web-app-capable`, `apple-touch-icon`) are in `nuxt.config.ts`'s `app.head`, so they're in the static shell before any script runs.
 - **Service worker** (`public/sw.js`, registered by `plugins/pwa.client.ts` in production builds only): caches the built app shell only. Pages are network first, falling back to the cached shell; content-hashed `/_nuxt/` files are cache first; the icons and manifest are network first. It never handles `/api/**` (the `/api/events` stream included), server-sent events, WebSocket upgrades, writes or other origins, and never caches a redirect (a Cloudflare Access sign-in) or an error. `utils/service-worker.test.ts` runs it against those requests.
-- **Install screen** (`InstallSheet.vue`): a bottom sheet on mobile, a modal on the web, opened from **Settings → App → Install Corral**. `useInstall()` decides what it offers (`utils/install.ts`):
+- **Install screen** (`InstallSheet.vue`): a bottom sheet on mobile, a modal on the web, opened from **Settings → App → Install Corral**. `useInstall()` decides what it offers (`features/shell/utils/install.ts`):
   - Chrome and Android: when `beforeinstallprompt` has fired, **Install app** shows the browser's prompt. The plugin catches the event early and suppresses Chrome's own mini-bar.
   - iOS (iPadOS included), which has no prompt: the three Add to Home Screen steps.
   - Already running standalone, or a browser that can't install: no Settings entry, and the sheet closes.
@@ -152,7 +152,7 @@ Built from the **Settings** and **Settings · Runner** frames. Behaviour follows
 
 ## Search
 
-Mobile has no global Search button or command palette. Board, Backlog and the Inbox list retain their own in-page search. The desktop command palette (`layouts/default.vue`, `utils/search.ts`) remains available through its Search button and ⌘K/Ctrl+K.
+Mobile has no global Search button or command palette. Board, Backlog and the Inbox list retain their own in-page search. The desktop command palette (`layouts/default.vue`, `features/shell/utils/search.ts`) remains available through its Search button and ⌘K/Ctrl+K.
 
 ## Pages without a mobile screen yet
 

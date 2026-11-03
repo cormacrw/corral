@@ -10,4 +10,4 @@ No projects still leads to onboarding on either layout; `/setup?add=1` stays
 open for adding a project. Deep links keep their destination.
 
 Implementation: `apps/web/app/middleware/setup.global.ts` and
-`apps/web/app/utils/onboarding.ts`. Both have unit coverage beside them.
+`apps/web/app/features/setup/utils/onboarding.ts`. Both have unit coverage beside them.

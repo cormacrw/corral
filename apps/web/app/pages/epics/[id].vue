@@ -22,7 +22,7 @@ watch(target, (ref) => {
 </script>
 
 <template>
-  <UDashboardPanel :ui="{ body: 'p-0' }">
+  <AppPanel>
     <main
       v-if="device.isMobile.value"
       class="flex h-full min-h-0 flex-col"
@@ -44,5 +44,5 @@ watch(target, (ref) => {
         />
       </main>
     </div>
-  </UDashboardPanel>
+  </AppPanel>
 </template>

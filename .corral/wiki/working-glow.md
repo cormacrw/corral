@@ -1,6 +1,6 @@
 # Working glow offsets
 
-`apps/web/app/components/BorderGlow.vue` picks a random lap fraction in
+`apps/web/app/components/shared/BorderGlow.vue` picks a random lap fraction in
 `onMounted` and uses it for a negative animation delay, scaled by `duration`.
 Each mounted instance keeps its phase through reactive updates; a reload or
 remount chooses again. Board and project overview cards, on desktop and

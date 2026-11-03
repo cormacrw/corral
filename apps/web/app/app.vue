@@ -59,10 +59,13 @@ const layout = computed(() => device.isMobile.value && route.meta.layout === und
 </script>
 
 <template>
-  <UApp :toaster="device.isMobile.value ? { position: 'top-center', ui: { viewport: 'top-[calc(env(safe-area-inset-top)+1rem)]' } } : undefined">
-    <NuxtLayout :name="layout">
-      <NuxtPage />
-    </NuxtLayout>
-    <InstallSheet />
-  </UApp>
+  <NuxtLayout :name="layout">
+    <NuxtPage />
+  </NuxtLayout>
+  <InstallSheet />
+  <UiToaster
+    rich-colors
+    :position="device.isMobile.value ? 'top-center' : 'bottom-right'"
+    :offset="device.isMobile.value ? { top: 'calc(env(safe-area-inset-top) + 1rem)' } : undefined"
+  />
 </template>

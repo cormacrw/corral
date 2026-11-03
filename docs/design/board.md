@@ -12,7 +12,7 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 1. **Toolbar** (bottom border):
    - the **Top-level / All sub-tasks** toggle (see [Views](#views-d31))
    - a search input (240px, "Search tasks")
-   - four **filters** (`components/BoardFilters.vue`), each a multi-select dropdown (`components/BoardFilter.vue`, `USelectMenu` with `multiple`) with a tick by each selected item. "All …" at the top of the menu clears the selection. The trigger reads "All parents" when nothing is selected, the item's name when one is, and "N parents" when several are:
+   - four **filters** (`features/board/components/BoardFilters.vue`), each a multi-select dropdown (`features/board/components/BoardFilter.vue`, `AppSelectMenu` with `multiple`) with a tick by each selected item. "All …" at the top of the menu clears the selection. The trigger reads "All parents" when nothing is selected, the item's name when one is, and "N parents" when several are:
      - **Parent:** every parent on the Board
      - **Status:** the columns
      - **Priority:** Urgent, High, Medium, Low
@@ -33,12 +33,12 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
      | Blocked & failed | Blocked, Failed | You |
      | Complete | Merged tasks and spikes, approved designs | Last 3 days |
 
-   - **Cards** (`components/TaskCard.vue`, shared with the mobile layout): a `div` with a `bg-default` background, a 1px border and `rounded-md`, stacked top to bottom:
+   - **Cards** (`features/tasks/components/TaskCard.vue`, shared with the mobile layout): a `div` with a `bg-background` background, a 1px border and `rounded-md`, stacked top to bottom:
      - **Title:** medium, highlighted, wrapping as far as it needs. It's the card's keyboard control.
      - **Parent:** one line, truncated, muted. Omitted when the task has none.
      - **Footer:** the priority on the left (Urgent in `error`, High in `warning`, others muted), and on the right the blocked icon, type icon and assignee.
-     - **Type icon:** muted, so colour on the card belongs to the priority. Bug `i-lucide-bug`, Design `i-lucide-paintbrush`, Spike `i-lucide-flask-conical`, and none for Task.
-     - **Assignee** (`components/TaskCardAssignee.vue`): the avatar only, with the full name on hover. Agent review shows `task.reviewer` and every other status shows `task.developer`, never falling back to the other role. With no agent it's a dashed circle (hover: Unassigned). The green dot shows only when the displayed agent holds the lease.
+     - **Type icon:** muted, so colour on the card belongs to the priority. Bug `i-ri-bug-line`, Design `i-ri-brush-line`, Spike `i-ri-flask-line`, and none for Task.
+     - **Assignee** (`features/tasks/components/TaskCardAssignee.vue`): the avatar only, with the full name on hover. Agent review shows `task.reviewer` and every other status shows `task.developer`, never falling back to the other role. With no agent it's a dashed circle (hover: Unassigned). The green dot shows only when the displayed agent holds the lease.
      - **Not on the card, in any status:** notes (status reasons, review round, "Waiting for you", "Merges when checks pass", "Paused"), the ref, type badge, design-changed badge and PR link. They're in the flyout.
      - **Working cards glow** (shared working indicator), with a `primary` border.
      - The selected card has a `primary` border and ring.
@@ -51,7 +51,7 @@ The toggle's view lives in `?view=` (`top` or `all`; old links say `epics` or `t
 
 Each card is a parent, and no task cards are shown. Tasks with no parent don't appear.
 
-**Columns.** `epicStage` in `apps/web/app/utils/board.ts` puts each parent in exactly one column, from the first row that matches:
+**Columns.** `epicStage` in `apps/web/app/features/board/utils/board.ts` puts each parent in exactly one column, from the first row that matches:
 
 | Column | When | Hint |
 |---|---|---|
@@ -67,7 +67,7 @@ The columns are shown in the order Ready, In progress, Agent review, Human revie
 
 A parent is shown under `epicOnBoard`: it has work left, or it finished within `COMPLETE_WINDOW_DAYS`, counted from its latest task completion (a merge or a design approval, the same rule as the Complete column) or, for a parent PR, the PR's merge. A parent waiting on its PR stays however old its tasks are.
 
-**Card** (`components/BoardEpicCard.vue`): the title and the meter with "N of M merged". Tags, review mode and the PR link stay in the parent flyout. An unfinished parent held by unfinished prerequisite parents shows the amber `i-lucide-ban` icon beside the title. It opens a "Waiting on" popover listing each prerequisite with its progress, and clicking a row opens that parent. Clicking the icon doesn't open the card's own flyout.
+**Card** (`features/board/components/BoardEpicCard.vue`): the title and the meter with "N of M merged". Tags, review mode and the PR link stay in the parent flyout. An unfinished parent held by unfinished prerequisite parents shows the amber `i-ri-prohibited-line` icon beside the title. It opens a "Waiting on" popover listing each prerequisite with its progress, and clicking a row opens that parent. Clicking the icon doesn't open the card's own flyout.
 
 **Working agents.** The card shows overlapping `AgentAvatar` pictures (initials as fallback), with no visible names: distinct task lease holders plus agents with active runs whose `epicId` matches the parent, including taskless parent reviews. Each agent appears once, in stable agent order. Show at most three avatars, then "+N" for the rest. Hover or keyboard focus shows the agent name in a tooltip; each avatar has an accessible name and the group announces all working agents, including those behind "+N". While any agent is working, wrap the card in the shared `BorderGlow` treatment. With none, show neither avatars nor glow. Task and run SSE updates refresh this without a reload.
 
@@ -79,7 +79,7 @@ On desktop, clicking a card opens the parent in the flyout; clicking it again cl
 
 - Clicking anywhere on a card opens it in the flyout; clicking it again closes the flyout. The title is a button: Tab reaches it, Enter or Space does the same, and the focus ring shows round the whole card.
 - The PR link is in the flyout's properties and opens in a new tab.
-- Each filter shows tasks matching any of its selected items; with nothing selected it doesn't filter. Search and the filters combine with AND (`matchesFilter` in `apps/web/app/utils/board.ts`).
+- Each filter shows tasks matching any of its selected items; with nothing selected it doesn't filter. Search and the filters combine with AND (`matchesFilter` in `apps/web/app/features/board/utils/board.ts`).
   - **Status** hides the columns that aren't selected (and their tabs on mobile).
   - **Agent** matches the agent holding the task's lease, or the agent it's assigned to. Tasks aren't assigned ahead of time (D15), so a task belongs to the agent of its latest run of the role whose turn it is (`task.developer` / `task.reviewer`): the developer in Ready and In progress, the reviewer in Agent review (`taskAgentIds`). A task no agent of that role has claimed matches no agent.
 - The search and filters live in the URL query, so a filtered Board reloads and can be shared: `?q=`, and comma-separated `?parents=` (parent ids), `?status=` (column keys), `?priority=` and `?agent=` (agent ids). `?parent=` is taken by the parent flyout, and `?view=` by the Tasks / Parents toggle.
@@ -87,9 +87,9 @@ On desktop, clicking a card opens the parent in the flyout; clicking it again cl
 
 ## Rules
 
-- The Complete column only shows work finished in the last 3 days (`COMPLETE_WINDOW_DAYS` in `apps/web/app/utils/board.ts`). Older completed tasks stay on the Backlog, parent and task pages.
-- The Complete column lists the most recently finished task first (`sortColumn` in `apps/web/app/utils/board.ts`), on desktop and mobile; ties fall back to ref. Other columns keep the order the task list gives them.
-- Ready tasks with unfinished dependencies stay in Ready (D10). An amber `i-lucide-ban` button sits to the left of the type icon when `dependsOn` contains a task not done by `isTaskDone`, or `waitingOnEpics` is nonempty (parent dependencies, or a Merged dependency in another parent that isn't done). Approved designs count as done. Resolve dependencies against the full project task list, before filters and the completion window. A dependency missing from that list, such as a Draft, counts as not done. Other statuses, including Blocked and Failed, never get the icon.
+- The Complete column only shows work finished in the last 3 days (`COMPLETE_WINDOW_DAYS` in `apps/web/app/features/board/utils/board.ts`). Older completed tasks stay on the Backlog, parent and task pages.
+- The Complete column lists the most recently finished task first (`sortColumn` in `apps/web/app/features/board/utils/board.ts`), on desktop and mobile; ties fall back to ref. Other columns keep the order the task list gives them.
+- Ready tasks with unfinished dependencies stay in Ready (D10). An amber `i-ri-prohibited-line` button sits to the left of the type icon when `dependsOn` contains a task not done by `isTaskDone`, or `waitingOnEpics` is nonempty (parent dependencies, or a Merged dependency in another parent that isn't done). Approved designs count as done. Resolve dependencies against the full project task list, before filters and the completion window. A dependency missing from that list, such as a Draft, counts as not done. Other statuses, including Blocked and Failed, never get the icon.
 - The blocked button opens a `UPopover` headed **Waiting on**, listing every blocking task’s title, ref and status, plus each waiting parent. A dependency missing from the task list shows its ref alone. Task rows open the flyout on desktop and the task page on phones. Parent rows link to `/epics/<id>`, like Board parents. The button and rows stop clicks from opening the parent card. Escape and outside clicks dismiss the popover. It fits within the phone viewport and updates from live task data without a reload.
 - "Working" comes from an active lease, not from the status. A task in In progress waiting for a retry doesn't glow.
 
@@ -102,7 +102,7 @@ On desktop, clicking a card opens the parent in the flyout; clicking it again cl
 ## Responsive
 
 - On the web layout, columns scroll sideways at every width.
-- On the mobile layout (D17, `components/BoardMobile.vue`), the Board shows **one column at a time**, from the `Board · one column at a time` frame:
+- On the mobile layout (D17, `features/board/components/BoardMobile.vue`), the Board shows **one column at a time**, from the `Board · one column at a time` frame:
   - the header's Search button shows the search input. The **Filters** icon button (`list-filter`) beside it toggles the filter row, **collapsed by default**, with an accessible label and pressed/expanded state
   - in Tasks, the expanded row contains the same Parent, Status, Priority and Agent filters as the web Board, two to a row, plus Clear filters while anything is filtered and "N tasks". Collapsing it keeps the selections and URL query unchanged
   - the Filters button shows a dot while any of the four filters is set, open or closed (search alone does not add a dot). Filters from the URL apply immediately without expanding the row

@@ -13,7 +13,7 @@ vi.stubGlobal('useRoute', () => ({ params: { slug: 'corral' } }))
 vi.stubGlobal('definePageMeta', vi.fn())
 const removing = ref<string | null>(null)
 vi.stubGlobal('useRemovingProject', () => removing)
-const { useProjectMissing } = await import('~/composables/useProject')
+const { useProjectMissing } = await import('~/features/projects/composables/useProject')
 vi.stubGlobal('useProjectMissing', useProjectMissing)
 vi.stubGlobal('provideProject', vi.fn())
 

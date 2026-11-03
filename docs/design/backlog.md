@@ -30,7 +30,7 @@ The page spans the full content width.
      - the priority (Urgent `error`, High `warning`, others muted)
      - the age
      - **Move to board** (ghost, kanban icon), shown on hover or focus from 768px up and always below that
-   - The selected row uses `bg-elevated`.
+   - The selected row uses `bg-muted`.
 3. **Task flyout:** docked on the right. A Backlog task shows a banner above its properties, "In the Backlog, so never scheduled until you move it.", with **Move to board** (solid primary). The Status menu also offers Ready as the only other option.
 
 ## Interactions
@@ -53,7 +53,7 @@ The page spans the full content width.
 ## Responsive
 
 - **Below 768px:** the criteria and age columns hide.
-- **Mobile layout** (D17, `components/BacklogMobile.vue`, the `Backlog` frame): the search input fills the width with the count under it, and **New task** is a **+** in the header. Each parent card puts **Plan with Juno** and **Move all to board** side by side under its header (hidden while collapsed). Rows show the ref and title, then the In plan badge, priority and type badge (Bug, Spike and Design only), with an icon-only **Move to board** on the right. Tapping a row, or creating a task, opens the task's page instead of the flyout. There's no Collapse all / Expand all.
+- **Mobile layout** (D17, `features/board/components/BacklogMobile.vue`, the `Backlog` frame): the search input fills the width with the count under it, and **New task** is a **+** in the header. Each parent card puts **Plan with Juno** and **Move all to board** side by side under its header (hidden while collapsed). Rows show the ref and title, then the In plan badge, priority and type badge (Bug, Spike and Design only), with an icon-only **Move to board** on the right. Tapping a row, or creating a task, opens the task's page instead of the flyout. There's no Collapse all / Expand all.
 
 ## Open questions
 

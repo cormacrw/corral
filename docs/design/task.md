@@ -34,10 +34,10 @@ Ready tasks whose parent has unfinished prerequisites, or with a Merged dependen
    | Property | Control | Editable |
    |---|---|---|
    | Project | text | No |
-   | Status | `USelectMenu` with a colour dot | Only the moves a human may make under D10 (e.g. Blocked → Backlog / Ready / In progress). Otherwise read-only, with the tooltip "Set by agents while they work" |
+   | Status | `AppSelectMenu` with a colour dot | Only the moves a human may make under D10 (e.g. Blocked → Backlog / Ready / In progress). Otherwise read-only, with the tooltip "Set by agents while they work" |
    | Reason | why a Blocked or Failed task stopped (`task.statusReason`), in `error`. Only shown when there is one | No |
-   | Priority | `USelectMenu`: Urgent, High, Medium, Low | Yes |
-   | Parent | `USelectMenu` | Yes |
+   | Priority | `AppSelectMenu`: Urgent, High, Medium, Low | Yes |
+   | Parent | `AppSelectMenu` | Yes |
    | Developer | avatar and name of the agent of the task's latest developer run (`task.developer`), or "Any available developer" with no avatar until one claims it | No (D15: no manual assignment yet) |
    | Reviewer | avatar and name of the agent of the task's latest reviewer run (`task.reviewer`), or "Any available reviewer" until one exists | No (D15) |
    | Human review | `USwitch` | Yes (D5) |
@@ -45,8 +45,8 @@ Ready tasks whose parent has unfinished prerequisites, or with a Merged dependen
    | Pull request | link, or "Not opened yet" | No |
    | Review round | text, e.g. "2 of 5" | No |
 
-   - Dropdowns are Nuxt UI `USelectMenu`, never native `<select>`.
-   - The trigger is borderless with a chevron and gets `bg-elevated` on hover or while open.
+   - Dropdowns are `AppSelectMenu`, never native `<select>`.
+   - The trigger is borderless with a chevron and gets `bg-muted` on hover or while open.
    - The menu uses popover styling, with a trailing `primary` check on the selected item.
    - Picking an option saves immediately and shows "Saved".
    - **Design tasks (D20)** show a **Design** section here, before Depends on (on mobile, in the Details tab):

@@ -2,7 +2,7 @@ import { EPIC_REVIEW_STATES } from '@corral/core'
 import type { Agent, DraftSession, Epic, EpicDetail, EpicReview, Inbox, PerfSummary, PlanSessionDetail, Project, PullRequestDetail, PullRequestStatus, ServerEvent, Task } from '@corral/contracts'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '~/composables/useApi'
-import { STOP_ASKING } from '~/utils/plan-questions'
+import { STOP_ASKING } from '~/features/plan/utils/plan-questions'
 import { mockCall, onMockEvent, pmReply } from './mock-api'
 
 describe('prototype mock API', () => {

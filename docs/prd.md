@@ -720,7 +720,7 @@ Corral uses a hosted control plane and a local execution plane.
 
 ### 8.2 Recommended stack
 
-> **Superseded by D7:** Nuxt + Nuxt UI (not SvelteKit), Hono server, PGlite → Postgres, Node/TS runner, Turborepo. See [architecture.md](architecture.md).
+> **Superseded by D7 and D32:** Nuxt + shadcn-nuxt (not SvelteKit), Hono server, PGlite → Postgres, Node/TS runner, Turborepo. See [architecture.md](architecture.md).
 
 | Component | Recommendation |
 |---|---|

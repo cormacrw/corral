@@ -36,12 +36,12 @@ Multiple projects, global agents and per-project task prefixes are decided in **
 
 ## Shared conventions
 
-### Nuxt UI and tokens
+### Components and tokens
 
-- Use Nuxt UI components and semantic tokens only: `--ui-bg`, `--ui-bg-muted`, `--ui-bg-elevated`, `--ui-bg-accented`, `--ui-text-dimmed|muted|toned|highlighted|inverted`, `--ui-border`, `--ui-border-accented`, and the colour aliases `primary`, `success`, `info`, `warning`, `error`, `neutral`.
-- Theme comes from `app.config.ts` (`ui.colors.primary`, `ui.colors.neutral: 'slate'`) and `main.css` (`--font-sans`). Settings can override the neutral palette in dark mode only, saved per device (see [Settings](settings.md#appearance)). Never hard-code hex values in components. The only exception is a project's thumbnail colour, which is user data.
-- Light and dark mode both have to work. Primary uses shade 500 in light mode and 400 in dark mode, which is Nuxt UI's default.
-- Radii follow Nuxt UI: controls `rounded-md`, cards and panels `rounded-lg`, avatars and dots `rounded-full`.
+- Use shadcn-vue components through the `App*` composites (D32), and semantic tokens only: `background`, `foreground`, `card`, `popover`, `muted`, `muted-foreground`, `accent`, `border`, `input`, `ring`, `primary`, `destructive`, and Corral's `brand` (primary as text), `success`, `warning` and `info`. Colour props use the tones `primary`, `neutral`, `success`, `warning`, `info` and `error`.
+- The theme is shadcn preset `a31Y6GXo` (`reka-vega`, neutral base, emerald primary, Geist, Remix icons), in `assets/css/theme.css`. Settings can override the neutral palette in dark mode only, saved per device (see [Settings](settings.md#appearance)). Never hard-code hex values.
+- Light and dark mode both have to work. Solid fills use `bg-primary`; coloured text uses `text-brand`, because the dark primary fill is too dark to read as text.
+- Radii come from the preset's `--radius`: controls `rounded-md`, cards and panels `rounded-lg`, avatars and dots `rounded-full`.
 
 ### Project thumbnails
 
@@ -71,13 +71,13 @@ A status is always shown with its label. Colour is never the only signal.
 - **Images in text.** Markdown shows `attachment:<id>` images (and only those) as size-capped thumbnails, and clicking one opens it full size in a lightbox. This covers Plan messages, comments and inbox items.
 - **Inbox actions.** Buttons on a task item, a bar of large targets on a phone, with nothing selected when an item opens (a phone opens a question with Answer chosen). What can go at once is sent in one click; what needs words, or can't be undone, takes over the composer, changing its placeholder and submit label until it's sent or cancelled. Destructive actions use `error`. See [inbox.md](inbox.md#2-selected-message).
 - **Task flyout.** One component, docked on the right of Inbox, Plan, Board, Backlog, Pull requests and Agent pages. See [task.md](task.md).
-- **Resizable panes.** Splits that hold lists can be resized with a 1px divider. The divider turns `primary` on hover, focus and drag, and moves 16px per arrow-key press. Use `UDashboardPanel` with `resizable`.
+- **Resizable panes.** Splits that hold lists can be resized with a 1px divider. The divider turns `primary` on hover, focus and drag, and moves 16px per arrow-key press. Use the Resizable component.
 - **Working indicator.** Anything an agent is actively running on (it holds a lease) gets the pulse: the outline breathes in `primary` and the avatar's status dot pings. Respect `prefers-reduced-motion` with a static `primary` outline and no ping. "Working" comes from the lease, not the status (D10).
 - **Unread dot.** An 8px `primary` dot. It's used on Inbox rows. Side nav Plan threads use the attention indicators described in [Plan](plan.md#side-nav-threads).
 
 ### States every page must handle
 
-Loading (skeletons, never spinners on whole pages), empty, error (a `UAlert` with retry), runner offline (Plan and live runs are unavailable, with a banner explaining why), and project paused (a banner on project pages with Resume).
+Loading (skeletons, never spinners on whole pages), empty, error (a `AppAlert` with retry), runner offline (Plan and live runs are unavailable, with a banner explaining why), and project paused (a banner on project pages with Resume).
 
 ### Deployment (D12)
 

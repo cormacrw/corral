@@ -3,9 +3,9 @@
 </script>
 
 <template>
-  <UDashboardPanel>
+  <AppPanel>
     <div class="p-6">
-      <USkeleton class="h-6 w-48" />
+      <UiSkeleton class="h-6 w-48" />
     </div>
-  </UDashboardPanel>
+  </AppPanel>
 </template>

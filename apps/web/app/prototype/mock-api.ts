@@ -2,7 +2,7 @@ import { flowMetricsQuery, planMessageFields } from '@corral/contracts'
 import { checkEpicDependencies, isTaskDone } from '@corral/core'
 import type { CreateAgentInput, PerfWindow, CreateTaskInput, EpicReviewActionInput, HumanTransitionInput, InboxActionInput, PatchEpicInput, DraftSession, NewPlanMessageFields, Plan, PlanMessage, PlanSessionDetail, StartPlanSessionInput, RunEvent, ServerEvent, Task } from '@corral/contracts'
 import { ApiError } from '~/queries/client'
-import { STOP_ASKING } from '~/utils/plan-questions'
+import { STOP_ASKING } from '~/features/plan/utils/plan-questions'
 import * as f from './fixtures'
 
 // The server API for the static prototype (`pnpm prototype`, D20): the same
