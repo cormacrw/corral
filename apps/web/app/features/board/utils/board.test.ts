@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Task } from '@corral/contracts'
-import { matchesOverviewEpicFilter, BOARD_COLUMNS, cardAssignee, boardMove, boardColumnKey, boardView, epicOnBoard, epicStage, epicWorkingAgents, filterLabel, filtersFromQuery, filtersToQuery, hasFilters, matchesEpicFilter, matchesFilter, COMPLETE_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds, unfinishedPrerequisites, columnEntries, matchesParentFilter } from '~/features/board/utils/board.ts'
+import { activeFilterCount, boardFilterGroups, matchesOverviewEpicFilter, BOARD_COLUMNS, cardAssignee, boardMove, boardColumnKey, boardView, epicOnBoard, epicStage, epicWorkingAgents, filterLabel, filtersFromQuery, filtersToQuery, hasFilters, matchesEpicFilter, matchesFilter, COMPLETE_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds, unfinishedPrerequisites, columnEntries, matchesParentFilter } from '~/features/board/utils/board.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 const now = Date.parse('2026-10-29T12:00:00Z')
@@ -215,6 +215,19 @@ describe('filters in the URL query', () => {
     expect(hasFilters(NO_FILTERS)).toBe(false)
     expect(hasFilters({ ...NO_FILTERS, agents: ['a1'] })).toBe(true)
     expect(hasFilters({ ...NO_FILTERS, search: 'x' })).toBe(true)
+  })
+
+  it('offers each filter the options it matches on', () => {
+    const groups = boardFilterGroups([{ id: 'e1', label: 'Auth' }], [{ id: 'a1', name: 'Atlas' }])
+    expect(groups.map(g => g.key)).toEqual(['epics', 'statuses', 'priorities', 'agents'])
+    expect(groups[0].items).toEqual([{ value: 'e1', label: 'Auth' }])
+    expect(groups[1].items.map(i => i.value)).toEqual(BOARD_COLUMNS.map(c => c.key))
+    expect(groups[3].items).toEqual([{ value: 'a1', label: 'Atlas' }])
+  })
+
+  it('counts the filters that are set, not their items or the search', () => {
+    expect(activeFilterCount({ ...NO_FILTERS, search: 'x' })).toBe(0)
+    expect(activeFilterCount({ ...NO_FILTERS, agents: ['a1', 'a2'], priorities: ['high'] })).toBe(2)
   })
 })
 

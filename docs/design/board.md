@@ -11,15 +11,16 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
 
 1. **Toolbar** (bottom border):
    - the **Top-level / All sub-tasks** toggle (see [Views](#views-d31))
-   - a search input (240px, "Search tasks")
-   - four **filters** (`features/board/components/BoardFilters.vue`), each a multi-select dropdown (`features/board/components/BoardFilter.vue`, `AppSelectMenu` with `multiple`) with a tick by each selected item. "All …" at the top of the menu clears the selection. The trigger reads "All parents" when nothing is selected, the item's name when one is, and "N parents" when several are:
+   - **Parent details**, only when exactly one parent is selected: opens it in the flyout
+   - on the right, a **search** icon button (`features/board/components/BoardSearch.vue`) that opens the search bar (240px, "Search tasks") beside it and turns into a close button. Closing it, or Escape, clears the search. A search from the URL starts it open
+   - a **Filters** button (`features/board/components/BoardFiltersMenu.vue`), with a badge counting the filters set, opening a dropdown with every filter's options as checkboxes, a long list scrolling inside it. Nothing ticked in a filter means all:
+     - **Apply** commits the selections and closes it. Closing it any other way discards them
+     - **Reset** clears the filters at once and leaves it open. It doesn't touch the search
+   - the four **filters**:
      - **Parent:** every parent on the Board
      - **Status:** the columns
      - **Priority:** Urgent, High, Medium, Low
      - **Agent:** the developer and reviewer agents
-   - **Clear filters**, while any filter or the search is set: resets them all
-   - **Parent details**, only when exactly one parent is selected: opens it in the flyout
-   - "N tasks" on the right
 2. **Columns:** a horizontally scrolling row (`overflow: auto`, `role="region"`, focusable). Each column is 272px wide with a `bg-muted` background, a border and `rounded-lg`.
    - **Column header:** a status-colour dot, the name, a count pill, and a hint of whose turn it is on the right.
 
@@ -73,7 +74,7 @@ A parent is shown under `epicOnBoard`: it has work left, or it finished within `
 
 On desktop, clicking a card opens the parent in the flyout; clicking it again closes it. On mobile it opens `/epics/<id>`; Back returns to the same stage. The title is the card's keyboard button, and the selected card has the `primary` outline.
 
-**Toolbar.** The search reads "Search parents" and matches parent titles, and the Parent filter applies. Status, Priority and Agent are hidden, stay in the URL and return on switching back; Clear filters resets only the search and Parent filter here. The count reads "N parents".
+**Toolbar.** The search reads "Search parents" and matches parent titles, and the Parent filter applies. Status, Priority and Agent are hidden, stay in the URL and return on switching back.
 
 ## Interactions
 
@@ -104,7 +105,7 @@ On desktop, clicking a card opens the parent in the flyout; clicking it again cl
 - On the web layout, columns scroll sideways at every width.
 - On the mobile layout (D17, `features/board/components/BoardMobile.vue`), the Board shows **one column at a time**, from the `Board · one column at a time` frame:
   - the header's Search button shows the search input. The **Filters** icon button (`list-filter`) beside it toggles the filter row, **collapsed by default**, with an accessible label and pressed/expanded state
-  - in Tasks, the expanded row contains the same Parent, Status, Priority and Agent filters as the web Board, two to a row, plus Clear filters while anything is filtered and "N tasks". Collapsing it keeps the selections and URL query unchanged
+  - in Tasks, the expanded row contains the same Parent, Status, Priority and Agent filters as the web Board, two to a row, each a multi-select dropdown (`features/board/components/BoardFilters.vue`), plus Clear filters while anything (search included) is filtered and "N tasks". They take effect at once, without the web Board's Apply. Collapsing it keeps the selections and URL query unchanged
   - the Filters button shows a dot while any of the four filters is set, open or closed (search alone does not add a dot). Filters from the URL apply immediately without expanding the row
   - the Top-level / All sub-tasks toggle stays visible above the column tabs. Search and filters apply to both views; task-only filters stay saved for returning to Tasks
   - there is no parent carousel in either view or layout
