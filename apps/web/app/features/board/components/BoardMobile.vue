@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Board } from '~/features/board/composables/useBoard'
-import { BOARD_VIEW_ITEMS } from '~/features/board/utils/board'
+import { activeFilterCount, BOARD_VIEW_ITEMS, hasFilters, NO_FILTERS } from '~/features/board/utils/board'
 import { plural } from '~/utils/labels'
 
 // The Board on a phone (design/board.md, design/mobile.md): one column at a
@@ -13,9 +13,7 @@ const flyout = useTaskFlyout()
 const { index, column, select, onTouchStart, onTouchEnd, onTabKey } = useBoardColumnTabs(columns, view)
 
 const filtersOpen = ref(false)
-const activeFilterCount = computed(() => [
-  filters.value.epics, filters.value.statuses, filters.value.priorities, filters.value.agents
-].filter(values => values.length > 0).length)
+const activeFilters = computed(() => activeFilterCount(filters.value))
 
 const searching = ref(Boolean(search.value))
 function toggleSearch() {
@@ -41,7 +39,7 @@ function toggleSearch() {
           square
           variant="ghost"
           color="neutral"
-          :aria-label="activeFilterCount ? `Filters, ${activeFilterCount} active` : 'Filters'"
+          :aria-label="activeFilters ? `Filters, ${activeFilters} active` : 'Filters'"
           :aria-pressed="filtersOpen"
           :aria-expanded="filtersOpen"
           aria-controls="mobile-board-filters"
@@ -49,7 +47,7 @@ function toggleSearch() {
           @click="filtersOpen = !filtersOpen"
         >
           <span
-            v-if="activeFilterCount"
+            v-if="activeFilters"
             class="absolute end-0.5 top-0.5 size-2 rounded-full bg-primary"
             aria-hidden="true"
             data-testid="board-filter-indicator"
@@ -84,6 +82,16 @@ function toggleSearch() {
           :epics="epicOptions"
           :agents="taskAgents"
           item-class="w-[calc(50%-0.25rem)]"
+        />
+        <AppButton
+          v-if="hasFilters(filters)"
+          label="Clear filters"
+          icon="i-ri-close-line"
+          size="sm"
+          variant="ghost"
+          color="neutral"
+          class="shrink-0"
+          @click="filters = { ...NO_FILTERS }"
         />
         <AppButton
           v-if="single"

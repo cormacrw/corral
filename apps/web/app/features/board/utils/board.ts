@@ -1,7 +1,7 @@
 import type { Agent, Epic, HumanTransitionInput, Run, Task } from '@corral/contracts'
 import type { AgentRole, ParentStage, TaskPriority, TaskStatus } from '@corral/core'
 import { availableEvents, isTaskDone, parentStage, TASK_PRIORITIES } from '@corral/core'
-import { epicInProgress, isLiveRun } from '~/utils/labels.ts'
+import { epicInProgress, isLiveRun, PRIORITY } from '~/utils/labels.ts'
 
 import { completedAt } from '~/features/runs/utils/completion.ts'
 
@@ -187,6 +187,21 @@ export function matchesParentFilter(card: { workingAgents: Pick<Agent, 'id'>[] }
 
 export function hasFilters(filters: BoardFilters): boolean {
   return Boolean(filters.search) || filters.epics.length + filters.statuses.length + filters.priorities.length + filters.agents.length > 0
+}
+
+// The four filters and their options, for both Boards' controls
+export function boardFilterGroups(epics: { id: string, label: string }[], agents: { id: string, name: string }[]) {
+  return [
+    { key: 'epics', name: 'Parent', plural: 'parents', icon: 'i-ri-node-tree', items: epics.map(e => ({ value: e.id, label: e.label })) },
+    { key: 'statuses', name: 'Status', plural: 'statuses', icon: 'i-ri-layout-column-line', items: BOARD_COLUMNS.map(c => ({ value: c.key, label: c.label })) },
+    { key: 'priorities', name: 'Priority', plural: 'priorities', icon: 'i-ri-signal-tower-line', items: Object.entries(PRIORITY).map(([value, p]) => ({ value, label: p.label })) },
+    { key: 'agents', name: 'Agent', plural: 'agents', icon: 'i-ri-robot-2-line', items: agents.map(a => ({ value: a.id, label: a.name })) }
+  ] as const
+}
+
+// How many of the four filters are set. The search isn't one of them.
+export function activeFilterCount(filters: BoardFilters): number {
+  return [filters.epics, filters.statuses, filters.priorities, filters.agents].filter(values => values.length > 0).length
 }
 
 // The filters live in the URL query so a filtered Board can be reloaded and

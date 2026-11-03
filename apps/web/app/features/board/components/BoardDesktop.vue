@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import type { Board } from '~/features/board/composables/useBoard'
 import { BOARD_VIEW_ITEMS } from '~/features/board/utils/board'
-import { plural } from '~/utils/labels'
 
 // The Board on the web (design/board.md): every column side by side, with
 // tasks dragged between them
 const props = defineProps<{ board: Board }>()
-const { slug, all, filters, view, search, columns, total, single, epicLabel, epicOptions, taskAgents, loading, error, refetch } = props.board
+const { slug, all, filters, view, search, columns, single, epicLabel, epicOptions, taskAgents, loading, error, refetch } = props.board
 const flyout = useTaskFlyout()
 const prefetch = useTaskPrefetch()
 const { moving, dragged, canDrag, canDrop, startDrag, allowDrop, dropTask } = useBoardDrag()
@@ -21,20 +20,6 @@ const { moving, dragged, canDrag, canDrop, startDrag, allowDrop, dropTask } = us
         :content="false"
         class="w-auto shrink-0"
       />
-      <AppInput
-        v-model="search"
-        placeholder="Search tasks"
-        icon="i-ri-search-line"
-        size="sm"
-        class="w-60"
-      />
-      <BoardFilters
-        v-model="filters"
-        :epics="epicOptions"
-        :agents="taskAgents"
-        size="sm"
-        item-class="w-40"
-      />
       <AppButton
         v-if="single"
         label="Parent details"
@@ -45,7 +30,14 @@ const { moving, dragged, canDrag, canDrop, startDrag, allowDrop, dropTask } = us
         :aria-pressed="flyout.epic.value === single"
         @click="flyout.toggleEpic(single)"
       />
-      <span class="ms-auto text-sm text-muted-foreground">{{ plural(total, 'task') }}</span>
+      <div class="ms-auto flex items-center gap-2">
+        <BoardSearch v-model="search" />
+        <BoardFiltersMenu
+          v-model="filters"
+          :epics="epicOptions"
+          :agents="taskAgents"
+        />
+      </div>
     </ProjectToolbar>
 
     <AppLoadError
