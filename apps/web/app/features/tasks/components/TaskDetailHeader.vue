@@ -11,7 +11,7 @@ const flyout = useTaskFlyout()
 const isDraft = computed(() => props.task?.status === 'draft')
 const parent = computed(() => props.task?.parentTask ? [{ label: props.task.parentTask.title, to: `/tasks/${props.task.parentTask.ref}` }] : [])
 const crumbs = computed(() => [{ label: 'Board', to: props.project ? `/projects/${props.project.slug}/board` : '/' }, ...parent.value, { label: props.taskRef }])
-const menu = [{ label: 'Delete task', icon: 'i-ri-delete-bin-line', color: 'error' as const, onSelect: () => emit('delete') }]
+const menu = [{ label: 'Delete task', icon: 'i-hugeicons-delete-02', color: 'error' as const, onSelect: () => emit('delete') }]
 </script>
 
 <template>
@@ -36,7 +36,7 @@ const menu = [{ label: 'Delete task', icon: 'i-ri-delete-bin-line', color: 'erro
           {{ epic.title }}
         </button>
         <Icon
-          name="i-ri-arrow-right-s-line"
+          name="i-hugeicons-arrow-right-01"
           class="size-4 shrink-0"
           aria-hidden="true"
         />
@@ -86,7 +86,7 @@ const menu = [{ label: 'Delete task', icon: 'i-ri-delete-bin-line', color: 'erro
         :content="{ align: 'end' }"
       >
         <AppButton
-          icon="i-ri-more-line"
+          icon="i-hugeicons-more-horizontal"
           variant="ghost"
           color="neutral"
           aria-label="More"

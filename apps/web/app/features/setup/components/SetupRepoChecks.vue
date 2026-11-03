@@ -26,14 +26,14 @@ const { isMobile } = useDevice()
           class="flex items-start gap-2"
         >
           <Icon
-            :name="c.ok ? 'i-ri-checkbox-circle-line' : 'i-ri-close-circle-line'"
+            :name="c.ok ? 'i-hugeicons-checkmark-circle-02' : 'i-hugeicons-cancel-circle'"
             :class="['mt-0.5 size-4 shrink-0', c.ok ? 'text-success' : 'text-destructive']"
           />
           <span :class="isMobile && '*:block'"><span class="font-medium">{{ c.title }}</span> <span :class="['text-muted-foreground', isMobile && 'text-xs']">{{ c.detail }}</span></span>
         </li>
         <li class="flex items-start gap-2">
           <Icon
-            name="i-ri-information-line"
+            name="i-hugeicons-information-circle"
             class="mt-0.5 size-4 shrink-0 text-info"
           />
           <span :class="['text-muted-foreground', isMobile && 'text-xs']">Agents read .corral/ from the repository when it exists; nothing is written to the repository during setup.</span>

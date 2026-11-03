@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { InboxItem } from '@corral/contracts'
-import { inboxItemBadge } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 import TimeAgo from '~/components/shared/TimeAgo.vue'
 
@@ -29,24 +28,15 @@ defineProps<{ item: Exclude<InboxItem, { type: 'plan_thread' }>, mobile?: boolea
       v-if="item.type === 'release_notes'"
       :class="['font-mono text-xs text-muted-foreground', !mobile && 'block']"
     >{{ item.fromSha ? `${item.fromSha}…` : '' }}{{ item.toSha }}</span>
-    <span :class="['flex items-center gap-2', mobile ? 'mt-0.5' : 'mt-1']">
-      <AppBadge
-        :label="inboxItemBadge(item).label"
-        :color="inboxItemBadge(item).color"
-        variant="subtle"
-        :size="mobile ? 'sm' : 'xs'"
-        class="shrink-0"
+    <span
+      v-if="item.project"
+      :class="['flex min-w-0 items-center gap-1 text-xs text-muted-foreground', mobile ? 'mt-0.5' : 'mt-1']"
+    >
+      <ProjectThumbnail
+        :project="item.project"
+        :size="16"
       />
-      <span
-        v-if="item.project"
-        class="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
-      >
-        <ProjectThumbnail
-          :project="item.project"
-          :size="16"
-        />
-        <span class="truncate">{{ item.project.name }}<template v-if="mobile && item.taskRef"> · {{ item.taskRef }}</template></span>
-      </span>
+      <span class="truncate">{{ item.project.name }}<template v-if="mobile && item.taskRef"> · {{ item.taskRef }}</template></span>
     </span>
   </span>
 </template>

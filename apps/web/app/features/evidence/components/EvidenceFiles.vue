@@ -24,7 +24,7 @@ const emit = defineEmits<{ open: [item: Evidence] }>()
       >
       <Icon
         v-else
-        :name="isVideo(item) ? 'i-ri-video-on-line' : 'i-ri-file-text-line'"
+        :name="isVideo(item) ? 'i-hugeicons-video-01' : 'i-hugeicons-file-01'"
         class="size-6 shrink-0 text-muted-foreground"
       />
       <span class="min-w-0">

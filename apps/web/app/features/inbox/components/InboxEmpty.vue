@@ -47,7 +47,7 @@ function openActivity() {
     </template>
     <template v-else-if="inbox && count === 0">
       <Icon
-        name="i-ri-inbox-line"
+        name="i-hugeicons-inbox"
         class="size-8"
       />
       <span class="font-medium text-foreground">No decisions waiting</span>

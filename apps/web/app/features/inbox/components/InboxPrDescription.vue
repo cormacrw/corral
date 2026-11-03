@@ -14,7 +14,7 @@ defineProps<{ pr: PullRequestDetail, icon?: boolean }>()
       <p class="flex items-center gap-2 font-medium text-foreground">
         <Icon
           v-if="icon"
-          name="i-ri-git-pull-request-line"
+          name="i-hugeicons-git-pull-request"
           class="size-4 shrink-0 text-muted-foreground"
         />
         <span class="min-w-0">#{{ pr.number }} {{ pr.title }}</span>

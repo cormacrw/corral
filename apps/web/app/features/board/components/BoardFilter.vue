@@ -44,7 +44,7 @@ const label = computed(() => filterLabel(selected.value, id => props.items.find(
           <span class="flex-1">{{ all }}</span>
           <Icon
             v-if="selected.length === 0"
-            name="i-ri-check-line"
+            name="i-hugeicons-tick-02"
             class="size-4 shrink-0"
           />
         </button>

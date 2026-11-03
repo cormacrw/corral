@@ -99,7 +99,7 @@ onBeforeUnmount(() => {
     <div :class="['flex flex-col items-center', fullWidth && 'w-full']">
       <div :class="['flex items-center', compact ? 'gap-1' : 'gap-2', fullWidth && 'w-full justify-between']">
         <AppButton
-          icon="i-ri-subtract-line"
+          icon="i-hugeicons-minus-sign"
           color="neutral"
           variant="outline"
           size="xl"
@@ -114,7 +114,7 @@ onBeforeUnmount(() => {
           data-testid="concurrency"
         >{{ value }}</span>
         <AppButton
-          icon="i-ri-add-line"
+          icon="i-hugeicons-add-01"
           color="neutral"
           variant="outline"
           size="xl"

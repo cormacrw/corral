@@ -42,7 +42,7 @@ const VIEWS = [{ value: 'since', label: 'Since your last review' }, { value: 'wh
       color="warning"
       variant="subtle"
       title="Couldn't work out what changed since your review"
-      :actions="feedback?.diffUrl ? [{ label: 'Compare on GitHub', to: feedback.diffUrl, target: '_blank', trailingIcon: 'i-ri-arrow-right-up-line' }] : []"
+      :actions="feedback?.diffUrl ? [{ label: 'Compare on GitHub', to: feedback.diffUrl, target: '_blank', trailingIcon: 'i-hugeicons-arrow-up-right-01' }] : []"
       data-testid="inbox-since-unavailable"
     />
     <p

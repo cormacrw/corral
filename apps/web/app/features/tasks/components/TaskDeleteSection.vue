@@ -16,7 +16,7 @@ const description = computed(() => props.task.status === 'backlog' || props.task
   <section :class="mobile ? 'hidden' : 'border-t border-border pt-3'">
     <AppButton
       label="Delete task"
-      icon="i-ri-delete-bin-line"
+      icon="i-hugeicons-delete-02"
       color="error"
       variant="ghost"
       size="sm"

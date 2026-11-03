@@ -146,6 +146,14 @@ describe('mobile layout', () => {
     wrapper.unmount()
   })
 
+  it('gives each page the body\'s height, so its own footer stays on screen', () => {
+    route.path = route.fullPath = '/inbox/item-1'
+    const wrapper = mount(MobileLayout, { global, slots: { default: () => h(AppPanel, () => h('p', 'Content')) } })
+    // A block body lets a page grow to its content and scroll away its footer
+    expect(wrapper.get('[data-testid="mobile-body"]').classes()).toEqual(expect.arrayContaining(['flex', 'min-h-0', 'flex-1']))
+    wrapper.unmount()
+  })
+
   it('uses the Inbox item context above its task ref', () => {
     route.path = '/inbox/item-1'
     mobileHeader.value = { title: 'COR-5', eyebrow: 'Inbox · 1 of 3' }

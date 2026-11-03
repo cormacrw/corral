@@ -5,7 +5,7 @@ const { open } = useInstall()
 
 <template>
   <SettingsRow
-    icon="i-ri-add-box-line"
+    icon="i-hugeicons-add-square"
     label="Install Corral"
     description="Add it to your home screen"
     :dense="dense"

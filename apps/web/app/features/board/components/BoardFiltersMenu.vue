@@ -44,7 +44,7 @@ function reset() {
     content-class="flex max-h-[min(36rem,calc(100vh-6rem))] w-[28rem] flex-col gap-3"
   >
     <AppButton
-      icon="i-ri-filter-3-line"
+      icon="i-hugeicons-filter-horizontal"
       label="Filters"
       size="sm"
       variant="outline"

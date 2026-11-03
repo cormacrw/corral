@@ -36,7 +36,7 @@ const STATUS_DOT: Record<string, string> = { needs_approval: 'bg-primary', quest
         >Global</span>
         <Icon
           v-if="thread.activeRunId"
-          name="i-ri-loader-4-line"
+          name="i-hugeicons-loading-03"
           class="size-3.5 shrink-0 animate-spin text-muted-foreground"
           aria-label="Juno is working"
         />
@@ -55,7 +55,7 @@ const STATUS_DOT: Record<string, string> = { needs_approval: 'bg-primary', quest
         menu
       />
       <AppButton
-        icon="i-ri-close-line"
+        icon="i-hugeicons-cancel-01"
         size="xs"
         variant="ghost"
         color="neutral"

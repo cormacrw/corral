@@ -32,7 +32,7 @@ const PROJECT_PAGES = [
       >
         <span class="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
           <Icon
-            name="i-ri-shield-star-line"
+            name="i-hugeicons-shield-energy"
             class="size-4"
           />
         </span>
@@ -45,7 +45,7 @@ const PROJECT_PAGES = [
             variant="outline"
             @click="emit('search')"
           >
-            <Icon name="i-ri-search-line" />
+            <Icon name="i-hugeicons-search-01" />
             <span>Search…</span>
             <UiKbd class="ms-auto group-data-[collapsible=icon]:hidden">
               ⌘K
@@ -62,7 +62,7 @@ const PROJECT_PAGES = [
             <ShellNavItem
               to="/plan"
               label="Plan"
-              icon="i-ri-message-2-line"
+              icon="i-hugeicons-message-01"
               :active="isActive('/plan')"
               :badge="attentionCount"
               :badge-label="`${attentionCount} threads need attention`"
@@ -71,7 +71,7 @@ const PROJECT_PAGES = [
             <ShellNavItem
               to="/inbox"
               label="Inbox"
-              icon="i-ri-inbox-line"
+              icon="i-hugeicons-inbox"
               :active="isActive('/inbox')"
               :badge="shell.inboxCount"
             />
@@ -89,7 +89,7 @@ const PROJECT_PAGES = [
             to="/setup?step=repo&add=1"
             aria-label="Add project"
           >
-            <Icon name="i-ri-add-line" />
+            <Icon name="i-hugeicons-add-01" />
           </NuxtLink>
         </UiSidebarGroupAction>
         <UiSidebarMenu>
@@ -121,7 +121,7 @@ const PROJECT_PAGES = [
               :aria-label="`${isExpanded(project) ? 'Collapse' : 'Expand'} ${project.name}`"
               @click="toggle(project)"
             >
-              <Icon :name="isExpanded(project) ? 'i-ri-arrow-down-s-line' : 'i-ri-arrow-right-s-line'" />
+              <Icon :name="isExpanded(project) ? 'i-hugeicons-arrow-down-01' : 'i-hugeicons-arrow-right-01'" />
             </UiSidebarMenuAction>
             <UiSidebarMenuSub v-if="isExpanded(project)">
               <UiSidebarMenuSubItem
@@ -182,7 +182,7 @@ const PROJECT_PAGES = [
           <ShellNavItem
             to="/settings/profile"
             label="Settings"
-            icon="i-ri-settings-3-line"
+            icon="i-hugeicons-settings-01"
             :active="isActive('/settings')"
           />
         </UiSidebarMenu>
@@ -193,7 +193,7 @@ const PROJECT_PAGES = [
       <div class="flex items-center gap-2 rounded-md bg-sidebar-accent p-2 text-xs group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-1">
         <span class="relative inline-flex shrink-0">
           <Icon
-            name="i-ri-server-line"
+            name="i-hugeicons-server-stack-01"
             class="size-4 text-muted-foreground"
           />
           <span

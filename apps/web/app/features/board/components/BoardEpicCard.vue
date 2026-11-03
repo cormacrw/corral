@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Agent, Epic } from '@corral/contracts'
 import { EPIC_CONFLICT_PENDING, EPIC_FIX, epicStoppedLabel, runPath } from '~/utils/labels'
+import { markdownToPlainText } from '~/utils/markdown'
 
 // An epic on the Board: its title and progress, with a blocked icon while
 // prerequisite epics are unfinished (COR-154). The card is a div so the icon
@@ -10,6 +11,7 @@ const props = defineProps<{ epic: Epic, waitingOn: Epic[], workingAgents: Agent[
 const flyout = useTaskFlyout()
 const selected = computed(() => flyout.epic.value === props.epic.id)
 const popover = ref(false)
+const summary = computed(() => props.epic.description ? markdownToPlainText(props.epic.description) : '')
 
 function openPrerequisite(id: string) {
   popover.value = false
@@ -55,7 +57,7 @@ function openPrerequisite(id: string) {
               class="flex size-5 cursor-pointer items-center justify-center rounded text-warning hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary"
             >
               <Icon
-                name="i-ri-prohibited-line"
+                name="i-hugeicons-unavailable"
                 class="size-4"
               />
             </button>
@@ -82,6 +84,18 @@ function openPrerequisite(id: string) {
           </AppPopover>
         </span>
       </span>
+      <p
+        v-if="summary"
+        class="line-clamp-2 min-w-0 text-xs break-words text-muted-foreground"
+        data-testid="epic-card-summary"
+      >
+        {{ summary }}
+      </p>
+      <TaskCardMeta
+        :task-ref="epic.taskRef"
+        :pr-number="epic.prNumber"
+        :at="epic.updatedAt"
+      />
       <div
         role="meter"
         :aria-label="`${epic.title}: ${epic.mergedCount} of ${epic.taskCount} tasks merged`"

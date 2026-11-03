@@ -5,7 +5,7 @@ const dark = computed(() => colorMode.value === 'dark')
 
 <template>
   <AppButton
-    :icon="dark ? 'i-ri-moon-line' : 'i-ri-sun-line'"
+    :icon="dark ? 'i-hugeicons-moon-02' : 'i-hugeicons-sun-03'"
     variant="ghost"
     color="neutral"
     :aria-label="`Switch to ${dark ? 'light' : 'dark'} mode`"

@@ -81,7 +81,6 @@ const skeleton = computed(() => loading.value && (['pr', 'diff'].includes(openTa
       <InboxItemSummary
         :key="item.id"
         :item="item"
-        :evidence="rows.flatMap(row => row.evidence)"
       />
       <InboxEpicVerdict
         v-if="item.type === 'epic_review'"
@@ -106,7 +105,7 @@ const skeleton = computed(() => loading.value && (['pr', 'diff'].includes(openTa
           :to="item.prUrl"
           target="_blank"
           :label="prLabel"
-          icon="i-ri-git-pull-request-line"
+          icon="i-hugeicons-git-pull-request"
           color="neutral"
           variant="ghost"
           size="sm"

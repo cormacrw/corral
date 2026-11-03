@@ -14,7 +14,7 @@ const stale = computed(() => props.design?.newerVersion ? props.design : null)
   >
     <AppBadge
       :label="`Design changed: v${stale.version} → v${stale.newerVersion}`"
-      icon="i-ri-palette-line"
+      icon="i-hugeicons-paint-board"
       color="warning"
       variant="subtle"
       size="sm"

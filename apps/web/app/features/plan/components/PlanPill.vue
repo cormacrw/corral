@@ -14,7 +14,7 @@ const tasks = computed(() => plural(currentTasks(props.plan).length, 'task'))
 <template>
   <div class="flex shrink-0 justify-center px-3 py-2">
     <AppButton
-      icon="i-ri-list-check-2"
+      icon="i-hugeicons-task-done-01"
       :color="plan.status === 'proposed' ? 'primary' : 'neutral'"
       variant="subtle"
       class="min-h-11 max-w-full rounded-full px-4 shadow-sm"

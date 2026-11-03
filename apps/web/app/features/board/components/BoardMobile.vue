@@ -27,7 +27,7 @@ function toggleSearch() {
     <MobilePageHeader>
       <template #actions>
         <AppButton
-          icon="i-ri-search-line"
+          icon="i-hugeicons-search-01"
           variant="ghost"
           color="neutral"
           aria-label="Search tasks"
@@ -35,7 +35,7 @@ function toggleSearch() {
           @click="toggleSearch"
         />
         <AppButton
-          icon="i-ri-filter-3-line"
+          icon="i-hugeicons-filter-horizontal"
           square
           variant="ghost"
           color="neutral"
@@ -67,7 +67,7 @@ function toggleSearch() {
         v-if="searching"
         v-model="search"
         placeholder="Search tasks"
-        icon="i-ri-search-line"
+        icon="i-hugeicons-search-01"
         autofocus
         class="mx-4"
       />
@@ -86,7 +86,7 @@ function toggleSearch() {
         <AppButton
           v-if="hasFilters(filters)"
           label="Clear filters"
-          icon="i-ri-close-line"
+          icon="i-hugeicons-cancel-01"
           size="sm"
           variant="ghost"
           color="neutral"
@@ -96,7 +96,7 @@ function toggleSearch() {
         <AppButton
           v-if="single"
           label="Parent details"
-          icon="i-ri-node-tree"
+          icon="i-hugeicons-hierarchy"
           size="sm"
           variant="ghost"
           color="neutral"

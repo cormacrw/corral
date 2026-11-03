@@ -23,7 +23,7 @@ const removed = computed(() => props.plan.tasks.length - currentTasks(props.plan
   >
     <AppButton
       :label="`Changes from v${props.previous.version}`"
-      :icon="open ? 'i-ri-arrow-down-s-line' : 'i-ri-arrow-right-s-line'"
+      :icon="open ? 'i-hugeicons-arrow-down-01' : 'i-hugeicons-arrow-right-01'"
       variant="link"
       color="neutral"
       size="sm"

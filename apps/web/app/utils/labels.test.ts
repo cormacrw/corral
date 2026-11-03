@@ -125,9 +125,9 @@ it('excludes Approved designs from open board work', () => {
 
 it('gives a Board card an icon for every type but a plain task', () => {
   expect(cardTypeIcon('task')).toBeNull()
-  expect(cardTypeIcon('bug')).toEqual({ name: 'i-ri-bug-line', label: 'Bug' })
-  expect(cardTypeIcon('design')).toEqual({ name: 'i-ri-brush-line', label: 'Design' })
-  expect(cardTypeIcon('spike')).toEqual({ name: 'i-ri-flask-line', label: 'Spike' })
+  expect(cardTypeIcon('bug')).toEqual({ name: 'i-hugeicons-bug-01', label: 'Bug' })
+  expect(cardTypeIcon('design')).toEqual({ name: 'i-hugeicons-paint-brush-02', label: 'Design' })
+  expect(cardTypeIcon('spike')).toEqual({ name: 'i-hugeicons-test-tube', label: 'Spike' })
 })
 
 it('labels completed rebase developer runs', () => {

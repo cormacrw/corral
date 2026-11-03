@@ -9,5 +9,5 @@ export function inboxTldr(body: string) {
 
 // A review's verdict at a glance
 export const verdictMark = (approved: boolean) => approved
-  ? { icon: 'i-ri-checkbox-circle-line', color: 'text-success' }
-  : { icon: 'i-ri-error-warning-line', color: 'text-warning' }
+  ? { icon: 'i-hugeicons-checkmark-circle-02', color: 'text-success' }
+  : { icon: 'i-hugeicons-alert-circle', color: 'text-warning' }

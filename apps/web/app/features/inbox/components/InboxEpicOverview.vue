@@ -2,7 +2,7 @@
 import type { EpicReview, EpicReviewFeedback, EpicReviewRound, EpicReviewTaskRow, Evidence } from '@corral/contracts'
 import type { EpicInboxItem } from '~/features/inbox/composables/useInboxView'
 import { EPIC_REVIEW_MODE, plural } from '~/utils/labels'
-import InboxEvidenceGrid from '~/features/inbox/components/InboxEvidenceGrid.vue'
+import InboxEvidenceCarousel from '~/features/inbox/components/InboxEvidenceCarousel.vue'
 
 // The Overview tab of an epic in the Inbox (design/inbox.md): what changed
 // since the human last looked, the reviewer's notes, screenshots by task, then
@@ -121,7 +121,7 @@ const next = computed(() => event.value === 'human_approved' && props.review?.st
             class="flex gap-2 px-3 py-2 font-mono text-sm break-all"
           >
             <Icon
-              name="i-ri-file-warning-line"
+              name="i-hugeicons-file-not-found"
               class="mt-0.5 size-4 shrink-0 text-destructive"
             />
             {{ file }}
@@ -181,10 +181,10 @@ const next = computed(() => event.value === 'human_approved' && props.review?.st
       </p>
     </section>
 
-    <InboxEvidenceGrid
+    <InboxEvidenceCarousel
       v-if="screenshots.length"
       :shots="screenshots"
-      :mobile="mobile"
+      :current="viewing?.id"
       data-testid="inbox-epic-screenshots"
       @open="viewing = $event"
     />
@@ -196,6 +196,9 @@ const next = computed(() => event.value === 'human_approved' && props.review?.st
     >
       {{ EPIC_REVIEW_MODE[review.reviewMode].label }} · {{ size }}
     </p>
-    <EvidenceViewer v-model="viewing" />
+    <EvidenceViewer
+      v-model="viewing"
+      :files="screenshots.map(s => s.evidence)"
+    />
   </div>
 </template>

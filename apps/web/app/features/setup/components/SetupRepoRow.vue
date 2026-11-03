@@ -21,7 +21,7 @@ const blocked = computed(() => repoBlockedReason(props.repo))
     @click="$emit('pick')"
   >
     <Icon
-      :name="repo.isPrivate ? 'i-ri-lock-line' : 'i-ri-book-line'"
+      :name="repo.isPrivate ? 'i-hugeicons-square-lock-02' : 'i-hugeicons-book-open-01'"
       class="mt-0.5 size-4 shrink-0 text-muted-foreground"
     />
     <span class="min-w-0 flex-1">
@@ -57,7 +57,7 @@ const blocked = computed(() => repoBlockedReason(props.repo))
     </span>
     <Icon
       v-if="selected"
-      name="i-ri-check-line"
+      name="i-hugeicons-tick-02"
       class="mt-0.5 size-4 shrink-0 text-brand"
     />
   </button>

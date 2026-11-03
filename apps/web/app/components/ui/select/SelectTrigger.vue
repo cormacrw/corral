@@ -2,7 +2,8 @@
 import type { SelectTriggerProps } from 'reka-ui'
 
 import type { HTMLAttributes } from 'vue'
-import { RiArrowDownSLine } from '@remixicon/vue'
+import { HugeiconsIcon } from '@hugeicons/vue'
+import { ArrowDown01Icon } from '@hugeicons/core-free-icons'
 import { reactiveOmit } from '@vueuse/core'
 import { cn } from 'cn'
 import { SelectIcon, SelectTrigger, useForwardProps } from 'reka-ui'
@@ -28,7 +29,7 @@ const forwardedProps = useForwardProps(delegatedProps)
   >
     <slot />
     <SelectIcon as-child>
-      <RiArrowDownSLine class="text-muted-foreground size-4 pointer-events-none" />
+      <HugeiconsIcon :icon="ArrowDown01Icon" :stroke-width="2" class="text-muted-foreground size-4 pointer-events-none" />
     </SelectIcon>
   </SelectTrigger>
 </template>

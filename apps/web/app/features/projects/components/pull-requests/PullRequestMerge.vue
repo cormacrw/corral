@@ -6,7 +6,7 @@ import type { PullRequestRow } from '~/features/projects/composables/usePullRequ
 const props = defineProps<{ row: PullRequestRow }>()
 const icon = computed(() => {
   const { merge, humanReviewOutstanding } = props.row.pr
-  return merge.eligible ? (humanReviewOutstanding ? 'i-ri-time-line' : 'i-ri-git-merge-line') : 'i-ri-close-circle-line'
+  return merge.eligible ? (humanReviewOutstanding ? 'i-hugeicons-clock-01' : 'i-hugeicons-git-merge') : 'i-hugeicons-cancel-circle'
 })
 </script>
 

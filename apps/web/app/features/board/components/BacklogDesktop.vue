@@ -17,7 +17,7 @@ const prefetch = useTaskPrefetch()
       <AppInput
         v-model="search"
         placeholder="Search Backlog"
-        icon="i-ri-search-line"
+        icon="i-hugeicons-search-01"
         size="sm"
         class="w-60"
       />
@@ -43,7 +43,7 @@ const prefetch = useTaskPrefetch()
         />
         <AppButton
           label="New task"
-          icon="i-ri-add-line"
+          icon="i-hugeicons-add-01"
           size="sm"
           :loading="creating"
           @click="newTask"
@@ -82,7 +82,7 @@ const prefetch = useTaskPrefetch()
           <AppButton
             v-if="group.id !== 'none'"
             label="Parent details"
-            icon="i-ri-node-tree"
+            icon="i-hugeicons-hierarchy"
             variant="link"
             color="neutral"
             size="xs"
@@ -99,7 +99,7 @@ const prefetch = useTaskPrefetch()
           <AppButton
             v-if="movableRows(group).length > 0"
             :label="moveGroupLabel(group)"
-            icon="i-ri-kanban-view"
+            icon="i-hugeicons-kanban"
             variant="outline"
             color="neutral"
             size="xs"
@@ -142,7 +142,7 @@ const prefetch = useTaskPrefetch()
             <AppButton
               v-if="task.status === 'backlog'"
               label="Move to board"
-              icon="i-ri-kanban-view"
+              icon="i-hugeicons-kanban"
               variant="ghost"
               color="neutral"
               size="xs"

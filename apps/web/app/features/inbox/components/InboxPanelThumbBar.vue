@@ -90,7 +90,7 @@ async function submit(text: string) {
         @click="tap(a.value)"
       >
         <Icon
-          :name="ctx.busy && ctx.action === a.value ? 'i-ri-loader-4-line' : a.icon"
+          :name="ctx.busy && ctx.action === a.value ? 'i-hugeicons-loading-03' : a.icon"
           :class="['size-5 shrink-0', ctx.busy && ctx.action === a.value && 'animate-spin']"
         />
         <span class="line-clamp-2 text-center leading-tight">{{ label(a) }}</span>
@@ -103,7 +103,7 @@ async function submit(text: string) {
         @click="toggleReply"
       >
         <Icon
-          name="i-ri-reply-line"
+          name="i-hugeicons-arrow-turn-backward"
           class="size-5"
         />
         <span>Reply</span>

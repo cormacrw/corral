@@ -25,7 +25,7 @@ const working = computed(() => Boolean(agent.value && props.task.lease?.agentId 
       />
       <Icon
         v-else
-        name="i-ri-loader-line"
+        name="i-hugeicons-loading-02"
         class="size-6 text-muted-foreground/70"
         data-testid="card-unassigned"
       />

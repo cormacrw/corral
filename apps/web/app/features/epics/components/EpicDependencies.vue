@@ -55,7 +55,7 @@ async function setDependencies(ids: string[]) {
         {{ item.title }} · {{ item.mergedCount }}/{{ item.taskCount }} done
       </NuxtLink>
       <AppButton
-        icon="i-ri-close-line"
+        icon="i-hugeicons-cancel-01"
         color="neutral"
         variant="ghost"
         :aria-label="`Remove dependency on ${item.title}`"

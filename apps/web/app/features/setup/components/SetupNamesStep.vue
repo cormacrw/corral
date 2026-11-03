@@ -30,7 +30,7 @@ const { isMobile } = useDevice()
         :size="isMobile ? 'md' : 'xs'"
         variant="ghost"
         color="neutral"
-        icon="i-ri-sparkling-2-line"
+        icon="i-hugeicons-sparkles"
         @click="suggest"
       />
     </div>

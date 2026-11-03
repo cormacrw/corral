@@ -32,7 +32,7 @@ const unmet = computed(() => props.p.criteria.value.some(c => c.met === false))
       class="flex items-center gap-1.5"
     >
       <Icon
-        name="i-ri-checkbox-circle-line"
+        name="i-hugeicons-checkmark-circle-02"
         class="size-4 shrink-0 text-success"
       />
       <span>{{ p.gates.value.map(g => g.name).join(', ') }} passed</span>
@@ -42,7 +42,7 @@ const unmet = computed(() => props.p.criteria.value.some(c => c.met === false))
       class="flex items-center gap-1.5"
     >
       <Icon
-        :name="unmet ? 'i-ri-list-unordered' : 'i-ri-list-check-2'"
+        :name="unmet ? 'i-hugeicons-left-to-right-list-bullet' : 'i-hugeicons-task-done-01'"
         :class="['size-4 shrink-0', unmet ? 'text-destructive' : allMet ? 'text-success' : 'text-muted-foreground']"
       />
       <span><span :class="['font-medium', unmet ? 'text-destructive' : 'text-foreground']">{{ p.met.value }} of {{ p.criteria.value.length }}</span> criteria met</span>

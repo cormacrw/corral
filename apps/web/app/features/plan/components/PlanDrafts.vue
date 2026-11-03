@@ -30,7 +30,7 @@ defineProps<{ sessions: DraftSession[], mobile?: boolean }>()
           data-testid="plan-drafts-header"
         >
           <Icon
-            name="i-ri-chat-1-line"
+            name="i-hugeicons-bubble-chat"
             class="size-4 shrink-0 text-muted-foreground"
           />
           <span class="flex min-w-0 flex-1 items-center gap-2">

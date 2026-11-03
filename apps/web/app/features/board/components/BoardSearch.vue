@@ -18,14 +18,14 @@ function setOpen(next: boolean) {
     v-model="search"
     placeholder="Search tasks"
     aria-label="Search tasks"
-    icon="i-ri-search-line"
+    icon="i-hugeicons-search-01"
     size="sm"
     autofocus
     class="w-60"
     @keydown.esc="setOpen(false)"
   />
   <AppButton
-    :icon="showing ? 'i-ri-close-line' : 'i-ri-search-line'"
+    :icon="showing ? 'i-hugeicons-cancel-01' : 'i-hugeicons-search-01'"
     size="sm"
     variant="ghost"
     color="neutral"

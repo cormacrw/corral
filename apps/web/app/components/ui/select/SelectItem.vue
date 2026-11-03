@@ -2,7 +2,8 @@
 import type { SelectItemProps } from 'reka-ui'
 
 import type { HTMLAttributes } from 'vue'
-import { RiCheckLine } from '@remixicon/vue'
+import { HugeiconsIcon } from '@hugeicons/vue'
+import { Tick02Icon } from '@hugeicons/core-free-icons'
 import { reactiveOmit } from '@vueuse/core'
 import { cn } from 'cn'
 import {
@@ -33,7 +34,7 @@ const forwardedProps = useForwardProps(delegatedProps)
     <span class="pointer-events-none absolute right-2 flex size-4 items-center justify-center">
       <SelectItemIndicator>
         <slot name="indicator-icon">
-          <RiCheckLine class="pointer-events-none" />
+          <HugeiconsIcon :icon="Tick02Icon" :stroke-width="2" class="pointer-events-none" />
         </slot>
       </SelectItemIndicator>
     </span>

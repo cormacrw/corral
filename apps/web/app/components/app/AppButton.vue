@@ -49,7 +49,7 @@ const inert = computed(() => props.disabled || props.loading)
   >
     <Icon
       v-if="loading"
-      name="i-ri-loader-4-line"
+      name="i-hugeicons-loading-03"
       class="animate-spin motion-reduce:animate-none"
     />
     <Icon

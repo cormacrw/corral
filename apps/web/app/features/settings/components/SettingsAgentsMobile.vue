@@ -78,7 +78,7 @@ watch([() => route.hash, () => agents.value?.map(agent => agent.id).join(',')], 
       <details class="border-t border-border pt-2">
         <summary class="flex min-h-11 cursor-pointer items-center gap-2 font-medium text-foreground">
           <Icon
-            name="i-ri-settings-4-line"
+            name="i-hugeicons-settings-02"
             class="size-4"
           />More settings
         </summary>

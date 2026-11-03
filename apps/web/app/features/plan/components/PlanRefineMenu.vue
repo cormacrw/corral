@@ -18,7 +18,7 @@ const items = computed(() => props.project
     value-key="value"
     size="xs"
     variant="ghost"
-    icon="i-ri-list-check-2"
+    icon="i-hugeicons-task-done-01"
     placeholder="Refine a task"
     :search-input="{ placeholder: 'Search Backlog' }"
     aria-label="Refine a task"

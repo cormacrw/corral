@@ -46,14 +46,14 @@ defineProps<{ project: Project, pmName: string, mobile?: boolean }>()
         :label="`Plan with ${pmName}`"
         variant="outline"
         color="neutral"
-        icon="i-ri-message-2-line"
+        icon="i-hugeicons-message-01"
         :size="mobile ? 'lg' : 'md'"
         :block="mobile"
       />
       <AppButton
         :to="`/projects/${project.slug}/board`"
         label="Open board"
-        :icon="mobile ? 'i-ri-kanban-view-2' : undefined"
+        :icon="mobile ? 'i-hugeicons-layout-03' : undefined"
         :size="mobile ? 'lg' : 'md'"
         :block="mobile"
       />

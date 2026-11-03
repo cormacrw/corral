@@ -36,14 +36,14 @@ const runnerStatus = computed(() => `${runner.value?.online ? 'Online' : 'Offlin
       <li>
         <SettingsRow
           to="/settings/profile"
-          icon="i-ri-user-line"
+          icon="i-hugeicons-user"
           label="Profile"
         />
       </li>
       <li>
         <SettingsRow
           to="/settings/runner"
-          icon="i-ri-server-line"
+          icon="i-hugeicons-server-stack-01"
           label="Runners"
           :description="runnerStatus"
           data-testid="settings-runner"
@@ -59,7 +59,7 @@ const runnerStatus = computed(() => `${runner.value?.online ? 'Online' : 'Offlin
       <li>
         <SettingsRow
           to="/settings/performance"
-          icon="i-ri-dashboard-3-line"
+          icon="i-hugeicons-dashboard-speed-02"
           label="Performance"
           data-testid="settings-performance"
         />
@@ -107,7 +107,7 @@ const runnerStatus = computed(() => `${runner.value?.online ? 'Online' : 'Offlin
           </span>
           <Icon
             v-if="agent.role === 'pm'"
-            name="i-ri-arrow-right-s-line"
+            name="i-hugeicons-arrow-right-01"
             class="size-4 shrink-0 text-muted-foreground/70"
           />
         </NuxtLink>

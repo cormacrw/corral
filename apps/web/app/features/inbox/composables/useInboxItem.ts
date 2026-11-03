@@ -42,7 +42,7 @@ export function useInboxItem() {
   const taskRef = computed(() => isTaskItem(selected.value) ? selected.value.taskRef : null)
   const taskResult = useQuery(computed(() => ({ ...seededTaskQuery(client, taskRef.value ?? ''), enabled: taskRef.value !== null })))
   const task = computed(() => taskResult.data.value ?? null)
-  // Human reviews show evidence; New artifacts need the files' real types
+  // Human reviews show evidence, and another item's Criteria tab shows new files
   const address = computed(() => isTaskItem(selected.value) && (selected.value.type === 'human_review' || selected.value.newArtifacts?.length) && task.value ? { slug: selected.value.project.slug, number: task.value.number, ref: task.value.ref } : null)
   const evidenceOptions = computed(() => ({ ...taskEvidenceQuery(address.value ?? { slug: '', number: 0, ref: '' }), enabled: address.value !== null }))
   const reviewsOptions = computed(() => ({ ...taskReviewsQuery(address.value ?? { slug: '', number: 0, ref: '' }), enabled: address.value !== null && selected.value?.type === 'human_review' }))

@@ -41,7 +41,7 @@ export function usePlanThreadDelete() {
     const shown = toast.add({
       title: 'Thread deleted · its drafts were discarded',
       duration: UNDO_MS,
-      actions: [{ label: 'Undo', icon: 'i-ri-arrow-go-back-line', onClick: () => undo(sessionId) }]
+      actions: [{ label: 'Undo', icon: 'i-hugeicons-arrow-turn-backward', onClick: () => undo(sessionId) }]
     })
     const timer = setTimeout(() => void commit(sessionId), UNDO_MS)
     timers.set(sessionId, { timer, toastId: shown.id })

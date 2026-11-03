@@ -70,8 +70,8 @@ const ready = computed(() => images.value.filter(i => i.status === 'done'))
 const available = computed(() => !props.disabled && !props.busy && !sending.value && !uploading.value)
 const canSend = computed(() => available.value && (props.allowEmpty || text.value.trim().length > 0 || ready.value.length > 0))
 const submitAppearance = computed(() => props.submitLabel
-  ? { label: props.submitLabel, trailingIcon: 'i-ri-arrow-up-line' }
-  : { 'icon': 'i-ri-arrow-up-line', 'aria-label': 'Send' })
+  ? { label: props.submitLabel, trailingIcon: 'i-hugeicons-arrow-up-02' }
+  : { 'icon': 'i-hugeicons-arrow-up-02', 'aria-label': 'Send' })
 
 async function send(message = text.value) {
   if (!available.value || (!props.allowEmpty && !message.trim() && ready.value.length === 0)) return false
@@ -163,7 +163,7 @@ function onPick(event: Event) {
   <!-- The whole box takes pasted and dropped images, not only the textarea -->
   <div
     ref="box"
-    :class="['flex flex-col gap-2 rounded-lg border bg-background p-2 focus-within:ring-2 focus-within:ring-ring/50', dragging && 'ring-2 ring-primary']"
+    :class="['flex flex-col gap-2 rounded-lg border bg-background p-3 focus-within:ring-2 focus-within:ring-ring/50', dragging && 'ring-2 ring-primary']"
     @paste="onPaste"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
@@ -191,7 +191,7 @@ function onPick(event: Event) {
           aria-label="Uploading"
         >
           <Icon
-            name="i-ri-loader-4-line"
+            name="i-hugeicons-loading-03"
             class="size-5 animate-spin text-foreground"
           />
         </span>
@@ -201,12 +201,12 @@ function onPick(event: Event) {
           aria-label="Upload failed"
         >
           <Icon
-            name="i-ri-alert-line"
+            name="i-hugeicons-alert-02"
             class="size-5 text-destructive"
           />
         </span>
         <AppButton
-          icon="i-ri-close-line"
+          icon="i-hugeicons-cancel-01"
           size="xs"
           color="neutral"
           variant="solid"
@@ -239,7 +239,7 @@ function onPick(event: Event) {
             @change="onPick"
           >
           <AppButton
-            icon="i-ri-attachment-2"
+            icon="i-hugeicons-attachment-01"
             size="xs"
             variant="ghost"
             color="neutral"

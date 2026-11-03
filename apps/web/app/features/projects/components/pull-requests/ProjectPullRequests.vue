@@ -12,7 +12,7 @@ const { prs, rows, summary, error, refetch, refreshing, refresh } = usePullReque
         <MobilePageHeader>
           <template #actions>
             <AppButton
-              icon="i-ri-refresh-line"
+              icon="i-hugeicons-refresh"
               variant="ghost"
               color="neutral"
               aria-label="Refresh"
@@ -39,7 +39,7 @@ const { prs, rows, summary, error, refetch, refreshing, refresh } = usePullReque
         >{{ summary }} · live from GitHub</span>
         <AppButton
           label="Refresh"
-          icon="i-ri-refresh-line"
+          icon="i-hugeicons-refresh"
           variant="outline"
           color="neutral"
           size="sm"

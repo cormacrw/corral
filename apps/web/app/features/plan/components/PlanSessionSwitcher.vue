@@ -39,7 +39,7 @@ async function go(to: string) {
   >
     <span class="relative">
       <AppButton
-        icon="i-ri-history-line"
+        icon="i-hugeicons-history"
         variant="ghost"
         color="neutral"
         aria-label="Sessions"
@@ -59,7 +59,7 @@ async function go(to: string) {
           </h2>
           <AppButton
             label="New session"
-            icon="i-ri-add-line"
+            icon="i-hugeicons-add-01"
             size="sm"
             variant="soft"
             @click="go('/plan')"
@@ -94,7 +94,7 @@ async function go(to: string) {
                   <span class="text-xs text-muted-foreground">{{ projectOf(session)?.name ?? 'Global' }}</span>
                   <Icon
                     v-if="session.activeRunId"
-                    name="i-ri-loader-4-line"
+                    name="i-hugeicons-loading-03"
                     class="size-3.5 shrink-0 animate-spin text-muted-foreground"
                   />
                   <span
@@ -115,7 +115,7 @@ async function go(to: string) {
                   ><span class="sr-only">, unread</span></span>
                 </button>
                 <AppButton
-                  icon="i-ri-close-line"
+                  icon="i-hugeicons-cancel-01"
                   variant="ghost"
                   color="neutral"
                   :aria-label="`Close ${session.title}`"

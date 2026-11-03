@@ -89,14 +89,14 @@ export function useInboxEpicActions(
   const actions = computed(() => {
     if (props.item.type === 'epic_review') {
       return [
-        { value: 'approve', label: 'Approve parent', icon: 'i-ri-check-line' },
-        { value: 'request_changes', label: 'Request changes', icon: 'i-ri-feedback-line' }
+        { value: 'approve', label: 'Approve parent', icon: 'i-hugeicons-tick-02' },
+        { value: 'request_changes', label: 'Request changes', icon: 'i-hugeicons-comment-01' }
       ]
     }
     if (props.item.type !== 'epic_conflict') return []
     return props.item.decision
-      ? [{ value: 'clarify', label: 'Answer in your own words', icon: 'i-ri-reply-line' }]
-      : [{ value: 'retry', label: 'Retry', icon: 'i-ri-reset-right-line' }]
+      ? [{ value: 'clarify', label: 'Answer in your own words', icon: 'i-hugeicons-arrow-turn-backward' }]
+      : [{ value: 'retry', label: 'Retry', icon: 'i-hugeicons-redo-02' }]
   })
 
   async function act(value: Action): Promise<boolean> {

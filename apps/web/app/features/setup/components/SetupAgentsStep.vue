@@ -24,7 +24,7 @@ const badgeSize = computed(() => isMobile.value ? 'sm' : 'xs')
         :size="isMobile ? 'md' : 'xs'"
         variant="ghost"
         color="neutral"
-        icon="i-ri-refresh-line"
+        icon="i-hugeicons-refresh"
         @click="scan"
       />
     </div>
@@ -91,7 +91,7 @@ const badgeSize = computed(() => isMobile.value ? 'sm' : 'xs')
     <AppAlert
       color="info"
       variant="subtle"
-      icon="i-ri-shield-line"
+      icon="i-hugeicons-shield-01"
       title="Your credentials stay with your CLI. Corral never sees, stores or sends your model-provider login."
     />
   </div>

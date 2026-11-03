@@ -26,7 +26,7 @@ watch(designs.error, (e) => {
 
 const versionItems = computed(() => versions.value.map(v => ({ label: `v${v.version} · ${DESIGN_VERSION_STATUS[v.status].label}`, value: v.id })))
 const viewport = ref<DesignViewport>(props.mobile ? 'mobile' : 'desktop')
-const VIEWPORT_ITEMS = [{ label: 'Desktop', value: 'desktop', icon: 'i-ri-computer-line' }, { label: 'Mobile', value: 'mobile', icon: 'i-ri-smartphone-line' }]
+const VIEWPORT_ITEMS = [{ label: 'Desktop', value: 'desktop', icon: 'i-hugeicons-computer' }, { label: 'Mobile', value: 'mobile', icon: 'i-hugeicons-smart-phone-01' }]
 </script>
 
 <template>
@@ -51,7 +51,7 @@ const VIEWPORT_ITEMS = [{ label: 'Desktop', value: 'desktop', icon: 'i-ri-comput
         <AppButton
           :to="`/designs/${selected.id}`"
           target="_blank"
-          icon="i-ri-external-link-line"
+          icon="i-hugeicons-link-square-02"
           variant="ghost"
           color="neutral"
           size="sm"
@@ -104,13 +104,13 @@ const VIEWPORT_ITEMS = [{ label: 'Desktop', value: 'desktop', icon: 'i-ri-comput
         class="flex flex-wrap items-center gap-2 rounded-lg border border-success/40 bg-success/5 px-3 py-2 text-sm"
       >
         <Icon
-          name="i-ri-chat-1-line"
+          name="i-hugeicons-bubble-chat"
           class="size-4 text-success"
         />
         <span class="me-auto">Approving v{{ selected.version }} started planning its build.</span>
         <AppButton
           label="Open Plan session"
-          trailing-icon="i-ri-arrow-right-line"
+          trailing-icon="i-hugeicons-arrow-right-02"
           variant="link"
           size="sm"
           :to="`/plan/${selected.planSessionId}`"

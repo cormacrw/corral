@@ -18,7 +18,7 @@ const { openEpic } = useTaskFlyout()
   >
     <p class="flex items-center gap-1.5">
       <Icon
-        name="i-ri-git-branch-line"
+        name="i-hugeicons-git-branch"
         class="size-4 shrink-0"
       />
       <span>Part of

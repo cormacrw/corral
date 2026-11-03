@@ -230,21 +230,21 @@ export const TASK_TYPE: Record<Task['type'], string> = {
 }
 // The badge on Board and Backlog cards (D19, D20). Plain tasks get none.
 export function taskTypeBadge(type: Task['type']): { label: string, color: Color, icon: string } | null {
-  if (type === 'bug') return { label: TASK_TYPE.bug, color: 'error', icon: 'i-ri-bug-line' }
-  if (type === 'spike') return { label: TASK_TYPE.spike, color: 'info', icon: 'i-ri-flask-line' }
-  if (type === 'design') return { label: TASK_TYPE.design, color: 'info', icon: 'i-ri-palette-line' }
+  if (type === 'bug') return { label: TASK_TYPE.bug, color: 'error', icon: 'i-hugeicons-bug-01' }
+  if (type === 'spike') return { label: TASK_TYPE.spike, color: 'info', icon: 'i-hugeicons-test-tube' }
+  if (type === 'design') return { label: TASK_TYPE.design, color: 'info', icon: 'i-hugeicons-paint-board' }
   return null
 }
 // The muted icon on a Board card, which leaves colour to the priority. Plain tasks get none.
 export function cardTypeIcon(type: Task['type']): { name: string, label: string } | null {
-  if (type === 'bug') return { name: 'i-ri-bug-line', label: TASK_TYPE.bug }
-  if (type === 'design') return { name: 'i-ri-brush-line', label: TASK_TYPE.design }
-  if (type === 'spike') return { name: 'i-ri-flask-line', label: TASK_TYPE.spike }
+  if (type === 'bug') return { name: 'i-hugeicons-bug-01', label: TASK_TYPE.bug }
+  if (type === 'design') return { name: 'i-hugeicons-paint-brush-02', label: TASK_TYPE.design }
+  if (type === 'spike') return { name: 'i-hugeicons-test-tube', label: TASK_TYPE.spike }
   return null
 }
 // Every type's icon, plain tasks included, for rows that show it on its own
 export function taskTypeIcon(type: Task['type']): string {
-  return taskTypeBadge(type)?.icon ?? 'i-ri-checkbox-line'
+  return taskTypeBadge(type)?.icon ?? 'i-hugeicons-checkmark-square-02'
 }
 
 // A run that hasn't finished yet

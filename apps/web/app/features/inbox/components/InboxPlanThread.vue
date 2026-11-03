@@ -87,7 +87,7 @@ async function approve(to: 'ready' | 'backlog') {
         <!-- Deletes at once, with Undo in a toast (design/inbox.md#delete-thread) -->
         <AppButton
           label="Delete thread"
-          icon="i-ri-delete-bin-line"
+          icon="i-hugeicons-delete-02"
           variant="ghost"
           color="error"
           size="sm"
@@ -138,7 +138,7 @@ async function approve(to: 'ready' | 'backlog') {
             <div class="flex flex-wrap gap-2">
               <AppButton
                 label="View plan"
-                icon="i-ri-list-check-2"
+                icon="i-hugeicons-task-done-01"
                 variant="outline"
                 color="neutral"
                 size="sm"
@@ -187,7 +187,7 @@ async function approve(to: 'ready' | 'backlog') {
             <AppButton
               :to="`/plan/${item.sessionId}`"
               label="Open in Plan"
-              icon="i-ri-chat-1-line"
+              icon="i-hugeicons-bubble-chat"
               variant="outline"
               color="neutral"
               size="sm"
@@ -201,7 +201,7 @@ async function approve(to: 'ready' | 'backlog') {
             data-testid="inbox-plan-working"
           >
             <Icon
-              name="i-ri-loader-4-line"
+              name="i-hugeicons-loading-03"
               class="size-4 animate-spin"
             />
             {{ item.sender.name }} is working on it.
@@ -218,7 +218,7 @@ async function approve(to: 'ready' | 'backlog') {
             v-if="runnerOffline"
             color="warning"
             variant="subtle"
-            icon="i-ri-server-line"
+            icon="i-hugeicons-server-stack-01"
             title="Plan needs the runner. It's offline."
             class="mb-2"
           />

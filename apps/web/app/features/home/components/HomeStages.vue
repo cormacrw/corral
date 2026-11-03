@@ -55,12 +55,12 @@ defineProps<{
       data-testid="home-attention"
     >
       <Icon
-        name="i-ri-alert-line"
+        name="i-hugeicons-alert-02"
         :class="['size-4 shrink-0', counts.blocked ? 'text-destructive' : 'text-warning']"
       />
       <span class="flex-1">{{ attention }}</span>
       <Icon
-        name="i-ri-arrow-right-s-line"
+        name="i-hugeicons-arrow-right-01"
         class="size-4 text-muted-foreground"
       />
     </NuxtLink>

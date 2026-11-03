@@ -52,7 +52,7 @@ const tap = computed(() => stack.value ? 'min-h-11 w-full justify-center whitesp
         <AppButton
           label="Accept recommendation"
           :size="size"
-          :icon="chose(props.message.recommendation) ? 'i-ri-check-line' : 'i-ri-thumb-up-line'"
+          :icon="chose(props.message.recommendation) ? 'i-hugeicons-tick-02' : 'i-hugeicons-thumbs-up'"
           :variant="chose(props.message.recommendation) ? 'solid' : 'soft'"
           color="primary"
           :class="tap"
@@ -67,7 +67,7 @@ const tap = computed(() => stack.value ? 'min-h-11 w-full justify-center whitesp
           :key="option"
           :label="option"
           :size="size"
-          :icon="chose(option) ? 'i-ri-check-line' : undefined"
+          :icon="chose(option) ? 'i-hugeicons-tick-02' : undefined"
           :variant="chose(option) ? 'solid' : 'outline'"
           :color="chose(option) ? 'primary' : 'neutral'"
           :class="tap"
@@ -78,7 +78,7 @@ const tap = computed(() => stack.value ? 'min-h-11 w-full justify-center whitesp
         <AppButton
           label="Other…"
           :size="size"
-          :icon="choseOther ? 'i-ri-check-line' : undefined"
+          :icon="choseOther ? 'i-hugeicons-tick-02' : undefined"
           :variant="choseOther ? 'solid' : stack ? 'outline' : 'ghost'"
           :color="choseOther ? 'primary' : 'neutral'"
           :class="tap"
@@ -89,7 +89,7 @@ const tap = computed(() => stack.value ? 'min-h-11 w-full justify-center whitesp
         <AppButton
           label="Stop and propose the plan"
           :size="size"
-          :icon="chose(STOP_ASKING) ? 'i-ri-check-line' : 'i-ri-list-check-2'"
+          :icon="chose(STOP_ASKING) ? 'i-hugeicons-tick-02' : 'i-hugeicons-task-done-01'"
           :variant="chose(STOP_ASKING) ? 'solid' : stack ? 'outline' : 'ghost'"
           :color="chose(STOP_ASKING) ? 'primary' : 'neutral'"
           :class="stack ? tap : 'ms-auto'"

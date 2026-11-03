@@ -18,7 +18,7 @@ const { isMobile } = useDevice()
       v-else-if="repos && !repos.signedIn"
       color="warning"
       variant="subtle"
-      icon="i-ri-github-line"
+      icon="i-hugeicons-github"
       title="The runner isn't signed in to GitHub"
     >
       <template #description>

@@ -18,7 +18,7 @@ const { isMobile } = useDevice()
         :id="id"
         v-model="userName"
         :size="isMobile ? 'xl' : 'lg'"
-        icon="i-ri-user-line"
+        icon="i-hugeicons-user"
         placeholder="Your name"
         :maxlength="80"
       />

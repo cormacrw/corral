@@ -66,7 +66,7 @@ const { log, content, onLogScroll } = usePlanThreadScroll(() => {
         />
         <AppButton
           to="/plan"
-          icon="i-ri-add-line"
+          icon="i-hugeicons-add-01"
           variant="ghost"
           color="neutral"
           aria-label="New session"

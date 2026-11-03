@@ -25,7 +25,7 @@ async function reconnect() {
     v-if="offline && device.isMobile.value"
     color="error"
     variant="subtle"
-    icon="i-ri-alert-line"
+    icon="i-hugeicons-alert-02"
     title="Plan needs the runner. It's offline."
     :description="`${pm?.name ?? 'The PM'} runs in the runner container. Your sessions and drafts are safe.`"
     :actions="[{ label: 'Reconnect', color: 'error', variant: 'outline', loading: reconnecting, onClick: reconnect }]"
@@ -35,7 +35,7 @@ async function reconnect() {
     v-else-if="offline"
     color="warning"
     variant="subtle"
-    icon="i-ri-server-line"
+    icon="i-hugeicons-server-stack-01"
     title="Plan needs the runner. It's offline."
     :description="hint"
   />

@@ -39,7 +39,7 @@ Multiple projects, global agents and per-project task prefixes are decided in **
 ### Components and tokens
 
 - Use shadcn-vue components through the `App*` composites (D32), and semantic tokens only: `background`, `foreground`, `card`, `popover`, `muted`, `muted-foreground`, `accent`, `border`, `input`, `ring`, `primary`, `destructive`, and Corral's `brand` (primary as text), `success`, `warning` and `info`. Colour props use the tones `primary`, `neutral`, `success`, `warning`, `info` and `error`.
-- The theme is shadcn preset `a31Y6GXo` (`reka-vega`, neutral base, emerald primary, Geist, Remix icons), in `assets/css/theme.css`. Settings can override the neutral palette in dark mode only, saved per device (see [Settings](settings.md#appearance)). Never hard-code hex values.
+- The theme is shadcn preset `a31Y6GXo` (`reka-vega`, neutral base, emerald primary, Geist, Hugeicons), in `assets/css/theme.css`. Settings can override the neutral palette in dark mode only, saved per device (see [Settings](settings.md#appearance)). Never hard-code hex values.
 - Light and dark mode both have to work. Solid fills use `bg-primary`; coloured text uses `text-brand`, because the dark primary fill is too dark to read as text.
 - Radii come from the preset's `--radius`: controls `rounded-md`, cards and panels `rounded-lg`, avatars and dots `rounded-full`.
 

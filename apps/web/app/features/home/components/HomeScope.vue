@@ -21,7 +21,7 @@ const selected = computed(() => props.items.find(item => item.value === projectI
     <AppDropdownMenu :items="menu">
       <AppButton
         :label="selected"
-        trailing-icon="i-ri-arrow-down-s-line"
+        trailing-icon="i-hugeicons-arrow-down-01"
         variant="link"
         color="neutral"
         size="sm"

@@ -2,11 +2,11 @@
 // The desktop section menu (design/settings.md). Phones list the sections on
 // /settings instead (SettingsMobile).
 const SECTIONS = [
-  { label: 'Profile', to: '/settings/profile', icon: 'i-ri-user-line' },
-  { label: 'Agents', to: '/settings/agents', icon: 'i-ri-robot-2-line' },
-  { label: 'Runners', to: '/settings/runner', icon: 'i-ri-server-line' },
-  { label: 'Performance', to: '/settings/performance', icon: 'i-ri-dashboard-3-line' },
-  { label: 'Appearance', to: '/settings/appearance', icon: 'i-ri-palette-line' }
+  { label: 'Profile', to: '/settings/profile', icon: 'i-hugeicons-user' },
+  { label: 'Agents', to: '/settings/agents', icon: 'i-hugeicons-robot-01' },
+  { label: 'Runners', to: '/settings/runner', icon: 'i-hugeicons-server-stack-01' },
+  { label: 'Performance', to: '/settings/performance', icon: 'i-hugeicons-dashboard-speed-02' },
+  { label: 'Appearance', to: '/settings/appearance', icon: 'i-hugeicons-paint-board' }
 ]
 
 const route = useRoute()

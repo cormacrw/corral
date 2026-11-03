@@ -10,7 +10,7 @@ const emit = defineEmits<{ send: [message: string] }>()
 <template>
   <AppButton
     label="Grill me"
-    icon="i-ri-fire-line"
+    icon="i-hugeicons-fire"
     size="xs"
     variant="ghost"
     color="neutral"

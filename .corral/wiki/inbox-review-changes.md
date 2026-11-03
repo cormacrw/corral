@@ -39,13 +39,12 @@ Inbox refreshes through its existing event dependencies.
 ## Message presentation
 
 `InboxMessage.vue` is shared by desktop/mobile task panels and parent review and
-conflict panels. It shows `message` as plain text and only `newArtifacts` in a
-New row immediately below. Files open `EvidenceViewer.vue` (also used by
-`EvidenceList.vue`); design links open the version preview. Evidence metadata
-provides MIME types where available, with kind/name fallbacks while loading.
+conflict panels. It shows `message` as plain text, with no New row of files
+under it (removed at Cormac's request): `newArtifacts` still reaches the client,
+but only to decide whether a non-review item loads evidence for its Criteria tab.
 Task Option D panels show the full `body`, including spike findings, in the
 Message tab. Items without `message` retain the existing markdown body;
-Plan/release components remain separate. No New markers are added to the criteria evidence lists.
+Plan/release components remain separate.
 
 ## Mobile draft visibility
 

@@ -1,14 +1,8 @@
 <script lang="ts" setup>
 import type { ToasterProps } from 'vue-sonner'
 
-import {
-  RiCheckboxCircleLine,
-  RiInformationLine,
-  RiLoader4Line,
-  RiCloseCircleLine,
-  RiAlertLine,
-  RiCloseLine,
-} from '@remixicon/vue'
+import { HugeiconsIcon } from '@hugeicons/vue'
+import { Alert02Icon, Cancel01Icon, CancelCircleIcon, CheckmarkCircle02Icon, InformationCircleIcon, Loading03Icon } from '@hugeicons/core-free-icons'
 import { reactiveOmit } from '@vueuse/core'
 import { cn } from 'cn'
 import { Toaster as Sonner } from 'vue-sonner'
@@ -39,24 +33,24 @@ const delegatedProps = reactiveOmit(props, 'class', 'toastOptions')
     v-bind="delegatedProps"
   >
     <template #success-icon>
-      <RiCheckboxCircleLine class="size-4" />
+      <HugeiconsIcon :icon="CheckmarkCircle02Icon" :stroke-width="2" class="size-4" />
     </template>
     <template #info-icon>
-      <RiInformationLine class="size-4" />
+      <HugeiconsIcon :icon="InformationCircleIcon" :stroke-width="2" class="size-4" />
     </template>
     <template #warning-icon>
-      <RiAlertLine class="size-4" />
+      <HugeiconsIcon :icon="Alert02Icon" :stroke-width="2" class="size-4" />
     </template>
     <template #error-icon>
-      <RiCloseCircleLine class="size-4" />
+      <HugeiconsIcon :icon="CancelCircleIcon" :stroke-width="2" class="size-4" />
     </template>
     <template #loading-icon>
       <div>
-        <RiLoader4Line class="size-4 animate-spin" />
+        <HugeiconsIcon :icon="Loading03Icon" :stroke-width="2" class="size-4 animate-spin" />
       </div>
     </template>
     <template #close-icon>
-      <RiCloseLine class="size-4" />
+      <HugeiconsIcon :icon="Cancel01Icon" :stroke-width="2" class="size-4" />
     </template>
   </Sonner>
 </template>

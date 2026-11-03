@@ -12,16 +12,16 @@ export interface SearchPage {
 
 export function searchPages(projects: Project[], agents: Agent[]): SearchPage[] {
   return [
-    { label: 'Plan', icon: 'i-ri-message-2-line', to: '/plan' },
-    { label: 'Inbox', icon: 'i-ri-inbox-line', to: '/inbox' },
-    { label: 'Settings', icon: 'i-ri-settings-3-line', to: '/settings/profile' },
+    { label: 'Plan', icon: 'i-hugeicons-message-01', to: '/plan' },
+    { label: 'Inbox', icon: 'i-hugeicons-inbox', to: '/inbox' },
+    { label: 'Settings', icon: 'i-hugeicons-settings-01', to: '/settings/profile' },
     ...projects.flatMap(p => [
-      { label: `${p.name} · Overview`, icon: 'i-ri-dashboard-line', to: `/projects/${p.slug}` },
-      { label: `${p.name} · Board`, icon: 'i-ri-kanban-view', to: `/projects/${p.slug}/board` },
-      { label: `${p.name} · Backlog`, icon: 'i-ri-list-unordered', to: `/projects/${p.slug}/backlog` },
-      { label: `${p.name} · Pull requests`, icon: 'i-ri-git-pull-request-line', to: `/projects/${p.slug}/pull-requests` }
+      { label: `${p.name} · Overview`, icon: 'i-hugeicons-dashboard-square-01', to: `/projects/${p.slug}` },
+      { label: `${p.name} · Board`, icon: 'i-hugeicons-kanban', to: `/projects/${p.slug}/board` },
+      { label: `${p.name} · Backlog`, icon: 'i-hugeicons-left-to-right-list-bullet', to: `/projects/${p.slug}/backlog` },
+      { label: `${p.name} · Pull requests`, icon: 'i-hugeicons-git-pull-request', to: `/projects/${p.slug}/pull-requests` }
     ]),
-    ...agents.map(a => ({ label: `${a.name} · ${ROLE[a.role]}`, icon: 'i-ri-robot-2-line', to: `/agents/${a.name.toLowerCase()}` }))
+    ...agents.map(a => ({ label: `${a.name} · ${ROLE[a.role]}`, icon: 'i-hugeicons-robot-01', to: `/agents/${a.name.toLowerCase()}` }))
   ]
 }
 

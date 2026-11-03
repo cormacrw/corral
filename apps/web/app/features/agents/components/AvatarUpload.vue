@@ -60,7 +60,7 @@ async function clear() {
       >
       <AppButton
         :label="props.avatarUrl ? 'Change picture' : 'Upload picture'"
-        icon="i-ri-image-add-line"
+        icon="i-hugeicons-image-add-01"
         size="xs"
         variant="outline"
         color="neutral"

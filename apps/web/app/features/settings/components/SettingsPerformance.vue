@@ -82,7 +82,7 @@ const PAGE_COLUMNS: PerfColumn<PerfPageRow>[] = [
       data-testid="perf-empty"
     >
       <Icon
-        name="i-ri-dashboard-3-line"
+        name="i-hugeicons-dashboard-speed-02"
         class="size-8 text-muted-foreground/70"
       />
       <p class="font-medium">

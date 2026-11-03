@@ -14,6 +14,8 @@ const open = ref<ViewerFile | null>(null)
 
 const latest = computed(() => props.reviews[0] ?? null)
 const forTask = computed(() => props.evidence.filter(e => e.criterionId === null))
+// The viewer flips through the files in the order they're listed
+const files = computed(() => [...props.criteria.flatMap(c => props.evidence.filter(e => e.criterionId === c.id)), ...forTask.value].filter(e => e.url))
 const note = (id: string) => latest.value?.criteria.find(c => c.criterionId === id)?.note ?? ''
 </script>
 
@@ -82,6 +84,9 @@ const note = (id: string) => latest.value?.criteria.find(c => c.criterionId === 
       No evidence yet.
     </p>
 
-    <EvidenceViewer v-model="open" />
+    <EvidenceViewer
+      v-model="open"
+      :files="files"
+    />
   </div>
 </template>

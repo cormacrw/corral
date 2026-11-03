@@ -104,7 +104,7 @@ watch(() => props.events.length, async () => {
           class="flex items-center gap-2 self-start py-1 ps-1 pe-2 text-sm text-muted-foreground/70 italic"
         >
           <Icon
-            name="i-ri-brain-line"
+            name="i-hugeicons-brain-02"
             class="size-3.5 shrink-0"
           />
           Thinking
@@ -121,7 +121,7 @@ watch(() => props.events.length, async () => {
             @click="toggle(`t${entry.key}`, false)"
           >
             <Icon
-              :name="isOpen(`t${entry.key}`, false) ? 'i-ri-arrow-down-s-line' : 'i-ri-arrow-right-s-line'"
+              :name="isOpen(`t${entry.key}`, false) ? 'i-hugeicons-arrow-down-01' : 'i-hugeicons-arrow-right-01'"
               class="size-3.5 shrink-0"
             />
             Thinking
@@ -144,14 +144,14 @@ watch(() => props.events.length, async () => {
             @click="toggle(`g${entry.key}`, entry.failed > 0)"
           >
             <Icon
-              :name="isOpen(`g${entry.key}`, entry.failed > 0) ? 'i-ri-arrow-down-s-line' : 'i-ri-arrow-right-s-line'"
+              :name="isOpen(`g${entry.key}`, entry.failed > 0) ? 'i-hugeicons-arrow-down-01' : 'i-hugeicons-arrow-right-01'"
               class="size-3.5 shrink-0 text-muted-foreground/70"
             />
             <span class="min-w-0 truncate">{{ entry.summary }}</span>
             <AppBadge
               v-if="entry.failed > 0"
               :label="`${entry.failed} failed`"
-              icon="i-ri-close-line"
+              icon="i-hugeicons-cancel-01"
               color="error"
               variant="subtle"
               size="sm"
@@ -165,7 +165,7 @@ watch(() => props.events.length, async () => {
               class="shrink-0 rounded-full"
             >
               <Icon
-                name="i-ri-loader-4-line"
+                name="i-hugeicons-loading-03"
                 class="animate-spin motion-reduce:animate-none"
               />
               Running
@@ -206,7 +206,7 @@ watch(() => props.events.length, async () => {
                 >−{{ step.removed }}</span>
                 <Icon
                   v-if="props.live && !step.done"
-                  name="i-ri-loader-4-line"
+                  name="i-hugeicons-loading-03"
                   class="size-3.5 shrink-0 animate-spin text-muted-foreground/70 motion-reduce:animate-none"
                 />
               </button>

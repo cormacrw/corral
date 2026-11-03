@@ -22,7 +22,7 @@ defineEmits<{ deleted: [] }>()
 const flyout = useTaskFlyout()
 const tab = useLocalStorage<'tasks' | 'graph' | 'activity' | 'comments'>('corral.epic.tab', 'tasks')
 // A phone has room for all four labels only without their icons
-const TAB_ICONS: Record<string, string> = { tasks: 'i-ri-list-unordered', graph: 'i-ri-node-tree', activity: 'i-ri-pulse-line', comments: 'i-ri-message-2-line' }
+const TAB_ICONS: Record<string, string> = { tasks: 'i-hugeicons-left-to-right-list-bullet', graph: 'i-hugeicons-hierarchy', activity: 'i-hugeicons-pulse-01', comments: 'i-hugeicons-message-01' }
 const tabs = computed(() => [
   { label: `Sub-tasks (${props.epic.tasks.length})`, value: 'tasks' },
   { label: 'Graph', value: 'graph' },

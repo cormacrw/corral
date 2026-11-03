@@ -79,9 +79,9 @@ async function deleteThread() {
           color="neutral"
           class="min-h-11"
         />
-        <AppDropdownMenu :items="[{ label: 'Delete thread', icon: 'i-ri-delete-bin-line', color: 'error' as const, disabled: busy, onSelect: deleteThread }]">
+        <AppDropdownMenu :items="[{ label: 'Delete thread', icon: 'i-hugeicons-delete-02', color: 'error' as const, disabled: busy, onSelect: deleteThread }]">
           <AppButton
-            icon="i-ri-more-line"
+            icon="i-hugeicons-more-horizontal"
             variant="ghost"
             color="neutral"
             aria-label="Thread actions"
