@@ -21,8 +21,21 @@ const { approval, detail, plan: latest, previous, counts, text, busy, offline, w
 const actionError = ref<string | null>(null)
 const error = computed(() => actionError.value ?? detail.error.value?.message ?? null)
 const loadingPlan = detail.isPending
-// A question or a failed turn is answered here; a plan is approved instead
-const canReply = computed(() => Boolean(props.item.question || props.item.failure))
+// A failed turn is answered here, a question in its card (Other… is written
+// there and sent with Submit), and a plan is approved instead
+const canReply = computed(() => Boolean(props.item.failure))
+const writing = ref(false)
+const answer = ref('')
+watch(() => props.item.id, () => {
+  writing.value = false
+  answer.value = ''
+})
+async function submitAnswer() {
+  const message = answer.value.trim()
+  if (!message || !await send(message)) return
+  answer.value = ''
+  writing.value = false
+}
 const messageOf = (e: unknown) => errorMessage(e)
 
 const loadPlan = () => {
@@ -107,14 +120,17 @@ async function deleteThread() {
         />
         <PlanQuestion
           v-if="item.question"
+          v-model:draft="answer"
           :message="item.question"
           data-message-id="inbox-question"
           :active="!working"
           stacked
           :disabled="cantSend"
+          :writing="writing"
           @answer="send"
-          @other="composer?.focus()"
+          @other="writing = !writing"
           @stop="send(STOP_ASKING)"
+          @submit="submitAnswer"
         />
         <template v-else-if="item.plan">
           <h2 class="text-lg font-semibold text-foreground">
@@ -179,6 +195,20 @@ async function deleteThread() {
           {{ item.sender.name }} is working…
         </p>
       </div>
+    </div>
+    <div
+      v-if="item.question && writing"
+      class="shrink-0 border-t border-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+    >
+      <AppButton
+        label="Submit"
+        icon="i-hugeicons-arrow-up-02"
+        class="min-h-11 w-full justify-center"
+        :loading="busy"
+        :disabled="!answer.trim() || cantSend"
+        data-testid="inbox-primary"
+        @click="submitAnswer"
+      />
     </div>
     <div
       v-if="canReply"

@@ -2,6 +2,7 @@
 import type { EpicReview, EpicReviewFeedback, EpicReviewRound, EpicReviewTaskRow, Evidence } from '@corral/contracts'
 import type { EpicInboxItem } from '~/features/inbox/composables/useInboxView'
 import { EPIC_REVIEW_MODE, plural } from '~/utils/labels'
+import { evidenceCriterion } from '~/features/evidence/utils/evidenceFile'
 import InboxEvidenceCarousel from '~/features/inbox/components/InboxEvidenceCarousel.vue'
 
 // The Overview tab of an epic in the Inbox (design/inbox.md): what changed
@@ -25,7 +26,7 @@ const viewing = ref<Evidence | null>(null)
 const notes = computed(() => (props.rounds[0]?.findings ?? []).filter(f => f.level === 'non_blocking'))
 const screenshots = computed(() => props.rows.flatMap(row => row.evidence
   .filter(e => e.url && e.contentType?.startsWith('image/'))
-  .map(evidence => ({ evidence, caption: `${row.ref} · ${evidence.fileName}` }))))
+  .map(evidence => ({ evidence, caption: `${row.ref} · ${evidenceCriterion(evidence, row.criteria)}` }))))
 const conflict = computed(() => props.item.type === 'epic_conflict' ? props.item : null)
 const merged = computed(() => props.rows.filter(r => r.merged).length)
 const size = computed(() => [
@@ -199,6 +200,7 @@ const next = computed(() => event.value === 'human_approved' && props.review?.st
     <EvidenceViewer
       v-model="viewing"
       :files="screenshots.map(s => s.evidence)"
+      :captions="Object.fromEntries(screenshots.map(s => [s.evidence.id, s.caption]))"
     />
   </div>
 </template>

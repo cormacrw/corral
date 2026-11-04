@@ -22,7 +22,7 @@ defineProps<{ kind: InboxItemKind, item: Item }>()
     <ProjectThumbnail
       v-if="item.project"
       :project="item.project"
-      :size="14"
+      :size="18"
     />
     <span class="truncate">{{ item.project?.name ?? 'Global' }}<template v-if="item.taskRef"> · <TaskLink :task-ref="item.taskRef" /></template> · {{ item.sender.name }} · {{ timeAgo(item.at) }}</span>
   </p>

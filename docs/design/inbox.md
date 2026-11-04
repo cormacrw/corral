@@ -24,7 +24,7 @@ There are three columns. The list divider can be resized (280–560px, default 3
 ### 1. Message list
 
 - **Search** input.
-- **Filter tabs** (`UTabs`, pill): **Inbox** (with count; the Needs you list, decisions only), **Activity** (agent progress and release notes, read on demand, with no count), **Resolved** (with count).
+- **Filter tabs** (`UTabs`, pill): **Inbox** (with count; the Needs you list, decisions only) and **Resolved** (with count). There is no Activity tab (D33): agent progress and undismissed release notes aren't shown in the Inbox.
   - Each tab has an icon: inbox tray, pulse, check circle.
   - Below 360px of list width the labels hide. Only icons and counts remain; the names move to tooltips and `aria-label`, e.g. "Inbox, 4".
 - **Rows**, each a button:
@@ -37,9 +37,9 @@ There are three columns. The list divider can be resized (280–560px, default 3
   - no badges or tags beyond these
 - **Plan thread rows** have the same layout; see [Plan threads](#plan-threads).
 - The selected row uses `bg-muted`.
-- **Empty state:** the Inbox tab says "No decisions are waiting on you. Agents may still be working; their updates are in Activity." It never implies that background work has finished. The detail pane says the same with **Open Activity**. Activity, Resolved and a search with no matches each have their own line.
-- **Live updates:** an informational item arriving adds no Inbox row, doesn't change the count or badge, and doesn't move the selection. It appears under Activity.
-- **A link to an item:** an informational item opens with the list on Activity, and a resolved one on Resolved. A link to something no longer listed shows "This isn't waiting on you any more", with **Open Activity** and, when known, its source: **Open in Plan**, **Open task** or **Open parent**. It's never presented as a new request.
+- **Empty state:** the Inbox tab says "No decisions are waiting on you. Agents may still be working." It never implies that background work has finished. The detail pane says the same. Resolved and a search with no matches each have their own line.
+- **Live updates:** an informational item arriving adds no Inbox row, doesn't change the count or badge, and doesn't move the selection. It isn't listed (D33).
+- **A link to an item:** a resolved item opens with the list on Resolved. A link to something no longer listed, including an informational item, shows "This isn't waiting on you any more" with, when known, its source: **Open in Plan**, **Open task** or **Open parent**. It's never presented as a new request.
 
 ### 2. Selected message
 
@@ -224,6 +224,6 @@ Mobile Plan threads reuse Plan's `PlanQuestion`, composer and `PlanDetail` botto
 
 ## Release notes (COR-129)
 
-The latest 20 deployments appear as Release notes from the configured PM, with its avatar, project, time and short commit range. Undismissed notes are listed under **Activity** by deployment time, read or unread (D11). They never appear in the default Inbox tab or add to its badge or count, so they need no dismissing. An unread dot stays until the item is opened, on desktop or mobile. Reading keeps the item in Activity; the optional Dismiss moves it to Resolved.
+The latest 20 deployments appear as Release notes from the configured PM, with its avatar, project, time and short commit range. Undismissed notes were listed under **Activity**, which D33 removed from the Inbox, so the web app shows them nowhere for now; the server still records them. Dismissed notes stay in Resolved. They never appear in the default Inbox tab or add to its badge or count.
 
 The shared detail pane renders markdown with task references linking to `/tasks/:ref`, and shows the commit range (or the first-deploy commit). Pending notes show “Writing release notes…” and refresh on `deployment.updated`, without a reload. Mobile uses its regular back header and the same detail pane, without a task-details button or reply composer.

@@ -15,7 +15,6 @@ function toggleSearch() {
 // Server order: newest first, task items and threads together (D11)
 const tabs = computed(() => [
   { label: 'Inbox', value: 'needsYou', icon: 'i-hugeicons-inbox', count: count.value },
-  { label: 'Activity', value: 'activity', icon: 'i-hugeicons-pulse-01', count: null },
   { label: 'Resolved', value: 'resolved', icon: 'i-hugeicons-checkmark-circle-02', count: inbox.value?.resolved.length ?? 0 }
 ])
 </script>

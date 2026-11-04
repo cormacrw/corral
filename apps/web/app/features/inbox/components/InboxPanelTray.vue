@@ -87,6 +87,7 @@ defineExpose({ send, hasImages: computed(() => composer.value?.hasImages ?? fals
       :input-id="retryNote ? noteId : undefined"
       :placeholder="retryNote ? 'What should the agent do differently?' : ctx.placeholder"
       :submit-label="ctx.submitLabel"
+      submit-icon-only
       :submit-color="ctx.action === 'delete' ? 'error' : 'primary'"
       :allow-empty="ctx.action !== null && !ctx.needsText"
       :busy="ctx.busy || ctx.taskLoading"

@@ -13,6 +13,21 @@ body {
   overscroll-behavior: none;
 }
 
+/* An icon has no content to hold its width, so a flex row would squeeze it */
+@layer base {
+  .iconify {
+    flex-shrink: 0;
+  }
+}
+
+/* Native scrollbars and form controls follow the app's theme, not the OS */
+:root {
+  color-scheme: light;
+}
+.dark {
+  color-scheme: dark;
+}
+
 /* A 44px touch target, wherever fingers are the pointer or the screen is phone-sized */
 @utility tap-target {
   @media (pointer: coarse), (max-width: 639px) {

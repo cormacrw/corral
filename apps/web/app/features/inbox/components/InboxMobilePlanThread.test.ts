@@ -47,7 +47,15 @@ function screen(item = question) {
       components: {
         AppButton, AppDrawer, AppDropdownMenu, PlanSheets,
         MobilePageHeader: defineComponent({ setup: (_, { slots }) => () => h('header', slots.actions?.()) }),
-        PlanQuestion: defineComponent({ props: ['message', 'disabled'], emits: ['answer'], setup: (p, { emit }) => () => h('button', { disabled: p.disabled, onClick: () => emit('answer', 'ntfy') }, p.message.text) }),
+        PlanQuestion: defineComponent({
+          props: ['message', 'disabled', 'writing', 'draft'],
+          emits: ['answer', 'other', 'submit', 'update:draft'],
+          setup: (p, { emit }) => () => h('div', [
+            h('button', { disabled: p.disabled, onClick: () => emit('answer', 'ntfy') }, p.message.text),
+            h('button', { onClick: () => emit('other') }, 'Other…'),
+            p.writing ? h('textarea', { 'data-testid': 'plan-question-other', 'value': p.draft, 'onInput': (e: Event) => emit('update:draft', (e.target as HTMLTextAreaElement).value) }) : null
+          ])
+        }),
         PromptComposer: defineComponent({ setup: () => () => h('textarea') }),
         MarkdownText: defineComponent({ props: ['text'], setup: p => () => h('p', p.text) }),
         AgentAvatar: defineComponent({ setup: () => () => h('span') }),
@@ -78,14 +86,25 @@ beforeEach(() => {
 })
 
 describe('focused mobile Plan thread', () => {
-  it('shows the question and composer and submits the chosen answer to its session', async () => {
+  it('shows the question without a reply box and submits the chosen answer to its session', async () => {
     const w = screen()
     expect(w.text()).toContain('Which service?')
-    expect(w.find('textarea').exists()).toBe(true)
+    expect(w.find('textarea').exists()).toBe(false)
     expect(mocks.session).toHaveBeenCalledWith('s-2')
     await click(w, 'Which service?')
     expect(mocks.message).toHaveBeenCalledWith('s-2', 'ntfy', undefined)
     expect(mocks.replace).toHaveBeenCalledWith('/inbox')
+  })
+
+  it('writes Other… inside the question and sends it with Submit', async () => {
+    const w = screen()
+    expect(w.find('[data-testid="inbox-primary"]').exists()).toBe(false)
+    await click(w, 'Other…')
+    const input = w.get('[data-testid="plan-question-other"]')
+    expect(w.get('[data-testid="inbox-primary"]').attributes('disabled')).toBeDefined()
+    await input.setValue('Web Push, with ntfy later')
+    await click(w, 'Submit')
+    expect(mocks.message).toHaveBeenCalledWith('s-2', 'Web Push, with ntfy later', undefined)
   })
 
   it.each(['Approve to board', 'Approve to Backlog'])('shows the summary without conversation and handles %s', async (label) => {

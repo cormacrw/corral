@@ -35,7 +35,21 @@ const requesting = ref(false)
 watch(() => props.item.id, () => {
   requesting.value = false
 })
-const showComposer = computed(() => !props.item.plan || requesting.value)
+// A question is answered in its card: an option, or Other… written there and
+// sent with Submit, so it has no reply box
+const writing = ref(false)
+const answer = ref('')
+watch(() => props.item.id, () => {
+  writing.value = false
+  answer.value = ''
+})
+const showComposer = computed(() => !props.item.question && (!props.item.plan || requesting.value))
+async function submitAnswer() {
+  const message = answer.value.trim()
+  if (!message || !await send(message)) return
+  answer.value = ''
+  writing.value = false
+}
 function requestChanges() {
   requesting.value = !requesting.value
   if (requesting.value) void nextTick(() => composer.value?.focus())
@@ -114,13 +128,16 @@ async function approve(to: 'ready' | 'backlog') {
       >
         <template v-if="item.question">
           <PlanQuestion
+            v-model:draft="answer"
             :message="item.question"
             data-message-id="inbox-question"
             :active="!working"
             :disabled="cantSend"
+            :writing="writing"
             @answer="send"
-            @other="composer?.focus()"
+            @other="writing = !writing"
             @stop="send(STOP_ASKING)"
+            @submit="submitAnswer"
           />
         </template>
 
@@ -239,6 +256,16 @@ async function approve(to: 'ready' | 'backlog') {
                 @click="requestChanges"
               />
             </template>
+            <AppButton
+              v-if="item.question && writing"
+              label="Submit"
+              icon="i-hugeicons-arrow-up-02"
+              size="sm"
+              :loading="busy"
+              :disabled="!answer.trim() || cantSend"
+              data-testid="inbox-primary"
+              @click="submitAnswer"
+            />
             <!-- Deletes at once, with Undo in a toast (design/inbox.md#delete-thread) -->
             <AppButton
               label="Delete thread"

@@ -13,7 +13,6 @@ const { list, inbox, error, tab, search, items, count, emptyText, selectedId, it
 
 const tabs = computed(() => [
   { label: `Inbox (${count.value})`, value: 'needsYou', icon: 'i-hugeicons-inbox' },
-  { label: 'Activity', value: 'activity', icon: 'i-hugeicons-pulse-01' },
   { label: `Resolved (${inbox.value?.resolved.length ?? 0})`, value: 'resolved', icon: 'i-hugeicons-checkmark-circle-02' }
 ])
 function select(item: InboxItem) {

@@ -3,6 +3,7 @@ import { errorMessage } from '~/lib/errors'
 import type { Evidence } from '@corral/contracts'
 import { computed, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
+import { usePinchZoom } from '~/features/evidence/composables/usePinchZoom'
 import { isImage, isPdf, isText, isVideo, kindLabel } from '~/features/evidence/utils/evidenceFile'
 import { timeAgo } from '~/utils/labels'
 
@@ -10,7 +11,11 @@ export type ViewerFile = Pick<Evidence, 'id' | 'fileName' | 'kind' | 'createdAt'
 const open = defineModel<ViewerFile | null>({ required: true })
 // The files to flip through from the open one, with arrows, the arrow keys
 // or a swipe. Without it, or when the open file isn't in it, there's one file.
-const props = defineProps<{ files?: ViewerFile[] }>()
+// `captions`, by file ID, name what each file proves (its criterion): given
+// one, it's the footer under the file, in place of the file name up top.
+const props = defineProps<{ files?: ViewerFile[], captions?: Record<string, string> }>()
+const caption = computed(() => open.value ? props.captions?.[open.value.id] ?? null : null)
+const details = computed(() => open.value ? `${kindLabel(open.value.kind)} · ${timeAgo(open.value.createdAt)}${open.value.note ? ` · ${open.value.note}` : ''}` : '')
 const index = computed(() => open.value ? (props.files ?? []).findIndex(f => f.id === open.value!.id) : -1)
 const paging = computed(() => index.value !== -1 && props.files!.length > 1)
 function step(by: -1 | 1) {
@@ -25,20 +30,10 @@ useEventListener('keydown', (event: KeyboardEvent) => {
   else return
   event.preventDefault()
 })
-// A sideways swipe of 50px or more that's more sideways than down
-let touch: { x: number, y: number } | null = null
-function touchStart(event: TouchEvent) {
-  const t = event.touches[0]
-  touch = event.touches.length === 1 && t ? { x: t.clientX, y: t.clientY } : null
-}
-function touchEnd(event: TouchEvent) {
-  const t = event.changedTouches[0]
-  if (!touch || !t) return
-  const dx = t.clientX - touch.x
-  const dy = t.clientY - touch.y
-  touch = null
-  if (Math.abs(dx) >= 50 && Math.abs(dx) > Math.abs(dy)) step(dx < 0 ? 1 : -1)
-}
+// Swipe to the next file; pinch to zoom an image, which starts unzoomed each time
+const frame = ref<HTMLElement | null>(null)
+const pinch = usePinchZoom(frame, step, () => Boolean(open.value && isImage(open.value)))
+watch(() => open.value?.id, pinch.reset)
 const text = ref<string | null>(null)
 const textError = ref<string | null>(null)
 watch(open, async (item) => {
@@ -59,23 +54,25 @@ watch(open, async (item) => {
   <AppModal
     :open="open !== null"
     :title="open?.fileName ?? undefined"
-    :description="open ? `${kindLabel(open.kind)} · ${timeAgo(open.createdAt)}${open.note ? ` · ${open.note}` : ''}` : ''"
+    :description="details"
+    :hide-header="caption !== null"
     content-class="sm:max-w-4xl"
     @update:open="open = null"
   >
     <template #body>
       <div
-        class="min-w-0"
+        ref="frame"
+        :class="['min-w-0', open && isImage(open) && 'touch-none overflow-hidden']"
         data-testid="evidence-viewer-body"
-        @touchstart.passive="touchStart"
-        @touchend="touchEnd"
       >
         <img
           v-if="open && isImage(open)"
           :src="open.url ?? undefined"
           :alt="open.note || open.fileName || undefined"
           loading="lazy"
-          class="max-h-[70vh] w-full object-contain"
+          draggable="false"
+          :style="pinch.style.value"
+          :class="['h-[70vh] w-full object-contain select-none', !pinch.zoomed.value && 'transition-transform duration-150']"
         >
         <template v-else-if="open && isVideo(open)">
           <video
@@ -120,6 +117,18 @@ watch(open, async (item) => {
             :download="open.fileName ?? ''"
             class="text-brand hover:underline"
           >Download</a>
+        </p>
+      </div>
+      <div
+        v-if="caption"
+        class="-mt-2 border-t border-border pt-3 text-sm"
+        data-testid="evidence-viewer-caption"
+      >
+        <p class="font-medium text-foreground">
+          {{ caption }}
+        </p>
+        <p class="mt-0.5 text-xs text-muted-foreground">
+          {{ details }}
         </p>
       </div>
       <div

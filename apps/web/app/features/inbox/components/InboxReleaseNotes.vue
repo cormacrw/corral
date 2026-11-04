@@ -32,7 +32,7 @@ watch(() => props.item.deploymentId, (id) => {
         <div class="flex items-center gap-1 text-xs text-muted-foreground">
           <ProjectThumbnail
             :project="item.project"
-            :size="16"
+            :size="18"
           />{{ item.project.name }}
         </div>
         <p class="text-xs text-muted-foreground">

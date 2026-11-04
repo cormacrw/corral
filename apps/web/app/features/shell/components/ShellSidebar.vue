@@ -38,6 +38,7 @@ const PROJECT_PAGES = [
           <UiSidebarMenuButton
             tooltip="Search"
             variant="outline"
+            class="group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:shadow-none group-data-[collapsible=icon]:hover:bg-sidebar-accent group-data-[collapsible=icon]:hover:shadow-none"
             @click="emit('search')"
           >
             <Icon name="i-hugeicons-search-01" />
@@ -53,7 +54,8 @@ const PROJECT_PAGES = [
     <UiSidebarContent>
       <UiSidebarGroup>
         <nav aria-label="Global">
-          <UiSidebarMenu>
+          <!-- A gap, so neighbouring highlights don't touch -->
+          <UiSidebarMenu class="gap-0.5">
             <ShellNavItem
               to="/plan"
               label="Plan"
@@ -98,11 +100,13 @@ const PROJECT_PAGES = [
               as-child
               :tooltip="project.name"
               :is-active="currentSlug === project.slug"
+              class="group-data-[collapsible=icon]:p-1.5!"
             >
               <NuxtLink :to="`/projects/${project.slug}`">
+                <!-- The agent avatars' size, so two initials have room -->
                 <ProjectThumbnail
                   :project="project"
-                  :size="16"
+                  :size="20"
                 />
                 <span class="truncate">{{ project.name }}</span>
                 <span
@@ -152,6 +156,7 @@ const PROJECT_PAGES = [
               as-child
               :tooltip="`${agent.name} · ${ROLE[agent.role]}`"
               :is-active="isActive(`/agents/${agent.name.toLowerCase()}`)"
+              class="group-data-[collapsible=icon]:p-1.5!"
             >
               <NuxtLink :to="`/agents/${agent.name.toLowerCase()}`">
                 <!-- Nav icon size, so rows stay one height and fit when collapsed -->
@@ -185,7 +190,7 @@ const PROJECT_PAGES = [
     </UiSidebarContent>
 
     <UiSidebarFooter>
-      <div class="flex items-center gap-2 rounded-md bg-sidebar-accent p-2 text-xs group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-1">
+      <div class="flex items-center gap-2 rounded-md bg-sidebar-accent p-2 text-xs group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0">
         <span class="relative inline-flex shrink-0">
           <Icon
             name="i-hugeicons-server-stack-01"

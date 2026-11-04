@@ -57,7 +57,7 @@ defineExpose({ scrollTo, focusSlide })
     <template v-if="count > 1">
       <AppButton
         v-if="index > 0"
-        icon="i-ri-arrow-left-s-line"
+        icon="i-hugeicons-arrow-left-01"
         aria-label="Previous"
         color="neutral"
         variant="outline"
@@ -66,7 +66,7 @@ defineExpose({ scrollTo, focusSlide })
       />
       <AppButton
         v-if="index < count - 1"
-        icon="i-ri-arrow-right-s-line"
+        icon="i-hugeicons-arrow-right-01"
         aria-label="Next"
         color="neutral"
         variant="outline"

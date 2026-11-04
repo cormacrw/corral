@@ -41,7 +41,7 @@ it('uses the larger avatar on mobile', () => {
   expect(mountRow(thread(), true).get('[data-avatar]').attributes('data-size')).toBe('md')
 })
 
-it('keeps the unread dot and working spinner', () => {
+it('marks unread and shows the working spinner', () => {
   const idle = mountRow(thread())
   expect(idle.find('[aria-label="Unread"]').exists()).toBe(false)
   expect(idle.find('[data-spinner]').exists()).toBe(false)

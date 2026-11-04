@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Evidence } from '@corral/contracts'
 import type { InboxPanel, InboxPanelContext } from '~/features/inbox/composables/useInboxPanel'
+import { evidenceCriterion } from '~/features/evidence/utils/evidenceFile'
 import InboxEvidenceCarousel from '~/features/inbox/components/InboxEvidenceCarousel.vue'
 
 // The panel's Overview tab: a decision's options, a review's evidence, or what
@@ -8,9 +9,12 @@ import InboxEvidenceCarousel from '~/features/inbox/components/InboxEvidenceCaro
 const props = defineProps<{ ctx: InboxPanelContext, p: InboxPanel, mobile?: boolean }>()
 const viewing = ref<Evidence | null>(null)
 
-const shots = computed(() => props.p.images.value.map(evidence => ({ evidence, caption: evidence.fileName })))
+// Each captioned with the criterion it proves, in the carousel and the viewer
+const criterionOf = (evidence: Evidence) => evidenceCriterion(evidence, props.p.task.value?.acceptanceCriteria ?? [])
+const shots = computed(() => props.p.images.value.map(evidence => ({ evidence, caption: criterionOf(evidence) })))
 // The viewer flips through every file here, screenshots first
 const files = computed(() => [...props.p.images.value, ...props.p.others.value])
+const captions = computed(() => Object.fromEntries(files.value.map(f => [f.id, criterionOf(f)])))
 const hasEvidence = computed(() => props.p.images.value.length > 0 || props.p.others.value.length > 0)
 // Approval can't be taken without its task, so there's nothing to explain
 const actionHelp = computed(() => props.ctx.actions.filter(a => !(a.value === 'approve' && props.ctx.taskLoadFailed)))
@@ -92,6 +96,7 @@ const loading = computed(() => props.ctx.taskLoading || (props.p.isReview.value 
     <EvidenceViewer
       v-model="viewing"
       :files="files"
+      :captions="captions"
     />
   </div>
 </template>

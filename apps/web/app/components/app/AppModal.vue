@@ -7,7 +7,9 @@ const props = withDefaults(defineProps<{
   description?: string
   contentClass?: HTMLAttributes['class']
   dismissible?: boolean
-}>(), { title: undefined, description: undefined, contentClass: undefined, dismissible: true })
+  // Title and description for screen readers only, when the body says it
+  hideHeader?: boolean
+}>(), { title: undefined, description: undefined, contentClass: undefined, dismissible: true, hideHeader: false })
 const open = defineModel<boolean>('open', { default: false })
 
 function setOpen(next: boolean) {
@@ -21,7 +23,7 @@ function setOpen(next: boolean) {
     @update:open="setOpen"
   >
     <DialogContent :class="contentClass">
-      <DialogHeader>
+      <DialogHeader :class="{ 'sr-only': hideHeader }">
         <DialogTitle>{{ title }}</DialogTitle>
         <DialogDescription :class="{ 'sr-only': !description }">
           {{ description || title }}

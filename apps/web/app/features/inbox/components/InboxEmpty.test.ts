@@ -37,12 +37,11 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-it('explains an empty queue without saying the work is finished, and points to Activity', async () => {
-  const { wrapper, tab } = await show(null)
+it('explains an empty queue without saying the work is finished', async () => {
+  const { wrapper } = await show(null)
   expect(wrapper.text()).toContain('Agents may still be working')
   expect(wrapper.text()).not.toContain('All clear')
-  await wrapper.get('a').trigger('click')
-  expect(tab.value).toBe('activity')
+  expect(wrapper.text()).not.toContain('Activity')
 })
 
 it('sends a link to a read Plan reply to its conversation, with no decision to make', async () => {
@@ -57,11 +56,8 @@ it('sends a link to a resolved task to the task', async () => {
   expect(wrapper.get(`a[href="/tasks/${task.taskRef}"]`).text()).toBe('Open task')
 })
 
-it('leaves an unknown link on Activity, off its dead route', async () => {
-  const { wrapper, tab } = await show('gone')
-  const links = wrapper.findAll('a')
-  expect(links.map(a => a.text())).toEqual(['Open Activity'])
-  await links[0]!.trigger('click')
-  expect(tab.value).toBe('activity')
-  expect(replace).toHaveBeenCalledWith('/inbox')
+it('says an unknown link has nothing to decide, with nowhere to send it', async () => {
+  const { wrapper } = await show('gone')
+  expect(wrapper.text()).toContain('isn\'t waiting on you any more')
+  expect(wrapper.findAll('a')).toHaveLength(0)
 })

@@ -13,12 +13,12 @@ export const isOwnPane = (item: InboxItem | null) => isEpicItem(item) || item?.t
 export const isTaskItem = (item: InboxItem | null): item is TaskInboxItem => item?.taskId != null
 
 const PREFETCH_LIMIT_MS = 1000
-export const AGENTS_MAY_BE_WORKING = 'Agents may still be working; their updates are in Activity.'
+export const AGENTS_MAY_BE_WORKING = 'Agents may still be working.'
 
-// What each tab lists (D11): the server's lists, decisions first and
-// informational items read on demand under Activity.
-export function inboxTabs(inbox: Inbox | null): Record<'needsYou' | 'activity' | 'resolved', InboxItem[]> {
-  return { needsYou: inbox?.needsYou ?? [], activity: inbox?.activity ?? [], resolved: inbox?.resolved ?? [] }
+// What each tab lists (D11): the server's lists, decisions first. The server's
+// informational items (its activity list) have no place in the Inbox (D33).
+export function inboxTabs(inbox: Inbox | null): Record<'needsYou' | 'resolved', InboxItem[]> {
+  return { needsYou: inbox?.needsYou ?? [], resolved: inbox?.resolved ?? [] }
 }
 
 function createInboxView() {
@@ -32,7 +32,7 @@ function createInboxView() {
   const inbox = list.inbox
   // A failed refetch keeps the list it has
   const error = computed(() => inbox.value ? null : list.error.value?.message ?? null)
-  const tab = ref<'needsYou' | 'activity' | 'resolved'>('needsYou')
+  const tab = ref<'needsYou' | 'resolved'>('needsYou')
   const search = ref('')
 
   const isHidden = (item: InboxItem) => deletes.pending.value.includes(item.id)
@@ -42,7 +42,6 @@ function createInboxView() {
   const count = computed(() => (inbox.value?.count ?? 0) - tabs.value.needsYou.filter(isHidden).length)
   const emptyText = computed(() => {
     if (search.value) return 'Nothing matches your search.'
-    if (tab.value === 'activity') return 'No activity yet.'
     if (tab.value === 'resolved') return 'Nothing resolved yet.'
     return `No decisions are waiting on you. ${AGENTS_MAY_BE_WORKING}`
   })
@@ -58,7 +57,7 @@ function createInboxView() {
   }, { immediate: true })
   const selected = computed<InboxItem | null>(() => {
     if (!inbox.value || !selectedId.value) return null
-    return [...inbox.value.needsYou, ...inbox.value.activity, ...inbox.value.resolved].find(i => i.id === selectedId.value)
+    return [...inbox.value.needsYou, ...inbox.value.resolved].find(i => i.id === selectedId.value)
       ?? (openThread.value?.id === selectedId.value ? { ...openThread.value, unread: false } : null)
   })
 
@@ -76,7 +75,7 @@ function createInboxView() {
     // Opened from a link, the list shows the tab holding it. Only on arrival: a
     // decision that goes quiet while open doesn't move the list.
     if (item && !previous && !tabs.value[tab.value].some(i => i.id === item.id)) {
-      tab.value = tabs.value.activity.some(i => i.id === item.id) ? 'activity' : tabs.value.resolved.some(i => i.id === item.id) ? 'resolved' : tab.value
+      if (tabs.value.resolved.some(i => i.id === item.id)) tab.value = 'resolved'
     }
     // A selection with nothing to show (e.g. the last item was just resolved).
     // Plain /inbox?task= has no selection to lose: its dock is a shared link.

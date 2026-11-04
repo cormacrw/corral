@@ -49,7 +49,10 @@ function onFocusin(event: FocusEvent) {
         :alt="evidence.note || evidence.fileName || ''"
         class="aspect-video w-full bg-muted/50 object-contain"
       >
-      <span class="block truncate border-t border-border px-3 py-2 text-xs text-muted-foreground">{{ caption }}</span>
+      <span
+        class="block border-t border-border px-3 py-2 text-xs text-muted-foreground"
+        :title="caption ?? undefined"
+      ><span class="line-clamp-2">{{ caption }}</span></span>
     </button>
   </AppCarousel>
 </template>

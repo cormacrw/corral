@@ -11,3 +11,6 @@ export const isText = (e: Typed) => !!e.contentType && (e.contentType.startsWith
 // a PDF goes in one. Anything else that isn't shown above is a download.
 export const isPdf = (e: Typed) => !!e.contentType?.startsWith('application/pdf')
 export const kindLabel = (kind: Evidence['kind']) => kind.replace('_', ' ')
+// What a file proves: its acceptance criterion, or the task as a whole
+export const evidenceCriterion = (e: Pick<Evidence, 'criterionId'>, criteria: { id: string, text: string }[]) =>
+  criteria.find(c => c.id === e.criterionId)?.text ?? 'Task as a whole'

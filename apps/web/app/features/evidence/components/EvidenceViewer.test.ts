@@ -6,12 +6,12 @@ import EvidenceViewer, { type ViewerFile } from '~/features/evidence/components/
 
 const shot = (id: string): ViewerFile => ({ id, fileName: `${id}.png`, kind: 'screenshot', createdAt: new Date().toISOString(), note: '', url: `/${id}`, contentType: 'image/png' })
 const files = ['a', 'b', 'c'].map(shot)
-const Modal = defineComponent({ props: { open: Boolean, title: String }, setup: (p, { slots }) => () => h('div', { 'data-open': p.open, 'data-title': p.title }, slots.body?.()) })
+const Modal = defineComponent({ props: { open: Boolean, title: String, hideHeader: Boolean }, setup: (p, { slots }) => () => h('div', { 'data-open': p.open, 'data-title': p.title, 'data-hide-header': p.hideHeader }, slots.body?.()) })
 const Button = defineComponent({ emits: ['click'], setup: (p, { emit, attrs }) => () => h('button', { ...attrs, onClick: () => emit('click') }) })
 
-function render(open: ViewerFile | null, list?: ViewerFile[]) {
+function render(open: ViewerFile | null, list?: ViewerFile[], captions?: Record<string, string>) {
   const wrapper = mount(EvidenceViewer, {
-    props: { 'modelValue': open, 'files': list, 'onUpdate:modelValue': (f: ViewerFile | null) => wrapper.setProps({ modelValue: f }) },
+    props: { 'modelValue': open, 'files': list, 'captions': captions, 'onUpdate:modelValue': (f: ViewerFile | null) => wrapper.setProps({ modelValue: f }) },
     global: { components: { AppModal: Modal, AppButton: Button }, stubs: { AppLoadError: true, UiSkeleton: true } },
     attachTo: document.body
   })
@@ -49,6 +49,42 @@ describe('EvidenceViewer', () => {
     expect(title(wrapper)).toBe('b.png')
     await swipe(-120, 0)
     expect(title(wrapper)).toBe('c.png')
+    wrapper.unmount()
+  })
+
+  it('puts what a file proves under it, in place of its name up top', async () => {
+    const plain = render(files[0]!, files)
+    expect(plain.find('[data-testid="evidence-viewer-caption"]').exists()).toBe(false)
+    expect(plain.get('[data-title]').attributes('data-hide-header')).toBe('false')
+    plain.unmount()
+    const wrapper = render(files[0]!, files, { a: 'Expired codes show why', b: 'Task as a whole' })
+    expect(wrapper.get('[data-testid="evidence-viewer-caption"]').text()).toContain('Expired codes show why')
+    expect(wrapper.get('[data-title]').attributes('data-hide-header')).toBe('true')
+    await wrapper.get('[aria-label="Next file"]').trigger('click')
+    expect(wrapper.get('[data-testid="evidence-viewer-caption"]').text()).toContain('Task as a whole')
+    wrapper.unmount()
+  })
+
+  it('zooms an image with a double tap and swipes no further while zoomed', async () => {
+    const wrapper = render(files[1]!, files)
+    // Its touch listeners attach once it has rendered
+    await wrapper.vm.$nextTick()
+    const body = wrapper.get('[data-testid="evidence-viewer-body"]')
+    // Two taps in quick succession
+    const tap = async () => {
+      await body.trigger('touchstart', { touches: [{ clientX: 0, clientY: 0 }] })
+      await body.trigger('touchend', { touches: [], changedTouches: [{ clientX: 0, clientY: 0 }] })
+    }
+    await tap()
+    await tap()
+    expect(wrapper.get('img').attributes('style')).toContain('scale(2)')
+    // A one-finger drag now pans the image instead of changing file
+    await body.trigger('touchstart', { touches: [{ clientX: 200, clientY: 200 }] })
+    await body.trigger('touchend', { touches: [], changedTouches: [{ clientX: 80, clientY: 200 }] })
+    expect(title(wrapper)).toBe('b.png')
+    // Another file starts unzoomed
+    await wrapper.get('[aria-label="Next file"]').trigger('click')
+    expect(wrapper.get('img').attributes('style') ?? '').not.toContain('scale')
     wrapper.unmount()
   })
 

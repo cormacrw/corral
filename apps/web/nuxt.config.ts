@@ -97,7 +97,8 @@ export default defineNuxtConfig({
 
   // No icon server and no network, in every build: bundle each icon the code
   // names. A name built at runtime would not be found, so write names out in full.
-  icon: { provider: 'none', clientBundle: { scan: { globInclude: ['app/**/*.{vue,ts}'] }, sizeLimitKb: 0 } },
+  // Its CSS goes in Tailwind's base layer, so `size-*` and other utilities win.
+  icon: { provider: 'none', cssLayer: 'base', clientBundle: { scan: { globInclude: ['app/**/*.{vue,ts}'] }, sizeLimitKb: 0 } },
 
   ...(prototype && { plugins: ['~/prototype/storage.client.ts'] }),
 

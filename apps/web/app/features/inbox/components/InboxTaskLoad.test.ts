@@ -242,7 +242,8 @@ it('closes the dock when the item left the list and its action failed', async ()
 it('keeps the selected decision, list and count when an informational update arrives', async () => {
   const { wrapper, item, replace, refresh } = await mountInbox('failed', undefined, 'COR-1')
   try {
-    const rows = () => wrapper.findAll('li').map(row => row.text())
+    // The order and contents; read state is the mock's to restore
+    const rows = () => wrapper.findAll('li').map(row => row.text().replace(/^Unread/, ''))
     const before = rows()
     const note = { ...inbox().activity.find(i => i.type === 'release_notes')!, id: 'new-note', subject: 'Fresh release', at: new Date(Date.now() + 60_000).toISOString() }
     const count = inbox().count
@@ -404,10 +405,9 @@ it('opens the next item at the top of a new detail scroller', async () => {
 })
 
 it('reads any other item when opened, clearing its dot before the request, without fetching the Inbox', async () => {
-  const { wrapper, params, openTab } = await mountInbox('human_review')
+  const { wrapper, params } = await mountInbox('human_review')
   try {
-    const item = inbox().activity.find(i => i.type === 'activity')!
-    await openTab('activity')
+    const item = inbox().needsYou.find(i => i.unread && i.type !== 'plan_thread' && i.id !== params.itemId)!
     const dot = () => wrapper.findAll('li').find(li => li.text().includes(item.subject))?.find('[aria-label="Unread"]').exists()
     expect(dot()).toBe(true)
     expect(item.unread).toBe(true)
@@ -415,62 +415,9 @@ it('reads any other item when opened, clearing its dot before the request, witho
     vi.mocked(api.inbox.read).mockClear()
     params.itemId = item.id
     await flushPromises()
-    expect(api.inbox.read).toHaveBeenCalledWith({ type: 'activity', id: item.id })
+    expect(api.inbox.read).toHaveBeenCalledWith({ type: item.type, id: item.id })
     expect(dot()).toBe(false)
     expect(api.inbox.get).not.toHaveBeenCalled()
-  } finally {
-    wrapper.unmount()
-  }
-})
-
-it('clears a release note\'s dot before the request, without fetching the Inbox', async () => {
-  const { wrapper, params, emitLive, openTab } = await mountInbox('human_review')
-  try {
-    const note = inbox().activity.find(i => i.type === 'release_notes')!
-    await openTab('activity')
-    const dot = () => wrapper.findAll('li').find(li => li.text().includes(note.toSha))?.find('[aria-label="Unread"]').exists()
-    expect(dot()).toBe(true)
-    vi.mocked(api.inbox.get).mockClear()
-    vi.mocked(api.inbox.read).mockClear()
-    let finish = () => {}
-    vi.mocked(api.deployments.read).mockReturnValue(new Promise((resolve) => {
-      finish = () => resolve({} as never)
-    }))
-    params.itemId = note.id
-    await flushPromises()
-    expect(api.deployments.read).toHaveBeenCalledWith(note.id)
-    expect(dot()).toBe(false)
-    expect(api.inbox.read).not.toHaveBeenCalled()
-    finish()
-    await flushPromises()
-    await emitLive({ type: 'deployment.updated', deployment: { id: note.id }, markedRead: true })
-    await flushPromises()
-    expect(api.inbox.get).not.toHaveBeenCalled()
-    // Any other change to a deployment still reloads the list
-    await emitLive({ type: 'deployment.updated', deployment: { id: note.id } })
-    expect(api.inbox.get).toHaveBeenCalledOnce()
-  } finally {
-    wrapper.unmount()
-  }
-})
-
-it('fills in a pending release note when its deployment updates', async () => {
-  const { wrapper, params, emitLive, openTab } = await mountInbox('human_review')
-  try {
-    const note = inbox().activity.find(i => i.type === 'release_notes')!
-    await openTab('activity')
-    const dot = () => wrapper.findAll('li').find(li => li.text().includes(note.toSha))?.find('[aria-label="Unread"]').exists()
-    expect(dot()).toBe(true)
-    const withNote = (notesStatus: string, notes: string | null) => ({ ...inbox(), activity: inbox().activity.map(i => i.id === note.id ? { ...i, notesStatus, notes } : i) })
-    vi.mocked(api.inbox.get).mockImplementation(async () => withNote('pending', null) as never)
-    await emitLive({ type: 'deployment.updated', deployment: { id: note.id } })
-    params.itemId = note.id
-    await flushPromises()
-    expect(wrapper.text()).toContain('Writing release notes…')
-    vi.mocked(api.inbox.get).mockImplementation(async () => withNote('ready', 'What shipped') as never)
-    await emitLive({ type: 'deployment.updated', deployment: { id: note.id } })
-    await flushPromises()
-    expect(wrapper.text()).not.toContain('Writing release notes…')
   } finally {
     wrapper.unmount()
   }
@@ -835,7 +782,7 @@ it('asks for a reason before deleting, and sends nothing with no action chosen',
   }
 })
 
-it('hides criteria and review history until their tab opens, and shows no actions on Activity', async () => {
+it('hides criteria and review history until their tab opens, and shows no actions on a resolved item', async () => {
   const latestReview = { id: 'r1', round: 0, verdict: 'approved', headSha: 'abc1234', summary: 'Fine', criteria: [], createdAt: inbox().activity.find(i => i.type === 'activity')!.at } as never
   const { wrapper, params, openTab } = await mountInbox('human_review', 'COR-5', null, true, task => ({ ...task, latestReview }))
   try {
@@ -843,10 +790,11 @@ it('hides criteria and review history until their tab opens, and shows no action
     expect(wrapper.find('[data-tab="review"]').exists()).toBe(true)
     await openTab('criteria')
     expect(wrapper.findComponent(evidenceStub).exists()).toBe(true)
-    params.itemId = inbox().activity.find(i => i.type === 'activity')!.id
+    const resolved = inbox().resolved.find(i => i.taskId)!
+    params.itemId = resolved.id
     await flushPromises()
     expect(wrapper.find('[data-testid="inbox-actions"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="inbox-read-only"]').text()).toBe('For your information. Nothing to do.')
+    expect(wrapper.find('[data-testid="inbox-read-only"]').text()).toBe(resolved.resolution)
     expect(wrapper.findComponent(composerStub).exists()).toBe(false)
   } finally {
     wrapper.unmount()
@@ -989,7 +937,7 @@ describe('on a phone', () => {
 
   it('shows no action bar on a read-only item', async () => {
     const view = await phone()
-    for (const read of [inbox().activity.find(i => i.type === 'activity')!, inbox().resolved[0]!]) {
+    for (const read of inbox().resolved.filter(i => i.taskId).slice(0, 2)) {
       view.params.itemId = read.id
       await flushPromises()
       expect(view.wrapper.find('[data-testid="inbox-panel-option-d"]').exists()).toBe(true)

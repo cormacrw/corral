@@ -1020,3 +1020,15 @@ Sessions can be **global** as well as tied to a project. A global session has **
 - **Icons:** the app names icons as `i-hugeicons-*` through `@nuxt/icon` (the `@iconify-json/hugeicons` set). `components/ui` uses `HugeiconsIcon` from `@hugeicons/vue` with icons from `@hugeicons/core-free-icons`, as shadcn-vue writes them for `iconLibrary: hugeicons`. `shadcn-vue migrate icons` only converts from Lucide, so the switch from Remix was done by hand.
 
 **Why:** Owning the component code gives Corral control of every control's markup and removes a large dependency that also supplied its fonts, icons, colour mode and editor. The composites keep one typed API for tone, icons and loading, so that handling isn't repeated across the app.
+
+## D33 — The Inbox has no Activity tab
+
+**Context:** The Inbox listed agent progress, the PM's actions and undismissed release notes under an Activity tab (D11, D30, COR-129). On 2026-11-04 Cormac removed it: the Inbox is for decisions, and Activity isn't the place for that feed.
+
+**Decision:** The web app's Inbox has two tabs, **Inbox** (Needs you) and **Resolved**. This overrides D11, D30 and COR-129 where they say informational items "appear in Activity".
+
+- **Server unchanged:** `GET /api/inbox` still returns `activity`, and the server keeps recording agent progress, PM actions and release notes. The web app doesn't list them anywhere for now.
+- **Links:** a link to an informational item shows "This isn't waiting on you any more", with the task or parent link when known. Resolved items, including dismissed release notes, open as before.
+- **Open:** whether this feed gets a home of its own (a page, or a place in Plan), or stops being produced.
+
+**Why:** Cormac wants the Inbox to hold only what needs a decision, and the feed wasn't something to read there.

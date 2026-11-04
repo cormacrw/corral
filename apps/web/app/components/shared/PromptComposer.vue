@@ -21,6 +21,8 @@ const props = withDefaults(defineProps<{
   disabled?: boolean
   busy?: boolean
   submitLabel?: string
+  // Just the arrow, with the label as its accessible name and tooltip
+  submitIconOnly?: boolean
   submitColor?: 'primary' | 'error' | 'neutral'
   // Can send with an empty message (e.g. an action or attached task)
   allowEmpty?: boolean
@@ -34,7 +36,7 @@ const props = withDefaults(defineProps<{
   // Bound with @submit. Resolving to false means it wasn't sent, so the
   // images stay for another try.
   onSubmit?: (text: string) => unknown
-}>(), { placeholder: 'Write a message…', hint: '', disabled: false, busy: false, submitLabel: '', submitColor: 'primary', allowEmpty: false, rows: 2, project: null, draftKey: '', onSubmit: undefined })
+}>(), { placeholder: 'Write a message…', hint: '', disabled: false, busy: false, submitLabel: '', submitIconOnly: false, submitColor: 'primary', allowEmpty: false, rows: 2, project: null, draftKey: '', onSubmit: undefined })
 
 const text = defineModel<string>({ default: '' })
 const toast = useToast()
@@ -72,9 +74,9 @@ const uploading = computed(() => images.value.some(i => i.status === 'uploading'
 const ready = computed(() => images.value.filter(i => i.status === 'done'))
 const available = computed(() => !props.disabled && !props.busy && !sending.value && !uploading.value)
 const canSend = computed(() => available.value && (props.allowEmpty || text.value.trim().length > 0 || ready.value.length > 0))
-const submitAppearance = computed(() => props.submitLabel
+const submitAppearance = computed(() => props.submitLabel && !props.submitIconOnly
   ? { label: props.submitLabel, trailingIcon: 'i-hugeicons-arrow-up-02' }
-  : { 'icon': 'i-hugeicons-arrow-up-02', 'aria-label': 'Send' })
+  : { 'icon': 'i-hugeicons-arrow-up-02', 'aria-label': props.submitLabel || 'Send', 'title': props.submitLabel || undefined })
 
 async function send(message = text.value) {
   if (!available.value || (!props.allowEmpty && !message.trim() && ready.value.length === 0)) return false

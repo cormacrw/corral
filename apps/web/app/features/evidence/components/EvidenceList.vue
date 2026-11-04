@@ -4,6 +4,7 @@ import { computed, ref } from 'vue'
 import CriterionMetIcon from '~/features/evidence/components/CriterionMetIcon.vue'
 import EvidenceGroup from '~/features/evidence/components/EvidenceGroup.vue'
 import EvidenceViewer from '~/features/evidence/components/EvidenceViewer.vue'
+import { evidenceCriterion } from '~/features/evidence/utils/evidenceFile'
 import type { ViewerFile } from '~/features/evidence/components/EvidenceViewer.vue'
 
 // Criteria next to their evidence (PRD §7.7, design/inbox.md), with the
@@ -87,6 +88,7 @@ const note = (id: string) => latest.value?.criteria.find(c => c.criterionId === 
     <EvidenceViewer
       v-model="open"
       :files="files"
+      :captions="Object.fromEntries(props.evidence.map(e => [e.id, evidenceCriterion(e, props.criteria)]))"
     />
   </div>
 </template>

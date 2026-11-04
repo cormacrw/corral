@@ -27,7 +27,7 @@ defineExpose({ scroller })
       :items="tabs"
       :content="false"
       variant="link"
-      list-class="overflow-x-auto"
+      list-class="no-scrollbar max-w-full justify-start overflow-x-auto overflow-y-hidden pb-1"
       trigger-class="shrink-0"
       :class="['shrink-0', mobile ? 'px-1' : 'px-3']"
       data-testid="inbox-tabs"

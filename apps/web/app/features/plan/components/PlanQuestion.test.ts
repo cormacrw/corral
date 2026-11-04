@@ -15,7 +15,12 @@ const AppButton = defineComponent({
   setup: (props, { emit, attrs }) => () => h('button', { ...attrs, 'disabled': props.disabled, 'data-variant': props.variant, 'onClick': () => emit('click') }, props.label)
 })
 const MarkdownText = defineComponent({ props: { text: String }, setup: props => () => h('p', props.text) })
-const global = { components: { AppButton, MarkdownText } }
+const AppTextarea = defineComponent({
+  props: { modelValue: String, disabled: Boolean },
+  emits: ['update:modelValue'],
+  setup: (props, { emit, attrs }) => () => h('textarea', { ...attrs, value: props.modelValue, disabled: props.disabled, onInput: (e: Event) => emit('update:modelValue', (e.target as HTMLTextAreaElement).value) })
+})
+const global = { components: { AppButton, AppTextarea, MarkdownText } }
 
 const question = { text: 'Which database?', recommendation: 'Postgres', options: ['Postgres', 'SQLite', 'MySQL'] }
 const buttons = (wrapper: ReturnType<typeof mount>) => wrapper.findAll('button')
@@ -23,6 +28,24 @@ const labels = (wrapper: ReturnType<typeof mount>) => buttons(wrapper).map(b => 
 const button = (wrapper: ReturnType<typeof mount>, label: string) => buttons(wrapper).find(b => b.text() === label)!
 
 describe('PlanQuestion', () => {
+  it('writes Other… in the card when asked to, and submits it with Cmd or Ctrl+Enter', async () => {
+    const onSubmit = vi.fn()
+    const onUpdate = vi.fn()
+    const closed = mount(PlanQuestion, { props: { message: question, active: true }, global })
+    expect(closed.find('[data-testid="plan-question-other"]').exists()).toBe(false)
+    const wrapper = mount(PlanQuestion, { props: { 'message': question, 'active': true, 'writing': true, 'draft': '', 'onSubmit': onSubmit, 'onUpdate:draft': onUpdate }, global })
+    const input = wrapper.get('[data-testid="plan-question-other"]')
+    expect(button(wrapper, 'Other…').attributes('aria-pressed')).toBe('true')
+    await input.setValue('CockroachDB')
+    expect(onUpdate).toHaveBeenCalledWith('CockroachDB')
+    await input.trigger('keydown', { key: 'Enter', metaKey: true })
+    await input.trigger('keydown', { key: 'Enter', ctrlKey: true })
+    expect(onSubmit).toHaveBeenCalledTimes(2)
+    // A past question never opens it
+    const past = mount(PlanQuestion, { props: { message: question, active: false, writing: true }, global })
+    expect(past.find('[data-testid="plan-question-other"]').exists()).toBe(false)
+  })
+
   it('offers the recommendation, each option, Other… and Stop', () => {
     const wrapper = mount(PlanQuestion, { props: { message: question, active: true }, global })
     expect(wrapper.text()).toContain('Recommended: Postgres')
