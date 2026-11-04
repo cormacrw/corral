@@ -30,6 +30,8 @@ export type ServerEvent =
   | { type: 'profile.updated', profile: Profile }
   // A deployment's release notes were written. markedRead: only its read time changed
   | { type: 'deployment.updated', deployment: Deployment, markedRead?: true }
+  // The human opened an Inbox item (POST /inbox/read). Only its unread flag changed
+  | { type: 'inbox.read', itemType: string, id: string }
 
 export type ServerEventType = ServerEvent['type']
 

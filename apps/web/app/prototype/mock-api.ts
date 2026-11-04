@@ -322,6 +322,10 @@ route('POST', '/deployments/:id/dismiss', ([id]) => {
   return { ok: true }
 })
 route('GET', '/inbox', () => f.inbox())
+route('POST', '/inbox/read', (_params, body) => {
+  f.readItems.add((body as { id: string }).id)
+  return { ok: true }
+})
 // Let the static Inbox exercise send and auto-advance without a server.
 route('POST', '/inbox/:taskId/actions', ([taskId], body) => {
   const task = f.tasks.find(t => t.id === taskId) ?? notFound()

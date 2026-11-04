@@ -7,7 +7,7 @@ import { appendAudit, auditEvent } from './audit.ts'
 import { waitingDecision } from './epic-rebase-approval.ts'
 import { ApiFailure, failureReason, fromDatabaseError } from './errors.ts'
 import type { EventBus } from './events.ts'
-import { loadInbox, withRunnerItems } from './inbox.ts'
+import { loadInbox } from './inbox.ts'
 import type { Orchestrator } from './orchestrator.ts'
 import type { PmEdit, PmEditTool } from './pm-calls.ts'
 import { createProject, findProjectBySlug, listProjects, patchProject, toProject } from './projects.ts'
@@ -285,7 +285,7 @@ export class PmTools {
 
       case 'list_inbox': {
         strict(pmDirectTools.list_inbox.input)
-        const items = withRunnerItems(await loadInbox(db), runner.status().runners).needsYou
+        const items = (await loadInbox(db, runner.status().runners)).needsYou
         return { result: items.map(toolItem), summary: `Read the Inbox: ${items.length} ${items.length === 1 ? 'item' : 'items'}` }
       }
 

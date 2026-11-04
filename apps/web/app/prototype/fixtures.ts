@@ -1056,6 +1056,9 @@ export const epicHistory: EpicHistoryEntry[] = [
   { id: '3', at: ago(90), actor: 'Corral', event: 'approval_retained', text: 'Approval kept across the rebase: Approved 6f1c2ab94d, rebased 6f1c2ab94d to 2be07c11a3. The reviewer confirmed the resolution keeps the approved behaviour: both sides kept in export.ts.', detail: {} }
 ]
 
+// Items opened in the prototype, by ID (POST /inbox/read)
+export const readItems = new Set<string>()
+
 export function inbox(): Inbox {
   const needsYou: Inbox['needsYou'] = tasks
     .filter(t => t.status === 'human_review' || t.status === 'blocked' || t.status === 'failed')
@@ -1086,6 +1089,7 @@ export function inbox(): Inbox {
         at: t.updatedAt,
         prUrl: t.pr?.url ?? null,
         resolution: null,
+        unread: !readItems.has(t.id),
         ...(t.ref === 'COR-42' && { decision: epicDecision })
       }
     })
@@ -1120,7 +1124,7 @@ export function inbox(): Inbox {
       // The head moved after this was read, so the mock refuses any action on it
       prUrl: review.prUrl!, resolution: null, headSha: review.id === 'e-moved' ? 'stale-head' : review.prHeadSha!,
       tasks: tasks.filter(t => t.epicId === review.id).map(task => ({ task, evidence: evidence[task.id] ?? [], humanReview: task.humanReview, humanChecks: task.submission ? task.acceptanceCriteria.filter(c => c.checkedByHuman).map(c => c.id) : [] })),
-      since: null, newArtifacts: []
+      since: null, newArtifacts: [], unread: !readItems.has(review.id)
     })
   }
   const conflict = epics.find(e => e.reviewState === 'conflict')
@@ -1132,7 +1136,7 @@ export function inbox(): Inbox {
       id: conflict.id, type: 'epic_conflict', epicId: conflict.id, taskId: null, taskRef: null, subject: conflict.title,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
       preview: body, body, message: body, sender: { name: 'Corral', role: 'system' }, at: conflict.updatedAt,
-      prUrl: conflict.prUrl!, resolution: null, headSha: conflict.prHeadSha!, targetBranch: 'main', files, since: null, newArtifacts: []
+      prUrl: conflict.prUrl!, resolution: null, headSha: conflict.prHeadSha!, targetBranch: 'main', files, since: null, newArtifacts: [], unread: !readItems.has(conflict.id)
     })
   }
   const completed = tasks.find(t => t.status === 'merged')!
@@ -1143,20 +1147,20 @@ export function inbox(): Inbox {
     taskId: completed.id, taskRef: completed.ref, subject: completed.title,
     preview: 'The task was merged.', body: 'The task was merged.',
     sender: { name: 'Corral', role: 'system' }, at: completed.updatedAt,
-    prUrl: completed.pr?.url ?? null, resolution: null
+    prUrl: completed.pr?.url ?? null, resolution: null, unread: !readItems.has('activity-merged')
   }
   const activity: Inbox['activity'] = [merged]
   needsYou.sort((a, b) => b.at.localeCompare(a.at))
   activity.push(...releaseNotes.filter(r => !r.resolution))
   activity.sort((a, b) => b.at.localeCompare(a.at))
-  const approved = { ...merged, id: 'activity-approved', body: 'You approved and merged it', preview: 'You approved and merged it', resolution: 'You approved and merged it', sender: { name: 'Rita', role: 'reviewer' as const } }
+  const approved = { ...merged, id: 'activity-approved', body: 'You approved and merged it', preview: 'You approved and merged it', resolution: 'You approved and merged it', sender: { name: 'Rita', role: 'reviewer' as const }, unread: false }
   const epicMoment = (id: string, epicId: string, event: string, body: string, resolution: string | null): EpicActivityItem => {
     const epic = epics.find(e => e.id === epicId)!
     const project = projects.find(p => p.id === epic.projectId)!
     return {
       id, type: 'epic_activity', event, epicId, taskId: null, taskRef: null, subject: epic.title, preview: body, body,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
-      sender: resolution ? { name: 'You', role: 'system' } : { name: 'Corral', role: 'system' }, at: ago(40), prUrl: epic.prUrl, resolution
+      sender: resolution ? { name: 'You', role: 'system' } : { name: 'Corral', role: 'system' }, at: ago(40), prUrl: epic.prUrl, resolution, unread: !resolution && !readItems.has(id)
     }
   }
   activity.push(

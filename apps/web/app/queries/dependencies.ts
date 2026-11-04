@@ -81,12 +81,11 @@ function writeTask(task: Task, cache: EventCache): void {
 
 // Reading changes one row, so it needs no refetch. It never changes what's
 // listed or the count: a thread in Needs you still waits on a decision (D11).
+// Item IDs don't repeat across types: tasks, epics, sessions and deployments
+// are UUIDs, and audit-entry items are numbered or prefixed.
 export function inboxWithRead(current: Inbox, id: string): Inbox {
-  return {
-    ...current,
-    needsYou: current.needsYou.map(i => i.id === id && i.type === 'plan_thread' ? { ...i, unread: false } : i),
-    activity: current.activity.map(i => i.id === id && i.type === 'release_notes' ? { ...i, unread: false } : i)
-  }
+  const read = <T extends { id: string, unread: boolean }>(i: T): T => i.id === id && i.unread ? { ...i, unread: false } : i
+  return { ...current, needsYou: current.needsYou.map(read), activity: current.activity.map(read) }
 }
 
 // What a change to a project's tasks or runs leaves stale. A project not
@@ -243,6 +242,10 @@ export const eventDependencies: EventDependencies = {
   },
   'profile.updated': {
     write: ({ profile }, cache) => cache.set(keys.profile(), () => profile),
+    invalidates: () => []
+  },
+  'inbox.read': {
+    write: ({ id }, cache) => cache.set<Inbox>(keys.inbox(), inbox => inbox && inboxWithRead(inbox, id)),
     invalidates: () => []
   },
   'deployment.updated': {

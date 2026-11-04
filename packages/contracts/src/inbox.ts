@@ -20,6 +20,9 @@ interface InboxItemBase {
   message?: string
   sender: { name: string, role: AgentRole | 'system' }
   at: string
+  // Not opened since it arrived (`at`). Plan threads follow their session's
+  // flag and release notes their deployment's; Resolved items are always read.
+  unread: boolean
 }
 
 // A developer's one-line work note, posted as a task comment. taskRef names
@@ -119,7 +122,6 @@ interface PlanThreadBase extends Omit<InboxItemBase, 'project'> {
   resolution: null
   sessionId: string
   runtime: AgentRuntime
-  unread: boolean
   // Set while a PM turn is running
   activeRunId: string | null
 }
@@ -258,7 +260,6 @@ export interface ReleaseNotesItem extends InboxItemBase {
   toSha: string
   notes: string | null
   notesStatus: Deployment['notesStatus']
-  unread: boolean
   taskId: null
   taskRef: null
   prUrl: null
@@ -317,6 +318,14 @@ export interface Inbox {
   // needsYou's length; every Inbox badge is this or its per-project share
   count: number
 }
+
+// POST /inbox/read: the human opened an item. Plan threads and release notes
+// have their own read routes.
+export const inboxReadInput = z.object({
+  type: z.enum(['human_review', 'question', 'blocked', 'failed', 'stopped', 'activity', 'epic_review', 'epic_conflict', 'runner_update', 'epic_activity']),
+  id: z.string().min(1)
+})
+export type InboxReadInput = z.infer<typeof inboxReadInput>
 
 // What the human can do from an item's tray (design/inbox.md, D10)
 export const inboxActionInput = z.discriminatedUnion('action', [

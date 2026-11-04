@@ -4,7 +4,7 @@ import { auditText, readAudit, type AuditView } from './audit.ts'
 import { epicEventText, epicInboxItems } from './epic-prs.ts'
 import { waitingDecisions } from './epic-rebase-approval.ts'
 import { fileArtifacts, isNew, workNotes } from './inbox-changes.ts'
-import type { ActionableInboxItem, Comment, Evidence, Inbox, PlanThreadAttention, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
+import type { ActionableInboxItem, Comment, Evidence, Inbox, InboxItem, InboxReadInput, PlanThreadAttention, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { arrivalKey, storedMessages, withMessages, type PreparedItem } from './inbox-message.ts'
 import { ACTIVE_RUN_STATES, designPreviewUrl, humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
@@ -16,7 +16,7 @@ import { listEvidenceFor } from './runs.ts'
 import { idleStop, REPETITION_REASON } from './retry-recovery.ts'
 import { listCommentsFor } from './tasks.ts'
 
-const { deployments, agents, auditLog, planSessions, planEpics, planTasks, projects, reviews, runs, tasks, epics } = schema
+const { deployments, agents, auditLog, inboxReads, planSessions, planEpics, planTasks, projects, reviews, runs, tasks, epics } = schema
 
 // A request for changes, or an answer: a clarify is a resolve with a pinned comment
 const HUMAN_ACTIONS = ['human_request_changes', 'resolve', 'release_stop']
@@ -27,15 +27,16 @@ const ACTIVITY_EVENTS = ['pr_opened', 'pr_updated', 'pr_rebased', 'commit_submit
 // Resolved hold what's informational. Items are derived from tasks, Plan
 // sessions, the audit log and deployments; only their short conversational
 // prose is stored.
-export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
-  const [taskItems, threads, epicItems, [pm], recent] = await Promise.all([
+export async function loadInbox(db: Executor, runners: RunnerInfo[] = [], limit = 100): Promise<Inbox> {
+  const [taskItems, threads, epicItems, [pm], recent, reads] = await Promise.all([
     taskMessageItems(db),
     planThreads(db),
     epicInboxItems(db),
     db.select({ name: agents.name }).from(agents).where(eq(agents.role, 'pm')).limit(1),
     db.select({ deployment: deployments, project: projects }).from(deployments)
       .innerJoin(projects, eq(projects.id, deployments.projectId))
-      .orderBy(desc(deployments.createdAt), desc(deployments.id)).limit(20)
+      .orderBy(desc(deployments.createdAt), desc(deployments.id)).limit(20),
+    db.select().from(inboxReads)
   ])
   const releases: ReleaseNotesItem[] = recent.map(({ deployment: d, project }) => ({
     id: d.id, type: 'release_notes', deploymentId: d.id, project: projectTag(project),
@@ -46,7 +47,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     resolution: d.dismissedAt ? 'You dismissed these release notes' : null
   }))
   // One list, newest first by when each item began waiting (D11)
-  const needsYou = ([...taskItems, ...threads, ...epicItems] as ActionableInboxItem[]).sort((a, b) => b.at.localeCompare(a.at))
+  const needsYou = ([...taskItems, ...threads, ...epicItems, ...runnerUpdateItems(runners)] as ActionableInboxItem[]).sort((a, b) => b.at.localeCompare(a.at))
 
   const entries = await db.select({
     entry: { id: auditLog.id, actor: auditLog.actor, action: auditLog.action, detail: auditLog.detail, createdAt: auditLog.createdAt },
@@ -68,11 +69,11 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
     const base = { id: String(entry.id), project: projectTag(project), taskId: task.id, taskRef: taskRef(project.prefix, task.number), subject: task.title, prUrl: task.prUrl, at: entry.createdAt.toISOString() }
     if (entry.actor.kind === 'human' && !entry.actor.viaPm && (entry.action === 'task.deleted' || ['resolve', 'release_stop', 'human_approve', 'human_request_changes', 'send_back'].includes(event ?? ''))) {
       const resolution = resolutionText(entry.action, detail, task.type)
-      resolved.push({ ...base, type: 'activity', preview: resolution, body: resolution, sender: { name: 'You', role: 'system' }, resolution })
+      resolved.push({ ...base, type: 'activity', preview: resolution, body: resolution, sender: { name: 'You', role: 'system' }, resolution, unread: false })
     }
     if (entry.action === 'review.recorded' || entry.action === 'rebase.verified' || (entry.action === 'task.transition' && (ACTIVITY_EVENTS.includes(event ?? '') || (event === 'human_approve' && task.type === 'design')))) {
       const text = activityText(entry.action, event, detail, task.prNumber, task.type)
-      activity.push({ ...base, type: 'activity', preview: text, body: text, sender: senderOf(entry.actor), resolution: null })
+      activity.push({ ...base, type: 'activity', preview: text, body: text, sender: senderOf(entry.actor), resolution: null, unread: true })
     }
     if (activity.length >= limit + releases.length && resolved.length >= limit) break
   }
@@ -87,7 +88,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   for (const { entry, epic, project } of epicEvents) {
     const detail = readAudit(entry.detail)
     const body = epicEventText(detail)
-    const item: EpicActivityItem = { id: `epic-${entry.id}`, type: 'epic_activity', event: detail.event ?? '', epicId: epic.id, project: projectTag(project), taskId: null, taskRef: null, subject: epic.title, preview: body, body, sender: senderOf(entry.actor), at: entry.createdAt.toISOString(), prUrl: epic.prNumber ? `https://github.com/${project.repository}/pull/${epic.prNumber}` : null, resolution: entry.actor.kind === 'human' ? body : null }
+    const item: EpicActivityItem = { id: `epic-${entry.id}`, type: 'epic_activity', event: detail.event ?? '', epicId: epic.id, project: projectTag(project), taskId: null, taskRef: null, subject: epic.title, preview: body, body, sender: senderOf(entry.actor), at: entry.createdAt.toISOString(), prUrl: epic.prNumber ? `https://github.com/${project.repository}/pull/${epic.prNumber}` : null, resolution: entry.actor.kind === 'human' ? body : null, unread: entry.actor.kind !== 'human' }
     if (entry.actor.kind === 'human') resolved.push(item)
     else activity.push(item)
   }
@@ -103,7 +104,7 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   for (const { entry, project, session, task } of pmCalls) {
     const detail = entry.detail as { targetId?: string | null, summary?: string, sessionId: string, input?: { taskRef?: string } }
     const text = pmActivityText(entry.action, detail.summary ?? 'A PM action')
-    const base = { id: `pm-${entry.id}`, type: 'activity' as const, subject: text, preview: text, body: session ? `${text}. [PM conversation](/plan/${session.id})` : `${text}.`, sender: { name: 'PM', role: 'pm' as const }, at: entry.createdAt.toISOString(), prUrl: null, resolution: null }
+    const base = { id: `pm-${entry.id}`, type: 'activity' as const, subject: text, preview: text, body: session ? `${text}. [PM conversation](/plan/${session.id})` : `${text}.`, sender: { name: 'PM', role: 'pm' as const }, at: entry.createdAt.toISOString(), prUrl: null, resolution: null, unread: true }
     const tag = project ? projectTag(project) : { id: '', slug: '', name: session && session.projectId === null ? 'Global' : 'Removed project', thumbnailColor: null, thumbnailUrl: null }
     if (project && task && detail.input?.taskRef) activity.push({ ...base, project: tag, taskId: task.id, taskRef: taskRef(project.prefix, task.number) })
     else activity.push({ ...base, project: tag, taskId: null, taskRef: null })
@@ -111,7 +112,24 @@ export async function loadInbox(db: Executor, limit = 100): Promise<Inbox> {
   resolved.push(...releases.filter(d => d.resolution))
   activity.sort((a, b) => b.at.localeCompare(a.at))
   resolved.sort((a, b) => b.at.localeCompare(a.at))
-  return { needsYou, activity: activity.slice(0, limit), resolved: resolved.slice(0, limit), count: needsYou.length }
+  const readAt = new Map(reads.map(r => [r.key, r.readAt.toISOString()]))
+  const withRead = <T extends InboxItem>(item: T): T => OWN_READ_STATE.has(item.type) || !item.unread ? item : { ...item, unread: !isRead(readAt.get(inboxReadKey(item)), item.at) }
+  return { needsYou: needsYou.map(withRead), activity: activity.slice(0, limit).map(withRead), resolved: resolved.slice(0, limit), count: needsYou.length }
+}
+
+// Plan threads and release notes are read through their session or deployment
+const OWN_READ_STATE = new Set<InboxItem['type']>(['plan_thread', 'release_notes'])
+
+export const inboxReadKey = (item: Pick<InboxItem, 'type' | 'id'>) => `${item.type}:${item.id}`
+
+// Read when opened at or after it arrived. A task re-entering a status, or a
+// runner reconnecting, arrives again and is unread until opened again.
+const isRead = (readAt: string | undefined, at: string) => readAt !== undefined && readAt >= at
+
+// The human opened an item (POST /inbox/read)
+export async function markInboxRead(db: Executor, item: InboxReadInput): Promise<void> {
+  await db.insert(inboxReads).values({ key: inboxReadKey(item) })
+    .onConflictDoUpdate({ target: inboxReads.key, set: { readAt: sql`now()` } })
 }
 
 // Runners live in memory, not the database, so the route adds these. Dated by
@@ -124,14 +142,9 @@ export function runnerUpdateItems(runners: RunnerInfo[], now = Date.now()): Runn
       id: runnerItemId(runner.id), type: 'runner_update', project: null, runnerId: runner.id, online: runner.online,
       commit: runner.commit, serverCommit: runner.serverCommit, subject: `${runner.name} can't update`,
       preview: problem.slice(0, 200), body: problem, sender: { name: 'Corral', role: 'system' }, at: runner.connectedAt,
-      taskId: null, taskRef: null, prUrl: null, resolution: null
+      taskId: null, taskRef: null, prUrl: null, resolution: null, unread: true
     }]
   })
-}
-
-export function withRunnerItems(inbox: Inbox, runners: RunnerInfo[]): Inbox {
-  const needsYou = [...inbox.needsYou, ...runnerUpdateItems(runners)].sort((a, b) => b.at.localeCompare(a.at))
-  return { ...inbox, needsYou, count: needsYou.length }
 }
 
 // Only open sessions waiting on a human decision belong in the Inbox: a
@@ -343,6 +356,7 @@ async function prepareTaskItems(db: Executor, open: Open[]): Promise<PreparedIte
       at,
       prUrl: task.prUrl,
       resolution: null,
+      unread: true,
       ...decision && { decision },
       ...taskChanges(task, actions.get(task.id) ?? null, evidence.get(task.id) ?? [], notes, taskVersions)
     }

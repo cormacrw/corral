@@ -490,7 +490,7 @@ async function prepareEpicItems(db: Executor, epicId?: string): Promise<Prepared
     const shared = {
       id: epic.id, epicId: epic.id, taskId: null, taskRef: null, subject: epic.title,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: thumbnailUrl(project) },
-      at, prUrl: epic.prNumber ? `https://github.com/${project.repository}/pull/${epic.prNumber}` : `https://github.com/${project.repository}/tree/${epic.branch}`, resolution: null, headSha: epic.prHeadSha ?? epic.branch ?? epic.id,
+      at, prUrl: epic.prNumber ? `https://github.com/${project.repository}/pull/${epic.prNumber}` : `https://github.com/${project.repository}/tree/${epic.branch}`, resolution: null, unread: true, headSha: epic.prHeadSha ?? epic.branch ?? epic.id,
       ...epicChanges(all, boards[i]!, comments)
     }
     if (type === 'epic_review') {

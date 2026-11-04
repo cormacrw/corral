@@ -97,6 +97,7 @@ export const pmRouteExclusions: Record<string, string> = {
   'POST /api/plan/sessions/:id/read': 'Human UI read receipt; PM reading a thread must not clear the human unread state.',
   'POST /api/plan/plans/:id/discard': 'Human decision to discard a proposed plan; close_thread deliberately refuses threads with proposals or owned drafts.',
   'POST /api/deployments': 'Called by the deploy script to record a deployment, not by PM.',
+  'POST /api/inbox/read': 'Human Inbox read receipt; PM listing the Inbox must not clear human unread state.',
   'POST /api/deployments/:id/read': 'Human release-note read receipt; PM must not clear human unread state.',
   'POST /api/deployments/:id/dismiss': 'Human release-note dismissal; no PM deployment dismissal tool.',
   'GET /api/projects/:slug/metrics/flow': 'Human flow dashboard cohort and timing analytics; run tools report individual runs rather than aggregate flow metrics.',

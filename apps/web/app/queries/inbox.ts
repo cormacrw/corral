@@ -1,12 +1,12 @@
 import { matchMutation, queryOptions, useQuery, useQueryClient } from '@tanstack/vue-query'
-import type { Inbox, InboxActionInput, Task } from '@corral/contracts'
+import type { Inbox, InboxActionInput, InboxReadInput, Task } from '@corral/contracts'
 import { computed, onScopeDispose, shallowRef } from 'vue'
 import { api } from '~/composables/useApi'
 import { defineMutation, inboxWithRead, invalidateKeys, writeTaskResponse } from './dependencies'
 import { keys } from './keys'
 
 // Reads land in the cache as they happen, and a response can predate them
-const unreadIds = (inbox: Inbox | undefined) => [...inbox?.needsYou ?? [], ...inbox?.activity ?? []].filter(i => 'unread' in i && i.unread).map(i => i.id)
+const unreadIds = (inbox: Inbox | undefined) => [...inbox?.needsYou ?? [], ...inbox?.activity ?? []].filter(i => i.unread).map(i => i.id)
 
 export const inboxQuery = () => queryOptions({
   queryKey: keys.inbox(),
@@ -14,7 +14,7 @@ export const inboxQuery = () => queryOptions({
     const before = client.getQueryData<Inbox>(keys.inbox())
     const loaded = await api.inbox.get()
     const still = new Set(unreadIds(client.getQueryData<Inbox>(keys.inbox())))
-    return unreadIds(before).filter(id => !still.has(id)).reduce(inboxWithRead, loaded)
+    return unreadIds(before).filter(id => !still.has(id)).reduce((inbox, id) => inboxWithRead(inbox, id), loaded)
   }
 })
 
@@ -35,6 +35,15 @@ export const readDeployment = {
     client.setQueryData<Inbox>(keys.inbox(), inbox => inbox && inboxWithRead(inbox, id))
   },
   onError: (_error: Error, _id: string, _context: unknown, { client }: { client: ReturnType<typeof useQueryClient> }) => invalidateKeys(client, [keys.inbox()])
+}
+
+// Any other item, when opened. Plan threads and release notes read their own way.
+export const readInboxItem = {
+  ...defineMutation<unknown, InboxReadInput>({ mutationFn: input => api.inbox.read(input), invalidates: [] }),
+  onMutate: ({ id }: InboxReadInput, { client }: { client: ReturnType<typeof useQueryClient> }) => {
+    client.setQueryData<Inbox>(keys.inbox(), inbox => inbox && inboxWithRead(inbox, id))
+  },
+  onError: (_error: Error, _input: InboxReadInput, _context: unknown, { client }: { client: ReturnType<typeof useQueryClient> }) => invalidateKeys(client, [keys.inbox()])
 }
 
 export const dismissDeployment = defineMutation<unknown, string>({

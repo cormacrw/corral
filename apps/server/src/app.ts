@@ -16,6 +16,7 @@ import {
   humanTransitionInput,
   flowMetricsQuery,
   inboxActionInput,
+  inboxReadInput,
   epicReviewActionInput,
   patchAgentInput,
   patchEpicInput,
@@ -54,7 +55,7 @@ import { epicHistory } from './epic-prs.ts'
 import { getEpicReview } from './epic-review.ts'
 import { getEpic, listEpicHistory, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
 import type { EventBus } from './events.ts'
-import { loadInbox, withRunnerItems } from './inbox.ts'
+import { loadInbox, markInboxRead } from './inbox.ts'
 import type { GitHubClient } from './github.ts'
 import { listPullRequests, readPullRequest } from './pull-requests.ts'
 import { createProject, findProjectBySlug, listProjects, patchProject, setProjectThumbnail, toProject } from './projects.ts'
@@ -612,7 +613,14 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
     // Its Drafts are deleted; the session stays, so the PM can propose again
     .post('/plan/plans/:id/discard', async c => c.json(await plans.discard(c.req.param('id'), actor)))
 
-    .get('/inbox', async c => c.json(withRunnerItems(await loadInbox(db), runner.status().runners)))
+    .get('/inbox', async c => c.json(await loadInbox(db, runner.status().runners)))
+
+    .post('/inbox/read', validate('json', inboxReadInput), async (c) => {
+      const input = c.req.valid('json')
+      await markInboxRead(db, input)
+      events.publish({ type: 'inbox.read', itemType: input.type, id: input.id })
+      return c.json({ ok: true })
+    })
 
     .post('/inbox/:taskId/actions', validate('json', inboxActionInput), async (c) => {
       const [row] = await db.select({ id: schema.tasks.id }).from(schema.tasks)

@@ -1,10 +1,10 @@
 // What the Inbox's list and its selected item share (design/inbox.md):
 // pages/inbox.vue provides it, so it lasts across selections, and
 // pages/inbox/[itemId].vue, which remounts per item, reads it.
-import { useQueryClient } from '@tanstack/vue-query'
+import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import type { EpicActivityItem, EpicConflictItem, EpicReviewItem, Inbox, InboxItem, PlanThreadItem, TaskInboxItem } from '@corral/contracts'
 import { inject, provide, type InjectionKey } from 'vue'
-import { useHeldInbox } from '~/queries/inbox'
+import { readInboxItem, useHeldInbox } from '~/queries/inbox'
 import { taskQuery } from '~/queries/tasks'
 
 export type EpicInboxItem = EpicReviewItem | EpicConflictItem | EpicActivityItem
@@ -61,6 +61,15 @@ function createInboxView() {
     return [...inbox.value.needsYou, ...inbox.value.activity, ...inbox.value.resolved].find(i => i.id === selectedId.value)
       ?? (openThread.value?.id === selectedId.value ? { ...openThread.value, unread: false } : null)
   })
+
+  // Opening an item reads it, as in email. Plan threads and release notes read
+  // through their own panes. By ID, not the flag: a failed read restores the
+  // flag and must not try again in a loop.
+  const read = useMutation(readInboxItem)
+  watch(() => selected.value && `${selected.value.type}:${selected.value.id}`, () => {
+    const item = selected.value
+    if (item?.unread && item.type !== 'plan_thread' && item.type !== 'release_notes') read.mutate({ type: item.type, id: item.id })
+  }, { immediate: true })
 
   watch(() => selected.value?.id, async (_, previous) => {
     const item = selected.value

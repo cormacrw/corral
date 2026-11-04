@@ -33,7 +33,7 @@ import InboxIndexPage from '~/pages/inbox/index.vue'
 vi.mock('~/composables/useDevice', () => ({ useDevice: () => (globalThis as unknown as { useDevice: () => unknown }).useDevice() }))
 vi.mock('~/composables/useApi', () => ({
   api: {
-    inbox: { get: vi.fn(), act: vi.fn() },
+    inbox: { get: vi.fn(), act: vi.fn(), read: vi.fn().mockResolvedValue({}) },
     projects: { pullRequest: vi.fn() },
     tasks: { byRef: vi.fn(), evidence: vi.fn(), reviews: vi.fn(), designs: vi.fn(), comment: vi.fn() },
     deployments: { read: vi.fn() },
@@ -403,11 +403,35 @@ it('opens the next item at the top of a new detail scroller', async () => {
   }
 })
 
+it('reads any other item when opened, clearing its dot before the request, without fetching the Inbox', async () => {
+  const { wrapper, params, openTab } = await mountInbox('human_review')
+  try {
+    const item = inbox().activity.find(i => i.type === 'activity')!
+    await openTab('activity')
+    const dot = () => wrapper.findAll('li').find(li => li.text().includes(item.subject))?.find('[aria-label="Unread"]').exists()
+    expect(dot()).toBe(true)
+    expect(item.unread).toBe(true)
+    vi.mocked(api.inbox.get).mockClear()
+    vi.mocked(api.inbox.read).mockClear()
+    params.itemId = item.id
+    await flushPromises()
+    expect(api.inbox.read).toHaveBeenCalledWith({ type: 'activity', id: item.id })
+    expect(dot()).toBe(false)
+    expect(api.inbox.get).not.toHaveBeenCalled()
+  } finally {
+    wrapper.unmount()
+  }
+})
+
 it('clears a release note\'s dot before the request, without fetching the Inbox', async () => {
-  const { wrapper, params, emitLive } = await mountInbox('human_review')
+  const { wrapper, params, emitLive, openTab } = await mountInbox('human_review')
   try {
     const note = inbox().activity.find(i => i.type === 'release_notes')!
+    await openTab('activity')
+    const dot = () => wrapper.findAll('li').find(li => li.text().includes(note.toSha))?.find('[aria-label="Unread"]').exists()
+    expect(dot()).toBe(true)
     vi.mocked(api.inbox.get).mockClear()
+    vi.mocked(api.inbox.read).mockClear()
     let finish = () => {}
     vi.mocked(api.deployments.read).mockReturnValue(new Promise((resolve) => {
       finish = () => resolve({} as never)
@@ -415,7 +439,8 @@ it('clears a release note\'s dot before the request, without fetching the Inbox'
     params.itemId = note.id
     await flushPromises()
     expect(api.deployments.read).toHaveBeenCalledWith(note.id)
-    expect(wrapper.find('[aria-label="Unread"]').exists()).toBe(false)
+    expect(dot()).toBe(false)
+    expect(api.inbox.read).not.toHaveBeenCalled()
     finish()
     await flushPromises()
     await emitLive({ type: 'deployment.updated', deployment: { id: note.id }, markedRead: true })
@@ -430,9 +455,12 @@ it('clears a release note\'s dot before the request, without fetching the Inbox'
 })
 
 it('fills in a pending release note when its deployment updates', async () => {
-  const { wrapper, params, emitLive } = await mountInbox('human_review')
+  const { wrapper, params, emitLive, openTab } = await mountInbox('human_review')
   try {
     const note = inbox().activity.find(i => i.type === 'release_notes')!
+    await openTab('activity')
+    const dot = () => wrapper.findAll('li').find(li => li.text().includes(note.toSha))?.find('[aria-label="Unread"]').exists()
+    expect(dot()).toBe(true)
     const withNote = (notesStatus: string, notes: string | null) => ({ ...inbox(), activity: inbox().activity.map(i => i.id === note.id ? { ...i, notesStatus, notes } : i) })
     vi.mocked(api.inbox.get).mockImplementation(async () => withNote('pending', null) as never)
     await emitLive({ type: 'deployment.updated', deployment: { id: note.id } })
@@ -977,7 +1005,7 @@ it.each([false, true])('opens parent history with a parent task link and no task
       id: 'epic-100', type: 'epic_activity', event: 'human_changes_requested', epicId: 'epic-id',
       project: projects[0]!, subject: 'Parent history', preview: 'You requested changes', body: 'You requested changes: Cover the empty parent',
       sender: { name: 'You', role: 'system' }, at: '2026-10-31T12:00:00.000Z',
-      taskId: null, taskRef: null, prUrl: null, resolution: 'You requested changes: Cover the empty parent'
+      taskId: null, taskRef: null, prUrl: null, resolution: 'You requested changes: Cover the empty parent', unread: false
     }
     vi.mocked(api.inbox.get).mockResolvedValue({ needsYou: [], activity: [], resolved: [epic], count: 0 })
     vi.mocked(api.tasks.byRef).mockClear()

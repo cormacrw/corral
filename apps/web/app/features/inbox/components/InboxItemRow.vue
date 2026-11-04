@@ -11,7 +11,7 @@ const prefix = computed(() => inboxTitlePrefix(props.item))
 
 <template>
   <span
-    v-if="item.type === 'release_notes' && item.unread"
+    v-if="item.unread"
     class="mt-2 size-2 shrink-0 rounded-full bg-primary"
     aria-label="Unread"
   />

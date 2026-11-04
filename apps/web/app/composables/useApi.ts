@@ -23,6 +23,7 @@ import type {
   HumanTransitionInput,
   Inbox,
   InboxActionInput,
+  InboxReadInput,
   CreateAgentInput,
   PatchAgentInput,
   PatchEpicInput,
@@ -210,7 +211,8 @@ export const api = {
 
   inbox: {
     get: () => call<Inbox>('GET', '/inbox'),
-    act: (taskId: string, input: InboxActionInput) => call<{ task: Task | null }>('POST', `/inbox/${taskId}/actions`, input)
+    act: (taskId: string, input: InboxActionInput) => call<{ task: Task | null }>('POST', `/inbox/${taskId}/actions`, input),
+    read: (input: InboxReadInput) => call('POST', '/inbox/read', input)
   },
 
   epics: {
