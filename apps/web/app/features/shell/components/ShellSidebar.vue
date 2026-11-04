@@ -30,12 +30,7 @@ const PROJECT_PAGES = [
         to="/"
         class="flex items-center gap-2 p-1 font-semibold"
       >
-        <span class="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
-          <Icon
-            name="i-hugeicons-shield-energy"
-            class="size-4"
-          />
-        </span>
+        <AppLogo class="size-6" />
         <span class="group-data-[collapsible=icon]:hidden">Corral</span>
       </NuxtLink>
       <UiSidebarMenu>

@@ -8,7 +8,8 @@ useHead({
   ],
   link: [
     // Relative in the prototype, which runs from a sub-path
-    { rel: 'icon', href: import.meta.prototype ? 'favicon.ico' : '/favicon.ico' }
+    { rel: 'icon', href: import.meta.prototype ? 'favicon.ico' : '/favicon.ico', sizes: '32x32' },
+    { rel: 'icon', href: import.meta.prototype ? 'favicon.svg' : '/favicon.svg', type: 'image/svg+xml' }
   ],
   htmlAttrs: {
     lang: 'en'
