@@ -14,6 +14,9 @@ export interface ServerConfig {
   databaseUrl: string | undefined
   // Where people open Corral, for links in PR bodies (the web origin)
   publicUrl: string
+  // A demo instance (`pnpm dev:demo`): a saved fake GitHub and a demo runner
+  // instead of real ones (src/demo/). Never set in a deployment.
+  demo: boolean
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
@@ -28,7 +31,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     host: env.CORRAL_SERVER_HOST || '127.0.0.1',
     port: parsePort(env.CORRAL_SERVER_PORT, 4100),
     databaseUrl: env.CORRAL_DATABASE_URL || undefined,
-    publicUrl: (env.CORRAL_PUBLIC_URL || 'http://localhost:3000').replace(/\/+$/, '')
+    publicUrl: (env.CORRAL_PUBLIC_URL || 'http://localhost:3000').replace(/\/+$/, ''),
+    demo: env.CORRAL_DEMO === '1'
   }
 }
 

@@ -10,7 +10,8 @@ describe('loadConfig', () => {
       host: '127.0.0.1',
       port: 4100,
       databaseUrl: undefined,
-      publicUrl: 'http://localhost:3000'
+      publicUrl: 'http://localhost:3000',
+      demo: false
     })
   })
 
@@ -26,8 +27,14 @@ describe('loadConfig', () => {
       host: '0.0.0.0',
       port: 8080,
       databaseUrl: 'postgres://corral@postgres/corral',
-      publicUrl: 'https://corral.example.com'
+      publicUrl: 'https://corral.example.com',
+      demo: false
     })
+  })
+
+  it('runs as a demo only when CORRAL_DEMO is 1', () => {
+    expect(loadConfig({ CORRAL_DEMO: '1' }).demo).toBe(true)
+    expect(loadConfig({ CORRAL_DEMO: 'true' }).demo).toBe(false)
   })
 
   it('requires a token before enabling the external listener', () => {

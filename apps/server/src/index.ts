@@ -1,4 +1,4 @@
-import { databaseLocation, openDatabase } from '@corral/db'
+import { databaseLocation, openDatabase, schema } from '@corral/db'
 import { join } from 'node:path'
 import { formatDuration, printReady, redactUrl, shortenHome } from './banner.ts'
 import { ensureAgents, ensureOwner } from './bootstrap.ts'
@@ -19,13 +19,19 @@ const config = loadConfig()
 const location = databaseLocation(config.databaseUrl, config.dataDir)
 const database = await openDatabase(location)
 const events = new EventBus()
+// Only a demo instance loads the demo code (`pnpm dev:demo`)
+const demo = config.demo
+  ? { ...await import('./demo/demo-github.ts'), ...await import('./demo/demo-runner.ts') }
+  : undefined
 await ensureAgents(database.db)
 const services = createServices({
   db: database.db,
   events,
   spoolDir: join(config.dataDir, 'spool'),
   blobDir: join(config.dataDir, 'blobs'),
-  publicUrl: config.publicUrl
+  publicUrl: config.publicUrl,
+  // A demo instance (`pnpm dev:demo`) talks to a saved fake GitHub, never the real one
+  ...(demo && { github: demo.DemoGitHub.load(join(config.dataDir, 'demo-github.json')) })
 })
 
 const deps = { db: database.db, events, actor: await ensureOwner(database.db), ...services }
@@ -37,10 +43,14 @@ const runnerServer = config.runnerListen
   ? await startServer(deps, { ...config.runnerListen, runnerToken: config.runnerToken, runnerOnly: true })
   : undefined
 services.orchestrator.start()
+const stopDemoRunner = demo
+  ? await demo.startDemoRunner(server.url, async () => (await database.db.select({ repository: schema.projects.repository }).from(schema.projects)).map(p => p.repository))
+  : undefined
 printReady(`Corral API ready in ${formatDuration(process.uptime() * 1000)}`, {
   API: `${server.url}/api`,
   Runner: `${server.url.replace(/^http/, 'ws')}/runner`,
   ...(runnerServer ? { 'Tailnet runner': `${runnerServer.url.replace(/^http/, 'ws')}/runner` } : {}),
+  ...(demo ? { Demo: 'fake GitHub and a PM-only demo runner; no agent work starts' } : {}),
   Database: location.driver === 'postgres'
     ? `Postgres ${redactUrl(location.url)}`
     : `PGlite ${shortenHome(location.dataDir ?? 'in memory')}`
@@ -51,6 +61,7 @@ printReady(`Corral API ready in ${formatDuration(process.uptime() * 1000)}`, {
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
     services.orchestrator.stop()
+    stopDemoRunner?.()
     void Promise.all([server.close(), runnerServer?.close()]).finally(() => services.performance.stop().finally(() => database.close().finally(() => process.exit(0))))
     // Never hang a stop: if something above doesn't finish, exit anyway
     setTimeout(() => process.exit(0), 5000).unref()

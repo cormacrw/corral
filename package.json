@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.ts",
+    "dev:demo": "node scripts/dev.ts --demo",
+    "seed:demo": "node apps/server/src/demo/seed.ts --force",
     "build": "turbo run build",
     "lint": "turbo run lint && eslint scripts",
     "typecheck": "turbo run typecheck && tsc",

@@ -23,7 +23,8 @@ export class FakeGitHub implements GitHubClient {
   behind = new Map<string, number>()
   // What ciFailure answers, by check name; anything else can't be read
   ciLogs = new Map<string, { step: string | null, log: string }>()
-  #nextNumber = 1
+  // The next PR number; public so a saved demo GitHub can carry on from it
+  nextNumber = 1
 
   #key(repository: string, branch: string): string {
     return `${repository}#${branch}`
@@ -77,7 +78,7 @@ export class FakeGitHub implements GitHubClient {
     this.#record('openPullRequest', repository, input)
     const head = this.branches.get(this.#key(repository, input.head))
     if (!head) throw new Error(`Branch ${input.head} doesn't exist on ${repository}`)
-    const number = this.#nextNumber++
+    const number = this.nextNumber++
     const pr = {
       number,
       nodeId: `PR_node${number}`,

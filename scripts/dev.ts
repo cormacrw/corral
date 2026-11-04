@@ -2,7 +2,14 @@
 // checkouts (e.g. agents in separate worktrees) can run at once: each gets its
 // own data dir under .corral/ and its own ports, written to .corral/dev.json
 // so tools and agents can find this instance.
-import { spawn } from 'node:child_process'
+//
+// `pnpm dev:demo` (`--demo`) runs web and server on a seeded demo instead:
+// data in .corral/demo/server, seeded on first start (`--reseed` starts
+// over), a saved fake GitHub and, instead of the runner, a demo one that
+// only answers the PM with a note, so no agent ever starts
+// (apps/server/src/demo/seed.ts).
+import { spawn, spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { join, resolve } from 'node:path'
@@ -10,6 +17,10 @@ import { join, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '..')
 const instanceDir = join(root, '.corral')
 const host = '127.0.0.1'
+const demo = process.argv.includes('--demo')
+const reseed = process.argv.includes('--reseed')
+const turboArgs = process.argv.slice(2).filter(arg => arg !== '--demo' && arg !== '--reseed')
+const demoDataDir = join(instanceDir, 'demo', 'server')
 
 // Prefer the usual ports so a single instance stays predictable
 const serverPort = await pickPort(process.env.CORRAL_SERVER_PORT, 4100)
@@ -24,8 +35,14 @@ const env = {
   CORRAL_WEB_PORT: String(webPort),
   // Links in PR bodies point at the web app (D8: PRs link to Corral's evidence page)
   CORRAL_PUBLIC_URL: process.env.CORRAL_PUBLIC_URL || `http://localhost:${webPort}`,
-  CORRAL_SERVER_DATA_DIR: process.env.CORRAL_SERVER_DATA_DIR || join(instanceDir, 'server'),
-  CORRAL_RUNNER_DATA_DIR: process.env.CORRAL_RUNNER_DATA_DIR || join(instanceDir, 'runner')
+  CORRAL_SERVER_DATA_DIR: demo ? demoDataDir : process.env.CORRAL_SERVER_DATA_DIR || join(instanceDir, 'server'),
+  CORRAL_RUNNER_DATA_DIR: process.env.CORRAL_RUNNER_DATA_DIR || join(instanceDir, 'runner'),
+  ...(demo && { CORRAL_DEMO: '1' })
+}
+
+if (demo && (reseed || !existsSync(demoDataDir))) {
+  const seed = spawnSync(process.execPath, [join(root, 'apps', 'server', 'src', 'demo', 'seed.ts'), '--data-dir', demoDataDir, '--force'], { cwd: root, env: { ...env, CORRAL_DEMO_SEEDING_FOR_DEV: '1' }, stdio: 'inherit' })
+  if (seed.status !== 0) process.exit(seed.status ?? 1)
 }
 
 const instance = {
@@ -33,13 +50,14 @@ const instance = {
   webUrl: `http://localhost:${webPort}`,
   serverUrl,
   serverDataDir: env.CORRAL_SERVER_DATA_DIR,
-  runnerDataDir: env.CORRAL_RUNNER_DATA_DIR
+  runnerDataDir: env.CORRAL_RUNNER_DATA_DIR,
+  demo
 }
 await mkdir(instanceDir, { recursive: true })
 await writeFile(join(instanceDir, 'dev.json'), JSON.stringify(instance, null, 2) + '\n')
-console.log(`corral dev: web ${instance.webUrl}, server ${serverUrl} (details in .corral/dev.json)`)
+console.log(`corral dev${demo ? ' (demo)' : ''}: web ${instance.webUrl}, server ${serverUrl} (details in .corral/dev.json)`)
 
-const turbo = spawn('turbo', ['run', 'dev', ...process.argv.slice(2)], { cwd: root, env, stdio: 'inherit' })
+const turbo = spawn('turbo', ['run', 'dev', ...(demo ? ['--filter=!@corral/runner'] : []), ...turboArgs], { cwd: root, env, stdio: 'inherit' })
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => turbo.kill(signal))
 }

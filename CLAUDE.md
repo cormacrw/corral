@@ -9,6 +9,7 @@ Current phase: local-only POC, single user, agents run through the user's own lo
 No local Docker or Postgres is needed. Node 26 runs the TypeScript directly.
 
 - `pnpm dev`: web, server and runner for this checkout, on free ports written to `.corral/dev.json`
+- `pnpm dev:demo`: web and server on seeded demo data (every board state, Inbox items, Plan threads, PRs), with a fake GitHub and no agents. Use it to see or check UI without setting anything up. `--reseed` starts the data over (`.corral/wiki/demo-data.md`)
 - `pnpm run check`: the full gate (lint, typecheck, build, tests). Agent runs check what their prompt asks for, because `CORRAL_CHECK_SCOPE` narrows it (`.corral/wiki/bounded-checks.md`). `CORRAL_CHECK_CPUS` sets its parallelism (default 2)
 - One test file: `pnpm --filter @corral/server exec vitest run src/x.test.ts`
 - Postgres cases are skipped unless `CORRAL_DATABASE_URL` is set, and concurrency is only proven there (D14). To run them, point it at any Postgres where the user can create databases, for example `CORRAL_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/postgres pnpm --filter @corral/server test`, or start one with `startTestPostgres` (`.corral/wiki/postgres-tests.md`)
