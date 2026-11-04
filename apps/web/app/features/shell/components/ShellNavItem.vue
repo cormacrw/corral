@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppBadge from '~/components/app/AppBadge.vue'
+
 defineProps<{ to: string, label: string, icon: string, active?: boolean, badge?: number, badgeLabel?: string }>()
 </script>
 
@@ -17,12 +19,13 @@ defineProps<{ to: string, label: string, icon: string, active?: boolean, badge?:
         <span>{{ label }}</span>
       </NuxtLink>
     </UiSidebarMenuButton>
-    <UiSidebarMenuBadge
+    <!-- shadcn's Badge, where the sidebar puts its menu badge -->
+    <AppBadge
       v-if="badge"
+      :label="badge"
+      size="sm"
       :aria-label="badgeLabel"
-      class="bg-primary text-primary-foreground"
-    >
-      {{ badge }}
-    </UiSidebarMenuBadge>
+      class="pointer-events-none absolute top-1.5 right-1 tabular-nums group-data-[collapsible=icon]:hidden"
+    />
   </UiSidebarMenuItem>
 </template>

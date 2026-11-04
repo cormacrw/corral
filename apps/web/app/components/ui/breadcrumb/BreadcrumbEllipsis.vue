@@ -2,7 +2,7 @@
 import type { HTMLAttributes } from 'vue'
 
 import { HugeiconsIcon } from '@hugeicons/vue'
-import { MoreHorizontalIcon } from '@hugeicons/core-free-icons'
+import { MoreHorizontalCircle01Icon } from '@hugeicons/core-free-icons'
 import { cn } from 'cn'
 
 const props = defineProps<{
@@ -18,7 +18,7 @@ const props = defineProps<{
     :class="cn('size-5 [&>svg]:size-4 flex items-center justify-center', props.class)"
   >
     <slot>
-      <HugeiconsIcon :icon="MoreHorizontalIcon" :stroke-width="2" />
+      <HugeiconsIcon :icon="MoreHorizontalCircle01Icon" :stroke-width="2" />
     </slot>
     <span class="sr-only">More</span>
   </span>

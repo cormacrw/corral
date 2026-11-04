@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppBadge from '~/components/app/AppBadge.vue'
 // The mobile shell (D17, design/mobile.md): banners, the page and a five-tab
 // bar. app.vue swaps it in for the default layout; URLs stay the same.
 import { stepsToAppStart } from '~/utils/app-history'
@@ -121,12 +122,14 @@ const focused = computed(() => ['plan', 'inbox'].includes(parts.value[0] ?? '') 
                   :name="tab.icon"
                   class="size-6"
                 />
-                <span
+                <AppBadge
                   v-if="tab.badge"
-                  class="absolute -end-2.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-background"
+                  :label="tab.badge"
+                  size="xs"
+                  class="absolute -end-2.5 -top-1.5 min-w-4 tabular-nums"
                   :aria-label="`${tab.badge} open`"
                   data-testid="inbox-count"
-                >{{ tab.badge }}</span>
+                />
                 <span
                   v-else-if="tab.dot"
                   class="absolute -end-0.5 -top-0.5 size-2 rounded-full bg-primary"

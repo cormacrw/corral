@@ -49,23 +49,29 @@ defineExpose({ focus: () => composer.value?.focus() })
             @remove="taskRef = null"
           />
         </template>
-        <template #tools>
-          <!-- Locked: an agent session only resumes on the vendor that made it (D18) -->
+        <template #send-tools>
+          <!-- Locked: an agent session only resumes on the vendor that made it
+               (D18). Plain text, not a disabled button, which would grey out
+               the whole composer. -->
           <AppTooltip
             v-if="props.session"
             text="A session keeps the runtime it started with"
           >
-            <AppButton
-              :label="runtimeLabel(props.session.runtime)"
-              icon="i-hugeicons-square-lock-02"
-              size="xs"
-              variant="ghost"
-              color="neutral"
-              disabled
+            <span
+              tabindex="0"
+              class="flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-xs text-muted-foreground"
               aria-label="Runtime (locked)"
               data-testid="plan-runtime-locked"
-            />
+            >
+              <Icon
+                name="i-hugeicons-square-lock-02"
+                class="size-3.5"
+              />
+              {{ runtimeLabel(props.session.runtime) }}
+            </span>
           </AppTooltip>
+        </template>
+        <template #tools>
           <PlanRefineMenu
             v-model="taskRef"
             :project="props.project"

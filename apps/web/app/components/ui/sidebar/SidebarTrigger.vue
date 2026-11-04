@@ -2,7 +2,7 @@
 import type { HTMLAttributes } from 'vue'
 
 import { HugeiconsIcon } from '@hugeicons/vue'
-import { SidebarLeftIcon } from '@hugeicons/core-free-icons'
+import { LayoutLeftIcon } from '@hugeicons/core-free-icons'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { useSidebar } from './utils'
@@ -23,7 +23,7 @@ const { toggleSidebar } = useSidebar()
     :class="cn('', props.class)"
     @click="toggleSidebar"
   >
-    <HugeiconsIcon :icon="SidebarLeftIcon" :stroke-width="2" class="cn-rtl-flip" />
+    <HugeiconsIcon :icon="LayoutLeftIcon" :stroke-width="2" class="cn-rtl-flip" />
     <span class="sr-only">Toggle Sidebar</span>
   </Button>
 </template>

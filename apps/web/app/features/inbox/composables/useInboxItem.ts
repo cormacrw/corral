@@ -1,4 +1,3 @@
-import { taskNumber } from '~/utils/labels'
 import { errorMessage } from '~/lib/errors'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { InboxActionInput } from '@corral/contracts'
@@ -9,7 +8,7 @@ import { isEpicItem, isOwnPane, isTaskItem, useInboxView, type EpicInboxItem } f
 import { inboxActions } from '~/features/inbox/utils/inbox-actions'
 import { actOnInboxItem, holdsInbox } from '~/queries/inbox'
 import { keys } from '~/queries/keys'
-import { commentOnTask, seededTaskQuery, taskEvidenceQuery, taskReviewsQuery } from '~/queries/tasks'
+import { seededTaskQuery, taskEvidenceQuery, taskReviewsQuery } from '~/queries/tasks'
 
 const HUMAN_CHECK_ERROR = 'Tick each human check before approving.'
 
@@ -24,7 +23,6 @@ export function useInboxItem() {
 
   const client = useQueryClient()
   const acting = useMutation({ ...actOnInboxItem, ...holdsInbox })
-  const commenting = useMutation({ ...commentOnTask, ...holdsInbox })
   const action = ref<InboxActionInput['action'] | null>(null)
   const resolveTo = ref<ResolveTo>('in_progress')
   // One draft at a time: switching items clears it, leaving and coming back doesn't
@@ -80,7 +78,6 @@ export function useInboxItem() {
       case 'request_changes': return `What should ${task.value?.developer?.name ?? 'the developer'} change?`
       case 'clarify': return 'Your answer or guidance for the developer'
       case 'delete': return 'Reason for deleting (optional)'
-      case null: return `Reply to ${selected.value?.sender.name ?? 'the agent'}…`
       default: return 'Optional note'
     }
   })
@@ -109,7 +106,8 @@ export function useInboxItem() {
 
   // Resolves false when not sent, so the composer keeps its images
   async function submit(message: string): Promise<boolean> {
-    if (!isTaskItem(selected.value) || isOwnPane(selected.value)) return false
+    // Only actions send: a comment belongs on the task
+    if (!isTaskItem(selected.value) || isOwnPane(selected.value) || !action.value) return false
     if (taskLoading.value || approveBlocked.value) return false
     if (action.value === 'approve' && task.value?.acceptanceCriteria.some(c => c.checkedByHuman && !checkedHumanCriteria.value.includes(c.id))) {
       failedAction.value = HUMAN_CHECK_ERROR
@@ -120,14 +118,9 @@ export function useInboxItem() {
     busy.value = true
     failedAction.value = null
     try {
-      if (!action.value) {
-        await commenting.mutateAsync({ task: { id: actedOn.taskId, slug: actedOn.project.slug, number: taskNumber(actedOn.taskRef), ref: actedOn.taskRef }, body: message })
-        toast.add({ title: 'Done', description: 'Reply sent', color: 'success' })
-      } else {
-        const description = action.value === 'approve' && isSpike.value ? 'You accepted the findings' : submitLabel.value
-        await acting.mutateAsync({ taskId: actedOn.taskId, input: actionInput(message) })
-        toast.add({ title: 'Done', description, color: 'success' })
-      }
+      const description = action.value === 'approve' && isSpike.value ? 'You accepted the findings' : submitLabel.value
+      await acting.mutateAsync({ taskId: actedOn.taskId, input: actionInput(message) })
+      toast.add({ title: 'Done', description, color: 'success' })
       // A send finishing for an older selection leaves the new one alone
       if (selectedId.value !== actedOn.id) return true
       text.value = ''

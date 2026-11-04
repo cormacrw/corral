@@ -3,7 +3,7 @@ import type { NumberFieldIncrementProps } from 'reka-ui'
 
 import type { HTMLAttributes } from 'vue'
 import { HugeiconsIcon } from '@hugeicons/vue'
-import { Add01Icon } from '@hugeicons/core-free-icons'
+import { PlusSignIcon } from '@hugeicons/core-free-icons'
 import { reactiveOmit } from '@vueuse/core'
 import { cn } from 'cn'
 import { NumberFieldIncrement, useForwardProps } from 'reka-ui'
@@ -18,7 +18,7 @@ const forwarded = useForwardProps(delegatedProps)
 <template>
   <NumberFieldIncrement data-slot="increment" v-bind="forwarded" :class="cn('absolute top-1/2 -translate-y-1/2 right-0 disabled:cursor-not-allowed disabled:opacity-20 p-3', props.class)">
     <slot>
-      <HugeiconsIcon :icon="Add01Icon" :stroke-width="2" class="h-4 w-4" />
+      <HugeiconsIcon :icon="PlusSignIcon" :stroke-width="2" class="h-4 w-4" />
     </slot>
   </NumberFieldIncrement>
 </template>

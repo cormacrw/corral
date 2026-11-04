@@ -129,7 +129,7 @@ const rows = computed(() => ([
             :items="statusOptions"
             value-key="value"
             :disabled="!statusEditable"
-            variant="ghost"
+            inline
             size="sm"
             :search-input="false"
             :class="selectClass"
@@ -165,7 +165,7 @@ const rows = computed(() => ([
         :model-value="task.priority"
         :items="priorityOptions"
         value-key="value"
-        variant="ghost"
+        inline
         size="sm"
         :search-input="false"
         :class="selectClass"
@@ -178,7 +178,7 @@ const rows = computed(() => ([
         :disabled="typeOptions.length < 2"
         :items="typeOptions"
         value-key="value"
-        variant="ghost"
+        inline
         size="sm"
         :search-input="false"
         :class="selectClass"

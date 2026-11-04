@@ -101,7 +101,7 @@ function createInboxView() {
     await router.replace(itemRoute(next))
     list.release()
   }
-  // Delete thread, from its row or its header: no confirmation, Undo instead.
+  // Delete thread, from its bottom bar: no confirmation, Undo instead.
   // Deleting the selected thread moves on to the next item, as resolving does.
   async function deleteThread(item: PlanThreadItem) {
     const position = items.value.findIndex(i => i.id === item.id)

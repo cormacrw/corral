@@ -2,7 +2,7 @@
 import type { ToasterProps } from 'vue-sonner'
 
 import { HugeiconsIcon } from '@hugeicons/vue'
-import { Alert02Icon, Cancel01Icon, CancelCircleIcon, CheckmarkCircle02Icon, InformationCircleIcon, Loading03Icon } from '@hugeicons/core-free-icons'
+import { CheckmarkCircle01Icon, InformationCircleIcon, Loading03Icon, CancelCircleIcon, Alert02Icon, Cancel01Icon } from '@hugeicons/core-free-icons'
 import { reactiveOmit } from '@vueuse/core'
 import { cn } from 'cn'
 import { Toaster as Sonner } from 'vue-sonner'
@@ -33,7 +33,7 @@ const delegatedProps = reactiveOmit(props, 'class', 'toastOptions')
     v-bind="delegatedProps"
   >
     <template #success-icon>
-      <HugeiconsIcon :icon="CheckmarkCircle02Icon" :stroke-width="2" class="size-4" />
+      <HugeiconsIcon :icon="CheckmarkCircle01Icon" :stroke-width="2" class="size-4" />
     </template>
     <template #info-icon>
       <HugeiconsIcon :icon="InformationCircleIcon" :stroke-width="2" class="size-4" />

@@ -69,33 +69,7 @@ const placeholder = computed(() => {
               @remove="taskRef = null"
             />
           </template>
-          <template #tools>
-            <AppSelectMenu
-              :model-value="project?.id ?? 'global'"
-              :items="projectItems"
-              value-key="value"
-              size="xs"
-              variant="ghost"
-              :search-input="false"
-              aria-label="Project"
-              content-class="w-80 max-w-[calc(100vw-2rem)]"
-              class="w-auto max-w-56"
-              @update:model-value="projectId = $event === 'global' ? null : $event as string"
-            >
-              <template #item-leading="{ item }">
-                <ProjectThumbnail
-                  v-if="item.project"
-                  :project="item.project"
-                  :size="20"
-                />
-              </template>
-              <template #leading>
-                <span
-                  class="size-2.5 rounded-full"
-                  :style="{ background: project ? projectColor(project) : 'var(--muted-foreground)' }"
-                />
-              </template>
-            </AppSelectMenu>
+          <template #send-tools>
             <AppSelectMenu
               :model-value="runtime"
               :items="runtimeItems"
@@ -107,25 +81,56 @@ const placeholder = computed(() => {
               aria-label="Runtime"
               data-testid="plan-runtime"
               content-class="w-48"
-              class="w-auto max-w-40"
+              class="w-auto max-w-40 rounded-full"
               @update:model-value="lastRuntime = $event as AgentRuntime"
-            />
-            <AppSelectMenu
-              v-if="!device.isMobile.value"
-              :items="sessionItems"
-              value-key="value"
-              size="xs"
-              variant="ghost"
-              icon="i-hugeicons-history"
-              placeholder="Resume"
-              :search-input="{ placeholder: 'Search sessions' }"
-              aria-label="Resume a session"
-              content-class="w-80 max-w-[calc(100vw-2rem)]"
-              class="w-auto max-w-56"
-              @update:model-value="router.push(`/plan/${$event}`)"
             />
           </template>
         </PromptComposer>
+
+        <!-- Where it runs, as pills under the prompt rather than in its toolbar -->
+        <div
+          class="-mt-3 flex flex-wrap items-center gap-2"
+          data-testid="plan-start-options"
+        >
+          <AppSelectMenu
+            :model-value="project?.id ?? 'global'"
+            :items="projectItems"
+            value-key="value"
+            size="sm"
+            :search-input="false"
+            aria-label="Project"
+            content-class="w-80 max-w-[calc(100vw-2rem)]"
+            class="w-auto max-w-56 rounded-full px-3"
+            @update:model-value="projectId = $event === 'global' ? null : $event as string"
+          >
+            <template #item-leading="{ item }">
+              <ProjectThumbnail
+                v-if="item.project"
+                :project="item.project"
+                :size="20"
+              />
+            </template>
+            <template #leading>
+              <span
+                class="size-2.5 rounded-full"
+                :style="{ background: project ? projectColor(project) : 'var(--muted-foreground)' }"
+              />
+            </template>
+          </AppSelectMenu>
+          <AppSelectMenu
+            v-if="!device.isMobile.value"
+            :items="sessionItems"
+            value-key="value"
+            size="sm"
+            icon="i-hugeicons-history"
+            placeholder="Resume"
+            :search-input="{ placeholder: 'Search sessions' }"
+            aria-label="Resume a session"
+            content-class="w-80 max-w-[calc(100vw-2rem)]"
+            class="w-auto max-w-56 rounded-full px-3"
+            @update:model-value="router.push(`/plan/${$event}`)"
+          />
+        </div>
 
         <p
           v-if="offline && device.isMobile.value"

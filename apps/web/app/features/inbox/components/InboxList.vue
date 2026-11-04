@@ -9,7 +9,7 @@ import InboxItemRow from '~/features/inbox/components/InboxItemRow.vue'
 // and scroll.
 const router = useRouter()
 const prefetch = useTaskPrefetch()
-const { list, inbox, error, tab, search, items, count, emptyText, selectedId, itemRoute, deleteThread } = useInboxView()
+const { list, inbox, error, tab, search, items, count, emptyText, selectedId, itemRoute } = useInboxView()
 
 const tabs = computed(() => [
   { label: `Inbox (${count.value})`, value: 'needsYou', icon: 'i-hugeicons-inbox' },
@@ -66,7 +66,6 @@ const hover = (item: InboxItem) => isTaskItem(item) ? prefetch({ ref: item.taskR
       <li
         v-for="item in items"
         :key="item.id"
-        class="group relative"
       >
         <button
           type="button"
@@ -83,17 +82,6 @@ const hover = (item: InboxItem) => isTaskItem(item) ? prefetch({ ref: item.taskR
             :item="item"
           />
         </button>
-        <AppButton
-          v-if="item.type === 'plan_thread'"
-          icon="i-hugeicons-delete-02"
-          variant="soft"
-          color="error"
-          size="xs"
-          aria-label="Delete thread"
-          title="Delete thread"
-          class="absolute end-3 bottom-2 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-          @click="deleteThread(item)"
-        />
       </li>
       <li
         v-if="items.length === 0"

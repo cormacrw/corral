@@ -123,14 +123,13 @@ it('keeps a thread open after it leaves Needs you, until another item is picked'
 it('shows the sender in the detail header, and a renamed PM without a reload', async () => {
   const { wrapper, rename } = await mountInbox()
   try {
-    const header = wrapper.getComponent(InboxPlanThread).get('header')
-    expect(header.text()).toContain('Pam · PM')
-    expect(header.text()).toContain(projects[0]!.name)
-    expect(header.get('[data-avatar]').attributes('data-avatar')).toBe('Pam')
+    // The same meta line as a task's panel: kind · project · sender · when
+    const meta = wrapper.getComponent(InboxPlanThread).get('[data-testid="inbox-meta"]')
+    expect(meta.text()).toContain('Plan review')
+    expect(meta.text()).toContain(`${projects[0]!.name} · Pam ·`)
     rename('Renamed PM')
     await flushPromises()
-    expect(header.text()).toContain('Renamed PM · PM')
-    expect(header.get('[data-avatar]').attributes('data-avatar')).toBe('Renamed PM')
+    expect(meta.text()).toContain(`${projects[0]!.name} · Renamed PM ·`)
   } finally {
     wrapper.unmount()
   }
@@ -160,15 +159,16 @@ it('deletes from the header at once, selects the next item, and closes when Undo
   }
 })
 
-it('deletes from a row, and Undo brings it back without closing', async () => {
+it('has no delete on the row, and Undo brings a deleted thread back without closing', async () => {
   vi.useFakeTimers()
   const { wrapper, toasts, toastRemove, rows } = await mountInbox()
   try {
     const before = rows()
     const li = wrapper.findAll('li').find(li => li.find('[data-row="s-3"]').exists())!
-    await li.findAll('button').find(b => b.text() === 'Delete thread')!.trigger('click')
+    expect(li.findAll('button').some(b => b.text() === 'Delete thread')).toBe(false)
+    await wrapper.getComponent(InboxPlanThread).findAll('button').find(b => b.text() === 'Delete thread')!.trigger('click')
     await flushPromises()
-    expect(rows()).not.toContain('s-3')
+    expect(rows()).not.toContain('s-1')
     toasts.at(-1)!.actions![0]!.onClick()
     await flushPromises()
     expect(toastRemove).toHaveBeenCalled()

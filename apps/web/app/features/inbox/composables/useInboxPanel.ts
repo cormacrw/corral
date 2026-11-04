@@ -32,7 +32,7 @@ export interface InboxComposerContext {
   // pick the action for the composer
   act: (value: Action) => Promise<boolean>
   setAction: (value: Action | null) => void
-  // Leaves the chosen action, or a reply, for how the item opened
+  // Leaves the chosen action for how the item opened
   cancelAction: () => void
   setText: (value: string) => void
   setResolveTo: (value: ResolveTo) => void

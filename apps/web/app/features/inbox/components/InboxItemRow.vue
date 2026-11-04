@@ -2,9 +2,11 @@
 import type { InboxItem } from '@corral/contracts'
 import { markdownToPlainText } from '~/utils/markdown'
 import TimeAgo from '~/components/shared/TimeAgo.vue'
+import { inboxTitlePrefix } from '~/features/inbox/utils/inbox-title'
 
 // One Inbox row's content, on either layout. A Plan thread has PlanThreadRow.
-defineProps<{ item: Exclude<InboxItem, { type: 'plan_thread' }>, mobile?: boolean }>()
+const props = defineProps<{ item: Exclude<InboxItem, { type: 'plan_thread' }>, mobile?: boolean }>()
+const prefix = computed(() => inboxTitlePrefix(props.item))
 </script>
 
 <template>
@@ -22,7 +24,10 @@ defineProps<{ item: Exclude<InboxItem, { type: 'plan_thread' }>, mobile?: boolea
       <span :class="['min-w-0 truncate', mobile ? 'font-semibold text-foreground' : 'font-medium text-foreground']">{{ item.sender.name }}</span>
       <span class="ms-auto shrink-0 text-xs text-muted-foreground"><TimeAgo :at="item.at" /></span>
     </span>
-    <span :class="mobile ? 'font-semibold text-foreground' : 'block truncate text-sm font-medium'">{{ item.subject }}</span>
+    <span :class="mobile ? 'font-semibold text-foreground' : 'block truncate text-sm font-medium'"><span
+      v-if="prefix"
+      class="text-muted-foreground"
+    >{{ prefix }}: </span>{{ item.subject }}</span>
     <span :class="['line-clamp-2 text-muted-foreground', mobile ? 'text-sm' : 'text-xs']">{{ markdownToPlainText(item.preview) }}</span>
     <span
       v-if="item.type === 'release_notes'"

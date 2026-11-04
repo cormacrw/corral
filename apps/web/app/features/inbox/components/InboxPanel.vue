@@ -10,7 +10,9 @@ import InboxPanelOverview from '~/features/inbox/components/InboxPanelOverview.v
 const props = defineProps<{ ctx: InboxPanelContext, mobile?: boolean }>()
 const p = useInboxPanel(props.ctx)
 const tray = ref<{ send: () => Promise<boolean> } | null>(null)
-defineExpose({ send: () => tray.value?.send() ?? Promise.resolve(false) })
+// A one-click action sends through the composer when it's open, for its
+// images. Closed, the action goes alone: no hidden draft goes with it.
+defineExpose({ send: () => tray.value?.send() ?? props.ctx.submit('') })
 
 const tabs = computed(() => [
   { label: 'Overview', value: 'overview' },
@@ -39,26 +41,14 @@ const details = computed(() => openTab.value as Exclude<InboxPanelTab, 'overview
     @select="ctx.setTab($event as InboxPanelTab)"
   >
     <template #header>
-      <div class="flex items-start gap-3">
-        <div class="min-w-0 flex-1">
-          <InboxPanelMeta
-            :kind="p.kind.value"
-            :item="ctx.item"
-          />
-          <h1 class="mt-0.5 text-lg leading-tight font-semibold text-foreground">
-            {{ ctx.item.subject }}
-          </h1>
-        </div>
-        <AppButton
-          v-if="!mobile && ctx.task"
-          icon="i-hugeicons-sidebar-left"
-          aria-label="Task details"
-          title="Task details"
-          variant="ghost"
-          color="neutral"
-          size="sm"
-          :aria-pressed="ctx.taskOpen"
-          @click="ctx.toggleTask"
+      <div class="min-w-0">
+        <h1 class="text-lg leading-tight font-semibold text-foreground">
+          {{ ctx.item.subject }}
+        </h1>
+        <InboxPanelMeta
+          class="mt-1"
+          :kind="p.kind.value"
+          :item="ctx.item"
         />
       </div>
       <InboxItemSummary :item="ctx.item" />
@@ -77,17 +67,11 @@ const details = computed(() => openTab.value as Exclude<InboxPanelTab, 'overview
         v-else
         :p="p"
       />
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <InboxPanelActions
-          v-if="!mobile"
-          :ctx="ctx"
-          :can-act="p.canAct.value"
-        />
-        <InboxPanelArtifacts
-          :ctx="ctx"
-          :p="p"
-        />
-      </div>
+      <InboxPanelArtifacts
+        :ctx="ctx"
+        :p="p"
+        :mobile="mobile"
+      />
       <AppLoadError
         v-if="ctx.taskLoadFailed"
         title="Couldn't load this task"
@@ -116,12 +100,24 @@ const details = computed(() => openTab.value as Exclude<InboxPanelTab, 'overview
       />
       <div
         v-else-if="p.canAct.value"
-        class="shrink-0 border-t border-border p-3"
+        class="flex shrink-0 flex-col gap-2 border-t border-border p-3"
       >
+        <InboxPanelActions
+          :ctx="ctx"
+          can-act
+        />
+        <!-- The composer is for actions: it opens with one that takes words,
+             and a failed item opens on its Retry note -->
         <InboxPanelTray
+          v-if="ctx.composerChosen || ctx.item.type === 'failed'"
           ref="tray"
           :ctx="ctx"
-          offer-reply
+        />
+        <AppAlert
+          v-else-if="ctx.actionError"
+          color="error"
+          variant="subtle"
+          :title="ctx.actionError"
         />
       </div>
     </template>

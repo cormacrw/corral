@@ -3,7 +3,9 @@ import type { InboxItemKind, InboxPanelContext } from '~/features/inbox/composab
 import { timeAgo } from '~/utils/labels'
 
 // What the item is, as one quiet line: kind, project · ref, who and when
-defineProps<{ kind: InboxItemKind, item: Pick<InboxPanelContext['item'], 'project' | 'taskRef' | 'sender' | 'at'> }>()
+// A Plan thread can have no project, so it reads Global
+type Item = Pick<InboxPanelContext['item'], 'sender' | 'at'> & { project: InboxPanelContext['item']['project'] | null, taskRef: string | null }
+defineProps<{ kind: InboxItemKind, item: Item }>()
 </script>
 
 <template>
@@ -18,6 +20,7 @@ defineProps<{ kind: InboxItemKind, item: Pick<InboxPanelContext['item'], 'projec
     <span class="font-medium text-foreground">{{ kind.label }}</span>
     <span aria-hidden="true">·</span>
     <ProjectThumbnail
+      v-if="item.project"
       :project="item.project"
       :size="14"
     />

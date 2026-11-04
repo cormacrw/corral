@@ -23,6 +23,9 @@ const props = withDefaults(defineProps<{
   loading?: boolean
   size?: 'xs' | 'sm' | 'md' | 'lg'
   variant?: string
+  // An inline field, as in a task's properties: plain text until hovered,
+  // focused or open, when it shows its background and chevron
+  inline?: boolean
   contentClass?: HTMLAttributes['class']
   class?: HTMLAttributes['class']
   // What the trigger reads, in place of the selected items' names
@@ -62,12 +65,12 @@ function choose(item: Item) {
       <Button
         v-bind="$attrs"
         :id="$attrs.id ?? fieldId"
-        variant="outline"
+        :variant="variant === 'ghost' || inline ? 'ghost' : 'outline'"
         size="sm"
         role="combobox"
         :aria-expanded="open"
         :disabled="disabled || loading"
-        :class="cn('w-full justify-between font-normal', SIZES[size], variant === 'ghost' && 'border-transparent bg-transparent shadow-none dark:bg-transparent', props.class)"
+        :class="cn('w-full justify-between font-normal', SIZES[size], inline && 'group/inline disabled:opacity-100', props.class)"
       >
         <slot
           name="leading"
@@ -84,7 +87,7 @@ function choose(item: Item) {
         >{{ summary || placeholder }}</span>
         <Icon
           :name="loading ? 'i-hugeicons-loading-03' : 'i-hugeicons-arrow-down-01'"
-          :class="['size-4 shrink-0 text-muted-foreground', loading && 'animate-spin motion-reduce:animate-none']"
+          :class="['size-4 shrink-0 text-muted-foreground', loading && 'animate-spin motion-reduce:animate-none', inline && !loading && 'opacity-0 group-hover/inline:opacity-100 group-focus-visible/inline:opacity-100 group-aria-expanded/inline:opacity-100 group-disabled/inline:hidden']"
         />
       </Button>
     </PopoverTrigger>

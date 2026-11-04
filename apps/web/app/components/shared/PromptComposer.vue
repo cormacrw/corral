@@ -6,9 +6,12 @@ import { uploadAttachment } from '~/queries/attachments'
 import { readDraft, writeDraft } from '~/composables/useDraft'
 import { useDevice } from '~/composables/useDevice'
 import { attachmentProblem, withAttachments } from '~/utils/attachments'
+import { Comment, Fragment, useSlots, type VNode } from 'vue'
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from '~/components/ui/input-group'
 
-// The shared prompt composer (design/README.md): an auto-growing textarea
-// and a toolbar. Quick actions change what Send does. With a project, images
+// The shared prompt composer (design/README.md): every prompt box in the app.
+// It's shadcn's prompt input, an InputGroup holding an auto-growing textarea
+// with attachments above it and a toolbar below. Quick actions change what Send does. With a project, images
 // can be pasted, dropped or picked: each uploads straight away and goes out
 // as ![name](attachment:<id>) after the text.
 const props = withDefaults(defineProps<{
@@ -118,8 +121,15 @@ function remove(image: Image) {
 onBeforeUnmount(() => images.value.forEach(i => URL.revokeObjectURL(i.preview)))
 
 // Lets a page put the cursor in the composer (e.g. Other… on a question)
-const box = ref<HTMLElement | null>(null)
-defineExpose({ focus: () => box.value?.querySelector('textarea')?.focus(), send, uploading, hasImages: computed(() => images.value.length > 0) })
+const box = ref<{ $el: HTMLElement } | null>(null)
+defineExpose({ focus: () => box.value?.$el.querySelector('textarea')?.focus(), send, uploading, hasImages: computed(() => images.value.length > 0) })
+
+// A header slot can render nothing (e.g. no attached task), so the row above
+// the textarea shows only when it has something in it
+const slots = useSlots()
+function rendersSomething(nodes: VNode[] | undefined): boolean {
+  return !!nodes?.some(node => node.type === Fragment ? rendersSomething(node.children as VNode[]) : node.type !== Comment)
+}
 
 function onEnter(event: KeyboardEvent) {
   if (device.isMobile.value || event.shiftKey || event.isComposing) return
@@ -161,72 +171,82 @@ function onPick(event: Event) {
 
 <template>
   <!-- The whole box takes pasted and dropped images, not only the textarea -->
-  <div
+  <InputGroup
     ref="box"
-    :class="['flex flex-col gap-2 rounded-lg border bg-background p-3 focus-within:ring-2 focus-within:ring-ring/50', dragging && 'ring-2 ring-primary']"
+    :data-disabled="props.disabled || undefined"
+    :class="['bg-background', dragging && 'border-primary ring-3 ring-primary/50']"
     @paste="onPaste"
     @dragover="onDragOver"
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <ul
-      v-if="images.length > 0"
-      class="flex flex-wrap gap-2"
-      aria-label="Attached images"
+    <InputGroupAddon
+      v-if="images.length > 0 || rendersSomething(slots.header?.())"
+      align="block-start"
+      class="cursor-default flex-col items-stretch gap-2 pt-2.5 font-normal text-foreground select-auto"
     >
-      <li
-        v-for="image in images"
-        :key="image.key"
-        class="relative size-16 shrink-0 overflow-hidden rounded-md border border-border bg-muted/50"
-        :title="image.error ?? image.name"
+      <ul
+        v-if="images.length > 0"
+        class="flex flex-wrap gap-2"
+        aria-label="Attached images"
       >
-        <img
-          :src="image.preview"
-          :alt="image.name"
-          :class="['size-full object-cover', image.status !== 'done' && 'opacity-50']"
+        <li
+          v-for="image in images"
+          :key="image.key"
+          class="relative size-16 shrink-0 overflow-hidden rounded-md border border-border bg-muted/50"
+          :title="image.error ?? image.name"
         >
-        <span
-          v-if="image.status === 'uploading'"
-          class="absolute inset-0 flex items-center justify-center"
-          aria-label="Uploading"
-        >
-          <Icon
-            name="i-hugeicons-loading-03"
-            class="size-5 animate-spin text-foreground"
+          <img
+            :src="image.preview"
+            :alt="image.name"
+            :class="['size-full object-cover', image.status !== 'done' && 'opacity-50']"
+          >
+          <span
+            v-if="image.status === 'uploading'"
+            class="absolute inset-0 flex items-center justify-center"
+            aria-label="Uploading"
+          >
+            <Icon
+              name="i-hugeicons-loading-03"
+              class="size-5 animate-spin text-foreground"
+            />
+          </span>
+          <span
+            v-else-if="image.status === 'failed'"
+            class="absolute inset-0 flex items-center justify-center bg-destructive/20"
+            aria-label="Upload failed"
+          >
+            <Icon
+              name="i-hugeicons-alert-02"
+              class="size-5 text-destructive"
+            />
+          </span>
+          <AppButton
+            icon="i-hugeicons-cancel-01"
+            size="xs"
+            color="neutral"
+            variant="solid"
+            class="absolute end-0.5 top-0.5 rounded-full p-0.5 after:absolute after:-inset-2"
+            :aria-label="`Remove ${image.name}`"
+            @click="remove(image)"
           />
-        </span>
-        <span
-          v-else-if="image.status === 'failed'"
-          class="absolute inset-0 flex items-center justify-center bg-destructive/20"
-          aria-label="Upload failed"
-        >
-          <Icon
-            name="i-hugeicons-alert-02"
-            class="size-5 text-destructive"
-          />
-        </span>
-        <AppButton
-          icon="i-hugeicons-cancel-01"
-          size="xs"
-          color="neutral"
-          variant="solid"
-          class="absolute end-0.5 top-0.5 rounded-full p-0.5 after:absolute after:-inset-2"
-          :aria-label="`Remove ${image.name}`"
-          @click="remove(image)"
-        />
-      </li>
-    </ul>
-    <slot name="header" />
-    <textarea
+        </li>
+      </ul>
+      <slot name="header" />
+    </InputGroupAddon>
+    <InputGroupTextarea
       :id="props.inputId"
       v-model="text"
       :placeholder="props.placeholder"
       :disabled="props.disabled"
       :rows="props.rows"
-      class="field-sizing-content max-h-64 w-full resize-none bg-transparent px-1 text-sm outline-none placeholder:text-muted-foreground disabled:opacity-50"
+      class="max-h-64 min-h-0 px-3"
       @keydown.enter="onEnter"
     />
-    <div class="flex items-center gap-2">
+    <InputGroupAddon
+      align="block-end"
+      class="cursor-default gap-1"
+    >
       <div class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto overscroll-x-contain">
         <template v-if="props.project">
           <input
@@ -238,29 +258,34 @@ function onPick(event: Event) {
             aria-label="Choose images to attach"
             @change="onPick"
           >
-          <AppButton
-            icon="i-hugeicons-attachment-01"
-            size="xs"
-            variant="ghost"
-            color="neutral"
+          <InputGroupButton
+            size="icon-xs"
             aria-label="Attach images"
             class="tap-target"
             :disabled="props.disabled"
             @click="picker?.click()"
-          />
+          >
+            <Icon name="i-hugeicons-attachment-01" />
+          </InputGroupButton>
         </template>
         <slot name="tools" />
-        <span class="ms-auto hidden truncate text-xs text-muted-foreground/70 sm:inline">{{ props.hint || 'Enter to send · Shift+Enter for new line' }}</span>
+        <!-- What sending does, when a host says; no keyboard hints -->
+        <span
+          v-if="props.hint"
+          class="ms-auto hidden truncate text-xs font-normal text-muted-foreground/70 sm:inline"
+        >{{ props.hint }}</span>
       </div>
+      <!-- Controls that belong with sending, such as the model, sit by Send -->
+      <slot name="send-tools" />
       <AppButton
         v-bind="submitAppearance"
         :color="props.submitColor"
         :disabled="!canSend"
         :loading="props.busy || uploading"
         size="sm"
-        class="tap-target"
+        class="tap-target rounded-full"
         @click="send()"
       />
-    </div>
-  </div>
+    </InputGroupAddon>
+  </InputGroup>
 </template>

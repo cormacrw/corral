@@ -1,12 +1,9 @@
 <script setup lang="ts">
-import type { Plan, Task } from '@corral/contracts'
+import type { Plan } from '@corral/contracts'
 import { approvedPlanSummary } from '@corral/core'
-import { useQueries } from '@tanstack/vue-query'
-import { epicQuery } from '~/queries/epics'
-import { PLAN_STATUS, plural } from '~/utils/labels'
+import { PLAN_STATUS } from '~/utils/labels'
 import { currentTasks } from '~/features/plan/utils/plan-versions'
-import PlanDetailChanges from '~/features/plan/components/PlanDetailChanges.vue'
-import PlanDetailGroup from '~/features/plan/components/PlanDetailGroup.vue'
+import PlanDetailBody from '~/features/plan/components/PlanDetailBody.vue'
 
 // The session's latest plan, docked in the flyout (design/plan.md). Each
 // revision replaces it here rather than adding another card to the chat.
@@ -19,24 +16,6 @@ const flyout = useTaskFlyout()
 const tasks = computed(() => currentTasks(props.plan))
 // A revised Ready task stays in Ready with either button
 const revisesReady = computed(() => tasks.value.some(t => t.revises && t.status === 'ready'))
-// The plan's tasks under each of its epics, in the order the PM gave them.
-// Tasks without an epic, or a Draft moved to another epic by hand, are
-// listed last, under Other tasks (just Tasks when the plan has no epics).
-const groups = computed(() => {
-  const planned = new Set(props.plan.epics.map(e => e.id))
-  const other = { key: '', id: '', title: props.plan.epics.length > 0 ? 'Other tasks' : 'Tasks', dependsOn: [], reviewMode: null }
-  return [...props.plan.epics, other].map((epic) => {
-    const own = tasks.value.filter(t => epic.id ? t.epicId === epic.id : !t.epicId || !planned.has(t.epicId))
-    return { ...epic, tasks: own }
-  }).filter(g => g.tasks.length > 0)
-})
-const epicCount = computed(() => groups.value.filter(g => g.id).length)
-
-// Each epic shows its tasks as a list or a dependency graph, remembered per epic
-const views = useLocalStorage<Record<string, 'list' | 'graph'>>('corral.plan.views', {})
-const shownGraphs = computed(() => groups.value.filter(g => g.id && views.value[g.id] === 'graph').map(g => g.id))
-const graphs = useQueries({ queries: computed(() => shownGraphs.value.map(id => epicQuery(id))) })
-const graphTasks = computed<Record<string, Task[]>>(() => Object.fromEntries(graphs.value.flatMap(graph => graph.data ? [[graph.data.id, graph.data.tasks]] : [])))
 </script>
 
 <template>
@@ -79,26 +58,7 @@ const graphTasks = computed<Record<string, Task[]>>(() => Object.fromEntries(gra
     </header>
 
     <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-      <div class="px-4 pt-4 pb-2">
-        <h2 class="text-lg font-semibold">
-          {{ props.plan.title }}
-        </h2>
-        <p class="text-xs text-muted-foreground">
-          <template v-if="epicCount > 0">
-            {{ plural(epicCount, 'epic') }} ·
-          </template>{{ plural(tasks.length, 'task') }}
-        </p>
-      </div>
-      <PlanDetailGroup
-        v-for="group in groups"
-        :key="group.id"
-        :group="group"
-        :view="views[group.id] ?? 'list'"
-        :graph-tasks="graphTasks[group.id]"
-        @update:view="views[group.id] = $event"
-      />
-      <PlanDetailChanges
-        v-if="props.previous"
+      <PlanDetailBody
         :plan="props.plan"
         :previous="props.previous"
       />

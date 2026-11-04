@@ -2,7 +2,7 @@
 
 `apps/web/app` is layered. A layer may use the ones above it in this list, never the ones below.
 
-1. `components/ui`: stock shadcn-vue. Don't edit it; lint skips it. Add or update with `pnpm dlx shadcn-vue@latest add <name>` in `apps/web`, and delete what nothing uses, so the bundle and `pnpm audit` stay small.
+1. `components/ui`: stock shadcn-vue. Don't edit it; lint skips it. Add or update with `pnpm dlx shadcn-vue@latest add <name>` in `apps/web`, and delete what nothing uses, so the bundle and `pnpm audit` stay small. Two CLI quirks (shadcn-vue 2.9.0): it can't resolve the `utils` alias `cn` (the npm package) and fails with "resolvedPaths: Required", so set `utils` to `@/lib/utils` for the run, then rewrite `from '@/lib/utils'` back to `from 'cn'` and restore the alias. And its Hugeicons output imports icons from `@hugeicons/vue`; move them to `@hugeicons/core-free-icons` and render each as `<HugeiconsIcon :icon="…" :stroke-width="2" />`. It also adds a Google Fonts import to `main.css`; remove it (D32 bundles Geist).
 2. `lib/tone.ts` and `components/app`: the `App*` composites. Tone, icon, loading and link handling live here once. Tailwind only finds literal class names, which is why `tone.ts` spells every pair out.
 3. `components/shared`: product components that several features use, such as `PromptComposer` and `StatusBadge`.
 4. `queries`: the only code that talks to the server (lint enforces it).

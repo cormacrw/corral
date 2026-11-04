@@ -5,15 +5,46 @@ import { approvedPlanSummary } from '@corral/core'
 import { useInboxPlanThread } from '~/features/inbox/composables/useInboxPlanThread'
 import { runtimeLabel } from '~/utils/labels'
 import { STOP_ASKING } from '~/features/plan/utils/plan-questions'
+import InboxPanelLayout from '~/features/inbox/components/InboxPanelLayout.vue'
+import InboxPanelMeta from '~/features/inbox/components/InboxPanelMeta.vue'
+import PlanDetailBody from '~/features/plan/components/PlanDetailBody.vue'
 
 // A Plan thread in the Inbox (design/inbox.md#detail-pane): only what needs
 // you, the question or the plan, never the conversation. The full
-// conversation is one click away with Open in Plan.
+// conversation is one click away with Open in Plan. It shares the task
+// panel's frame, so a plan to approve reads like a task to review: what it is
+// up top, the plan in the body, the actions and the reply box at the bottom.
 const props = defineProps<{ item: PlanThreadItem }>()
 const emit = defineEmits<{ approved: [], delete: [] }>()
 const flyout = useTaskFlyout()
 const toast = useToast()
 const { approval, detail, plan, previous, counts, text, busy, offline: runnerOffline, working, cantSend, send: sendMessage, log, content, onLogScroll, composer } = useInboxPlanThread(() => props.item)
+const layout = ref<{ scroller: HTMLElement | null } | null>(null)
+watchEffect(() => {
+  log.value = layout.value?.scroller ?? null
+})
+const kind = computed(() => props.item.status === 'needs_approval'
+  ? { label: 'Plan review', icon: 'i-hugeicons-task-done-01', color: 'text-primary' }
+  : props.item.status === 'question'
+    ? { label: 'Question', icon: 'i-hugeicons-help-circle', color: 'text-info' }
+    : { label: 'Failed', icon: 'i-hugeicons-cancel-circle', color: 'text-destructive' })
+const tabs = [{ label: 'Overview', value: 'overview' }]
+// A plan's composer is for its Request changes action, so it stays hidden
+// until that's chosen. A question or a failed turn needs the reply box.
+const requesting = ref(false)
+watch(() => props.item.id, () => {
+  requesting.value = false
+})
+const showComposer = computed(() => !props.item.plan || requesting.value)
+function requestChanges() {
+  requesting.value = !requesting.value
+  if (requesting.value) void nextTick(() => composer.value?.focus())
+}
+async function sendChanges(message: string): Promise<boolean> {
+  const sent = await send(message)
+  if (sent && props.item.plan) requesting.value = false
+  return sent
+}
 async function send(message: string): Promise<boolean> {
   if (cantSend.value) return false
   try {
@@ -44,118 +75,153 @@ async function approve(to: 'ready' | 'backlog') {
 
 <template>
   <div class="flex h-full min-h-0 min-w-0 flex-1 max-[1100px]:flex-col">
-    <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header class="flex h-14 shrink-0 items-center gap-3 border-b border-border px-4">
-        <AgentAvatar
-          :name="item.sender.name"
-          size="sm"
-        />
-        <div class="min-w-0 flex-1">
-          <h1 class="truncate text-sm font-medium">
+    <InboxPanelLayout
+      ref="layout"
+      data-testid="inbox-plan-thread"
+      :tabs="tabs"
+      open-tab="overview"
+      @scroll="onLogScroll"
+    >
+      <template #header>
+        <div class="min-w-0">
+          <h1 class="text-lg leading-tight font-semibold text-foreground">
             {{ item.subject }}
           </h1>
-          <div class="flex min-w-0 items-center gap-2 text-xs whitespace-nowrap text-muted-foreground">
-            <span class="shrink-0"><span class="font-medium text-foreground">{{ item.sender.name }}</span> · PM</span>
-            <span class="flex min-w-0 items-center gap-1"><ProjectThumbnail
-              v-if="item.project"
-              :project="item.project"
-              :size="16"
-            /><span class="truncate">{{ item.project?.name ?? 'Global' }}</span></span>
-            <AppBadge
-              :label="item.status === 'needs_approval' ? 'Needs approval' : item.status === 'question' ? 'Question' : 'Failed'"
-              :color="item.status === 'needs_approval' ? 'primary' : item.status === 'question' ? 'info' : 'error'"
-              variant="subtle"
-              size="xs"
-              class="shrink-0"
-            />
-            <AppBadge
-              :label="runtimeLabel(item.runtime)"
-              variant="subtle"
-              color="neutral"
-              size="xs"
-              class="shrink-0"
-            />
-          </div>
+          <InboxPanelMeta
+            class="mt-1"
+            :kind="kind"
+            :item="item"
+          />
         </div>
-        <AppButton
-          :to="`/plan/${item.sessionId}`"
-          label="Open in Plan"
-          variant="ghost"
-          color="neutral"
-          size="sm"
-        />
-        <!-- Deletes at once, with Undo in a toast (design/inbox.md#delete-thread) -->
-        <AppButton
-          label="Delete thread"
-          icon="i-hugeicons-delete-02"
-          variant="ghost"
-          color="error"
-          size="sm"
-          @click="emit('delete')"
-        />
-      </header>
+        <p class="text-xs text-muted-foreground">
+          Runs on {{ runtimeLabel(item.runtime) }}
+        </p>
+        <div class="flex flex-wrap items-center gap-2">
+          <AppButton
+            :to="`/plan/${item.sessionId}`"
+            label="Open in Plan"
+            icon="i-hugeicons-bubble-chat"
+            variant="outline"
+            color="neutral"
+            size="sm"
+          />
+        </div>
+      </template>
 
       <div
-        ref="log"
-        class="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
-        @scroll.passive="onLogScroll"
+        ref="content"
+        class="flex w-full flex-col gap-4"
       >
-        <div
-          ref="content"
-          class="mx-auto flex w-full max-w-[720px] flex-col gap-4"
-        >
-          <template v-if="item.question">
-            <PlanQuestion
-              :message="item.question"
-              data-message-id="inbox-question"
-              :active="!working"
-              :disabled="cantSend"
-              @answer="send"
-              @other="composer?.focus()"
-              @stop="send(STOP_ASKING)"
-            />
-          </template>
+        <template v-if="item.question">
+          <PlanQuestion
+            :message="item.question"
+            data-message-id="inbox-question"
+            :active="!working"
+            :disabled="cantSend"
+            @answer="send"
+            @other="composer?.focus()"
+            @stop="send(STOP_ASKING)"
+          />
+        </template>
 
-          <section
-            v-else-if="item.plan"
-            class="flex flex-col gap-3 rounded-md border border-border p-4"
-            data-testid="inbox-plan"
+        <!-- The whole plan, in place of a card that opens it -->
+        <section
+          v-else-if="item.plan"
+          class="-mx-5 -mt-5"
+          data-testid="inbox-plan"
+        >
+          <PlanDetailBody
+            v-if="plan"
+            :plan="plan"
+            :previous="previous"
+            wide
+            :hide-title="plan.title === item.subject"
           >
-            <span class="text-xs font-medium text-muted-foreground">{{ counts }}</span>
-            <h2 class="text-base font-semibold">
+            <MarkdownText
+              :text="plan.summary"
+              class="mt-1 text-sm"
+            />
+          </PlanDetailBody>
+          <div
+            v-else
+            class="flex flex-col gap-3 px-5 pt-4"
+          >
+            <h2 class="text-lg font-semibold">
               {{ item.plan.title }}
             </h2>
+            <span class="text-xs text-muted-foreground">{{ counts }}</span>
             <MarkdownText
               :text="item.plan.summary"
               class="text-sm"
             />
+            <UiSkeleton
+              v-if="detail.isPending.value"
+              class="h-32 w-full"
+              data-testid="inbox-plan-loading"
+            />
             <AppLoadError
-              v-if="!plan && !detail.isPending.value"
+              v-else
               :title="detail.error.value?.message ?? 'Couldn\'t load this plan'"
               :retry="() => detail.refetch()"
               data-testid="inbox-plan-error"
             />
-            <div class="flex flex-wrap gap-2">
-              <AppButton
-                label="View plan"
-                icon="i-hugeicons-task-done-01"
-                variant="outline"
-                color="neutral"
-                size="sm"
-                :aria-pressed="flyout.plan.value"
-                :loading="detail.isPending.value"
-                :disabled="!plan"
-                @click="flyout.plan.value ? flyout.close() : flyout.openPlan()"
-              />
+          </div>
+        </section>
+
+        <section
+          v-else-if="item.failure"
+          class="flex flex-col gap-3"
+          data-testid="inbox-plan-failure"
+        >
+          <p class="text-sm text-foreground">
+            {{ item.sender.name }}'s turn failed and nothing will retry it. Send a message to try again, or delete the thread.
+          </p>
+          <MarkdownText
+            :text="item.failure"
+            class="text-sm"
+          />
+        </section>
+
+        <div
+          v-if="working"
+          class="flex items-center gap-2 text-sm text-muted-foreground"
+          data-testid="inbox-plan-working"
+        >
+          <Icon
+            name="i-hugeicons-loading-03"
+            class="size-4 animate-spin"
+          />
+          {{ item.sender.name }} is working on it.
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="flex shrink-0 flex-col gap-2 border-t border-border p-3">
+          <AppAlert
+            v-if="runnerOffline"
+            color="warning"
+            variant="subtle"
+            icon="i-hugeicons-server-stack-01"
+            title="Plan needs the runner. It's offline."
+          />
+          <div
+            class="flex flex-wrap items-center gap-2"
+            data-testid="inbox-actions"
+          >
+            <template v-if="item.plan">
               <AppButton
                 label="Approve to board"
+                icon="i-hugeicons-tick-02"
                 size="sm"
                 :loading="approving === 'ready'"
                 :disabled="approving !== null || working"
+                data-testid="inbox-primary"
                 @click="approve('ready')"
               />
               <AppButton
                 label="Approve to Backlog"
+                icon="i-hugeicons-archive-02"
+                color="neutral"
                 variant="outline"
                 size="sm"
                 :loading="approving === 'backlog'"
@@ -163,93 +229,44 @@ async function approve(to: 'ready' | 'backlog') {
                 @click="approve('backlog')"
               />
               <AppButton
-                :to="`/plan/${item.sessionId}`"
-                label="Open in Plan"
-                variant="ghost"
+                label="Request changes"
+                icon="i-hugeicons-pencil-edit-02"
                 color="neutral"
+                :variant="requesting ? 'subtle' : 'outline'"
                 size="sm"
+                :aria-pressed="requesting"
+                :disabled="approving !== null"
+                @click="requestChanges"
               />
-            </div>
-          </section>
-
-          <section
-            v-else-if="item.failure"
-            class="flex flex-col gap-3"
-            data-testid="inbox-plan-failure"
-          >
-            <p class="text-sm text-foreground">
-              {{ item.sender.name }}'s turn failed and nothing will retry it. Send a message to try again, or delete the thread.
-            </p>
-            <MarkdownText
-              :text="item.failure"
-              class="text-sm"
-            />
+            </template>
+            <!-- Deletes at once, with Undo in a toast (design/inbox.md#delete-thread) -->
             <AppButton
-              :to="`/plan/${item.sessionId}`"
-              label="Open in Plan"
-              icon="i-hugeicons-bubble-chat"
+              label="Delete thread"
+              icon="i-hugeicons-delete-02"
+              color="error"
               variant="outline"
-              color="neutral"
               size="sm"
-              class="self-start"
+              :disabled="approving !== null"
+              @click="emit('delete')"
             />
-          </section>
-
-          <div
-            v-if="working"
-            class="flex items-center gap-2 text-sm text-muted-foreground"
-            data-testid="inbox-plan-working"
-          >
-            <Icon
-              name="i-hugeicons-loading-03"
-              class="size-4 animate-spin"
-            />
-            {{ item.sender.name }} is working on it.
           </div>
-        </div>
-      </div>
-
-      <div
-        v-if="!item.plan"
-        class="shrink-0 border-t border-border p-3"
-      >
-        <div class="mx-auto w-full max-w-[720px]">
-          <AppAlert
-            v-if="runnerOffline"
-            color="warning"
-            variant="subtle"
-            icon="i-hugeicons-server-stack-01"
-            title="Plan needs the runner. It's offline."
-            class="mb-2"
-          />
           <PromptComposer
+            v-if="showComposer"
             ref="composer"
             v-model="text"
-            :placeholder="`Reply to ${item.sender.name}…`"
+            :placeholder="item.plan ? `What should ${item.sender.name} change?` : `Reply to ${item.sender.name}…`"
             :disabled="runnerOffline || working"
             :busy="busy"
+            :rows="1"
             :project="item.project?.slug"
             :draft-key="`inbox:${item.id}`"
-            @submit="send"
+            @submit="sendChanges"
           />
         </div>
-      </div>
-    </div>
-
-    <TaskFlyout>
-      <template
-        v-if="plan"
-        #plan
-      >
-        <PlanDetail
-          :plan="plan"
-          :previous="previous"
-          :busy="approving !== null"
-          :disabled="working"
-          @approve="approve"
-          @close="flyout.close()"
-        />
       </template>
-    </TaskFlyout>
+    </InboxPanelLayout>
+
+    <!-- A task opened from the plan -->
+    <TaskFlyout />
   </div>
 </template>

@@ -31,10 +31,11 @@ There are three columns. The list divider can be resized (280–560px, default 3
   - an unread dot
   - the sender's avatar
   - the sender name and time (bold when unread)
-  - the subject, which is the task title (bold when unread)
+  - the subject, which is the task title (bold when unread), prefixed with what the item is in muted text: **Task Review**, **Question**, **Blocked**, **Failed**, **Stopped**, **Plan Review**, **Parent Review**, **Conflict**, **Runner Update** or **Activity** (`inboxTitlePrefix`). Release notes have no prefix; their subject says it already.
   - a two-line preview
   - the project tag (a colour dot and project name)
-- **Plan thread rows** have the same layout, with a status badge beside the project tag; see [Plan threads](#plan-threads).
+  - no badges or tags beyond these
+- **Plan thread rows** have the same layout; see [Plan threads](#plan-threads).
 - The selected row uses `bg-muted`.
 - **Empty state:** the Inbox tab says "No decisions are waiting on you. Agents may still be working; their updates are in Activity." It never implies that background work has finished. The detail pane says the same with **Open Activity**. Activity, Resolved and a search with no matches each have their own line.
 - **Live updates:** an informational item arriving adds no Inbox row, doesn't change the count or badge, and doesn't move the selection. It appears under Activity.
@@ -45,12 +46,12 @@ There are three columns. The list divider can be resized (280–560px, default 3
 Task items (human review, question, blocked, failed, stopped, Activity and Resolved) use **Option D** (`InboxPanel`, with `useInboxPanel` deriving what it shows). What's needed to decide sits up front, and everything else is one click away in tabs. On a phone the actions and composer move to a bottom bar ([mobile.md](mobile.md#inbox)). Plan threads, parent items and release notes have their own layouts.
 
 - **Top block**, which fits at 1280×800 without scrolling:
-  - one quiet line (`InboxPanelMeta`): kind (Code, Design or Spike review, Question, Blocked, Failed, Stopped, Activity, Resolved) · project · ref · sender · time
-  - the title, and a **Task details** icon button (`aria-pressed`). The flyout is closed whenever an item opens, and one click opens it.
+  - the title, with one quiet line (`InboxPanelMeta`) under it: kind (Code, Design or Spike review, Question, Blocked, Failed, Stopped, Activity, Resolved) · project · ref · sender · time. Parent items and Plan threads put the same line under their titles. The flyout is closed whenever an item opens.
   - shared `InboxMessage` in place of a TL;DR: the short `message` clamped to three lines. Items with no message show **TL;DR** and the first paragraph of the body, cut to two lines.
   - the verdict on reviews (`InboxPanelVerdict`): reviewer and round, gates passed, criteria met. It's red only when a criterion is unmet; a human check waiting for its tick isn't unmet.
-  - the actions (`InboxPanelActions`) on the left, and the links (`InboxPanelArtifacts`) on the right: **PR #n**, or **Preview vN** and **Review design** on a design, or **Open task** or **Open parent** on Activity. Spikes have no PR link.
-- **Tabs:** **Overview · Criteria n/m · Review · PR description · Code diff N · Message**. Criteria and Review show on reviews that have them. The tab resets when another item opens.
+  - the links (`InboxPanelArtifacts`): **PR #n**, or **Preview vN** and **Review design** on a design, then **Task {ref}** (`aria-pressed`), which opens the task in the docked flyout with one click and closes it with another. Spikes have no PR link. On a phone, which has no flyout, Activity has **Open task** or **Open parent** instead.
+- **Bottom bar**, pinned to the bottom of an item you can act on: the actions (`InboxPanelActions`), with the composer above them once an action opens it (below).
+- **Tabs:** **Overview · Criteria n/m · Review · PR description · Code diff N · Message**. Criteria and Review show on reviews that have them. The tab resets when another item opens. A panel with only one tab shows no tab bar (`InboxPanelLayout`).
   - **Overview:** on a review, a screenshot carousel (`InboxEvidenceCarousel`): one large screenshot at a time, with "n of m", arrows and a swipe on phones. The other files follow it. One click opens any of them in the evidence viewer, which flips through all of the review's files, screenshots first, with its own arrows, the arrow keys or a swipe. Closing it leaves the carousel, and focus, on the last screenshot viewed. The Criteria tab's viewer flips through its files the same way. On other items, or a review with no evidence, what each action does. A read-only item shows its resolution, or "For your information. Nothing to do."
   - **Criteria:** `EvidenceList`, with its notes, evidence and human checks.
   - **Review:** every round's verdict and summary, newest first.
@@ -60,14 +61,14 @@ Task items (human review, question, blocked, failed, stopped, Activity and Resol
 
   | Item | Actions | One click |
   |---|---|---|
-  | Human review | Approve and merge (Accept findings on spikes, Approve design on designs) · Request changes | Approve sends, with the composer’s text and attached images as its note (waiting for pending uploads), and the Inbox moves on. An unmet criterion doesn't stop it. |
+  | Human review | Approve and merge (Accept findings on spikes, Approve design on designs) · Request changes | Approve sends with no note, and the Inbox moves on. An unmet criterion doesn't stop it. |
   | Question, Blocked | Answer · Send back to Backlog · Delete task | Send back sends |
   | Failed | Retry, with its status picker beside it · Send back to Backlog · Delete task | Retry and Send back send, Retry with whatever note is in the composer. An empty note still retries. |
   | Stopped | Retry · Give direction · Send back to Backlog · Delete task | Retry and Send back send |
   | Activity, Resolved | None, and no composer | |
 
   **Request changes**, **Answer**, **Give direction** and **Delete task** open the composer instead, with **Cancel** above it. Delete waits for it because it can't be undone, and takes an optional reason.
-- **Composer** (`InboxPanelTray`), pinned to the bottom of an item you can act on: with no action chosen it's the reply box, "Reply to {sender}…", which adds a comment to the task and leaves the item where it is, except on a Stopped item, where new human input releases the stop. A failed item opens on Retry instead: the composer is labelled **Note to send with Retry (optional)**, its hint says the note guides the agent's next run, and its send button retries with the chosen status. **Reply instead** beside the label switches it to the reply box, with **Cancel** above to return. Cancelling any action on a failed item, or sending a reply, returns to the Retry note.
+- **Composer** (`InboxPanelTray`, on the shared `PromptComposer`, built on shadcn's input group), just above the actions: it's only for actions, so it's hidden until one that takes words is chosen, and closes on **Cancel** or once sent. There's no reply box: a comment belongs on the task. A failed item opens on Retry: the composer is labelled **Note to send with Retry (optional)**, its hint says the note guides the agent's next run, and its send button retries with the chosen status. Cancelling any action on a failed item returns to the Retry note.
 
 ### What each kind shows
 
@@ -76,11 +77,11 @@ Task items (human review, question, blocked, failed, stopped, Activity and Resol
 - **Spikes always stop in Human review**, whatever their human-review flag says. They appear under Needs you and add one to its count. The **Message** tab renders the latest `## Findings` comment as markdown; criteria verdicts and evidence remain below it. Desktop and mobile label approval **Accept findings**, keep **Request changes**, and hide PR links and check badges. The success toast and Resolved entry say **You accepted the findings**. The preview is the start of the short message; approval finishes the spike in Merged; requesting changes returns it to the developer with the feedback.
 - **Designs** use **Approve design** on desktop and mobile. Approval marks the latest submitted version Approved, supersedes earlier versions and moves the task to Approved, then advances to the next item. There is no PR to merge; approval opens a Plan session and starts the PM’s build-planning turn.
 
-PM activity can have no task, including activity for a deleted task. It keeps its project tag (or **Global**) and PM conversation link in the **Message** tab, with no **Open task** or **Task details** controls and no task-loading error. This applies on desktop and mobile.
+PM activity can have no task, including activity for a deleted task. It keeps its project tag (or **Global**) and PM conversation link in the **Message** tab, with no **Open task** or **Task {ref}** controls and no task-loading error. This applies on desktop and mobile.
 
 ### 3. Task flyout
 
-Docked, stacked layout, from [task.md](task.md). It's closed when an item opens, including when acting moves on to the next one; **Task details** opens it, and it closes with its own × or the same button. A shared link with `?task=` still opens it.
+Docked, stacked layout, from [task.md](task.md). It's closed when an item opens, including when acting moves on to the next one; the **Task {ref}** button beside the PR link opens it, and it closes with its own × or the same button. A shared link with `?task=` still opens it.
 
 ## Plan threads
 
@@ -100,20 +101,22 @@ An open Plan session (D9) that's waiting on you, shown as an Inbox item (D11). A
 
 ### Row
 
-One button, in the same list as the other items, with a **Delete thread** button (trash icon, `error`) that appears on hover or keyboard focus at its bottom-right corner:
+One button, in the same list as the other items, with no delete control on a wide screen:
 
 - the **sender's avatar** and **name** (Juno, under the PM's current name), with the **time** it started waiting. While Juno is working (`activeRunId`), a spinner sits next to the time.
 - the **session title** (bold)
 - a two-line **preview**: Juno's question, the plan summary ("Plan v2 · 2 parents · 4 tasks"), or the failed turn's error
-- a **status badge** beside the **project tag** (a thumbnail and the project name): "Needs approval" in `primary`, "Question" in `info` or "Failed" in `error`, with the unread dot before the avatar while the turn is unseen.
+- the **project tag** (a thumbnail and the project name), with no status badge: the title's prefix (**Plan Review**, **Question** or **Failed**) says why it's here. The unread dot sits before the avatar while the turn is unseen.
 
 ### Detail pane
 
 The selected message column shows only what needs you, **not the conversation**. The full conversation stays in Plan ([plan.md](plan.md#conversation)), one click away with **Open in Plan**.
 
-- **Header:** the sender's avatar, the session title, and below it the sender's name and role, the project tag, the status badge, the runtime badge ("Claude" or "Codex"), **Open in Plan** and **Delete thread**. There's no Task details toggle; a plan's tasks open in the flyout instead.
+It shares the task panel's frame (`InboxPanelLayout`), so a plan to approve reads like a task to review.
+
+- **Header:** the session title with the `InboxPanelMeta` line (Plan review, Question or Failed · project · sender · time) under it, "Runs on Claude" or "Codex", then **Open in Plan**. There's no Task button; a plan's tasks open in the flyout instead.
 - **Question:** Juno's question in its `info` card, with "Recommended: …" when Juno gave one, and the one-tap answers: **Accept recommendation**, one button per option, **Other…** (focuses the reply box) and **Stop and propose the plan**. Below it, a reply box ("Reply to Juno…") for a free-text answer. A tap or a sent reply sends the answer to the session and starts a PM turn, exactly as in Plan; the thread then leaves the list unless Juno asks again or proposes a plan.
-- **Plan:** the plan's title, its summary and counts ("Plan v2 · 2 parents · 4 tasks"), with **View plan**, **Approve to board**, **Approve to Backlog** and **Open in Plan**. **View plan** opens the plan flyout docked on the right ([plan.md](plan.md#plan-flyout)), and a task from it opens in the task flyout.
+- **Plan:** the whole plan in the body (`PlanDetailBody`, shared with the plan flyout): its title (left out when it matches the session title), counts and summary, its tasks under each parent as a list or graph, and what changed since the previous version. A task opens in the task flyout. At the bottom, as on a task review: **Approve to board**, **Approve to Backlog** and **Request changes**, which opens the composer ("What should Juno change?") above them; sending it starts a PM turn.
 - **Failed turn:** what happened and the turn's error (`failure`), with **Open in Plan** under it and the reply box ("Reply to Juno…") below. Sending starts a PM turn, as for a question.
 - Earlier messages, Steps and the live turn's transcript aren't shown. While Juno is working, the pane shows a working line in place of the answers, and they're disabled.
 
@@ -122,18 +125,18 @@ The selected message column shows only what needs you, **not the conversation**.
 | Action | Shown | What it does |
 |---|---|---|
 | **Answer** | A question is pending | A one-tap answer, or the reply box, sends the answer to the session and starts a PM turn, as in Plan. Disabled while Juno is working. |
-| **View plan** | A plan is waiting for approval | Opens the latest plan version in the docked plan flyout. |
 | **Approve to board** | A plan is waiting for approval | Approves the latest plan version to the board (the plan flyout's **Add to board**). The session closes and leaves the Inbox. |
 | **Approve to Backlog** | A plan is waiting for approval | Approves it to the Backlog (**Add to backlog**). The session closes and leaves the Inbox. |
+| **Request changes** | A plan is waiting for approval | Opens the composer; what's sent goes to the session and starts a PM turn. |
 | **Open in Plan** | Always | Goes to `/plan/:sessionId`, with the full conversation, keeping the thread in the side nav. |
-| **Delete thread** | Always, in the header and on the row | Removes the thread at once with an Undo toast, then closes the session (below). |
+| **Delete thread** | Always, last in the bottom bar's actions | Removes the thread at once with an Undo toast, then closes the session (below). |
 
 - Only a human can approve (D9).
 - After approving, the pane shows a green "Resolved" `AppAlert` ("✓ 4 tasks on the board.") and selection moves to the next item that needs you.
 
 ### Delete thread
 
-**Delete thread** abandons a session without approving anything. It's on each thread's row (on hover) and in the thread's header. It closes the session exactly as **Close thread** in Plan's conversation header ([plan.md](plan.md#conversation)) does, but with Undo instead of a confirmation.
+**Delete thread** abandons a session without approving anything. It's with the other actions at the bottom of the thread. It closes the session exactly as **Close thread** in Plan's conversation header ([plan.md](plan.md#conversation)) does, but with Undo instead of a confirmation.
 
 - **No confirmation:** the row leaves the list at once and a toast says "Thread deleted · its drafts were discarded", with **Undo**, for 5 seconds. Deleting the selected thread moves selection to the next item, as resolving does.
 - **Undo** within the 5 seconds cancels the close: the row comes back and nothing was discarded.
@@ -170,7 +173,7 @@ Every parent item uses `InboxEpicPanel`, Option D for a parent, on desktop and m
 - **Review:** the integration findings first, then the reviewer's summary, for every round, newest first.
 - **Code diff:** switches between **Since your last review** and **Whole parent** in a later round. After a rebase a file's patch is its whole change on the parent, not the change since.
 - **Approve parent:** one click when nothing is owed, and the Inbox moves on. A non-blocking note doesn't ask for confirmation. With checks owed it opens Tasks, says what's left, and sends only once all are ticked.
-- **Request changes:** opens the composer, and its text becomes a fix task in Ready in the parent, titled by `feedbackFixTitle`. Parent items have no Reply.
+- **Request changes:** opens the composer, and its text becomes a fix task in Ready in the parent, titled by `feedbackFixTitle`.
 - **The head moved while open:** the action carries the head the human was looking at, so it fails with a message, the feedback text is kept and the panel refreshes. If the item leaves the Inbox while open, the panel stays on it with the message and nothing can be sent.
 - **What stopped a parent:** an `epic_conflict` item shows the failure, the conflicting files or the rebase's question. **Retry** goes round the automatic path again; a question is answered with a **Choose** button or in the composer.
 - **Read-only:** opened, conflict, approved and merged items show *For your information. Nothing to do.* in place of the actions, and Resolved items show the resolution. A merged parent shows its squash commit, and an approved one says what happens next. The Activity record of a conflict links its task and shows tasks merged, such as 2 of 3, only when a task exists.
@@ -198,7 +201,7 @@ Every parent item uses `InboxEpicPanel`, Option D for a parent, on desktop and m
 
 - **Loading:** skeleton rows in the list. An item's top block shows at once from the Inbox data, with skeletons for its verdict and tab body until the task and its evidence arrive; Approve reads **Loading task…** and the actions wait.
 - **An action fails:** an inline error above the composer, or above the action bar on a phone with the composer closed. The draft is kept, and an action that opens the composer stays chosen.
-- **The task fails to load:** an inline error at the end of the top block with **Retry**, instead of a spinner. Approval stays blocked, because its human-criteria check needs the task, and its action reads **Task not loaded**. The other actions and the reply box still work, on a failed item through **Reply instead**.
+- **The task fails to load:** an inline error at the end of the top block with **Retry**, instead of a spinner. Approval stays blocked, because its human-criteria check needs the task, and its action reads **Task not loaded**. The other actions still work.
 - **A task changed status elsewhere:** the item shows "Already resolved. This task changed status elsewhere." in Overview, with no actions and no composer, and no action bar on a phone.
 
 ## Responsive
@@ -209,7 +212,7 @@ Every parent item uses `InboxEpicPanel`, Option D for a parent, on desktop and m
 
 ## Accessibility
 
-- The tabs use `role="tablist"`. Actions are plain buttons named with their full label, so a phone's **Send back** is announced as "Send back to Backlog". Reply on a phone uses `aria-pressed`.
+- The tabs use `role="tablist"`. Actions are plain buttons named with their full label, so a phone's **Send back** is announced as "Send back to Backlog".
 - Every icon-only control has an `aria-label`.
 - Pane dividers are `role="separator"` with `aria-valuenow` and work with the arrow keys.
 

@@ -2,7 +2,8 @@
 import type { HTMLAttributes } from 'vue'
 import { Card, CardContent, CardFooter, CardHeader } from '~/components/ui/card'
 
-defineProps<{ class?: HTMLAttributes['class'] }>()
+// `contentClass`: e.g. px-0 for rows that run edge to edge
+defineProps<{ class?: HTMLAttributes['class'], contentClass?: HTMLAttributes['class'] }>()
 </script>
 
 <template>
@@ -10,7 +11,7 @@ defineProps<{ class?: HTMLAttributes['class'] }>()
     <CardHeader v-if="$slots.header">
       <slot name="header" />
     </CardHeader>
-    <CardContent>
+    <CardContent :class="contentClass">
       <slot />
     </CardContent>
     <CardFooter v-if="$slots.footer">

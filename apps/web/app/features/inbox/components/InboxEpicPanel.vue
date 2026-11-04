@@ -66,18 +66,21 @@ const skeleton = computed(() => loading.value && (['pr', 'diff'].includes(openTa
     @select="tab = $event as Tab"
   >
     <template #header>
-      <InboxPanelMeta
-        :kind="r.kind.value"
-        :item="item"
-      />
-      <h1 class="text-lg leading-tight font-semibold break-words text-foreground">
-        <NuxtLink
-          :to="`/epics/${item.epicId}`"
-          class="hover:underline"
-        >
-          {{ item.subject }}
-        </NuxtLink>
-      </h1>
+      <div class="min-w-0">
+        <h1 class="text-lg leading-tight font-semibold break-words text-foreground">
+          <NuxtLink
+            :to="`/epics/${item.epicId}`"
+            class="hover:underline"
+          >
+            {{ item.subject }}
+          </NuxtLink>
+        </h1>
+        <InboxPanelMeta
+          class="mt-1"
+          :kind="r.kind.value"
+          :item="item"
+        />
+      </div>
       <InboxItemSummary
         :key="item.id"
         :item="item"
@@ -87,14 +90,12 @@ const skeleton = computed(() => loading.value && (['pr', 'diff'].includes(openTa
         :item="item"
         :r="r"
       />
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <InboxPanelActions
-          v-if="canAct && !mobile"
-          :ctx="ctx"
-          can-act
-        />
+      <div
+        v-if="!canAct || item.prUrl"
+        class="flex flex-wrap items-center justify-between gap-2"
+      >
         <p
-          v-else-if="!canAct"
+          v-if="!canAct"
           class="text-sm text-muted-foreground"
           data-testid="inbox-read-only"
         >
@@ -106,24 +107,20 @@ const skeleton = computed(() => loading.value && (['pr', 'diff'].includes(openTa
           target="_blank"
           :label="prLabel"
           icon="i-hugeicons-git-pull-request"
+          trailing-icon="i-hugeicons-arrow-up-right-01"
           color="neutral"
-          variant="ghost"
+          variant="outline"
           size="sm"
         />
       </div>
+      <!-- On a wide screen this sits with the actions at the bottom -->
       <p
-        v-if="canAct && item.type === 'epic_review'"
+        v-if="mobile && canAct && item.type === 'epic_review'"
         class="text-xs text-muted-foreground"
         data-testid="inbox-epic-approving"
       >
         {{ r.approvalNote.value }}
       </p>
-      <AppAlert
-        v-if="ctx.actionError && !mobile && !ctx.composerChosen"
-        color="error"
-        variant="subtle"
-        :title="ctx.actionError"
-      />
     </template>
 
     <div
@@ -191,13 +188,32 @@ const skeleton = computed(() => loading.value && (['pr', 'diff'].includes(openTa
         v-if="canAct && mobile"
         :ctx="ctx"
         approve-label="Approve parent"
-        :reply="false"
       />
       <div
-        v-else-if="canAct && ctx.composerChosen"
-        class="shrink-0 border-t border-border p-3"
+        v-else-if="canAct"
+        class="flex shrink-0 flex-col gap-2 border-t border-border p-3"
       >
-        <InboxPanelTray :ctx="ctx" />
+        <p
+          v-if="item.type === 'epic_review'"
+          class="text-xs text-muted-foreground"
+          data-testid="inbox-epic-approving"
+        >
+          {{ r.approvalNote.value }}
+        </p>
+        <InboxPanelActions
+          :ctx="ctx"
+          can-act
+        />
+        <InboxPanelTray
+          v-if="ctx.composerChosen"
+          :ctx="ctx"
+        />
+        <AppAlert
+          v-else-if="ctx.actionError"
+          color="error"
+          variant="subtle"
+          :title="ctx.actionError"
+        />
       </div>
     </template>
   </InboxPanelLayout>

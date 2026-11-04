@@ -163,33 +163,12 @@ describe.each([false, true])('Retry guidance with mobile=%s', (mobile) => {
   })
 })
 
-describe('switching a failed item between its Retry note and a reply', () => {
+describe('a failed item\'s Retry note', () => {
   const button = (wrapper: VueWrapper, label: string) => wrapper.findAll('button').find(b => b.text() === label)!
   const expectRetryNote = (view: Awaited<ReturnType<typeof mountInbox>>) => {
     expect(view.wrapper.get('label').text()).toBe('Note to send with Retry (optional)')
     expect(view.composer().props('submitLabel')).toBe('Retry')
   }
-
-  it('replies on desktop from Reply instead, without retrying, and Cancel returns to the note', async () => {
-    vi.mocked(api.tasks.comment).mockResolvedValue({ id: 'c1' } as never)
-    const view = await mountInbox('failed', 'COR-9')
-    try {
-      await button(view.wrapper, 'Reply instead').trigger('click')
-      expect(view.wrapper.find('label').exists()).toBe(false)
-      expect(view.composer().props('placeholder')).toMatch(/^Reply to/)
-      await button(view.wrapper, 'Cancel').trigger('click')
-      expectRetryNote(view)
-
-      await button(view.wrapper, 'Reply instead').trigger('click')
-      await (view.composer().props('onSubmit') as (message: string) => Promise<boolean>)('Any news?')
-      await flushPromises()
-      expect(api.tasks.comment).toHaveBeenCalledOnce()
-      expect(api.inbox.act).not.toHaveBeenCalled()
-      expectRetryNote(view)
-    } finally {
-      view.wrapper.unmount()
-    }
-  })
 
   it.each([false, true])('restores the note after Delete then Cancel with mobile=%s', async (mobile) => {
     const view = await mountInbox('failed', 'COR-9', null, true, task => task, false, mobile)
@@ -198,20 +177,6 @@ describe('switching a failed item between its Retry note and a reply', () => {
       expect(view.wrapper.find('label').exists()).toBe(false)
       await button(view.wrapper, 'Cancel').trigger('click')
       expectRetryNote(view)
-    } finally {
-      view.wrapper.unmount()
-    }
-  })
-
-  it('restores the note when Reply is toggled off on a phone', async () => {
-    const view = await mountInbox('failed', 'COR-9', null, true, task => task, false, true)
-    try {
-      expect(button(view.wrapper, 'Reply instead')).toBeUndefined()
-      await button(view.wrapper, 'Reply').trigger('click')
-      expect(view.composer().props('placeholder')).toMatch(/^Reply to/)
-      await button(view.wrapper, 'Reply').trigger('click')
-      expectRetryNote(view)
-      expect(button(view.wrapper, 'Reply').attributes('aria-pressed')).toBe('false')
     } finally {
       view.wrapper.unmount()
     }
@@ -366,29 +331,29 @@ it('moves on without waiting out a next task that won\'t load', async () => {
 })
 
 it('resets the draft and checked criteria between items, and has neither after Back', async () => {
-  const { wrapper, item, params, composer, openTab } = await mountInbox('human_review', 'COR-5')
+  const { wrapper, item, params, panel, openTab } = await mountInbox('human_review', 'COR-5')
   try {
     const evidence = () => wrapper.getComponent(evidenceStub)
     await openTab('criteria')
-    await (composer().vm.$emit('update:modelValue', 'my note'), vue.nextTick())
+    panel().setText('my note')
     evidence().vm.$emit('update:checked', ['c1'])
     await vue.nextTick()
     expect(evidence().props('checked')).toEqual(['c1'])
     const other = inbox().needsYou.find(i => i.type === 'failed')!
     params.itemId = other.id
     await flushPromises()
-    expect(composer().props('modelValue')).toBe('')
+    expect(panel().text).toBe('')
     params.itemId = item.id
     await flushPromises()
-    expect(composer().props('modelValue')).toBe('')
+    expect(panel().text).toBe('')
     await openTab('criteria')
     expect(evidence().props('checked')).toEqual([])
-    await (composer().vm.$emit('update:modelValue', 'my note'), vue.nextTick())
+    panel().setText('my note')
     params.itemId = undefined
     await flushPromises()
     params.itemId = item.id
     await flushPromises()
-    expect(composer().props('modelValue')).toBe('')
+    expect(panel().text).toBe('')
   } finally {
     wrapper.unmount()
   }
@@ -396,11 +361,12 @@ it('resets the draft and checked criteria between items, and has neither after B
 
 it('keeps the draft through leaving the Inbox and coming back to the item', async () => {
   const first = await mountInbox('human_review', 'COR-41')
-  await (first.composer().vm.$emit('update:modelValue', 'my note'), vue.nextTick())
+  first.panel().setText('my note')
+  await vue.nextTick()
   first.wrapper.unmount()
   const again = await mountInbox('human_review', 'COR-41')
   try {
-    expect(again.composer().props('modelValue')).toBe('my note')
+    expect(again.panel().text).toBe('my note')
   } finally {
     sessionStorage.clear()
     again.wrapper.unmount()
@@ -529,7 +495,7 @@ it('lets go of the held list when the action fails, keeping the draft', async ()
 })
 
 it('shows a revisited item\'s task at once from cache', async () => {
-  const { wrapper, item, params, primary, composer } = await mountInbox('human_review', 'COR-41')
+  const { wrapper, item, params, primary, panel } = await mountInbox('human_review', 'COR-41')
   try {
     expect(primary().text()).toBe('Approve design')
     const other = inbox().needsYou.find(i => i.type === 'failed')!
@@ -541,18 +507,18 @@ it('shows a revisited item\'s task at once from cache', async () => {
     await vue.nextTick()
     await vue.nextTick()
     expect(primary().text()).toBe('Approve design')
-    expect(composer().props('busy')).toBe(false)
+    expect(panel().taskLoading).toBe(false)
   } finally {
     wrapper.unmount()
   }
 })
 
 it('shows the error instead of loading forever and keeps approval blocked when the task fails to load', async () => {
-  const { wrapper, composer, primary, submit, alert } = await mountInbox('human_review')
+  const { wrapper, panel, primary, submit, alert } = await mountInbox('human_review')
   try {
     expect(alert().text()).toContain('Couldn\'t load this task')
     expect(alert().find('button').text()).toBe('Retry')
-    expect(composer().props('busy')).toBe(false)
+    expect(panel().taskLoading).toBe(false)
     expect(primary().text()).toBe('Task not loaded')
     expect(primary().attributes('disabled')).toBeDefined()
     expect(wrapper.findAll('[data-testid="inbox-actions"] button').find(b => b.text() === 'Request changes')!.attributes('disabled')).toBeUndefined()
@@ -782,14 +748,14 @@ it('refetches the open PR when a run on its task ends, not while one is going', 
 
 it('sends nothing for unticked human checks, opens Criteria and says why, then approves once ticked', async () => {
   const check = { id: 'check', position: 0, text: 'Looks right', met: null, checkedByHuman: true }
-  const { wrapper, primary, alert, composer } = await mountInbox('human_review', 'COR-5', null, true, task => ({ ...task, acceptanceCriteria: [check] }))
+  const { wrapper, primary, alert } = await mountInbox('human_review', 'COR-5', null, true, task => ({ ...task, acceptanceCriteria: [check] }))
   try {
     expect(wrapper.findComponent(evidenceStub).exists()).toBe(false)
     await primary().trigger('click')
     await flushPromises()
     expect(api.inbox.act).not.toHaveBeenCalled()
     expect(alert().text()).toBe('Tick each human check before approving.')
-    expect(composer().props('placeholder')).toMatch(/^Reply to/)
+    expect(wrapper.findComponent(composerStub).exists()).toBe(false)
     wrapper.getComponent(evidenceStub).vm.$emit('update:checked', ['check'])
     await flushPromises()
     expect(alert().exists()).toBe(false)
@@ -801,16 +767,21 @@ it('sends nothing for unticked human checks, opens Criteria and says why, then a
   }
 })
 
-it('sends approval on one click, and opens the composer for what needs words', async () => {
-  const { wrapper, item, primary, composer } = await mountInbox('human_review', 'COR-5')
+it('sends approval on one click, and opens the composer only for what needs words', async () => {
+  const { wrapper, item, primary, composer, panel } = await mountInbox('human_review', 'COR-5')
   try {
     expect(wrapper.find('[data-testid="inbox-overview-loading"]').exists()).toBe(false)
-    expect(composer().props('placeholder')).toMatch(/^Reply to/)
+    expect(wrapper.findComponent(composerStub).exists()).toBe(false)
+    // The task opens from a button beside the PR link, not an icon
+    expect(wrapper.get('[data-testid="inbox-artifacts"]').findAll('button').map(b => b.text())).toContain('Task COR-5')
     await wrapper.findAll('button').find(b => b.text() === 'Request changes')!.trigger('click')
     expect(api.inbox.act).not.toHaveBeenCalled()
     expect(composer().props('submitLabel')).toBe('Request changes')
+    // What was typed for the closed composer doesn't go with the approval
+    await composer().vm.$emit('update:modelValue', 'a hidden note')
     await wrapper.findAll('button').find(b => b.text() === 'Cancel')!.trigger('click')
-    expect(composer().props('placeholder')).toMatch(/^Reply to/)
+    expect(wrapper.findComponent(composerStub).exists()).toBe(false)
+    expect(panel().text).toBe('a hidden note')
     await primary().trigger('click')
     await flushPromises()
     expect(api.inbox.act).toHaveBeenCalledWith((item as { taskId: string }).taskId, { action: 'approve', text: '' })
@@ -819,18 +790,17 @@ it('sends approval on one click, and opens the composer for what needs words', a
   }
 })
 
-it('asks for a reason before deleting, and replies with no action chosen even if the task failed to load', async () => {
-  const { wrapper, item, composer } = await mountInbox('failed')
+it('asks for a reason before deleting, and sends nothing with no action chosen', async () => {
+  const { wrapper, composer, panel } = await mountInbox('failed')
   try {
     await wrapper.findAll('button').find(b => b.text() === 'Delete task')!.trigger('click')
     expect(api.inbox.act).not.toHaveBeenCalled()
     expect(composer().props('submitLabel')).toBe('Delete task')
     await wrapper.findAll('button').find(b => b.text() === 'Cancel')!.trigger('click')
-    await wrapper.findAll('button').find(b => b.text() === 'Reply instead')!.trigger('click')
-    vi.mocked(api.tasks.comment).mockResolvedValue({ id: 'c1' } as never)
-    await (composer().props('onSubmit') as (message: string) => Promise<boolean>)('Any news?')
-    const failed = item as { project: { slug: string }, taskRef: string }
-    expect(api.tasks.comment).toHaveBeenCalledWith(failed.project.slug, Number(failed.taskRef.split('-')[1]), 'Any news?')
+    // Comments belong on the task: the Inbox has no reply
+    panel().setAction(null)
+    expect(await panel().submit('Any news?')).toBe(false)
+    expect(api.tasks.comment).not.toHaveBeenCalled()
     expect(api.inbox.act).not.toHaveBeenCalled()
   } finally {
     wrapper.unmount()
@@ -855,35 +825,35 @@ it('hides criteria and review history until their tab opens, and shows no action
   }
 })
 
-for (const type of ['human_review', 'failed'] as const) {
-  it(`waits for an attached image before the one-click ${type === 'human_review' ? 'approval' : 'retry'}`, async () => {
-    vi.stubGlobal('URL', { createObjectURL: () => 'blob:preview', revokeObjectURL: vi.fn() })
-    const ref = type === 'human_review' ? 'COR-5' : inbox().needsYou.find(i => i.type === 'failed')!.taskRef!
-    const { wrapper, item, primary } = await mountInbox(type, ref, null, true, task => task, true)
-    try {
-      let finish!: (value: never) => void
-      vi.mocked(api.attachments.upload).mockReturnValue(new Promise((resolve) => {
-        finish = resolve
-      }))
-      const input = wrapper.get('input[type="file"]')
-      Object.defineProperty(input.element, 'files', { value: [new File(['image'], 'screen.png', { type: 'image/png' })] })
-      await input.trigger('change')
-      await primary().trigger('click')
-      await flushPromises()
-      expect(api.inbox.act).not.toHaveBeenCalled()
-      // A second click while uploading must not queue another action.
-      await primary().trigger('click')
-      finish({ id: 'uploaded-image' } as never)
-      await flushPromises()
-      expect(api.inbox.act).toHaveBeenCalledExactlyOnceWith((item as { taskId: string }).taskId, expect.objectContaining({
-        action: type === 'human_review' ? 'approve' : 'resolve',
-        text: '![screen.png](attachment:uploaded-image)'
-      }))
-    } finally {
-      wrapper.unmount()
-    }
-  })
-}
+// Approval has no composer open, so only Retry, which opens on its note, can
+// carry an image
+it('waits for an attached image before the one-click retry', async () => {
+  vi.stubGlobal('URL', { createObjectURL: () => 'blob:preview', revokeObjectURL: vi.fn() })
+  const ref = inbox().needsYou.find(i => i.type === 'failed')!.taskRef!
+  const { wrapper, item, primary } = await mountInbox('failed', ref, null, true, task => task, true)
+  try {
+    let finish!: (value: never) => void
+    vi.mocked(api.attachments.upload).mockReturnValue(new Promise((resolve) => {
+      finish = resolve
+    }))
+    const input = wrapper.get('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { value: [new File(['image'], 'screen.png', { type: 'image/png' })] })
+    await input.trigger('change')
+    await primary().trigger('click')
+    await flushPromises()
+    expect(api.inbox.act).not.toHaveBeenCalled()
+    // A second click while uploading must not queue another action.
+    await primary().trigger('click')
+    finish({ id: 'uploaded-image' } as never)
+    await flushPromises()
+    expect(api.inbox.act).toHaveBeenCalledExactlyOnceWith((item as { taskId: string }).taskId, expect.objectContaining({
+      action: 'resolve',
+      text: '![screen.png](attachment:uploaded-image)'
+    }))
+  } finally {
+    wrapper.unmount()
+  }
+})
 
 describe('on a phone', () => {
   let mounted: { unmount: () => void } | undefined
@@ -900,23 +870,19 @@ describe('on a phone', () => {
   it('puts the actions in the bar, not the top block, and sends Approve on the tap', async () => {
     const view = await phone()
     expect(view.wrapper.find('[data-testid="inbox-actions"]').exists()).toBe(false)
-    expect(bar(view).findAll('button').map(b => b.text())).toEqual(['Approve and merge', 'Request changes', 'Reply'])
+    expect(bar(view).findAll('button').map(b => b.text())).toEqual(['Approve and merge', 'Request changes'])
     expect(composerOpen(view)).toBe(false)
     await view.primary().trigger('click')
     await flushPromises()
     expect(api.inbox.act).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'approve' }))
   })
 
-  it('opens the composer above the bar for Request changes and Reply', async () => {
+  it('opens the composer above the bar for Request changes', async () => {
     const view = await phone()
     await button(view, 'Request changes').trigger('click')
     await flushPromises()
     expect(composerOpen(view)).toBe(true)
     expect(view.panel().action).toBe('request_changes')
-    await button(view, 'Reply').trigger('click')
-    await flushPromises()
-    expect(composerOpen(view)).toBe(true)
-    expect(view.panel().action).toBeNull()
     expect(api.inbox.act).not.toHaveBeenCalled()
   })
 
@@ -928,12 +894,12 @@ describe('on a phone', () => {
     expect(api.inbox.act).not.toHaveBeenCalled()
   })
 
-  it.each(['Cancel', 'Reply'])('keeps a draft visible after %s before approval', async (control) => {
+  it('keeps a draft visible after Cancel before approval', async () => {
     const view = await phone()
-    await button(view, control === 'Cancel' ? 'Request changes' : 'Reply').trigger('click')
+    await button(view, 'Request changes').trigger('click')
     view.panel().setText('Do not merge, the migration is wrong')
     await flushPromises()
-    await button(view, control).trigger('click')
+    await button(view, 'Cancel').trigger('click')
     await flushPromises()
     expect(composerOpen(view)).toBe(true)
     expect(view.composer().props('modelValue')).toBe('Do not merge, the migration is wrong')
@@ -943,7 +909,7 @@ describe('on a phone', () => {
     expect(composerOpen(view)).toBe(false)
   })
 
-  it('keeps an image-only draft visible after Cancel and toggling Reply off', async () => {
+  it('keeps an image-only draft visible after Cancel', async () => {
     vi.stubGlobal('URL', { createObjectURL: () => 'blob:preview', revokeObjectURL: vi.fn() })
     const view = await mountInbox('human_review', 'COR-5', null, true, task => task, true, true)
     mounted = view.wrapper
@@ -957,22 +923,7 @@ describe('on a phone', () => {
     await flushPromises()
     const images = () => view.wrapper.get('[aria-label="Attached images"]')
     expect(images().isVisible()).toBe(true)
-    await button(view, 'Reply').trigger('click')
-    await button(view, 'Reply').trigger('click')
-    await flushPromises()
-    expect(images().isVisible()).toBe(true)
     expect(api.inbox.act).not.toHaveBeenCalled()
-  })
-
-  it('closes the Reply composer once the reply is sent', async () => {
-    const view = await phone()
-    vi.mocked(api.tasks.comment).mockResolvedValue({} as never)
-    await button(view, 'Reply').trigger('click')
-    await flushPromises()
-    await (view.composer().vm as unknown as { onSubmit: (text: string) => Promise<boolean> }).onSubmit('On it')
-    await flushPromises()
-    expect(api.tasks.comment).toHaveBeenCalled()
-    expect(composerOpen(view)).toBe(false)
   })
 
   it('stops approval on an unticked human check, as on desktop', async () => {
@@ -992,7 +943,7 @@ describe('on a phone', () => {
 
   it('keeps Retry\'s status in the bar', async () => {
     const view = await phone('failed', 'COR-9')
-    expect(bar(view).findAll('button').map(b => b.text())).toEqual(['Retry', 'Send back', 'Delete', 'Reply'])
+    expect(bar(view).findAll('button').map(b => b.text())).toEqual(['Retry', 'Send back', 'Delete'])
     await view.primary().trigger('click')
     await flushPromises()
     expect(api.inbox.act).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'resolve', to: 'in_progress' }))
