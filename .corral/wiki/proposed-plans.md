@@ -30,3 +30,15 @@ the server's opening PM prompt (`apps/server/src/prompts.ts`) and the
 its opening prompt for every new session, regardless of project role overrides,
 and includes it again when reconstructing a lost session. Existing sessions
 retain their conversation and are not sent a new opening prompt on each turn.
+
+## Human review on plan tasks
+
+`normalizeProposedPlan` reads a missing `humanReview` as `false`, so the
+server's `propose_plan` handler records which keys left it out and `#propose`
+in `apps/server/src/plan.ts` resolves them before checking the plan: a new
+top-level task (no `ref`, no parent) takes `project.humanReviewDefault`, a new
+sub-task stays off, and a task with a `ref` keeps the existing task's flag.
+Where the project reviews by default, an explicit `humanReview: false` on a new
+top-level task is refused, pointing the PM at `update_task` after approval,
+which takes a confirm card (D11). The Draft is created with the resolved flag,
+so the plan panel and the approved task agree.

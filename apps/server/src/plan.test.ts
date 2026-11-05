@@ -2,7 +2,7 @@ import { databaseFixture } from '@corral/db/testing'
 import type { Attachment, Comment, DraftSession, Epic, EpicDetail, Plan, PlanSession, PlanSessionDetail, RunJob, Task } from '@corral/contracts'
 import { richTextToMarkdown } from '@corral/core'
 import { schema } from '@corral/db'
-import { and, desc, eq, inArray, ne } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { writeFile } from 'node:fs/promises'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
@@ -32,7 +32,7 @@ describe('plan sessions', () => {
     await t?.db.update(schema.projects).set({ paused: true })
   })
 
-  const plan = (tasksIn: Partial<{ key: string, ref: string, title: string, type: string, description: string, acceptanceCriteria: string[], dependsOn: string[], priority: string, humanReview: boolean, design: { taskRef: string, version: number, screens: string[] } }>[]) => ({
+  const plan = (tasksIn: Partial<{ key: string, ref: string, parent: string, title: string, type: string, description: string, acceptanceCriteria: string[], dependsOn: string[], priority: string, humanReview: boolean, design: { taskRef: string, version: number, screens: string[] } }>[]) => ({
     title: 'Login',
     summary: 'Email and password login',
     tasks: tasksIn.map((task, i) => ({
@@ -830,6 +830,62 @@ describe('plan sessions', () => {
     expect(await t.request('POST', `/api/plan/plans/${v1!.id}/approve`, { to: 'backlog' }).then(r => r.status)).toBe(200)
     const after = await t.request('GET', `/api/tasks/${target.ref}`).then(r => r.json()) as Task
     expect(after).toMatchObject({ type: 'design', humanReview: true })
+  })
+
+  describe('human review on plan tasks without the flag', () => {
+    async function reviewProject(humanReviewDefault: boolean) {
+      const project = await t.createProject()
+      await t.db.update(schema.projects).set({ paused: true, humanReviewDefault }).where(eq(schema.projects.id, project.id))
+      return project
+    }
+
+    async function propose(project: { id: string }, input: object) {
+      const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan it' }).then(r => r.json()) as PlanSessionDetail
+      const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.planSessionId === created.id)).job
+      const result = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', input)
+      await endTurn(job, 'Proposed.')
+      return { result, plans: (await session(created.id)).plans }
+    }
+
+    async function approvedReview(project: { id: string }, planId: string) {
+      expect(await t.request('POST', `/api/plan/plans/${planId}/approve`, { to: 'backlog' }).then(r => r.status)).toBe(200)
+      const rows = await t.db.select().from(tasks).where(and(eq(tasks.projectId, project.id), isNull(tasks.deletedAt))).orderBy(tasks.number)
+      return Object.fromEntries(rows.map(r => [r.title, r.humanReview]))
+    }
+
+    it('gives a new top-level task the project default and a new sub-task none', async () => {
+      const project = await reviewProject(true)
+      const { result, plans } = await propose(project, {
+        ...plan([{ title: 'Standalone' }, { title: 'Sub-task', parent: 'p1' }, { title: 'Other sub-task', parent: 'p1' }]),
+        parents: [{ key: 'p1', title: 'Feature' }]
+      })
+      expect(result).toMatchObject({ ok: true })
+      expect(plans[0]!.tasks.map(task => [task.title, task.humanReview])).toEqual([['Standalone', true], ['Sub-task', false], ['Other sub-task', false]])
+      expect(await approvedReview(project, plans[0]!.id)).toMatchObject({ 'Standalone': true, 'Sub-task': false, 'Other sub-task': false })
+    })
+
+    it('leaves a new top-level task without review where the project has none by default', async () => {
+      const project = await reviewProject(false)
+      const { plans } = await propose(project, plan([{ title: 'Standalone' }]))
+      expect(plans[0]!.tasks.map(task => task.humanReview)).toEqual([false])
+      expect(await approvedReview(project, plans[0]!.id)).toEqual({ Standalone: false })
+    })
+
+    it('refuses humanReview false on a new top-level task where the project reviews by default', async () => {
+      const project = await reviewProject(true)
+      const { result, plans } = await propose(project, plan([{ title: 'Unreviewed', humanReview: false }]))
+      expect(result).toMatchObject({ error: expect.stringMatching(/not saved.*"Unreviewed".*update_task with humanReview false.*confirm/) })
+      expect(plans).toEqual([])
+    })
+
+    it('keeps an existing task\'s setting when a revision leaves the flag out', async () => {
+      const project = await reviewProject(true)
+      const unreviewed = await t.createTask(project.slug, { title: 'Unreviewed', humanReview: false })
+      const reviewed = await t.createTask(project.slug, { title: 'Reviewed', humanReview: true })
+      const { plans } = await propose(project, plan([{ ref: unreviewed.ref, title: 'Unreviewed' }, { ref: reviewed.ref, title: 'Reviewed' }]))
+      expect(plans[0]!.tasks.map(task => [task.title, task.humanReview])).toEqual([['Unreviewed', false], ['Reviewed', true]])
+      expect(await approvedReview(project, plans[0]!.id)).toEqual({ Unreviewed: false, Reviewed: true })
+    })
   })
 
   // A design task with v1 superseded, v2 approved and v3 submitted (D20)

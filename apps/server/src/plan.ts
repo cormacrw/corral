@@ -653,6 +653,19 @@ export class PlanService {
   async #propose(session: SessionRow, project: ProjectRow, runId: string, proposed: ProposedPlan, actor: Actor, keepsReview: ReadonlySet<string> = new Set()) {
     const { db } = this.#d
     const { found, targets } = await this.#lookupRefs(project, proposed)
+    // A new top-level task that leaves the flag out takes the project's
+    // default, and can't turn it off: that lowers a gate, so it takes the
+    // human's confirmation through update_task once the task exists. A new
+    // sub-task gets its review from its parent's mode, so it starts off.
+    const lowered: string[] = []
+    for (const task of proposed.tasks) {
+      if (task.ref || task.epic) continue
+      if (keepsReview.has(task.key)) task.humanReview = requiresHumanReview(task.type, project.humanReviewDefault)
+      else if (!task.humanReview && project.humanReviewDefault) lowered.push(`"${task.title}"`)
+    }
+    if (lowered.length > 0) {
+      throw new ToolError(`The plan was not saved: ${project.name} has human review on by default, so a new task can't set humanReview to false (${lowered.join(', ')}). Leave humanReview out so it takes the project default. If the human wants a task without human review, once the plan is approved call update_task with humanReview false, which asks them to confirm.`)
+    }
     // A revision that leaves the flag out keeps the task's
     for (const task of proposed.tasks) {
       const target = task.ref ? targets.get(task.ref) : undefined
