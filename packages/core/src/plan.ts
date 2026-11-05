@@ -30,7 +30,11 @@ export interface ProposedEpic {
 
 export interface PlanTaskContent {
   title: string
+  // Markdown: a short summary for people
   description: string
+  // Markdown: the approach for agents. Left out or empty, the task has none,
+  // so a revision clears a plan it leaves out, as it does the description.
+  implementationPlan?: string | undefined
   type: TaskType
   priority: TaskPriority
   humanReview: boolean
@@ -284,6 +288,7 @@ const taskComparisons: { [K in keyof ProposedTask]-?: (a: ProposedTask, b: Propo
   epic: (a, b) => (a.epic || undefined) === (b.epic || undefined),
   title: (a, b) => a.title === b.title,
   description: (a, b) => a.description === b.description,
+  implementationPlan: (a, b) => (a.implementationPlan ?? '') === (b.implementationPlan ?? ''),
   type: (a, b) => a.type === b.type,
   priority: (a, b) => a.priority === b.priority,
   humanReview: (a, b) => a.humanReview === b.humanReview,

@@ -154,12 +154,13 @@ export class AgentTools {
       title: task.title,
       status: task.status,
       description: richTextToMarkdown(task.description),
+      implementationPlan: richTextToMarkdown(task.implementationPlan),
       branch: task.branch,
       submissions: (await listTaskSubmissions(this.#c.d.db, task.id)).map(s => ({ sequence: s.sequence, headSha: s.submittedHeadSha, baseSha: s.baseSha, targetBranch: s.targetBranch, agentApprovedHeadSha: s.agentApprovedHeadSha, integratedCommitSha: s.integratedCommitSha, integratedAt: s.integratedAt?.toISOString() ?? null, createdAt: s.createdAt.toISOString() })),
       reviewRound: task.reviewRounds,
       criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),
       comments: notes.map(c => ({ ...c, createdAt: c.createdAt.toISOString() })),
-      attachments: await listTaskAttachments(this.#c.d.db, ctx.project!.id, task.description, notes),
+      attachments: await listTaskAttachments(this.#c.d.db, ctx.project!.id, task, notes),
       evidence: items.map(e => ({ id: e.id, criterionId: e.criterionId, kind: e.kind, note: e.note, fileName: e.fileName, round: e.round }))
     }
   }

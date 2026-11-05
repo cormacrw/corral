@@ -23,6 +23,7 @@ Short implementation notes written while building. Not binding: `docs/README.md`
 - [Frontend structure](frontend-structure.md)
 - [Demo data (`pnpm dev:demo`)](demo-data.md)
 - [Criteria checked by a human](human-checked-criteria.md)
+- [Implementation plans](implementation-plans.md)
 - [Inbox quick actions](inbox-quick-actions.md)
 - [Inbox review changes](inbox-review-changes.md)
 - [Launch destination](mobile-landing.md)

@@ -281,6 +281,7 @@ export function task(project: Project, number: number, fields: Partial<Task> & P
     ref: `${project.prefix}-${number}`,
     number,
     description: doc(`${fields.title}.`),
+    implementationPlan: null,
     priority: 'medium',
     type: 'task',
     kind: 'normal',
@@ -952,9 +953,9 @@ export const grilling: Record<string, { questions: Pick<PlanMessage, 'text' | 'r
       title: 'Mobile push',
       summary: 'Web Push notifications for Needs you items, opening the Inbox item.',
       tasks: [
-        { key: 'T1', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'VAPID keys and push subscriptions', status: 'draft', priority: 'urgent', humanReview: false, dependsOn: [] },
-        { key: 'T2', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'Send a push when an item needs you', status: 'draft', priority: 'high', humanReview: true, dependsOn: ['T1'] },
-        { key: 'T3', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'Open the Inbox item from a push', status: 'draft', priority: 'low', humanReview: false, dependsOn: ['T2'] }
+        { key: 'T1', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'VAPID keys and push subscriptions', description: '', implementationPlan: '', status: 'draft', priority: 'urgent', humanReview: false, dependsOn: [] },
+        { key: 'T2', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'Send a push when an item needs you', description: '', implementationPlan: '', status: 'draft', priority: 'high', humanReview: true, dependsOn: ['T1'] },
+        { key: 'T3', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'Open the Inbox item from a push', description: '', implementationPlan: '', status: 'draft', priority: 'low', humanReview: false, dependsOn: ['T2'] }
       ]
     }
   }
@@ -967,9 +968,9 @@ export const plans: Record<string, Plan[]> = {
       summary: 'A design task type whose deliverable is an approved, versioned prototype.', status: 'proposed', approvedAt: null,
       epics: [{ key: 'E1', id: 'e-design', title: 'Design tasks', reviewMode: 'each_task' }],
       tasks: [
-        { key: 'T1', change: 'added', revises: false, taskId: 't-cor-13', epicId: 'e-design', ref: 'COR-13', title: 'Design review screen', status: 'draft', priority: 'high', humanReview: true, dependsOn: [] },
-        { key: 'T2', change: 'added', revises: false, taskId: 't-cor-14', epicId: 'e-design', ref: 'COR-14', title: 'Approve a design version', status: 'draft', priority: 'urgent', humanReview: false, dependsOn: ['T1'] },
-        { key: 'T3', change: 'added', revises: false, taskId: 't-cor-15', epicId: 'e-design', ref: 'COR-15', title: 'Pin a design version to a task', status: 'draft', priority: 'low', humanReview: false, dependsOn: ['T2'] }
+        { key: 'T1', change: 'added', revises: false, taskId: 't-cor-13', epicId: 'e-design', ref: 'COR-13', title: 'Design review screen', description: '', implementationPlan: '', status: 'draft', priority: 'high', humanReview: true, dependsOn: [] },
+        { key: 'T2', change: 'added', revises: false, taskId: 't-cor-14', epicId: 'e-design', ref: 'COR-14', title: 'Approve a design version', description: '', implementationPlan: '', status: 'draft', priority: 'urgent', humanReview: false, dependsOn: ['T1'] },
+        { key: 'T3', change: 'added', revises: false, taskId: 't-cor-15', epicId: 'e-design', ref: 'COR-15', title: 'Pin a design version to a task', description: '', implementationPlan: '', status: 'draft', priority: 'low', humanReview: false, dependsOn: ['T2'] }
       ],
       createdAt: ago(60 * 25)
     }
@@ -980,8 +981,8 @@ export const plans: Record<string, Plan[]> = {
       summary: 'Steadier cards while runs start, and a look at long columns.', status: 'proposed', approvedAt: null,
       epics: [],
       tasks: [
-        { key: 'T1', change: 'added', revises: false, taskId: 't-cor-16', epicId: null, ref: 'COR-16', title: 'Cards jump when a run starts', status: 'draft', priority: 'medium', humanReview: false, dependsOn: [] },
-        { key: 'T2', change: 'added', revises: false, taskId: 't-cor-17', epicId: null, ref: 'COR-17', title: 'Spike: virtualise long columns', status: 'draft', priority: 'low', humanReview: false, dependsOn: [] }
+        { key: 'T1', change: 'added', revises: false, taskId: 't-cor-16', epicId: null, ref: 'COR-16', title: 'Cards jump when a run starts', description: '', implementationPlan: '', status: 'draft', priority: 'medium', humanReview: false, dependsOn: [] },
+        { key: 'T2', change: 'added', revises: false, taskId: 't-cor-17', epicId: null, ref: 'COR-17', title: 'Spike: virtualise long columns', description: '', implementationPlan: '', status: 'draft', priority: 'low', humanReview: false, dependsOn: [] }
       ],
       createdAt: ago(60 * 50)
     }
@@ -991,7 +992,7 @@ export const plans: Record<string, Plan[]> = {
       id: 'plan-4', sessionId: 's-4', projectId: 'p-corral', epicId: null, version: 1, title: 'Keep the Plan conversation within a phone\'s screen width',
       summary: 'Long tokens wrap; code blocks and tables scroll in their own box.', status: 'approved', approvedAt: ago(30), epics: [],
       tasks: [
-        { key: 'T1', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'Wrap long tokens in messages', status: 'draft', priority: 'high', humanReview: false, dependsOn: [] }
+        { key: 'T1', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'Wrap long tokens in messages', description: '', implementationPlan: '', status: 'draft', priority: 'high', humanReview: false, dependsOn: [] }
       ],
       createdAt: ago(60)
     }

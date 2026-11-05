@@ -34,6 +34,9 @@ export const tasks = pgTable('tasks', {
   title: text().notNull(),
   // Rich-text document from the editor (design/task.md)
   description: jsonb(),
+  // Implementation detail for agents (approach, files, edge cases); the
+  // description above is the short summary people read. Null when none.
+  implementationPlan: jsonb(),
   status: taskStatus().notNull().default('backlog'),
   priority: taskPriority().notNull().default('medium'),
   type: taskType().notNull(),

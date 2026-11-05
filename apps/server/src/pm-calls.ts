@@ -1,5 +1,5 @@
 import { humanTransitionInput, isPmGatedTool, neutralPmCall, pmActionTools, pmDirectTools, requiresPmConfirmation, storedProjectFields, type PmGatedTool } from '@corral/contracts'
-import { canChangeType, isActiveRun, requiresHumanReview, taskRef, type Actor } from '@corral/core'
+import { canChangeType, isActiveRun, markdownToRichText, requiresHumanReview, taskRef, type Actor } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, eq, isNull } from 'drizzle-orm'
 import { z } from 'zod'
@@ -28,6 +28,11 @@ const shown = (value: unknown) => {
 
 // The stored mode `epic` is parent-level review
 const modeName = (mode: string | undefined) => mode === 'epic' ? 'parent' : mode
+
+// The PM's markdown plan as stored rich text; blank or null clears it
+function planDoc(markdown: string | null | undefined) {
+  return markdown ? markdownToRichText(markdown) : null
+}
 
 export type PmEditTool = 'create_task' | 'update_task' | 'update_parent'
 
@@ -132,13 +137,13 @@ export class PmCalls {
       return { result: epic, projectId: project.id, summary: `Updated parent ${epic.title}` }
     }
     if (tool === 'create_task') {
-      const { parentId, ...parsed } = z.object(pmActionTools.create_task.input).strict().parse(scopedInput)
-      const task = await loadTask(db, await createTask(db, project, { ...parsed, epicId: parentId ?? null }, actor))
+      const { parentId, implementationPlan, ...parsed } = z.object(pmActionTools.create_task.input).strict().parse(scopedInput)
+      const task = await loadTask(db, await createTask(db, project, { ...parsed, implementationPlan: planDoc(implementationPlan), epicId: parentId ?? null }, actor))
       events.publish({ type: 'task.created', task })
       return { result: task, projectId: project.id, target: { taskId: task.id, taskRef: task.ref }, summary: `Created ${task.ref}: ${task.title}` }
     }
-    const { taskRef: ref, paused, parentId, ...edits } = z.object(pmActionTools.update_task.input).strict().parse(scopedInput)
-    const fields = { ...edits, ...parentId !== undefined && { epicId: parentId } }
+    const { taskRef: ref, paused, parentId, implementationPlan, ...edits } = z.object(pmActionTools.update_task.input).strict().parse(scopedInput)
+    const fields = { ...edits, ...parentId !== undefined && { epicId: parentId }, ...implementationPlan !== undefined && { implementationPlan: planDoc(implementationPlan) } }
     const match = /^([A-Za-z]+)-(\d+)$/.exec(ref)
     if (!match || match[1]!.toUpperCase() !== project.prefix.toUpperCase()) throw new ToolError('Use a task ref from this conversation’s project')
     const [row] = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))

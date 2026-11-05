@@ -222,6 +222,7 @@ function toTask(
     number: row.number,
     title: row.title,
     description: upgradePlainMarkdown(row.description),
+    implementationPlan: row.implementationPlan ?? null,
     ...taskStatus(row, session),
     priority: row.priority,
     type: row.type,
@@ -386,6 +387,7 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
       number: allocated!.number,
       title: input.title,
       description: input.description,
+      implementationPlan: input.implementationPlan ?? null,
       type: input.type,
       kind: options.kind,
       priority: input.priority,
@@ -486,7 +488,7 @@ export async function addSubtask(db: Executor, project: ProjectRow, taskId: stri
       projectId: project.id, taskId, title: task.title, description: richTextToMarkdown(task.description), priority: task.priority, reviewMode: project.epicReviewModeDefault, createdBy: actor
     }).returning({ id: epics.id })
     // Ready needs a description, and the work it describes moves to this sub-task
-    const subId = await createTask(tx, project, { ...input, description: input.description ?? task.description as CreateTaskInput['description'], epicId: delivery!.id }, actor)
+    const subId = await createTask(tx, project, { ...input, description: input.description ?? task.description as CreateTaskInput['description'], implementationPlan: input.implementationPlan ?? task.implementationPlan as CreateTaskInput['implementationPlan'], epicId: delivery!.id }, actor)
     await promoteToParent(tx, project, task, subId, actor)
     if (task.status === 'draft') {
       await tx.update(tasks).set({ status: 'draft' }).where(eq(tasks.id, subId))

@@ -88,6 +88,10 @@ export interface Plan {
     epicId: string | null
     ref: string | null
     title: string
+    // Markdown, staged for a revised task: the short summary, and the
+    // implementation plan ('' when none)
+    description: string
+    implementationPlan: string
     status: TaskStatus | null
     priority: TaskPriority
     humanReview: boolean

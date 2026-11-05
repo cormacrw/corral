@@ -8,7 +8,8 @@ const proposedTask = z.object({
   // Runners from before parent tasks (D31) send `epic`, with keys from `epics`
   epic: z.string().trim().optional().describe('Older name for parent'),
   title: z.string().trim().min(1),
-  description: z.string().trim(),
+  description: z.string().trim().describe('Markdown: one to three plain sentences a person reads to know what the task is and why. Put the approach, files and edge cases in implementationPlan'),
+  implementationPlan: z.string().trim().optional().describe('Markdown for the agent that builds it: approach, file pointers, edge cases and test notes. On a task with a ref, include its current plan (from get_task) to keep it: a revision without one clears it'),
   type: z.enum(TASK_TYPES),
   priority: z.enum(TASK_PRIORITIES).default('medium'),
   humanReview: z.boolean().optional().describe('Leave out on a task with a ref to keep its current setting'),

@@ -31,8 +31,10 @@ function without<T extends object, K extends keyof T>(shape: T, key: K): Omit<T,
   delete fields[key]
   return fields
 }
-function taskFields<T extends { epicId: unknown }>(shape: T) {
-  return { ...without(shape, 'epicId'), parentId: z.uuid().nullable().optional() }
+// The PM writes the implementation plan as markdown; the server stores rich text
+const implementationPlan = z.string().trim().nullable().optional().describe('Markdown for the agent that builds it: approach, file pointers, edge cases and test notes. Keep the description to a short summary for people; an empty string or null clears the plan')
+function taskFields<T extends { epicId: unknown, implementationPlan: unknown }>(shape: T) {
+  return { ...without(shape, 'epicId'), implementationPlan, parentId: z.uuid().nullable().optional() }
 }
 
 function projectFields<T extends { epicReviewModeDefault: unknown }>(shape: T) {

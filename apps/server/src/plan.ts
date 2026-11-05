@@ -551,9 +551,10 @@ export class PlanService {
         return {
           ...task,
           description: richTextToMarkdown(task.description),
+          implementationPlan: richTextToMarkdown(task.implementationPlan),
           epic: epic ?? null,
           comments: notes.map(c => ({ author: c.author.kind, body: c.body, pinned: c.pinned, at: c.createdAt.toISOString() })),
-          attachments: await listTaskAttachments(db, project!.id, task.description, notes.map(c => ({ author: c.author.kind, body: c.body, createdAt: c.createdAt })))
+          attachments: await listTaskAttachments(db, project!.id, task, notes.map(c => ({ author: c.author.kind, body: c.body, createdAt: c.createdAt })))
         }
       }
 
@@ -756,6 +757,7 @@ export class PlanService {
         const input = {
           title: task.title,
           description: markdownToRichText(task.description),
+          implementationPlan: planDoc(task.implementationPlan),
           type: task.type,
           priority: task.priority,
           humanReview: task.humanReview,
@@ -795,6 +797,7 @@ export class PlanService {
           revisions.set(task.key, {
             title: task.title,
             description: task.description,
+            ...(task.implementationPlan && { implementationPlan: task.implementationPlan }),
             type: task.type,
             priority: task.priority,
             humanReview: task.humanReview,
@@ -983,7 +986,7 @@ export class PlanService {
       db.select({ prefix: projects.prefix }).from(projects).where(eq(projects.id, projectId)),
       db.select({
         item: planTasks,
-        task: { id: tasks.id, number: tasks.number, epicId: tasks.epicId, title: tasks.title, status: tasks.status, priority: tasks.priority, humanReview: tasks.humanReview }
+        task: { id: tasks.id, number: tasks.number, epicId: tasks.epicId, title: tasks.title, description: tasks.description, implementationPlan: tasks.implementationPlan, status: tasks.status, priority: tasks.priority, humanReview: tasks.humanReview }
       }).from(planTasks).leftJoin(tasks, eq(tasks.id, planTasks.taskId))
         .where(inArray(planTasks.planId, planIds)).orderBy(asc(planTasks.position)),
       db.select().from(planEpics).where(inArray(planEpics.planId, planIds)).orderBy(asc(planEpics.position)),
@@ -1029,6 +1032,8 @@ export class PlanService {
           epicId: item.revision ? item.revision.epicId : task?.epicId ?? null,
           ref: task && project ? taskRef(project.prefix, task.number) : null,
           title: item.revision?.title ?? task?.title ?? item.key,
+          description: item.revision ? item.revision.description : richTextToMarkdown(task?.description ?? null),
+          implementationPlan: item.revision ? item.revision.implementationPlan ?? '' : richTextToMarkdown(task?.implementationPlan ?? null),
           status: task?.status ?? null,
           priority: item.revision?.priority ?? task?.priority ?? 'medium',
           humanReview: item.revision?.humanReview ?? task?.humanReview ?? false,
@@ -1077,6 +1082,7 @@ export class PlanService {
         epic: task.epicId ? keyOf.get(task.epicId) ?? task.epicId : undefined,
         title: task.title,
         description: richTextToMarkdown(task.description),
+        ...(task.implementationPlan ? { implementationPlan: richTextToMarkdown(task.implementationPlan) } : {}),
         type: task.type,
         priority: task.priority,
         humanReview: task.humanReview,
@@ -1394,6 +1400,7 @@ async function reviseTask(tx: Executor, project: ProjectRow, taskId: string, rev
   await patchTask(tx, project, taskId, {
     title: revision.title,
     description: markdownToRichText(revision.description),
+    implementationPlan: planDoc(revision.implementationPlan),
     type: revision.type,
     priority: revision.priority,
     humanReview: revision.humanReview,
@@ -1403,7 +1410,12 @@ async function reviseTask(tx: Executor, project: ProjectRow, taskId: string, rev
   }, actor, invalidatedEpics)
   // Revisions saved before pins existed leave the task's pin alone
   if (revision.design !== undefined) await setDesignPin(tx, taskId, revision.design)
-  await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.revised', { ...plan, fields: ['title', 'description', 'type', 'priority', 'humanReview', 'acceptanceCriteria', 'epicId', 'dependsOn', ...(revision.design !== undefined ? ['design'] : [])] }))
+  await appendAudit(tx, { projectId: project.id, taskId, actor }, auditEvent('task.revised', { ...plan, fields: ['title', 'description', 'implementationPlan', 'type', 'priority', 'humanReview', 'acceptanceCriteria', 'epicId', 'dependsOn', ...(revision.design !== undefined ? ['design'] : [])] }))
+}
+
+// A proposed plan as stored rich text; none when it's left out or blank
+function planDoc(markdown: string | undefined) {
+  return markdown?.trim() ? markdownToRichText(markdown) : null
 }
 
 async function keepCriterionIds(tx: Executor, taskId: string, texts: (string | { text: string, checkedByHuman?: boolean | undefined })[]) {

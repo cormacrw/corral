@@ -84,7 +84,7 @@ export class RunJobs {
     }
     const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
     const notes = await this.comments(task.id)
-    const attached = await listTaskAttachments(db, ctx.project!.id, task.description, notes)
+    const attached = await listTaskAttachments(db, ctx.project!.id, task, notes)
     const pin = await this.#pinnedDesign(ctx.project!.prefix, task.id)
     const previous = await this.previousAuthorRun(db, task.id, ctx.agent.id, ctx.run.role, ctx.run.id)
     const [lastRun] = await db.select().from(runs)
@@ -102,6 +102,7 @@ export class RunJobs {
       ref,
       title: task.title,
       description: task.description,
+      implementationPlan: task.implementationPlan,
       branch: spike ? null : task.branch,
       spike,
       design: author.design ?? null,
@@ -232,7 +233,7 @@ export class RunJobs {
     const items = (await listEvidence(db, task.id)).filter(e => e.round === task.reviewRounds)
     const [previous] = await db.select().from(reviews).where(eq(reviews.taskId, task.id)).orderBy(desc(reviews.createdAt)).limit(1)
     const notes = await this.comments(task.id)
-    const attached = await listTaskAttachments(db, ctx.project!.id, task.description, notes)
+    const attached = await listTaskAttachments(db, ctx.project!.id, task, notes)
     // A spike has no commit: the reviewer gets a checkout of the default
     // branch and judges the findings the developer last reported (D19)
     const baseBranch = await taskBase(db, task, ctx.project!)
@@ -285,6 +286,7 @@ export class RunJobs {
         ref,
         title: task.title,
         description: task.description,
+        implementationPlan: task.implementationPlan,
         branch: spike ? null : task.branch,
         spike,
         findings: reported?.summary ?? null,

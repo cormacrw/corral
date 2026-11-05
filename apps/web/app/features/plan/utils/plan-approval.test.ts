@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { approvePlan } from '~/features/plan/utils/plan-approval.ts'
 
 const item = (key: string, change: Plan['tasks'][number]['change'] = 'added'): Plan['tasks'][number] =>
-  ({ key, change, revises: false, taskId: null, epicId: null, ref: null, title: key, status: 'draft', priority: 'medium', humanReview: false, dependsOn: [] })
+  ({ key, change, revises: false, taskId: null, epicId: null, ref: null, title: key, description: '', implementationPlan: '', status: 'draft', priority: 'medium', humanReview: false, dependsOn: [] })
 const plan = (tasks = [item('a'), item('b'), item('c', 'removed')]): Plan =>
   ({ id: 'p1', sessionId: 's1', projectId: 'pr', epicId: null, version: 1, title: 'Plan', summary: '', status: 'proposed', approvedAt: null, epics: [], tasks, createdAt: '' })
 
