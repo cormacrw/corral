@@ -20,6 +20,14 @@ export function pmWorktreePath(dataDir: string, projectId: string, planSessionId
   return join(dataDir, 'worktrees', `pm-${projectId}-${planSessionId}`)
 }
 
+// One Turbo cache per project on this runner, shared by its worktrees, so a
+// new task's unchanged packages replay lint, typecheck and build. Keyed by
+// project, so one project's entries never replay in another
+// (.corral/wiki/turbo-cache.md).
+export function turboCachePath(dataDir: string, projectId: string): string {
+  return join(dataDir, 'turbo-cache', projectId)
+}
+
 export interface Workspace {
   path: string
   bare: string | null
@@ -312,7 +320,8 @@ export async function sweepWorktrees(
   dataDir: string,
   keep: KeepLists,
   pmTurnRunning: (planSessionId: string) => boolean,
-  runIsHere: (runId: string) => boolean = () => true
+  runIsHere: (runId: string) => boolean = () => true,
+  projectRunning: (projectId: string) => boolean = () => true
 ): Promise<{ removed: string[], kept: string[] }> {
   const root = join(dataDir, 'worktrees')
   const folders = await readdir(root, { withFileTypes: true }).catch(() => [])
@@ -339,6 +348,9 @@ export async function sweepWorktrees(
   await sweepRunFiles(dataDir, keep, pmTurnRunning, runIsHere).catch((error: unknown) => {
     console.warn(`Could not sweep the scratch folders: ${error instanceof Error ? error.message : String(error)}`)
   })
+  await pruneTurboCaches(dataDir, projectRunning).catch((error: unknown) => {
+    console.warn(`Could not prune the Turbo caches: ${error instanceof Error ? error.message : String(error)}`)
+  })
   return { removed, kept }
 }
 
@@ -364,6 +376,46 @@ async function sweepRunFiles(dataDir: string, keep: KeepLists, pmTurnRunning: (p
   for (const file of await readdir(spool).catch(() => [])) {
     const runId = RUN_SPOOL.exec(file)?.[1]
     if (runId && !runIsHere(runId)) await rm(join(spool, file), { force: true })
+  }
+}
+
+export const TURBO_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60_000
+export const TURBO_CACHE_MAX_BYTES = 5 * 1024 ** 3
+
+// Turbo never evicts local entries. An entry is a task hash's files
+// (<hash>.tar.zst and <hash>-meta.json); its last use is the newest atime or
+// mtime of them. Entries unused for the age limit go, then the oldest until
+// the project is under the size cap. A project with a run on this runner is
+// left alone: its agent may be reading or writing entries right now.
+export async function pruneTurboCaches(
+  dataDir: string,
+  projectRunning: (projectId: string) => boolean,
+  now = Date.now(),
+  limits: { maxAgeMs: number, maxBytes: number } = { maxAgeMs: TURBO_CACHE_MAX_AGE_MS, maxBytes: TURBO_CACHE_MAX_BYTES }
+): Promise<void> {
+  const root = join(dataDir, 'turbo-cache')
+  for (const project of await readdir(root, { withFileTypes: true }).catch(() => [])) {
+    if (!project.isDirectory() || projectRunning(project.name)) continue
+    const folder = join(root, project.name)
+    const entries = new Map<string, { files: string[], used: number, bytes: number }>()
+    for (const file of await readdir(folder, { withFileTypes: true })) {
+      if (!file.isFile()) continue
+      const info = await stat(join(folder, file.name)).catch(() => null)
+      if (!info) continue
+      const hash = file.name.replace(/(-meta\.json|\..*)$/, '')
+      const entry = entries.get(hash) ?? { files: [], used: 0, bytes: 0 }
+      entry.files.push(file.name)
+      entry.used = Math.max(entry.used, info.atimeMs, info.mtimeMs)
+      entry.bytes += info.size
+      entries.set(hash, entry)
+    }
+    const oldestFirst = [...entries.values()].sort((a, b) => a.used - b.used)
+    let total = oldestFirst.reduce((sum, entry) => sum + entry.bytes, 0)
+    for (const entry of oldestFirst) {
+      if (now - entry.used <= limits.maxAgeMs && total <= limits.maxBytes) break
+      for (const file of entry.files) await rm(join(folder, file), { force: true })
+      total -= entry.bytes
+    }
   }
 }
 

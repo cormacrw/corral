@@ -193,6 +193,8 @@ The root is configurable (env vars). `pnpm dev` puts it in the checkout's own `.
                                 processes stay warm (D9); swept with its session
     spool/<runId>.jsonl         the agent's raw output while the run is live,
                                 deleted once run.ended has gone out
+    turbo-cache/<projectId>/    Turbo's local cache, shared by the project's
+                                worktrees (TURBO_CACHE_DIR); pruned by the sweep
 ```
 
 Backing up `server/` backs up all of a dev instance's state. For the deployed instance, back up the Postgres database (`pg_dump`) and the server volume (blobs) (D14).

@@ -39,7 +39,7 @@ const connection: ServerConnection = new ServerConnection(config.serverUrl, { ru
   },
   onMessage(message) {
     if (message.type === 'job.request') {
-      runSetupJob(config, message.job, planSessionId => runs.pmTurnRunning(planSessionId), runId => runs.hasRun(runId)).then(
+      runSetupJob(config, message.job, planSessionId => runs.pmTurnRunning(planSessionId), runId => runs.hasRun(runId), projectId => runs.projectRunning(projectId)).then(
         result => connection.send({ type: 'job.result', jobId: message.jobId, ok: true, result }),
         (error: unknown) => connection.send({ type: 'job.result', jobId: message.jobId, ok: false, error: error instanceof Error ? error.message : String(error) })
       )

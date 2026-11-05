@@ -22,6 +22,9 @@ agent's environment, the only `CORRAL_*` variable an agent sees:
 | Parent conflict fix, parent rebase or resolution task | Yes | `none` | No checks at all |
 | Any | No | unset | The full local check |
 
+Lint, typecheck and build replay from the project's Turbo cache, which the
+runner shares between its worktrees ([turbo-cache.md](turbo-cache.md)).
+
 Any project's check script can honour the variable. `scripts/check.ts` returns
 at once on `none`, and runs lint and typecheck without the test suites on
 `targeted`. `--review` and an unset variable run everything. A published head

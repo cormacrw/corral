@@ -55,7 +55,10 @@ export function agentArgs(options: ArgOptions & ({ prompt: string } | { input: '
 // git prefers over any user.name/user.email the agent writes to its config.
 // CORRAL_CHECK_SCOPE is the one exception: it's about this run, and a project's
 // check script can honour it (docs/agent-runtime-and-auth.md).
-export function agentEnv(base: NodeJS.ProcessEnv = process.env, gitAuthor: GitAuthor | null = null, checkScope: CheckScope | null = null): NodeJS.ProcessEnv {
+// TURBO_CACHE_DIR points at the project's shared Turbo cache on this runner, so
+// a new worktree doesn't start cold; an operator's own value wins
+// (.corral/wiki/turbo-cache.md).
+export function agentEnv(base: NodeJS.ProcessEnv = process.env, gitAuthor: GitAuthor | null = null, checkScope: CheckScope | null = null, turboCacheDir: string | null = null): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base }
   for (const key of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'NODE_ENV']) delete env[key]
   for (const key of Object.keys(env)) {
@@ -70,6 +73,7 @@ export function agentEnv(base: NodeJS.ProcessEnv = process.env, gitAuthor: GitAu
     env.GIT_AUTHOR_EMAIL = env.GIT_COMMITTER_EMAIL = gitAuthor.email
   }
   if (checkScope) env.CORRAL_CHECK_SCOPE = checkScope
+  if (turboCacheDir && !env.TURBO_CACHE_DIR) env.TURBO_CACHE_DIR = turboCacheDir
   return env
 }
 
@@ -228,13 +232,13 @@ export function startProcess(
   bin: string,
   args: string[],
   stdin: 'ignore' | 'pipe',
-  options: Pick<RuntimeOptions, 'cwd' | 'gitAuthor' | 'checkScope' | 'onLine'>,
+  options: Pick<RuntimeOptions, 'cwd' | 'gitAuthor' | 'checkScope' | 'turboCacheDir' | 'onLine'>,
   parser: { parse(line: string): ParsedLine },
   input?: string
 ): { child: ChildProcess, exited: Promise<AgentExit> } {
   const child = spawn(bin, args, {
     cwd: options.cwd,
-    env: agentEnv(process.env, options.gitAuthor, options.checkScope ?? null),
+    env: agentEnv(process.env, options.gitAuthor, options.checkScope ?? null, options.turboCacheDir ?? null),
     // Its own process group, so the whole tree can be killed at once
     detached: true,
     stdio: [stdin, 'pipe', 'pipe']

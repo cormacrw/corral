@@ -12,7 +12,7 @@ import { batchEvents, capEvent } from './event-limits.ts'
 import { convertToMp4 } from './evidence-video.ts'
 import { outcomesFor, toolRefusal, toolsFor, type ToolOutcome, type ToolServer } from './mcp.ts'
 import { DEFAULT_ROLE_INSTRUCTIONS } from './role-defaults.ts'
-import { headSha, mergeBase, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions, removeScratch, saveStoppedWork } from './workspace.ts'
+import { headSha, mergeBase, prepareWorkspace, pushBranch, readProjectBrief, readRoleInstructions, removeScratch, saveStoppedWork, turboCachePath } from './workspace.ts'
 import { RunTimer } from './run-timings.ts'
 
 // Runs on this runner (flows.md §2 steps 3–5, PRD §8.6). Each run gets a
@@ -190,6 +190,11 @@ export class RunManager {
 
   hasRun(runId: string): boolean {
     return this.#runs.has(runId)
+  }
+
+  // Any run of the project, from assign until it's forgotten
+  projectRunning(projectId: string): boolean {
+    return [...this.#runs.values()].some(r => r.job.projectId === projectId)
   }
 
   // Set from assign on, so a turn still preparing its checkout counts
@@ -547,6 +552,7 @@ export class RunManager {
       quietResume: run.job.role === 'pm',
       gitAuthor: this.#config.gitAuthor,
       checkScope: run.job.role === 'developer' ? run.job.checkScope : null,
+      turboCacheDir: run.job.projectId ? turboCachePath(this.#config.dataDir, run.job.projectId) : null,
       onLine: (raw, parsed) => this.#onLine(run, raw, parsed)
     }
     const prepared = await run.runtime!.prepare?.(runtimeOptions) ?? runtimeOptions
@@ -572,6 +578,7 @@ export class RunManager {
       resumeSessionId: options.resume,
       gitAuthor: this.#config.gitAuthor,
       checkScope: run.job.role === 'developer' ? run.job.checkScope : null,
+      turboCacheDir: run.job.projectId ? turboCachePath(this.#config.dataDir, run.job.projectId) : null,
       onLine: (raw, parsed) => this.#onLine(run, raw, parsed)
     })
     run.process = session
