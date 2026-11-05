@@ -960,13 +960,73 @@ const tooltipFile: PullRequestFile = {
     '   request_changes: {'
   )
 }
+const rolesFiles: PullRequestFile[] = [
+  {
+    path: 'apps/web/app/utils/roles.ts', status: 'added', additions: 9, deletions: 0,
+    patch: lines(
+      '@@ -0,0 +1,9 @@',
+      '+import type { AgentRole } from \'@corral/contracts\'',
+      '+',
+      '+// What every screen calls each role (D23)',
+      '+export const ROLE_LABELS: Record<AgentRole, string> = {',
+      '+  designer: \'Designer\',',
+      '+  developer: \'Developer\',',
+      '+  reviewer: \'Reviewer\',',
+      '+  pm: \'PM\'',
+      '+}'
+    )
+  },
+  {
+    path: 'apps/web/app/features/agents/components/AgentCard.vue', status: 'modified', additions: 3, deletions: 3,
+    patch: lines(
+      '@@ -2,6 +2,7 @@',
+      ' import type { Agent } from \'@corral/contracts\'',
+      '+import { ROLE_LABELS } from \'~/utils/roles\'',
+      ' ',
+      ' const props = defineProps<{ agent: Agent }>()',
+      '@@ -21,7 +22,5 @@ const busy = computed(() => props.agent.runs > 0)',
+      '     <span class="font-medium">{{ agent.name }}</span>',
+      '-    <span class="text-muted-foreground">',
+      '-      {{ agent.role === \'coder\' ? \'Coder\' : agent.role === \'checker\' ? \'Checker\' : \'Designer\' }}',
+      '-    </span>',
+      '+    <span class="text-muted-foreground">{{ ROLE_LABELS[agent.role] }}</span>',
+      '   </div>'
+    )
+  },
+  {
+    path: 'packages/core/src/roles.ts', status: 'modified', additions: 6, deletions: 1,
+    patch: lines(
+      '@@ -8,4 +8,9 @@ export const AGENT_ROLES = [\'designer\', \'developer\', \'reviewer\', \'pm\'] as const',
+      '-export const parseRole = (value: string): AgentRole => value as AgentRole',
+      '+// Rows written before the rename still say coder or checker',
+      '+const LEGACY: Record<string, AgentRole> = { coder: \'developer\', checker: \'reviewer\' }',
+      '+export function parseRole(value: string): AgentRole {',
+      '+  if (value in LEGACY) return LEGACY[value]!',
+      '+  return AGENT_ROLES.includes(value as AgentRole) ? value as AgentRole : \'developer\'',
+      '+}'
+    )
+  },
+  {
+    path: 'packages/core/src/roles.test.ts', status: 'added', additions: 7, deletions: 0,
+    patch: lines(
+      '@@ -0,0 +1,7 @@',
+      '+import { expect, it } from \'vitest\'',
+      '+import { parseRole } from \'./roles.ts\'',
+      '+',
+      '+it(\'reads the old role names as the new ones\', () => {',
+      '+  expect(parseRole(\'coder\')).toBe(\'developer\')',
+      '+  expect(parseRole(\'checker\')).toBe(\'reviewer\')',
+      '+})'
+    )
+  }
+]
 function guidePullRequests(): PullRequestDetail[] {
   const body = (ref: string) => `## What\n\n${at(ref).title}.\n\n## How it was checked\n\n- Unit tests for the new parts\n- Screenshots attached as evidence`
   const total = (files: PullRequestFile[]) => files.length
   return [
     prDetail('COR-60', body('COR-60'), { files: runLogFiles, totalFiles: total(runLogFiles) }),
     // Over the cap: the guide's steps reach into files that aren't here
-    prDetail('COR-61', body('COR-61'), { files: runLogFiles.slice(0, 4), totalFiles: 34, truncated: true }),
+    prDetail('COR-61', body('COR-61'), { files: rolesFiles, totalFiles: 34, truncated: true }),
     prDetail('COR-62', body('COR-62'), { files: runLogFiles.slice(0, 3), totalFiles: 3 }),
     prDetail('COR-63', body('COR-63'), { files: runLogFiles.slice(1, 4), totalFiles: 3 }),
     prDetail('COR-64', body('COR-64'), { files: [tooltipFile], totalFiles: 1 })
@@ -1006,12 +1066,21 @@ export const guides: Record<number, PullRequestGuide & { planned?: PullRequestGu
   70: { status: 'ready', headSha: '5b030d7e1c', steps: runLogSteps('COR-60'), error: null, generatedAt: ago(12) },
   71: {
     status: 'ready', headSha: '5b030d7e1c', error: null, generatedAt: ago(8), steps: [
-      ...runLogSteps('COR-61').slice(0, 2).map((s, i) => ({ ...s, criterionIds: criterionIdsOf('COR-61', i) })),
       {
-        id: 'g-3', title: 'Every screen reads the new role names',
-        why: 'The labels move to one map, so "Every screen says designer, developer and reviewer" comes from a single place.',
+        id: 'g-1', title: 'One map names every role',
+        why: 'The labels move into `ROLE_LABELS`, so "Every screen says designer, developer and reviewer" comes from a single place instead of each component.',
+        criterionIds: criterionIdsOf('COR-61', 0), hunks: [{ path: 'apps/web/app/utils/roles.ts', hunk: 0 }, { path: 'apps/web/app/features/agents/components/AgentCard.vue', hunk: 0 }]
+      },
+      {
+        id: 'g-2', title: 'Old role names still load',
+        why: 'Rows saved before the rename say coder or checker; `parseRole` maps them to the new names, which is "Old role names still load from the database".',
+        criterionIds: criterionIdsOf('COR-61', 1), hunks: [{ path: 'packages/core/src/roles.ts', hunk: 0 }, { path: 'packages/core/src/roles.test.ts', hunk: 0 }]
+      },
+      {
+        id: 'g-3', title: 'Every screen reads the map',
+        why: 'The agent card, the task card and the run header drop their own wording for `ROLE_LABELS`. Two of these files are past the diff\'s cap.',
         criterionIds: criterionIdsOf('COR-61', 0),
-        hunks: [{ path: 'apps/web/app/features/runs/components/RunLog.vue', hunk: 0 }, { path: 'apps/web/app/utils/roles.ts', hunk: 0 }, { path: 'apps/web/app/features/agents/components/AgentCard.vue', hunk: 1 }]
+        hunks: [{ path: 'apps/web/app/features/agents/components/AgentCard.vue', hunk: 1 }, { path: 'apps/web/app/features/board/components/TaskCard.vue', hunk: 0 }, { path: 'apps/web/app/features/runs/components/RunHeader.vue', hunk: 0 }]
       }
     ]
   },

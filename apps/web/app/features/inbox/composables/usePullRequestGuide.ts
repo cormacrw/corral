@@ -1,24 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { PullRequestDetail, PullRequestGuide, Task } from '@corral/contracts'
 import { useLocalStorage } from '@vueuse/core'
-import { api } from '~/composables/useApi'
-import { keys } from '~/queries/keys'
+import { generatePullRequestGuide, pullRequestGuideQuery } from '~/queries/tasks'
 import { guideSteps } from '~/features/inbox/utils/guide'
 
 // A PR's guided review (COR-518, design): read it, ask for it, and remember
 // which steps this browser has read, per head commit so a new push starts over.
 export function usePullRequestGuide(slug: string, taskRef: string, pr: () => PullRequestDetail, criteria: () => Task['acceptanceCriteria']) {
   const client = useQueryClient()
-  const key = computed(() => [...keys.tasks.pullRequest(taskRef, pr().number), 'guide'] as const)
+  const options = computed(() => pullRequestGuideQuery({ slug, ref: taskRef }, pr().number))
   const query = useQuery(computed(() => ({
-    queryKey: key.value,
-    queryFn: () => api.projects.pullRequestGuide(slug, pr().number),
+    ...options.value,
     // Generating takes seconds; poll until it ends
     refetchInterval: (q: { state: { data?: PullRequestGuide } }) => q.state.data?.status === 'generating' ? 1000 : false
   })))
   const generate = useMutation({
-    mutationFn: () => api.projects.generatePullRequestGuide(slug, pr().number),
-    onSuccess: guide => client.setQueryData(key.value, guide)
+    mutationFn: () => generatePullRequestGuide(slug, pr().number),
+    onSuccess: guide => client.setQueryData(options.value.queryKey, guide)
   })
   const guide = computed(() => query.data.value ?? null)
   const status = computed(() => generate.isPending.value ? 'generating' : guide.value?.status ?? 'loading')

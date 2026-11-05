@@ -55,3 +55,11 @@ export function guideSteps(pr: PullRequestDetail, guide: PullRequestGuide, crite
 export const diffLineClass = (line: string) => line.startsWith('@@')
   ? 'bg-muted text-muted-foreground'
   : line.startsWith('+') ? 'bg-success/10 text-foreground' : line.startsWith('-') ? 'bg-destructive/10 text-foreground' : 'text-muted-foreground'
+
+// Scrolls the panel's own scroller, never the page, to put `el` under the
+// sticky Guided · Files switch
+export function scrollInPanel(el: Element | null | undefined, offset = 52) {
+  const scroller = el?.closest<HTMLElement>('[data-testid="inbox-detail-scroller"]')
+  if (!el || !scroller) return
+  scroller.scrollTo({ top: scroller.scrollTop + el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - offset })
+}

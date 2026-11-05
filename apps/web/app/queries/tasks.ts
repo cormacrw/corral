@@ -110,3 +110,7 @@ export const moveTask = {
     if (context?.interrupted) void invalidateKeys(client, [keys.tasks.list(task.slug)])
   }
 }
+
+// A PR's guided review (COR-518, design): read it, or ask for one
+export const pullRequestGuideQuery = ({ slug, ref }: Pick<TaskAddress, 'slug' | 'ref'>, number: number) => queryOptions({ queryKey: [...keys.tasks.pullRequest(ref, number), 'guide'] as const, queryFn: () => api.projects.pullRequestGuide(slug, number) })
+export const generatePullRequestGuide = (slug: string, number: number) => api.projects.generatePullRequestGuide(slug, number)

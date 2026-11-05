@@ -27,7 +27,8 @@ const modes = computed(() => [
 
 <template>
   <div class="flex flex-col gap-3">
-    <div class="flex items-center gap-2">
+    <!-- The switch stays in view while you scroll, so Files is always one tap away -->
+    <div :class="['sticky z-20 flex items-center gap-2 bg-background pb-1', mobile ? '-top-3 -mt-3 pt-3' : '-top-5 -mt-5 pt-5']">
       <AppTabs
         :model-value="shown"
         :items="modes"

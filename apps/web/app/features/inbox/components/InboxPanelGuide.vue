@@ -2,7 +2,7 @@
 import type { PullRequestDetail } from '@corral/contracts'
 import { PULL_REQUEST_LINE_LIMIT } from '@corral/contracts/client'
 import type { PullRequestGuideState } from '~/features/inbox/composables/usePullRequestGuide'
-import { splitHunks } from '~/features/inbox/utils/guide'
+import { scrollInPanel, splitHunks } from '~/features/inbox/utils/guide'
 import { plural, timeAgo } from '~/utils/labels'
 import InboxGuideHunk from '~/features/inbox/components/InboxGuideHunk.vue'
 
@@ -28,7 +28,7 @@ const root = ref<HTMLElement | null>(null)
 const go = async (index: number) => {
   openId.value = steps.value[index]?.id ?? null
   await nextTick()
-  root.value?.querySelector(`[data-step="${openId.value}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  scrollInPanel(root.value?.querySelector(`[data-step="${openId.value}"]`), props.layout === 'walkthrough' ? 0 : 52)
 }
 const toggle = (id: string) => {
   openId.value = openId.value === id ? null : id
@@ -258,14 +258,14 @@ const truncatedTitle = computed(() => `Showing ${props.pr.files.length} of ${plu
             v-for="(s, i) in steps"
             :key="s.id"
             :data-step="s.id"
-            :class="['scroll-mt-2 rounded-lg border', s.id === openId ? 'border-primary/40' : 'border-border', s.other && 'border-dashed']"
+            :class="['rounded-lg border', s.id === openId ? 'border-primary/40' : 'border-border', s.other && 'border-dashed']"
             data-testid="inbox-guide-step"
           >
-            <div :class="['flex items-start gap-2 rounded-t-lg p-2', s.id === openId && 'sticky top-0 z-10 bg-background']">
+            <div :class="['flex items-start gap-2 rounded-t-lg p-2', s.id === openId && 'sticky top-11 z-10 bg-background']">
               <!-- The mark: a number, a tick once read. Click it to mark or unmark. -->
               <button
                 type="button"
-                :class="['mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-medium', g.isRead(s.id) ? 'border-success bg-success text-success-foreground' : 'border-border text-muted-foreground hover:border-primary hover:text-primary']"
+                :class="['mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-medium', g.isRead(s.id) ? 'border-success bg-success text-background' : 'border-border text-muted-foreground hover:border-primary hover:text-primary']"
                 :aria-pressed="g.isRead(s.id)"
                 :aria-label="g.isRead(s.id) ? `Mark step ${i + 1} unread` : `Mark step ${i + 1} read`"
                 :title="g.isRead(s.id) ? 'Read. Click to mark unread' : 'Mark read'"

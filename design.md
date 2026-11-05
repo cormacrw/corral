@@ -30,7 +30,7 @@ Code diff gets a two-way switch at the top: **Guided n/m** and **Files**. Same t
 
 ## Screens (Option B unless noted)
 
-Ids are stable for build planning. Each has a desktop (1280 px) and mobile (390 px) screenshot named `<id>-desktop.png` / `<id>-mobile.png`.
+Ids are stable for build planning. Each has a desktop (1280 px) and mobile (390 px) screenshot named `<id>-desktop.png` / `<id>-mobile.png`. Mobile captures use the phone layout (`InboxMobile`, D17, forced with the device override `corral.device.layout = mobile`), where the item fills the screen and the actions sit in the bottom bar.
 
 | Id | Item in the prototype | What it shows |
 |---|---|---|
@@ -40,7 +40,8 @@ Ids are stable for build planning. Each has a desktop (1280 px) and mobile (390 
 | `guide-progress` | COR-60, after **Read · next step** twice | Read marks: steps 1–2 show a green tick instead of their number and a muted title, the segments for them are green, the open step's segment is primary, *2 of 5 read*, and the switch says **Guided 2/5**. |
 | `guide-other-changes` | COR-60, last step | The final **Other changes** step: dashed border, a `…` mark instead of a number, a fixed why (*Hunks the guide didn't place in a step…*), and the hunks no model step covered (an import change and a wiki line). Its button is **Read · done**. |
 | `guide-to-files` | COR-60, **In Files** on a hunk | Moving to the raw diff: the switch moves to **Files**, that file opens and scrolls into view with a highlighted border. **Guided** returns to the outline with the same step open and the read marks kept. |
-| `guide-truncated` | COR-61 `#/inbox/t-cor-61` | A diff over the cap: the same warning as Files (*Showing 4 of 34 files, up to N changed lines* · **See the full diff on GitHub**), and a hunk in a file past the cap shows its path with *Past the diff's cap, so not shown here* · **See it on GitHub**. |
+| `guide-truncated` | COR-61 `#/inbox/t-cor-61` | A diff over the cap ("Rename agent roles", 34 files): the same warning as Files (*Showing 4 of 34 files, up to N changed lines* · **See the full diff on GitHub**) above the steps. |
+| `guide-truncated-cut` | COR-61, open step 3 *Every screen reads the map* | A step that reaches past the cap: its hunk in a shown file renders as usual, and each hunk in a file past the cap (`TaskCard.vue`, `RunHeader.vue`) shows its path with *Past the diff's cap, so not shown here* · **See it on GitHub**. |
 | `guide-error` | COR-63 `#/inbox/t-cor-63` | Error: *Couldn't generate the guide* with the reason and **Retry** (the shared `AppLoadError`). Retry goes to generating, then ready. |
 | `guide-single` | COR-64 `#/inbox/t-cor-64` | A single small change: no outline, progress or Other changes. The title, the why, the one hunk and an *I've read this change* checkbox. |
 | `option-a-guide-tab` | COR-60 `#/inbox/t-cor-60?option=a`, **Guide** | Option A for comparison: the Guide tab on step 2 after **Next**. |
@@ -48,7 +49,9 @@ Ids are stable for build planning. Each has a desktop (1280 px) and mobile (390 
 ## Interactions
 
 - **Switch:** **Guided n/m · Files** (`AppTabs`, pill). Code diff opens on Guided when a guide exists or is generating, else on Files. The choice holds while the item is open.
-- **Opening a step:** click its header. One step is open at a time; its header (mark and title) sticks to the top of the scroller, so the step's title stays in view while you read its hunks.
+- **Opening a step:** click its header. One step is open at a time; its header (mark and title) sticks just under the switch, so the step's title stays in view while you read its hunks.
+- **The switch stays in view:** the **Guided · Files** switch sticks to the top of the panel's scroller, so the raw diff is one tap away from anywhere in a long guide, and after **In Files** you can see you're in Files.
+- **Scrolling:** moving to a step or a file scrolls only the panel's own scroller, never the page.
 - **Moving between steps:** **Read · next step** marks the open step read, opens the next and scrolls to it. **Previous** opens the one before. Each progress segment jumps to its step. On the last step the button is **Read · done**, which closes it.
 - **Read marks:** a step is read once you press **Read · next step** (or **Read · done**) on it. Click the numbered mark to mark a step read or unread without opening it. Read steps show a green tick, a muted title and a green segment; the count shows as *n of m read* and in the switch label. They're kept per browser and per head commit, so a new push starts them over.
 - **To the raw diff:** **In Files** on any hunk switches to Files, opens that file and scrolls to it. Back on Guided, nothing is lost.
@@ -82,7 +85,7 @@ interface PullRequestGuide {
 }
 ```
 
-`hunk` is the position of the `@@` block in the file's patch. The model's steps don't include **Other changes**; the client builds it from the hunks no step covers, so every hunk is shown exactly once. Endpoints (mocked in `prototype/mock-api.ts`): `GET` and `POST /projects/:slug/pull-requests/:number/guide`. Fixtures: COR-60…64 are new review tasks with PRs #70…74 and realistic diffs (`runLogFiles`, `tooltipFile`), and `guides` holds a guide per PR number; COR-5's PR #64 has none yet.
+`hunk` is the position of the `@@` block in the file's patch. The model's steps don't include **Other changes**; the client builds it from the hunks no step covers, so every hunk is shown exactly once. Endpoints (mocked in `prototype/mock-api.ts`): `GET` and `POST /projects/:slug/pull-requests/:number/guide`. Fixtures: COR-60…64 are new review tasks (COR-61's PR has its own role-rename diff, `rolesFiles`, with two step hunks in files past the cap) with PRs #70…74 and realistic diffs (`runLogFiles`, `tooltipFile`), and `guides` holds a guide per PR number; COR-5's PR #64 has none yet.
 
 ## Open questions
 

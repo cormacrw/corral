@@ -13,7 +13,6 @@ import InboxPanelGuideTab from '~/features/inbox/components/InboxPanelGuideTab.v
 const props = defineProps<{ ctx: InboxPanelContext, p: InboxPanel, section: 'criteria' | 'review' | 'pr' | 'diff' | 'guide' | 'message', mobile?: boolean, codeMode?: boolean }>()
 defineEmits<{ openDiff: [] }>()
 const reviews = computed(() => props.p.history.value)
-
 </script>
 
 <template>

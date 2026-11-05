@@ -2,6 +2,7 @@
 import type { PullRequestDetail } from '@corral/contracts'
 import { PULL_REQUEST_LINE_LIMIT } from '@corral/contracts/client'
 import { plural } from '~/utils/labels'
+import { scrollInPanel } from '~/features/inbox/utils/guide'
 
 // A PR's diff in the Inbox (design/inbox.md, the Code diff tab): the changed
 // files with their line counts, each opening to its unified diff. The first
@@ -19,7 +20,7 @@ watch(() => props.focus, async (path) => {
   if (!path) return
   if (!open.value.includes(path)) open.value = [...open.value, path]
   await nextTick()
-  root.value?.querySelector(`[data-path="${CSS.escape(path)}"]`)?.scrollIntoView({ block: 'start' })
+  scrollInPanel(root.value?.querySelector(`[data-path="${CSS.escape(path)}"]`))
 }, { immediate: true })
 const toggle = (path: string) => {
   open.value = open.value.includes(path) ? open.value.filter(p => p !== path) : [...open.value, path]
@@ -74,7 +75,7 @@ const lineClass = (line: string) => line.startsWith('@@')
       v-for="file in pr.files"
       :key="file.path"
       :data-path="file.path"
-      :class="['scroll-mt-2 overflow-hidden rounded-md border', file.path === focus ? 'border-primary/50' : 'border-border']"
+      :class="['overflow-hidden rounded-md border', file.path === focus ? 'border-primary/50' : 'border-border']"
       data-testid="inbox-diff-file"
     >
       <button
