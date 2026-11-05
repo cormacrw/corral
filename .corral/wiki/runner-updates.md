@@ -33,7 +33,7 @@ Review hardening: `runner-update-io.py` handles untrusted volume I/O. It walks
 absolute mount paths with directory descriptors and O_NOFOLLOW, reads only a
 bounded regular status file, creates random O_EXCL/O_NOFOLLOW feedback files,
 fchmods the open file descriptor, and renames relative to the pinned directory.
-Pre-created temporary/destination symlinks and concurrent parent replacement
+Pre-created temporary/destination symlinks and concurrent task replacement
 cannot overwrite or chmod external host files. The dedicated host checkout must
 not be mounted into agent containers. Host Python 3 is a documented prerequisite.
 

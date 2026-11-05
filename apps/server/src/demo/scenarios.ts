@@ -228,7 +228,7 @@ async function wishlistParent(t: Seeder, shop: Project): Promise<void> {
   await t.started(job)
   await t.call(job, 'propose_plan', {
     title: 'Wishlist',
-    summary: 'Save products from any product card, see them on a wishlist page, and keep them across reloads without an account. Built as one parent so the three parts ship together in one PR.',
+    summary: 'Save products from any product card, see them on a wishlist page, and keep them across reloads without an account. Built as one task so the three parts ship together in one PR.',
     parents: [{ key: 'wishlist', title: 'Wishlist', summary: 'Save products for later, without an account', reviewMode: 'parent' }],
     tasks: [
       { key: 'store', parent: 'wishlist', title: 'Wishlist store that survives reloads', description: 'Shoppers can save products for later, and they are still there after a reload.', implementationPlan: '- New `src/stores/wishlist.ts` Pinia store keyed by product id, with `add`, `remove` and `toggle`.\n- Persist with `useLocalStorage` under `wishlist:v1`; ignore and reset an unreadable value.\n- Edge case: a saved product that no longer exists is dropped when the page loads it.', type: 'task', priority: 'high', acceptanceCriteria: ['Items survive a page reload', 'Toggling a product twice leaves it out of the wishlist'] },
@@ -236,7 +236,7 @@ async function wishlistParent(t: Seeder, shop: Project): Promise<void> {
       { key: 'page', parent: 'wishlist', title: 'Wishlist page', description: 'A /wishlist page listing saved products with Remove and Add to bag.', type: 'task', dependsOn: ['store'], acceptanceCriteria: ['Lists every saved product with its price and stock', 'Remove takes a product off the list straight away'] }
     ]
   })
-  await t.pmReply(job, 'Here is a plan for the wishlist: one parent with three sub-tasks. The store comes first; the heart button and the wishlist page can then go in parallel. You review the whole thing once, as the parent\'s PR, rather than three times.')
+  await t.pmReply(job, 'Here is a plan for the wishlist: one task with three subtasks. The store comes first; the heart button and the wishlist page can then go in parallel. You review the whole thing once, as the task\'s PR, rather than three times.')
   await t.advance('15m')
   const [plan] = (await t.session(session.id)).plans
   await t.request('POST', `/api/plan/plans/${plan!.id}/approve`, { to: 'ready' })
@@ -712,7 +712,7 @@ async function planConversations(t: Seeder, notes: Project): Promise<void> {
 
   // A global conversation, across projects
   const status = await t.planSession({ text: 'What did the team get done this week?' })
-  await t.pmReply(status.job, 'This week on **Storefront**: lazy-loaded product images (LCP 3.1 s → 1.7 s), the review summary, the email currency fix after a second review round, and the whole Wishlist parent, whose PR is waiting for you in the Inbox. Apple Pay failed three times on domain verification and needs someone with Stripe dashboard access, and the warehouse sync is blocked on which credentials to use.\n\nOn **Field Notes**: the Expo setup and search are merged, design v2 of the notes screens is ready for you, and the CRDT spike recommends Yjs. I\'ve drafted the offline sync plan from it.')
+  await t.pmReply(status.job, 'This week on **Storefront**: lazy-loaded product images (LCP 3.1 s → 1.7 s), the review summary, the email currency fix after a second review round, and the whole Wishlist task, whose PR is waiting for you in the Inbox. Apple Pay failed three times on domain verification and needs someone with Stripe dashboard access, and the warehouse sync is blocked on which credentials to use.\n\nOn **Field Notes**: the Expo setup and search are merged, design v2 of the notes screens is ready for you, and the CRDT spike recommends Yjs. I\'ve drafted the offline sync plan from it.')
   await t.request('POST', `/api/plan/sessions/${status.session.id}/read`)
   await t.advance('30m')
 }

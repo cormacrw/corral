@@ -27,7 +27,7 @@ const shown = (value: unknown) => {
 }
 
 // The stored mode `epic` is parent-level review
-const modeName = (mode: string | undefined) => mode === 'epic' ? 'parent' : mode
+const modeName = (mode: string | undefined) => mode === 'epic' ? 'task' : mode
 
 // The PM's markdown plan as stored rich text; blank or null clears it
 function planDoc(markdown: string | null | undefined) {
@@ -125,7 +125,7 @@ export class PmCalls {
     if (tool === 'update_parent') {
       const { parentId: epicId, dependsOn, summary, ...fields } = z.object(pmActionTools.update_parent.input).strict().parse(scopedInput)
       const current = await getEpic(db, epicId)
-      if (current.projectId !== project.id) throw new ToolError('Use a parent task from this conversation’s project')
+      if (current.projectId !== project.id) throw new ToolError('Use a task with subtasks from this conversation’s project')
       await db.transaction(async (tx) => {
         await patchEpic(tx, epicId, { ...fields, ...(summary !== undefined && { description: summary }) }, actor)
         if (dependsOn !== undefined) await setEpicDependencies(tx, epicId, dependsOn, actor)
@@ -134,7 +134,7 @@ export class PmCalls {
       events.publish({ type: 'epic.updated', epic })
       for (const task of epic.tasks) events.publish({ type: 'task.updated', task })
       this.#c.scheduler.poke(epic.tasks.map(t => t.id))
-      return { result: epic, projectId: project.id, summary: `Updated parent ${epic.title}` }
+      return { result: epic, projectId: project.id, summary: `Updated task ${epic.title}` }
     }
     if (tool === 'create_task') {
       const { parentId, implementationPlan, ...parsed } = z.object(pmActionTools.create_task.input).strict().parse(scopedInput)
@@ -196,7 +196,7 @@ export class PmCalls {
       const removed = changes.requiredChecks ? project.requiredChecks.filter(check => !changes.requiredChecks!.includes(check)) : []
       if (removed.length) lowered.push(`stop requiring ${removed.join(', ')}`)
       if (changes.humanReviewDefault === false && project.humanReviewDefault) lowered.push('turn off human review by default')
-      if (lowersMode(project.epicReviewModeDefault, changes.epicReviewModeDefault)) lowered.push(`change the default parent review mode from ${modeName(project.epicReviewModeDefault)} to ${modeName(changes.epicReviewModeDefault)}`)
+      if (lowersMode(project.epicReviewModeDefault, changes.epicReviewModeDefault)) lowered.push(`change the default task review mode from ${modeName(project.epicReviewModeDefault)} to ${modeName(changes.epicReviewModeDefault)}`)
       if (changes.reviewRoundCap !== undefined && changes.reviewRoundCap > project.reviewRoundCap) lowered.push(`raise the review round cap from ${project.reviewRoundCap} to ${changes.reviewRoundCap}`)
       if (changes.failedRunCap !== undefined && changes.failedRunCap > project.failedRunCap) lowered.push(`raise the failed run cap from ${project.failedRunCap} to ${changes.failedRunCap}`)
       if (changes.paused === false && project.paused) lowered.push('resume the paused project, which restarts its runs and merges')
@@ -217,7 +217,7 @@ export class PmCalls {
       const epic = await getEpic(db, epicId)
       if (epic.projectId !== project.id) return null
       if (!epic.reviewModeLocked && lowersMode(epic.reviewMode, changes.reviewMode)) lowered.push(`change its review mode from ${modeName(epic.reviewMode)} to ${modeName(changes.reviewMode)}`)
-      return card(`parent ${epic.title}`, others(changes, ['reviewMode']), { id: epic.id, taskId: null, projectId: project.id })
+      return card(`task ${epic.title}`, others(changes, ['reviewMode']), { id: epic.id, taskId: null, projectId: project.id })
     }
 
     const { taskRef: ref, paused, parentId, ...edits } = z.object(pmActionTools.update_task.input).strict().parse(scoped)

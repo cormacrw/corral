@@ -9,7 +9,7 @@ import { createTestApp, type TestApp } from './test-app.ts'
 
 const { acceptanceCriteria, agents, epics, runs, taskDependencies, tasks } = schema
 
-describe('parent tasks', () => {
+describe('tasks with subtasks', () => {
   let t: TestApp
   beforeAll(async () => {
     t = await createTestApp('pglite')
@@ -48,7 +48,7 @@ describe('parent tasks', () => {
   const setSub = (id: string, status: 'merged' | 'in_progress' | 'backlog' | 'blocked', extra = {}) => t.db.update(tasks).set({ status, statusReason: status === 'blocked' ? 'Waiting' : null, ...extra }).where(eq(tasks.id, id))
 
   describe('dependency waits', () => {
-    it('keeps a dependent unclaimed until the parent\'s work is on the target branch, then starts it', async () => {
+    it('keeps a dependent unclaimed until the task\'s work is on the target branch, then starts it', async () => {
       const { project, delivery, a, b, waiting, developer } = await setup()
       expect(await api(`/api/projects/${project.slug}/tasks/${waiting.number}`)).toMatchObject({ waitingOnEpics: [{ id: delivery.id }] })
       // Unstarted sub-tasks hold it too: nothing has landed
@@ -66,7 +66,7 @@ describe('parent tasks', () => {
       expect(await claimable(waiting.id, developer)).toBe(true)
     })
 
-    it('releases a dependent of a direct parent when its sub-tasks finish', async () => {
+    it('releases a dependent of a direct task when its subtasks finish', async () => {
       const { delivery, a, b, waiting, developer } = await setup('direct')
       await setSub(a.id, 'merged')
       await setSub(b.id, 'in_progress')
@@ -76,7 +76,7 @@ describe('parent tasks', () => {
       expect(await claimable(waiting.id, developer)).toBe(true)
     })
 
-    it('doesn\'t wait forever on a parent with no live sub-tasks', async () => {
+    it('doesn\'t wait forever on a task with no live subtasks', async () => {
       const { a, b, waiting, developer } = await setup()
       await t.db.update(tasks).set({ deletedAt: new Date() }).where(eq(tasks.id, a.id))
       await t.db.update(tasks).set({ deletedAt: new Date() }).where(eq(tasks.id, b.id))
@@ -85,7 +85,7 @@ describe('parent tasks', () => {
   })
 
   describe('the engine', () => {
-    it('never claims a parent, and lists it nowhere work is listed', async () => {
+    it('never claims a task, and lists it nowhere work is listed', async () => {
       const { project, parentId, developer } = await setup()
       expect(await claimable(parentId, developer)).toBe(false)
       const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as { needsYou: { taskId?: string }[] }
@@ -99,7 +99,7 @@ describe('parent tasks', () => {
       expect(flow.status).toBeLessThan(500)
     })
 
-    it('rolls a parent up from its sub-tasks on read', async () => {
+    it('rolls a task up from its subtasks on read', async () => {
       const { project, parentId, delivery, a, b } = await setup()
       const parent = (await t.db.select().from(tasks).where(eq(tasks.id, parentId)))[0]!
       const read = () => api(`/api/projects/${project.slug}/tasks/${parent.number}`)
@@ -116,7 +116,7 @@ describe('parent tasks', () => {
       expect(await t.request('GET', `/api/projects/${project.slug}/tasks?view=board`).then(r => r.json())).toEqual(expect.arrayContaining([expect.objectContaining({ id: parentId })]))
     })
 
-    it('keeps a parent of Backlog work off the Board, and one of Drafts in its plan', async () => {
+    it('keeps a task of Backlog work off the Board, and one of Drafts in its plan', async () => {
       const { project, parentId, a, b } = await setup()
       const ids = async (view: string) => (await t.request('GET', `/api/projects/${project.slug}/tasks?view=${view}`).then(r => r.json()) as Task[]).map(task => task.id)
       expect(await ids('board')).not.toContain(parentId)
@@ -128,7 +128,7 @@ describe('parent tasks', () => {
   })
 
   describe('refusals', () => {
-    it('refuses status changes, criteria and delivery fields on a parent', async () => {
+    it('refuses status changes, criteria and delivery fields on a task', async () => {
       const { project, parentId } = await setup()
       const [parent] = await t.db.select().from(tasks).where(eq(tasks.id, parentId))
       const path = `/api/projects/${project.slug}/tasks/${parent!.number}`
@@ -140,7 +140,7 @@ describe('parent tasks', () => {
       expect((await t.db.select().from(tasks).where(eq(tasks.id, parentId)))[0]).toMatchObject({ status: 'parent' })
     })
 
-    it('carries a parent\'s title to its delivery record, and back', async () => {
+    it('carries a task\'s title to its delivery record, and back', async () => {
       const { project, parentId, delivery } = await setup()
       const [parent] = await t.db.select().from(tasks).where(eq(tasks.id, parentId))
       await patchTask(t.db, project as never, parentId, { title: 'Renamed' }, t.actor)
@@ -149,7 +149,7 @@ describe('parent tasks', () => {
       expect((await t.db.select().from(tasks).where(eq(tasks.id, parent!.id)))[0]).toMatchObject({ title: 'Again' })
     })
 
-    it('deletes an empty parent with its delivery record, and refuses one with sub-tasks', async () => {
+    it('deletes an empty task with its delivery record, and refuses one with subtasks', async () => {
       const { parentId, delivery, a, b } = await setup()
       await expect(deleteTaskRows(t.db, parentId, t.actor, null)).rejects.toThrow()
       await t.db.update(tasks).set({ deletedAt: new Date() }).where(eq(tasks.id, a.id))
@@ -161,7 +161,7 @@ describe('parent tasks', () => {
   })
 
   describe('promotion', () => {
-    it('makes a parent of an unstarted task: same ref and comments, criteria and dependencies move', async () => {
+    it('makes a task of an unstarted task: same ref and comments, criteria and dependencies move', async () => {
       const project = await t.createProject({ repository: 'cormacrw/test-app', defaultBranch: 'main' })
       const other = await t.createTask(project.slug)
       const res = await t.request('POST', `/api/projects/${project.slug}/tasks`, { title: 'Big one', type: 'task', humanReview: true, dependsOn: [other.number], acceptanceCriteria: ['Moves', { text: 'Human looks', checkedByHuman: true }] })
@@ -178,7 +178,7 @@ describe('parent tasks', () => {
       expect(await t.request('GET', `/api/projects/${project.slug}/tasks/${big.number}/comments`).then(r => r.json())).toEqual([expect.objectContaining({ body: 'Keep me' })])
     })
 
-    it('refuses a task with a run, lease or PR, a pinned one, and a sub-task', async () => {
+    it('refuses a task with a run, lease or PR, a pinned one, and a subtask', async () => {
       const { project, a } = await setup()
       const add = (number: number) => t.request('POST', `/api/projects/${project.slug}/tasks/${number}/subtasks`, { title: 'More', type: 'task' })
       expect((await add(a.number)).status).toBe(409)

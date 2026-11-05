@@ -133,7 +133,7 @@ describe.each(['pglite', 'postgres'] as const)('the data layer on %s', (driver) 
     await t.db.update(tasks).set({ status: 'merged', statusReason: null }).where(eq(tasks.id, task.id))
   })
 
-  it('keeps the parent arrival key, and counts Needs you as the Inbox lists it', async () => {
+  it('keeps the task arrival key, and counts Needs you as the Inbox lists it', async () => {
     const [conflict] = await t.db.insert(epics).values({ projectId: project.id, title: 'Conflicted', description: '', createdBy: t.actor, reviewState: 'conflict', prNumber: 3, prHeadSha: 'abc' }).returning()
     // Waiting for its reviewer's approval, so not listed
     await t.db.insert(epics).values({ projectId: project.id, title: 'Unreviewed', description: '', createdBy: t.actor, reviewState: 'human_review', prNumber: 4, prHeadSha: 'abc' })
@@ -158,15 +158,15 @@ describe.each(['pglite', 'postgres'] as const)('the data layer on %s', (driver) 
     await t.db.update(tasks).set({ status: 'merged', statusReason: null }).where(eq(tasks.id, task.id))
   })
 
-  it('lists a parent task\'s activity as its own, with no task', async () => {
+  it('lists a task with subtasks\'s activity as its own, with no task', async () => {
     const [epic] = await t.db.insert(epics).values({ projectId: project.id, title: 'Linked', description: '', createdBy: t.actor }).returning()
     await t.createTask(project.slug, { epicId: epic!.id })
     await appendAudit(t.db, { projectId: project.id, actor: system }, auditEvent('epic.pr', { epicId: epic!.id, event: 'opened', prNumber: 1 }))
     const item = (await inbox()).activity.find(i => i.epicId === epic!.id)
-    expect(item).toMatchObject({ type: 'epic_activity', event: 'opened', taskId: null, taskRef: null, body: 'Parent PR opened' })
+    expect(item).toMatchObject({ type: 'epic_activity', event: 'opened', taskId: null, taskRef: null, body: 'The task\'s PR opened' })
   })
 
-  it('publishes a parent task without its tasks', async () => {
+  it('publishes a task with subtasks without its tasks', async () => {
     const [epic] = await t.db.insert(epics).values({ projectId: project.id, title: 'Light', description: '', createdBy: t.actor }).returning()
     await t.createTask(project.slug, { epicId: epic!.id })
     expect(await loadEpic(t.db, epic!.id)).not.toHaveProperty('tasks')

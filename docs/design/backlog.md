@@ -5,7 +5,7 @@
 
 ## Purpose
 
-All of a project's tasks in **Backlog** status, grouped by parent. Backlog tasks are proposed or sent back, never scheduled, and not on the board (D10). This is where you browse what's coming and pick something to refine with Juno.
+All of a project's tasks in **Backlog** status, grouped by task. Backlog tasks are proposed or sent back, never scheduled, and not on the board (D10). This is where you browse what's coming and pick something to refine with Juno.
 
 ## Layout
 
@@ -13,15 +13,15 @@ The page spans the full content width.
 
 1. **Toolbar** (bottom border):
    - a search input ("Search Backlog")
-   - "N tasks · never scheduled until approved" and **Show completed**, off by default, which includes completed work of any age in the parent groups. Rows show status badges; only Backlog tasks offer Move to board.
+   - "N tasks · never scheduled until approved" and **Show completed**, off by default, which includes completed work of any age in the task groups. Rows show status badges; only Backlog tasks offer Move to board.
    - on the right: **Collapse all / Expand all** (outline) and **New task** (solid primary, plus icon)
-2. **Parent groups:** one bordered card per parent.
+2. **Task groups:** one bordered card per task.
    - **Header** (`bg-muted`):
-     - a chevron toggle with the parent name (`aria-expanded`), which rotates 90° when open
+     - a chevron toggle with the task name (`aria-expanded`), which rotates 90° when open
      - a count pill
-     - progress, e.g. "2 of 6 merged", counting the parent's tasks in every status
-     - **Plan with Juno** on the right, which opens Plan with this project and parent
-     - **Move all to board** (outline, kanban icon; "Move to board" when the parent has one Backlog task), which asks to confirm and then moves every Backlog task in the parent to Ready
+     - progress, e.g. "2 of 6 merged", counting the task's subtasks in every status
+     - **Plan with Juno** on the right, which opens Plan with this project and task
+     - **Move all to board** (outline, kanban icon; "Move to board" when the task has one Backlog task), which asks to confirm and then moves every Backlog subtask in the task to Ready
    - **Rows**, each a full-width button with a top divider:
      - the ref (40px column)
      - a type badge for Bug, Spike and Design, none for Task (D19, D20)
@@ -42,20 +42,20 @@ The page spans the full content width.
 
 ## Rules
 
-- Backlog → Ready is a human action. It needs a title, a description and verifiable acceptance criteria (D10). If any are missing, the task stays in the Backlog and a warning toast says what each one needs. Moving a parent moves the tasks that are ready and lists the rest.
+- Backlog → Ready is a human action. It needs a title, a description and verifiable acceptance criteria (D10). If any are missing, the task stays in the Backlog and a warning toast says what each one needs. Moving a task moves the tasks that are ready and lists the rest.
 - Deleting a Backlog task deletes it outright (D10).
 
 ## Data
 
-- **Backlog tasks:** ref, title, type, parent, priority, created, criteria count, plan id and plan status.
-- **Parents:** name, plus merged and total counts across statuses.
+- **Backlog tasks:** ref, title, type, task, priority, created, criteria count, plan id and plan status.
+- **Tasks with subtasks:** name, plus merged and total counts across statuses.
 
 ## Responsive
 
 - **Below 768px:** the criteria and age columns hide.
-- **Mobile layout** (D17, `features/board/components/BacklogMobile.vue`, the `Backlog` frame): the search input fills the width with the count under it, and **New task** is a **+** in the header. Each parent card puts **Plan with Juno** and **Move all to board** side by side under its header (hidden while collapsed). Rows show the ref and title, then the In plan badge, priority and type badge (Bug, Spike and Design only), with an icon-only **Move to board** on the right. Tapping a row, or creating a task, opens the task's page instead of the flyout. There's no Collapse all / Expand all.
+- **Mobile layout** (D17, `features/board/components/BacklogMobile.vue`, the `Backlog` frame): the search input fills the width with the count under it, and **New task** is a **+** in the header. Each task card puts **Plan with Juno** and **Move all to board** side by side under its header (hidden while collapsed). Rows show the ref and title, then the In plan badge, priority and type badge (Bug, Spike and Design only), with an icon-only **Move to board** on the right. Tapping a row, or creating a task, opens the task's page instead of the flyout. There's no Collapse all / Expand all.
 
 ## Open questions
 
-- Should rows be sortable or reorderable by priority within a parent?
-- Should tasks without a parent be shown in an "No parent" group at the end?
+- Should rows be sortable or reorderable by priority within a task?
+- Should standalone tasks be shown in an "No task" group at the end?

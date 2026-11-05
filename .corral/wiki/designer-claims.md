@@ -3,7 +3,7 @@
 Design authoring belongs only to designers (D23). Developers claim Ready or
 unleased In progress tasks other than design; designers claim only design
 in those statuses. Both use the same priority/status ordering, dependency and
-epic-dependency gates, pause controls and capacity limits. Without an eligible
+task-dependency gates, pause controls and capacity limits. Without an eligible
 designer a design stays Ready. Reviewers still review every task type.
 
 The orchestrator prepares designer jobs with designerPrompt and

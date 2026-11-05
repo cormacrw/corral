@@ -38,7 +38,7 @@ verdict. Integration reviews use
 failed parse comes back as `Not reported. <field>: <problem>`. Whether the
 role and task type may report that outcome is still checked after parsing.
 
-A parent resolution's `stuck` or `blocked` with no `decision` isn't refused:
+A task resolution's `stuck` or `blocked` with no `decision` isn't refused:
 `#decisionFor` raises a question from the summary with no alternatives, so the
 operation still holds and the human answers in words. That counts as changing
 approved behaviour, like any written answer. A refusal here loses the question,

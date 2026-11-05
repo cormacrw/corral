@@ -470,9 +470,9 @@ function activityText(action: string, event: string | null, detail: AuditView, p
     case 'design_submitted': return `Submitted design v${String(detail.version)}; on to the reviewer`
     case 'changes_requested': return detail.to === 'blocked' ? 'Changes requested; Blocked for you' : 'Changes requested; back to the developer'
     case 'merged': return `Merged ${pr}`
-    case 'integrated': return `Integrated ${String(detail.integratedCommitSha).slice(0, 10)} into the parent branch`
+    case 'integrated': return `Integrated ${String(detail.integratedCommitSha).slice(0, 10)} into the task's branch`
     case 'ci_failed': return `CI failed on ${commit}; back to the developer`
-    case 'base_conflict': return prNumber ? `${pr} conflicts with the base branch; back to the developer` : 'The commit conflicts with the parent branch; back to the developer'
+    case 'base_conflict': return prNumber ? `${pr} conflicts with the base branch; back to the developer` : 'The commit conflicts with the task\'s branch; back to the developer'
     case 'head_moved': return prNumber ? `New commits on ${pr}; back to the reviewer` : 'New commits on the task branch; back to the reviewer'
     default: return event ?? action
   }

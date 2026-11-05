@@ -3,7 +3,7 @@
 Evidence views show each criterion's latest submission and hide what it
 replaced. `features/evidence/utils/evidenceRounds.ts` decides this for every
 view: the Criteria tab and task Evidence tab (`EvidenceList`), the Inbox
-Overview screenshots and files (`useInboxPanel` `files`) and the epic
+Overview screenshots and files (`useInboxPanel` `files`) and the task
 Overview carousel (`InboxEpicOverview`).
 
 - **A submission is a run, not a round.** Runs are ordered by their first

@@ -15,7 +15,7 @@ Items come from two places:
 
 There's no separate notifications feed.
 
-A criterion marked **Checked by a human** always sends an approved task here, even if its task-level human-review flag is off, except a PR-free sub-task, whose checks appear on the parent review. Its evidence card says **Needs human check** and has a checkbox for the human. Tick every such criterion, in the **Criteria** tab, before **Approve and merge**; approving with one unticked sends nothing, opens that tab and says each check must be ticked. Requesting changes remains available. These ticks are local to the selected item; approval uses the usual merge gates.
+A criterion marked **Checked by a human** always sends an approved task here, even if its task-level human-review flag is off, except a PR-free subtask, whose checks appear on the task review. Its evidence card says **Needs human check** and has a checkbox for the human. Tick every such criterion, in the **Criteria** tab, before **Approve and merge**; approving with one unticked sends nothing, opens that tab and says each check must be ticked. Requesting changes remains available. These ticks are local to the selected item; approval uses the usual merge gates.
 
 ## Layout
 
@@ -31,7 +31,7 @@ There are three columns. The list divider can be resized (280–560px, default 3
   - an unread dot
   - the sender's avatar
   - the sender name and time (bold when unread)
-  - the subject, which is the task title (bold when unread), prefixed with what the item is in muted text: **Task Review**, **Question**, **Blocked**, **Failed**, **Stopped**, **Plan Review**, **Parent Review**, **Conflict**, **Runner Update** or **Activity** (`inboxTitlePrefix`). Release notes have no prefix; their subject says it already.
+  - the subject, which is the task title (bold when unread), prefixed with what the item is in muted text: **Task Review**, **Question**, **Blocked**, **Failed**, **Stopped**, **Plan Review**, **Task Review**, **Conflict**, **Runner Update** or **Activity** (`inboxTitlePrefix`). Release notes have no prefix; their subject says it already.
   - a two-line preview
   - the project tag (a colour dot and project name)
   - no badges or tags beyond these
@@ -39,17 +39,17 @@ There are three columns. The list divider can be resized (280–560px, default 3
 - The selected row uses `bg-muted`.
 - **Empty state:** the Inbox tab says "No decisions are waiting on you. Agents may still be working." It never implies that background work has finished. The detail pane says the same. Resolved and a search with no matches each have their own line.
 - **Live updates:** an informational item arriving adds no Inbox row, doesn't change the count or badge, and doesn't move the selection. It isn't listed (D33).
-- **A link to an item:** a resolved item opens with the list on Resolved. A link to something no longer listed, including an informational item, shows "This isn't waiting on you any more" with, when known, its source: **Open in Plan**, **Open task** or **Open parent**. It's never presented as a new request.
+- **A link to an item:** a resolved item opens with the list on Resolved. A link to something no longer listed, including an informational item, shows "This isn't waiting on you any more" with, when known, its source: **Open in Plan**, **Open task** or **Open task**. It's never presented as a new request.
 
 ### 2. Selected message
 
-Task items (human review, question, blocked, failed, stopped, Activity and Resolved) use **Option D** (`InboxPanel`, with `useInboxPanel` deriving what it shows). What's needed to decide sits up front, and everything else is one click away in tabs. On a phone the actions and composer move to a bottom bar ([mobile.md](mobile.md#inbox)). Plan threads, parent items and release notes have their own layouts.
+Task items (human review, question, blocked, failed, stopped, Activity and Resolved) use **Option D** (`InboxPanel`, with `useInboxPanel` deriving what it shows). What's needed to decide sits up front, and everything else is one click away in tabs. On a phone the actions and composer move to a bottom bar ([mobile.md](mobile.md#inbox)). Plan threads, task items and release notes have their own layouts.
 
 - **Top block**, which fits at 1280×800 without scrolling:
-  - the title, with one quiet line (`InboxPanelMeta`) under it: kind (Code, Design or Spike review, Question, Blocked, Failed, Stopped, Activity, Resolved) · project · ref · sender · time. Parent items and Plan threads put the same line under their titles. The flyout is closed whenever an item opens.
+  - the title, with one quiet line (`InboxPanelMeta`) under it: kind (Code, Design or Spike review, Question, Blocked, Failed, Stopped, Activity, Resolved) · project · ref · sender · time. Task review items and Plan threads put the same line under their titles. The flyout is closed whenever an item opens.
   - shared `InboxMessage` in place of a TL;DR: the short `message` clamped to three lines. Items with no message show **TL;DR** and the first paragraph of the body, cut to two lines.
   - the verdict on reviews (`InboxPanelVerdict`): reviewer and round, gates passed, criteria met. It's red only when a criterion is unmet; a human check waiting for its tick isn't unmet.
-  - the links (`InboxPanelArtifacts`): **PR #n**, or **Preview vN** and **Review design** on a design, then **Task {ref}** (`aria-pressed`), which opens the task in the docked flyout with one click and closes it with another. Spikes have no PR link. On a phone, which has no flyout, Activity has **Open task** or **Open parent** instead.
+  - the links (`InboxPanelArtifacts`): **PR #n**, or **Preview vN** and **Review design** on a design, then **Task {ref}** (`aria-pressed`), which opens the task in the docked flyout with one click and closes it with another. Spikes have no PR link. On a phone, which has no flyout, Activity has **Open task** or **Open task** instead.
 - **Bottom bar**, pinned to the bottom of an item you can act on: the actions (`InboxPanelActions`), with the composer above them once an action opens it (below).
 - **Tabs:** **Overview · Criteria n/m · Review · PR description · Code diff N · Message**. Criteria and Review show on reviews that have them. The tab resets when another item opens. A panel with only one tab shows no tab bar (`InboxPanelLayout`).
   - **Overview:** on a review, a screenshot carousel (`InboxEvidenceCarousel`): one large screenshot at a time, with "n of m", arrows and a swipe on phones. The other files follow it. One click opens any of them in the evidence viewer, which flips through all of the review's files, screenshots first, with its own arrows, the arrow keys or a swipe. Closing it leaves the carousel, and focus, on the last screenshot viewed. The Criteria tab's viewer flips through its files the same way. On other items, or a review with no evidence, what each action does. A read-only item shows its resolution, or "For your information. Nothing to do."
@@ -72,7 +72,7 @@ Task items (human review, question, blocked, failed, stopped, Activity and Resol
 
 ### What each kind shows
 
-- Needs-you task and parent items show the short `message` from shared `InboxMessage`, with no row of files under it: a review's files are in the Overview tab's carousel and the Criteria tab. Evidence is untrusted, so the viewer never frames HTML: images, video and text show in the app, a PDF in an iframe, and anything else is a download link.
+- Needs-you task and task items show the short `message` from shared `InboxMessage`, with no row of files under it: a review's files are in the Overview tab's carousel and the Criteria tab. Evidence is untrusted, so the viewer never frames HTML: images, video and text show in the app, a PDF in an iframe, and anything else is a download link.
 - The complete `body`, including spike findings, is in the **Message** tab, and the tab resets when another item opens. Items without `message` keep their existing rendering, including Plan threads, release notes, Activity and Resolved.
 - **Spikes always stop in Human review**, whatever their human-review flag says. They appear under Needs you and add one to its count. The **Message** tab renders the latest `## Findings` comment as markdown; criteria verdicts and evidence remain below it. Desktop and mobile label approval **Accept findings**, keep **Request changes**, and hide PR links and check badges. The success toast and Resolved entry say **You accepted the findings**. The preview is the start of the short message; approval finishes the spike in Merged; requesting changes returns it to the developer with the feedback.
 - **Designs** use **Approve design** on desktop and mobile. Approval marks the latest submitted version Approved, supersedes earlier versions and moves the task to Approved, then advances to the next item. There is no PR to merge; approval opens a Plan session and starts the PM’s build-planning turn.
@@ -95,7 +95,7 @@ An open Plan session (D9) that's waiting on you, shown as an Inbox item (D11). A
   - a **failed turn**: Juno's last turn ended in an error and nothing will retry it (`failure` holds the error). Reading doesn't clear it; messaging the session or deleting the thread does.
 - A session with only an **unread reply** is informational: it isn't listed and doesn't count, and the conversation stays in Plan.
 - Idle sessions, with none of the three, aren't Inbox items. They stay in Plan and its side nav threads ([plan.md](plan.md#side-nav-threads)). There's no "Open in Plan" divider or group.
-- **Order:** Needs you is one list of task items, threads and parent items, **newest first** by when each arrived (`at`), with no grouping or divider. The page shows it in the server's order. A task arrives when it enters Human review, Blocked or Failed (its latest transition into that status), so an update that keeps its status, such as its PR head moving, doesn't move it. A stopped task keeps its working status and arrives when the run that stopped it ended. A thread arrives when it started waiting: when the question was asked, the plan was proposed or the turn failed.
+- **Order:** Needs you is one list of task items, threads and task review items, **newest first** by when each arrived (`at`), with no grouping or divider. The page shows it in the server's order. A task arrives when it enters Human review, Blocked or Failed (its latest transition into that status), so an update that keeps its status, such as its PR head moving, doesn't move it. A stopped task keeps its working status and arrives when the run that stopped it ended. A thread arrives when it started waiting: when the question was asked, the plan was proposed or the turn failed.
 - The **Needs you** count is every listed item. Global, project and mobile counts all come from this list.
 - `plan.session` events add, re-sort and remove threads live: a question, a new plan version or a failed turn adds or moves a thread up; answering its question (until Juno asks again), approving its plan, messaging it after a failed turn or closing it, here or in Plan, removes it at once.
 
@@ -105,7 +105,7 @@ One button, in the same list as the other items, with no delete control on a wid
 
 - the **sender's avatar** and **name** (Juno, under the PM's current name), with the **time** it started waiting. While Juno is working (`activeRunId`), a spinner sits next to the time.
 - the **session title** (bold)
-- a two-line **preview**: Juno's question, the plan summary ("Plan v2 · 2 parents · 4 tasks"), or the failed turn's error
+- a two-line **preview**: Juno's question, the plan summary ("Plan v2 · 2 tasks · 4 subtasks"), or the failed turn's error
 - the **project tag** (a thumbnail and the project name), with no status badge: the title's prefix (**Plan Review**, **Question** or **Failed**) says why it's here. The unread dot sits before the avatar while the turn is unseen.
 
 ### Detail pane
@@ -116,7 +116,7 @@ It shares the task panel's frame (`InboxPanelLayout`), so a plan to approve read
 
 - **Header:** the session title with the `InboxPanelMeta` line (Plan review, Question or Failed · project · sender · time) under it, "Runs on Claude" or "Codex", then **Open in Plan**. There's no Task button; a plan's tasks open in the flyout instead.
 - **Question:** Juno's question in its `info` card, with "Recommended: …" when Juno gave one, and the one-tap answers: **Accept recommendation**, one button per option, **Other…** (focuses the reply box) and **Stop and propose the plan**. Below it, a reply box ("Reply to Juno…") for a free-text answer. A tap or a sent reply sends the answer to the session and starts a PM turn, exactly as in Plan; the thread then leaves the list unless Juno asks again or proposes a plan.
-- **Plan:** the whole plan in the body (`PlanDetailBody`, shared with the plan flyout): its title (left out when it matches the session title), counts and summary, its tasks under each parent as a list or graph, and what changed since the previous version. A task opens in the task flyout. At the bottom, as on a task review: **Approve to board**, **Approve to Backlog** and **Request changes**, which opens the composer ("What should Juno change?") above them; sending it starts a PM turn.
+- **Plan:** the whole plan in the body (`PlanDetailBody`, shared with the plan flyout): its title (left out when it matches the session title), counts and summary, its subtasks under each task as a list or graph, and what changed since the previous version. A task opens in the task flyout. At the bottom, as on a task review: **Approve to board**, **Approve to Backlog** and **Request changes**, which opens the composer ("What should Juno change?") above them; sending it starts a PM turn.
 - **Failed turn:** what happened and the turn's error (`failure`), with **Open in Plan** under it and the reply box ("Reply to Juno…") below. Sending starts a PM turn, as for a question.
 - Earlier messages, Steps and the live turn's transcript aren't shown. While Juno is working, the pane shows a working line in place of the answers, and they're disabled.
 
@@ -160,23 +160,23 @@ On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its 
 - **Row:** the sender's avatar, name and time, the session title, the preview, and the status badge beside the project tag, in the same list as the other items. The first tab is named **Inbox** (the web's Needs you), newest first, with no group for threads.
 - **Swipe to delete:** swiping a thread row left reveals a red **Delete** button; a full swipe deletes at once, and a short one snaps back. Task items don't swipe. Deleting removes the row immediately and shows a "Thread deleted · its drafts were discarded" toast with **Undo** for 5 seconds; only then is the thread closed (as [Delete thread](#delete-thread), discarding its drafts and unapproved plan). Undo puts the row back with nothing discarded. If the close fails, the row comes back with an error toast. `usePlanThreadDelete` holds the pending deletes, shared with desktop, so a delete started on the thread screen carries on after it returns to the list or the layout changes. Reloading or closing the tab during Undo sends the close immediately with a keepalive request.
 
-### Parent items (D27)
+### Task items (D27)
 
-A parent rebase's question (D27, COR-291) is a task question whose Overview leads with the question, any binding decision, each alternative with its effect and a **Choose** button, and the affected changes. Choosing resumes the rebase; **Answer** writes a free-form answer, which counts as a behaviour change.
+A task rebase's question (D27, COR-291) is a task question whose Overview leads with the question, any binding decision, each alternative with its effect and a **Choose** button, and the affected changes. Choosing resumes the rebase; **Answer** writes a free-form answer, which counts as a behaviour change.
 
-Every parent item uses `InboxEpicPanel`, Option D for a parent, on desktop and mobile: a parent PR waiting on the human, what stopped a parent, and the read-only moments in Activity and Resolved. It reads `GET /api/epics/:id/review`. The top block shows at once, from the item, with skeletons in the tab body until the review arrives.
+Every task item uses `InboxEpicPanel`, Option D for a task, on desktop and mobile: a task's PR waiting on the human, what stopped a task, and the read-only moments in Activity and Resolved. It reads `GET /api/epics/:id/review`. The top block shows at once, from the item, with skeletons in the tab body until the review arrives.
 
-- **Up front:** the kind, project, sender and time, the parent's name linking to it, and `InboxMessage` (a TL;DR with no message). On a review the verdict reads **Rita approved the parent · lint, test passed · 3 of 3 tasks merged · You saw 1 of 3**, or says there's no reviewer approval on this head when the review stopped or a merge was refused. *You saw* counts tasks that had their own human review. Then the actions and the parent PR's link. A line under the actions names the target branch, how many commits it has moved when it has, and that approving runs CI and squash-merges; with a pending conflict (D27) it says approving sends the conflict to a developer first.
+- **Up front:** the kind, project, sender and time, the task's name linking to it, and `InboxMessage` (a TL;DR with no message). On a review the verdict reads **Rita approved the task · lint, test passed · 3 of 3 tasks merged · You saw 1 of 3**, or says there's no reviewer approval on this head when the review stopped or a merge was refused. *You saw* counts tasks that had their own human review. Then the actions and the task's PR's link. A line under the actions names the target branch, how many commits it has moved when it has, and that approving runs CI and squash-merges; with a pending conflict (D27) it says approving sends the conflict to a developer first.
 - **Tabs:** Overview · Tasks n/m · Review · PR description · Code diff N · Message.
 - **Overview:** a later round leads with **Since your last review**, quoting the human's feedback and naming its fix tasks, with **See only these changes**. Then non-blocking notes, screenshots labelled by task, then the review mode and size. With no screenshots, only the notes and the size. A first review has no such block.
 - **Tasks:** one row per task with who passed it, criteria met, its PR or, for a PR-free task, its commit, and whether it's a **Fix task** or **Conflict task**. A row opens the task. Owed human checks are ticked here. Conflict and CI fixes have no task (D29), so these labels come from a human's Request changes, or from before D29.
 - **Review:** the integration findings first, then the reviewer's summary, for every round, newest first.
-- **Code diff:** switches between **Since your last review** and **Whole parent** in a later round. After a rebase a file's patch is its whole change on the parent, not the change since.
-- **Approve parent:** one click when nothing is owed, and the Inbox moves on. A non-blocking note doesn't ask for confirmation. With checks owed it opens Tasks, says what's left, and sends only once all are ticked.
-- **Request changes:** opens the composer, and its text becomes a fix task in Ready in the parent, titled by `feedbackFixTitle`.
+- **Code diff:** switches between **Since your last review** and **Whole task** in a later round. After a rebase a file's patch is its whole change on the task, not the change since.
+- **Approve task:** one click when nothing is owed, and the Inbox moves on. A non-blocking note doesn't ask for confirmation. With checks owed it opens Tasks, says what's left, and sends only once all are ticked.
+- **Request changes:** opens the composer, and its text becomes a fix task in Ready in the task, titled by `feedbackFixTitle`.
 - **The head moved while open:** the action carries the head the human was looking at, so it fails with a message, the feedback text is kept and the panel refreshes. If the item leaves the Inbox while open, the panel stays on it with the message and nothing can be sent.
-- **What stopped a parent:** an `epic_conflict` item shows the failure, the conflicting files or the rebase's question. **Retry** goes round the automatic path again; a question is answered with a **Choose** button or in the composer.
-- **Read-only:** opened, conflict, approved and merged items show *For your information. Nothing to do.* in place of the actions, and Resolved items show the resolution. A merged parent shows its squash commit, and an approved one says what happens next. The Activity record of a conflict links its task and shows tasks merged, such as 2 of 3, only when a task exists.
+- **What stopped a task:** an `epic_conflict` item shows the failure, the conflicting files or the rebase's question. **Retry** goes round the automatic path again; a question is answered with a **Choose** button or in the composer.
+- **Read-only:** opened, conflict, approved and merged items show *For your information. Nothing to do.* in place of the actions, and Resolved items show the resolution. A merged task shows its squash commit, and an approved one says what happens next. The Activity record of a conflict links its task and shows tasks merged, such as 2 of 3, only when a task exists.
 
 ## What each action does (D10)
 
@@ -193,7 +193,7 @@ Every parent item uses `InboxEpicPanel`, Option D for a parent, on desktop and m
 
 - **Items:** id, project, task ref, type (question / human review / blocked / failed / stopped / activity / plan thread), sender agent and role, time, subject, preview, body, unread, resolved outcome.
 - **Type-specific fields:** PR, checks, criteria with evidence, positions, suggested answers. A plan thread has the session id, title, status (needs approval / question / failed), `activeRunId`, preview, `failure` and the time it started waiting; its question and plan come from the Plan session endpoints.
-- **What changed since the last review:** a needs-you task or parent item carries `since` and `newArtifacts`. `since` is null until the human has acted, then holds when they last requested changes or answered, what they said, the developers' one-line notes after it, and a parent's fix tasks. `newArtifacts` lists the files added after that action, plus a design's latest version with its preview link, and on a parent each file names its task. Before any action everything is new. Written (`note`) evidence is never listed. Actions and artifacts are compared by time, because review rounds reset when a task is resolved.
+- **What changed since the last review:** a needs-you task or subtask item carries `since` and `newArtifacts`. `since` is null until the human has acted, then holds when they last requested changes or answered, what they said, the developers' one-line notes after it, and a task's fix tasks. `newArtifacts` lists the files added after that action, plus a design's latest version with its preview link, and on a task each file names its task. Before any action everything is new. Written (`note`) evidence is never listed. Actions and artifacts are compared by time, because review rounds reset when a task is resolved.
 - **Counts per filter.**
 - New items stream in over SSE; plan threads follow `plan.session` events.
 
@@ -220,7 +220,7 @@ Every parent item uses `InboxEpicPanel`, Option D for a parent, on desktop and m
 
 - Should Activity items expire, or stay forever?
 
-Mobile Plan threads reuse Plan's `PlanQuestion`, composer and `PlanDetail` bottom sheet, without `PlanConversation`. `InboxMobile` renders its focused Plan thread through `InboxMobilePlanThread`; the Inbox header keeps Back to Inbox and Open in Plan (the session route), with Delete thread in the overflow menu. Deleting returns to `/inbox` at once and closes the session after the 5-second Undo toast (`usePlanThreadDelete`); list rows use `SwipeToDelete` for the same action. A waiting plan has View plan and side-by-side approval destinations. The thread provides `FLYOUT_SHEETS`, so `useTaskFlyout` keeps a task or parent opened from the plan sheet on the Inbox route (`?task=`/`?parent=`) in a taller sheet over the plan, and dismissing it goes back to the plan; either successful approval closes the sheet and returns to `/inbox`. Failed approvals keep the screen and sheet open.
+Mobile Plan threads reuse Plan's `PlanQuestion`, composer and `PlanDetail` bottom sheet, without `PlanConversation`. `InboxMobile` renders its focused Plan thread through `InboxMobilePlanThread`; the Inbox header keeps Back to Inbox and Open in Plan (the session route), with Delete thread in the overflow menu. Deleting returns to `/inbox` at once and closes the session after the 5-second Undo toast (`usePlanThreadDelete`); list rows use `SwipeToDelete` for the same action. A waiting plan has View plan and side-by-side approval destinations. The thread provides `FLYOUT_SHEETS`, so `useTaskFlyout` keeps a task or task opened from the plan sheet on the Inbox route (`?task=`/`?parent=`) in a taller sheet over the plan, and dismissing it goes back to the plan; either successful approval closes the sheet and returns to `/inbox`. Failed approvals keep the screen and sheet open.
 
 ## Release notes (COR-129)
 

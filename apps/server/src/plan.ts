@@ -713,10 +713,10 @@ export class PlanService {
           const [row] = await tx.select().from(epics).where(eq(epics.id, current)).for('update')
           if (epic.reviewMode && epic.reviewMode !== row!.reviewMode) {
             const taskRows = await tx.select({ status: tasks.status, prNumber: tasks.prNumber, integrationProtocol: tasks.integrationProtocol }).from(tasks).where(eq(tasks.epicId, current))
-            if (reviewModeLocked(row!, taskRows)) throw new ToolError('The plan was not saved: the review mode can\'t change once a task in the parent has submitted work or opened a PR.')
+            if (reviewModeLocked(row!, taskRows)) throw new ToolError('The plan was not saved: the review mode can\'t change once a subtask in the task has submitted work or opened a PR.')
             // Only an epic still being planned is the plan's to set: its tasks are all Drafts
             const live = previous?.status === 'approved' || taskRows.some(t => t.status !== 'draft')
-            if (live && lowersMode(row!.reviewMode, epic.reviewMode)) throw new ToolError(`The plan was not saved: it would lower ${row!.title} to ${epic.reviewMode === 'epic' ? 'parent' : epic.reviewMode} review. Use update_parent, which asks the human.`)
+            if (live && lowersMode(row!.reviewMode, epic.reviewMode)) throw new ToolError(`The plan was not saved: it would lower ${row!.title} to ${epic.reviewMode === 'epic' ? 'task' : epic.reviewMode} review. Use update_parent, which asks the human.`)
           }
           await tx.update(epics).set({ title: epic.title, description: epic.summary, ...(epic.reviewMode && { reviewMode: epic.reviewMode }), updatedAt: new Date() }).where(eq(epics.id, current))
           await syncParentContent(tx, current, { title: epic.title, description: epic.summary })
@@ -1200,12 +1200,12 @@ export class PlanService {
         const refusal = await promotionRefusal(db, target)
         if (refusal) throw new ToolError(`The plan was not saved: ${parent.ref}: ${refusal}`)
         const [claimed] = await db.select({ id: epics.id }).from(epics).where(eq(epics.taskId, target.id))
-        if (claimed && ![...previousEpics.values()].includes(claimed.id)) throw new ToolError(`The plan was not saved: another plan already turns ${parent.ref} into a parent. Wait for that plan, or use it.`)
+        if (claimed && ![...previousEpics.values()].includes(claimed.id)) throw new ToolError(`The plan was not saved: another plan already gives ${parent.ref} subtasks. Wait for that plan, or use it.`)
         promoted.set(parent.key, target.id)
         parent.title ||= target.title
         parent.summary ||= richTextToMarkdown(target.description)
       }
-      if (parent.asParent && subTasks(parent.key) < 2) throw new ToolError(`The plan was not saved: ${parent.title || parent.key} needs at least two sub-tasks. A single unit of work is one task, not a parent with one sub-task.`)
+      if (parent.asParent && subTasks(parent.key) < 2) throw new ToolError(`The plan was not saved: ${parent.title || parent.key} needs at least two subtasks. A single unit of work is one task, not a task with one subtask.`)
     }
     // Refs of existing parents, for the delivery records dependencies are stored
     // on. A key in this plan may look like a ref.
@@ -1216,7 +1216,7 @@ export class PlanService {
         if (keys.has(dep) || !/^[A-Za-z]+-\d+$/.test(dep)) return dep
         const target = await findTaskByRef(db, project, dep.toUpperCase()).catch(() => null)
         const [delivery] = target ? await db.select({ id: epics.id }).from(epics).where(eq(epics.taskId, target.id)) : []
-        if (!delivery) throw new ToolError(`The plan was not saved: ${dep} isn't a parent task.`)
+        if (!delivery) throw new ToolError(`The plan was not saved: ${dep} isn't a task with subtasks.`)
         return delivery.id
       }))
     }
@@ -1248,10 +1248,10 @@ export class PlanService {
     if (row?.task.status === 'parent') return
     const subs = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.epicId, epicId), isNull(tasks.deletedAt))).orderBy(asc(tasks.number))
     if (!row) {
-      if (subs.length > 1) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'The task this plan turns into a parent has gone. Ask for the plan again.' }] })
+      if (subs.length > 1) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'The task this plan would give subtasks to has gone. Ask for the plan again.' }] })
       return
     }
-    if (!subs[0]) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: `${row.task.title} has no sub-tasks left to become a parent of.` }] })
+    if (!subs[0]) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: `${row.task.title} has no subtasks left to include.` }] })
     await promoteToParent(tx, project, row.task, subs[0].id, actor)
   }
 

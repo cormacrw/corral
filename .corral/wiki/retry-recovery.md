@@ -55,12 +55,12 @@ to Backlog; none resets the failed-run counter, and
 the audited human action starts a fresh streak. Findings are taken only from PM
 comments after this stop's queued-triage comment.
 
-Fresh human task input or a changed target releases a repetition stop. A human
+Fresh huma task input or a changed target releases a repetition stop. A human
 choice in a pending recovery question resumes work only if the PM explicitly
 listed that exact choice in `ask_question.retryOptions`. The selected retry
 choice is copied to a pinned task comment and resolves Failed/Blocked through
 D10, with the usual counter reset. Refusal, clarification, stale answers and
-unmarked free text never resume work or reset caps. Parent rebase
+unmarked free text never resume work or reset caps. Task rebase
 answers also go through D27's decision journal: exact alternative labels keep
 the recorded choice's semantics, and other free text conservatively counts as
 a behaviour change. Routine comments and target changes cannot bypass

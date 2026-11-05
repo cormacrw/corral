@@ -47,7 +47,7 @@ describe('run lifecycle', () => {
     expect(await listRuns(t.db, { projectId: project.id, active: true }, 3)).toHaveLength(3)
   })
 
-  it('publishes an interrupted parent run when its lease expires without a runner response', async () => {
+  it('publishes an interrupted task run when its lease expires without a runner response', async () => {
     const project = await t.createProject()
     const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'reviewer')).limit(1)
     const [epic] = await t.db.insert(schema.epics).values({ projectId: project.id, title: 'Expired review', createdBy: t.actor }).returning()
@@ -64,7 +64,7 @@ describe('run lifecycle', () => {
       type: 'run.updated',
       run: expect.objectContaining({
         id: run!.id, epicId: epic!.id, taskId: null, state: 'interrupted',
-        endedAt: t.clock.now.toISOString(), outcome: null, error: 'Parent review lease expired'
+        endedAt: t.clock.now.toISOString(), outcome: null, error: 'Task review lease expired'
       })
     })
     expect(await listRuns(t.db, { projectId: project.id, active: true })).toEqual([])

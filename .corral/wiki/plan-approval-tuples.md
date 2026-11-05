@@ -4,6 +4,6 @@
 
 `PlanTaskWrite` separates removed items (no staged revision) from active version diffs with a live task ID. `added`, `changed` and `unchanged` can all carry a revision: change compares plan versions, while revision means edits to a referenced existing task. An unchanged proposal can still be awaiting its first approval. Drafts owned by the session are edited directly; edits to referenced tasks are staged and applied transactionally only on approval.
 
-The `plan_tasks_revision_change` check forbids revisions on removed items. It deliberately does not require task or parent IDs: foreign keys clear those on deletion, and historical plans must still load. Read rows remain separate from the stricter new-write payloads.
+The `plan_tasks_revision_change` check forbids revisions on removed items. It deliberately does not require task or subtask IDs: foreign keys clear those on deletion, and historical plans must still load. Read rows remain separate from the stricter new-write payloads.
 
 Migration 0049 adds both checks NOT VALID, enforcing new inserts/updates after scanning history and warning with every offending plan/session and plan-task/plan ID. `openDatabase` forwards them to the server's output as `Database warning: ...` lines, so operators find them with `docker compose logs server`. Historical rows stay readable and are not repaired or attributed to an invented approver.

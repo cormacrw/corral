@@ -160,7 +160,7 @@ export class EpicFixes {
         this.#c.ending.finished(ctx, 'Reported failed')
         return { ok: true, message: 'Recorded. You can stop now.' }
     }
-    throw new ToolError('A developer on a parent task reports pr_updated, stuck or failed')
+    throw new ToolError('A developer on a task with subtasks reports pr_updated, stuck or failed')
   }
 
   // Nothing moves here: the synchronizer's pass publishes the reported commit
@@ -174,7 +174,7 @@ export class EpicFixes {
     const fix = run.fixKind
     if (fix === 'conflict' && !report.conflictedFiles?.length) throw new ToolError('Not submitted. Add conflictedFiles: every file in which you resolved a conflict.')
     const [current] = await db.select().from(operations).where(eq(operations.id, run.operationId!))
-    if (current && headSha === current.expectedTargetSha) throw new ToolError('Not submitted. The branch is still at the parent head: there is nothing to publish. Commit your work and report again.')
+    if (current && headSha === current.expectedTargetSha) throw new ToolError('Not submitted. The branch is still at the task\'s head: there is nothing to publish. Commit your work and report again.')
     const head = await github.branchHead(project.repository, epicResolutionBranch(run.operationId!))
     if (head !== headSha) throw new ToolError(`Not submitted. The branch on GitHub is at ${head ?? 'nothing'}, not your commit ${headSha}. Try again.`)
     await db.transaction(async (tx) => {
@@ -188,7 +188,7 @@ export class EpicFixes {
     })
     await this.publish(run.epicId!)
     this.#c.ending.finished(ctx, 'Outcome accepted')
-    return { ok: true, message: 'Corral checks the candidate and publishes it to the parent branch. You can stop now.' }
+    return { ok: true, message: 'Corral checks the candidate and publishes it to the task\'s branch. You can stop now.' }
   }
 
   // A product question waits on the human with the lock held. Anything else
@@ -197,7 +197,7 @@ export class EpicFixes {
     const { db } = this.#c.d
     const { run } = ctx
     const project = ctx.project!
-    if (!report.decision && run.fixKind === 'conflict') throw new ToolError('Not reported. A parent task rebase asks the human through `decision`: one focused question, at least two alternatives and the changes affected. Add it and report again.')
+    if (!report.decision && run.fixKind === 'conflict') throw new ToolError('Not reported. A task rebase asks the human through `decision`: one focused question, at least two alternatives and the changes affected. Add it and report again.')
     await db.transaction(async (tx) => {
       const operation = await this.#active(tx, run)
       if (!operation) throw new ToolError('This fix is over. Stop working.')

@@ -1,12 +1,12 @@
-# Parent fixes and fix tasks
+# Task fixes and fix tasks
 
-Code and branch names still say epic: see [Parent tasks](parent-tasks.md). The `epics` row is a parent's delivery record.
+Code and branch names still say `epic`: see [Tasks with subtasks](parent-tasks.md). The `epics` row is a task's delivery record.
 
-D29 splits parent fixes in two. A human's Request changes is new work, so it's a
+D29 splits task fixes in two. A human's Request changes is new work, so it's a
 task. Conflicts, CI failures and integration review changes are developer runs on
-the parent, with no task.
+the task, with no separate subtask.
 
-## Developer runs on the parent
+## Developer runs on the task
 
 Each fix is a `rebase` row in `task_integration_operations` with `fix` set to
 `conflict`, `ci` or `review`, so it's on the same writer lock, and everything that
@@ -16,7 +16,7 @@ new kind of operation would have meant teaching every lock check about it.
 The run has `epicId` and `operationId` and no task. Code that sees `ctx.run.epicId`
 must also look at the role: a developer run isn't an integration review. The
 candidate is `corral/epic-rebase/<operation>`. For `ci` and `review`, `ontoSha` is
-the parent head, so the publish check holds the fix to the head it's fixing.
+the task's head, so the publish check holds the fix to the head it's fixing.
 
 A CI fix with `behaviourChanged: false` keeps approval while the PR's head can read
 stale just after the push. The merge pass must not take that as an unknown head,
@@ -24,14 +24,14 @@ so `startReview` compares with the branch before it drops approval.
 
 A fix has no reviewer before it publishes, so the push guard's target-only rule
 (`epic-rebases.md`) lets an edit through only on a review fix or one reported with
-`behaviourChanged: true`: those send the parent back to integration review. A CI or
-review fix has `ontoSha` at the parent head, so history can't separate the sides;
-the guard then counts any already-present file outside the parent's diff. The server
+`behaviourChanged: true`: those send the task back to integration review. A CI or
+review fix has `ontoSha` at the task's head, so history can't separate the sides;
+the guard then counts any already-present file outside the task's diff. The server
 keeps each such diff on `fixReport.targetFiles` before pushing, and `epicReviewPrompt`
 lists them until a review approves.
 
-A run that never reached a runner (`NEVER_STARTED`) costs no attempt, and the parent
-waits on the scheduler's backoff. `claim` skips a parent whose PR isn't open, and
+A run that never reached a runner (`NEVER_STARTED`) costs no attempt, and the task
+waits on the scheduler's backoff. `claim` skips a task whose PR isn't open, and
 `job` sends the candidate's head as `continueFrom`, so a kept worktree on another
 runner catches up or fails instead of overwriting newer work.
 
@@ -44,13 +44,13 @@ until a newer run starts or the operation ends. Three set `syncError`. Completed
 (`reviewRoundCap`) since the last Retry are bounded too, and the next one's
 operation opens stopped. Retry resets all of them.
 
-A review fix ends with the parent back in integration review, like any behaviour
+A review fix ends with the task back in integration review, like any behaviour
 change. An integration review can't report while an operation is active: its
 verdict is stale, and the review runs again.
 
 ## Fix tasks
 
-A human's Request changes creates a Ready task in the parent and sets `reviewState`
+A human's Request changes creates a Ready subtask in the task and sets `reviewState`
 to `changes_requested` in one transaction. `feedbackPoints` and `feedbackFixTitle`
 in `packages/core/src/review-feedback.ts` derive the criteria and title: list items
 are the points, or paragraphs when the feedback has no list.
@@ -58,13 +58,13 @@ are the points, or paragraphs when the feedback has no list.
 `changes_requested` is sticky. `invalidateEpicReview` leaves it alone, so the fix
 task's own creation and other board changes can't downgrade it to `open`. Only
 `EpicPullRequests.reconcile` leaves it, moving to `in_review` once every board task
-has merged. That also covers a deleted fix task, at the same head, so the parent
+has merged. That also covers a deleted fix task, at the same head, so the task
 can't get stuck.
 
 Human approval requires `human_review`, so it returns 409 while changes are
 outstanding.
 
-A stopped parent is a Needs you item (D11): `waitingEpics` selects on `syncError`, so the Inbox and its count agree with the parent, and `sync_failed` is its arrival. It's an `epic_conflict` item with `stopped` set, and its Retry is the same `rebase` action as the parent page's.
+A stopped task is a Needs you item (D11): `waitingEpics` selects on `syncError`, so the Inbox and its count agree with the task, and `sync_failed` is its arrival. It's an `epic_conflict` item with `stopped` set, and its Retry is the same `rebase` action as the task page's.
 
 ## CI output
 
@@ -74,6 +74,6 @@ In CI, turbo groups passing packages under `##[group]pkg:task`, but a failing pa
 
 ## Task kinds
 
-Tasks expose a persisted `kind` (`normal`, `fix`, `conflict`), independent of `type`. It's server-owned, not an editable input. `createEpicFixTask` sets `fix` for a human's Request changes. Nothing sets `conflict` now that conflicts run with no task (D29); the migration that added the column classifies older rows by what marks them (`corral/epic-rebase/` branches and `Rebase epic:` tasks on the parent's branch are `conflict`; `Fix integration:` and `CI failed:` titles in a parent are `fix`, a title match that only affects the label), so the Inbox's Tasks tab reads them correctly.
+Tasks expose a persisted `kind` (`normal`, `fix`, `conflict`), independent of `type`. It's server-owned, not an editable input. `createEpicFixTask` sets `fix` for a human's Request changes. Nothing sets `conflict` now that conflicts run with no task (D29); the migration that added the column classifies older rows by what marks them (`corral/epic-rebase/` branches and `Rebase epic:` tasks on the task's branch are `conflict`; `Fix integration:` and `CI failed:` titles in a task are `fix`, a title match that only affects the label), so the Inbox's Tasks tab reads them correctly.
 
 The human's `epic.pr` / `human_changes_requested` audit record stores their feedback in `summary`, the reviewed `headSha`, its `createdAt`, and a `fixTasks` snapshot of the created tasks' IDs, refs and titles, in the same transaction as the tasks and review-state change. Each request keeps its own record. Inbox round-two context reads the latest record's links rather than matching titles or creation times. Renaming or removing a task does not erase that link; older audit records without links read as an empty list.
