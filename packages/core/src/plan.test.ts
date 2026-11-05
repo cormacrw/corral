@@ -222,6 +222,14 @@ describe('diffPlans', () => {
     expect(diffPlans([task('a', { design: pin })], [task('a', { design: { ...pin, taskRef: 'cor-7' } })])).toEqual([{ key: 'a', change: 'unchanged' }])
   })
 
+  it('counts a change to the implementation plan alone as a change', () => {
+    expect(diffPlans([task('a', { implementationPlan: 'Edit login.ts' }), task('b')], [task('a', { implementationPlan: 'Edit auth.ts' }), task('b', { implementationPlan: '' })])).toEqual([
+      { key: 'a', change: 'changed' },
+      { key: 'b', change: 'unchanged' }
+    ])
+    expect(diffPlans([task('a')], [task('a', { implementationPlan: 'Edit login.ts' })])).toEqual([{ key: 'a', change: 'changed' }])
+  })
+
   it('counts a changed design pin as a change', () => {
     const pin = { taskRef: 'COR-7', version: 2, screens: ['login'] }
     expect(diffPlans([task('a', { design: pin }), task('b', { design: pin })], [task('a', { design: pin }), task('b', { design: { ...pin, screens: ['signup'] } })])).toEqual([

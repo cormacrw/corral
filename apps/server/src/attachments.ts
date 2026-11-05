@@ -75,15 +75,16 @@ export interface TaskAttachment {
   foundIn: string[]
 }
 
-// The project's attachments referenced in a task's description and
-// comments, once each, in order of appearance, for the agents' prompts and
+// The project's attachments referenced in a task's description,
+// implementation plan and comments, once each, in order of appearance, for the agents' prompts and
 // get_task. References to images outside the project are left out.
-export async function listTaskAttachments(db: Executor, projectId: string, description: unknown, comments: { author: string, body: string, createdAt: Date }[]): Promise<TaskAttachment[]> {
+export async function listTaskAttachments(db: Executor, projectId: string, task: { description: unknown, implementationPlan?: unknown }, comments: { author: string, body: string, createdAt: Date }[]): Promise<TaskAttachment[]> {
   const found = new Map<string, string[]>()
   const note = (ids: string[], where: string) => {
     for (const id of ids) found.set(id, [...found.get(id) ?? [], where])
   }
-  note(attachmentIdsInRichText(description), 'the description')
+  note(attachmentIdsInRichText(task.description), 'the description')
+  note(attachmentIdsInRichText(task.implementationPlan), 'the implementation plan')
   for (const c of comments) note(attachmentIdsInMarkdown(c.body), `a comment by ${c.author} (${c.createdAt.toISOString()})`)
   if (found.size === 0) return []
   const rows = await db.select({ id: attachments.id, fileName: attachments.fileName }).from(attachments)

@@ -12,6 +12,8 @@ export const richTextDocument = z.looseObject({ type: z.literal('doc') }).superR
 export const createTaskInput = z.object({
   title: z.string().trim().min(1),
   description: richTextDocument.nullable().default(null),
+  // How to build it, for agents; the description stays a short human summary
+  implementationPlan: richTextDocument.nullable().default(null),
   type: z.enum(TASK_TYPES),
   priority: z.enum(TASK_PRIORITIES).default('medium'),
   epicId: z.uuid().nullable().default(null),
@@ -27,6 +29,7 @@ export type CreateTaskInput = z.input<typeof createTaskInput>
 export const patchTaskInput = z.object({
   title: z.string().trim().min(1).optional(),
   description: richTextDocument.nullable().optional(),
+  implementationPlan: richTextDocument.nullable().optional(),
   priority: z.enum(TASK_PRIORITIES).optional(),
   type: z.enum(TASK_TYPES).optional(),
   epicId: z.uuid().nullable().optional(),
@@ -128,6 +131,8 @@ interface TaskFields {
   number: number
   title: string
   description: unknown
+  // Rich text, or null when the task has none
+  implementationPlan: unknown
   priority: TaskPriority
   type: TaskType
   kind: TaskKind

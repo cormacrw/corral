@@ -145,6 +145,27 @@ describe('questionText', () => {
   })
 })
 
+describe('implementation plan', () => {
+  const doc = (text: string) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+  const planned = { description: doc('Let people sign in.'), implementationPlan: doc('Edit src/login.ts and keep the session cookie.') }
+
+  it.each([
+    ['developer', developerPrompt({ ...task, ...planned }, 'Victor')],
+    ['reviewer', reviewerPrompt({ ...review, ...planned }, 'Rita')]
+  ])('follows the task description in the %s prompt', (_name, prompt) => {
+    const description = prompt.indexOf('Let people sign in.')
+    const heading = prompt.indexOf('## Implementation plan')
+    expect(description).toBeGreaterThan(-1)
+    expect(heading).toBeGreaterThan(description)
+    expect(prompt.indexOf('Edit src/login.ts and keep the session cookie.')).toBeGreaterThan(heading)
+  })
+
+  it.each([null, { type: 'doc', content: [] }])('is left out when the task has none (%j)', (implementationPlan) => {
+    expect(developerPrompt({ ...task, implementationPlan }, 'Victor')).not.toContain('## Implementation plan')
+    expect(reviewerPrompt({ ...review, implementationPlan }, 'Rita')).not.toContain('## Implementation plan')
+  })
+})
+
 describe('developer and reviewer attachments', () => {
   const attachments = [
     { id: '11111111-1111-4111-8111-111111111111', fileName: 'mockup.png', foundIn: ['the description'] },

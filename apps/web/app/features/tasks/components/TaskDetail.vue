@@ -168,6 +168,14 @@ const composerHint = computed(() => task.value && agentHolds(task.value)
           :sent-to="sentTo"
           :save="patch"
         />
+        <TaskImplementationPlanField
+          v-show="shows('details')"
+          :key="props.taskRef"
+          :task="task"
+          :slug="slug"
+          :readonly="readonly"
+          :save="patch"
+        />
         <TaskCriteria
           v-show="shows('criteria')"
           :key="props.taskRef"

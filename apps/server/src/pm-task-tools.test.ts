@@ -157,6 +157,28 @@ describe('PM task and epic tools', () => {
     expect(await call('update_task', { taskRef: task.ref, dependsOn: [], epicId: null, description: null })).toMatchObject({ ok: true, result: { dependsOn: [], epicId: null, description: null } })
   })
 
+  it('keeps the implementation plan apart from the description through create_task, update_task, PATCH and get_task', async () => {
+    const doc = (text: string) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] })
+    const created = await call('create_task', { title: 'Planned task', type: 'task', description: doc('Let people sign in.'), implementationPlan: 'Edit `src/login.ts`.' })
+    const task = (created as { result: Task }).result
+    expect(await get(task)).toMatchObject({ description: doc('Let people sign in.'), implementationPlan: { type: 'doc' } })
+    expect(await call('get_task', { taskRef: task.ref })).toMatchObject({ ok: true, result: { description: 'Let people sign in.', implementationPlan: 'Edit `src/login.ts`.' } })
+
+    // Each edit leaves the other field as it was
+    expect(await call('update_task', { taskRef: task.ref, implementationPlan: 'Edit `src/auth.ts` instead.' })).toMatchObject({ ok: true })
+    expect(await call('get_task', { taskRef: task.ref })).toMatchObject({ result: { description: 'Let people sign in.', implementationPlan: 'Edit `src/auth.ts` instead.' } })
+    expect(await call('update_task', { taskRef: task.ref, description: doc('Sign in with email.') })).toMatchObject({ ok: true })
+    expect(await call('get_task', { taskRef: task.ref })).toMatchObject({ result: { description: 'Sign in with email.', implementationPlan: 'Edit `src/auth.ts` instead.' } })
+    expect((await request('PATCH', `/api/projects/${slug}/tasks/${task.number}`, { implementationPlan: doc('Use the session cookie.') })).status).toBe(200)
+    expect(await get(task)).toMatchObject({ description: doc('Sign in with email.'), implementationPlan: doc('Use the session cookie.') })
+    expect((await request('PATCH', `/api/projects/${slug}/tasks/${task.number}`, { description: doc('Sign in.') })).status).toBe(200)
+    expect(await get(task)).toMatchObject({ description: doc('Sign in.'), implementationPlan: doc('Use the session cookie.') })
+
+    expect(await call('update_task', { taskRef: task.ref, implementationPlan: '' })).toMatchObject({ ok: true })
+    expect(await get(task)).toMatchObject({ description: doc('Sign in.'), implementationPlan: null })
+    expect(await call('get_task', { taskRef: task.ref })).toMatchObject({ result: { implementationPlan: '' } })
+  })
+
   it('delivers changed title, priority and criteria to the active developer and supports pause/resume', async () => {
     const task = await t.createTask(slug)
     await request('POST', `/api/projects/${slug}/tasks/${task.number}/transitions`, { type: 'approve' })

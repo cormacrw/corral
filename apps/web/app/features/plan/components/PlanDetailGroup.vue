@@ -103,6 +103,28 @@ const flyout = useTaskFlyout()
             class="size-4 shrink-0 text-muted-foreground/70"
           />
         </button>
+        <!-- What the task is for people, with the agents' plan folded away -->
+        <div
+          v-if="task.description || task.implementationPlan"
+          class="px-3 pb-2 text-xs text-muted-foreground"
+        >
+          <MarkdownText
+            v-if="task.description"
+            :text="task.description"
+          />
+          <details
+            v-if="task.implementationPlan"
+            class="mt-1"
+          >
+            <summary class="tap-target flex cursor-pointer items-center rounded-md focus-visible:outline-2 focus-visible:outline-primary">
+              Implementation plan
+            </summary>
+            <MarkdownText
+              :text="task.implementationPlan"
+              class="mt-1 text-foreground"
+            />
+          </details>
+        </div>
       </li>
     </ul>
     <div

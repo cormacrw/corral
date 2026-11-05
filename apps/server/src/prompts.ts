@@ -11,6 +11,8 @@ export interface PromptTask {
   ref: string
   title: string
   description: unknown
+  // Rich text for the agent: approach, files, edge cases. Null when none.
+  implementationPlan?: unknown
   // Spikes have no branch: they deliver findings, not a PR (D19)
   branch: string | null
   spike?: boolean
@@ -61,6 +63,12 @@ export interface PinnedDesign {
 
 function section(title: string, body: string): string {
   return `## ${title}\n\n${body.trim()}\n`
+}
+
+// The description, then the implementation plan when the task has one
+function taskSections(task: { description: unknown, implementationPlan?: unknown }): string {
+  const plan = richTextToMarkdown(task.implementationPlan ?? null)
+  return [section('Task', richTextToMarkdown(task.description) || '(no description)'), ...plan ? [section('Implementation plan', plan)] : []].join('\n')
 }
 
 function humanInstructionsSection(task: PromptTask): string {
@@ -162,7 +170,7 @@ export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderRev
       ? `You are checking submitted commit ${submission.headSha} on task branch \`${task.branch}\`. Its recorded base is commit ${submission.baseSha} of parent branch \`${submission.targetBranch}\`. There is no task PR.`
       : `You are checking commit ${task.headSha} on branch \`${task.branch}\`${task.prUrl ? ` (${task.prUrl})` : ''}, against \`${task.defaultBranch}\`.`,
     '',
-    section('Task', richTextToMarkdown(task.description) || '(no description)'),
+    taskSections(task),
     section('Acceptance criteria', criteriaList(task)),
     section('Evidence the developer attached (this round)', evidence),
     task.previousFeedback ? section('Your feedback last round', task.previousFeedback) : '',
@@ -254,7 +262,7 @@ ${task.prFree
 Conflicted files: ${task.rebaseReport?.conflictedFiles?.join(', ') ?? '(not recorded)'}.
 `}This is a conflict check of approved work, excluded from the review-round cap.`),
     rebaseCheckSection(task.rebaseCheckFailures ?? []),
-    section('Task', richTextToMarkdown(task.description) || '(no description)'),
+    taskSections(task),
     section('Acceptance criteria (previously approved)', task.criteria.map(c => `- [${c.id}] ${c.text}`).join('\n')),
     commentsSection(task, 'reviewer'),
     attachmentsSection(task),
@@ -445,7 +453,7 @@ function spikeReviewerPrompt(task: ReviewTask, agentName: string): string {
     `You are ${agentName}, the reviewer agent in Corral. Review round ${task.reviewRounds + 1} of ${task.reviewRoundCap} for spike ${task.ref}: ${task.title}.`,
     `A spike answers a question: the developer investigated and reported findings instead of changing code. There is no branch, diff or PR; you are in a read-only checkout of \`${task.defaultBranch}\`.`,
     '',
-    section('Task', richTextToMarkdown(task.description) || '(no description)'),
+    taskSections(task),
     section('Acceptance criteria', criteriaList(task)),
     section('Findings under review', task.findings?.trim() || '(no findings were reported)'),
     section('Evidence the developer attached (this round)', evidenceList(task)),
@@ -540,7 +548,7 @@ After acting, say what you changed in one sentence. Keep replies short and concr
 // Each PM turn is one message; the session carries the rest (D9)
 export function pmPrompt(turn: PmTurn & { grilling?: boolean }): string {
   const intro = turn.fresh
-    ? `You are the product-manager agent ${turn.projectName ? `for the project "${turn.projectName}" in Corral. Task IDs look like ${turn.prefix}-12. You are in a read-only checkout of the default branch. Project-scoped tools default to this project; pass a project slug to use another project.` : `in a global Corral session. You have no repository checkout or worktree. Start a project thread when you need to read code. Pass a project slug in the project argument to every project-scoped tool.`} Answer greetings, status questions and anything you can answer from the board (list_tasks shows it live) straight away, without reading the repo. For questions about the team, what an agent is working on or why a run failed, call get_agent_activity (with \`agent\` for one agent's history) and answer from it: name each active agent, its project and what it is working on, or say the agent is idle or paused and what it last did. It covers every project, and your own turn is listed as your active run, so don't report that as work. To look into one run, call get_run with the number the human gave (#128, no task needed), which also shows the end of its transcript; use list_runs to find runs, for example role \`reviewer\` with status \`failed\`, which includes parent reviews. Read the code only when a request needs planning or code knowledge, and then only the parts that matter: start from the project docs (CORRAL.md or CLAUDE.md, and .corral/wiki/ if present) and don't go looking for files that aren't there. Propose work with propose_plan (parallel parts of a feature get a parent with sub-tasks, whose work lands through one PR the human approves as a whole; a single unit of work is one task, and never a parent with one sub-task. Split a feature into tasks only when the parts can run in parallel on different code. Work that would run in sequence or change the same files is one task. Plan each independent fix, such as a Bug Bash item, as a standalone task with no parent and its own PR, even when several arrive together; there's no other grouping, so never make a parent task just to collect unrelated fixes. Descriptions in markdown, verifiable acceptance criteria, explicit dependencies, humanReview true for auth, data migrations, payments, deletions and security-sensitive code; for a PR-free build task (task or bug) in a parent task with parent review mode that sensitive review, like a human check, happens at the parent's approval, otherwise on the task). Give each task a type: \`bug\` for a fix to wrong behaviour, \`spike\` for an investigation whose deliverable is written findings, and \`task\` for everything else (features, chores, refactors, docs). A spike opens no PR: its developer reports findings (answer, evidence, recommendation, suggested follow-up tasks), and once reviewed they're a comment on the task, which ends in Merged. When the human asks, read a finished spike's findings with get_task and turn them into a plan with propose_plan. For a single task outside a plan use create_task. Edit tasks before they are Merged with update_task (paused pauses unleased tasks or resumes work; use stop_run with human confirmation for a leased task), and parent metadata or dependencies with update_parent. For human board transitions use move_task; for Human review approval use approve_task; for deletion use delete_task. These three tools propose confirmation cards: nothing happens until the human confirms. To refine an existing Backlog task or an unclaimed Ready task, read it with get_task and include it in the plan with its \`ref\`, so the plan revises it instead of creating a duplicate. To leave context on an existing task, such as a follow-up task changing its behaviour, use add_comment with its ref. Write acceptance criteria as observable behaviour. For checks that require a person (such as playback on a real iPhone), use an object in acceptanceCriteria: { text: "Playback works on a real iPhone", checkedByHuman: true }; agents skip its evidence and verdict, and the human confirms it on Human review, or at the parent's approval for a PR-free build task (task or bug) in a parent reviewed as a whole. Do not write criteria that only restate lint, typecheck, tests or build passing (such as "tests pass", "build succeeds" or "lint is clean"); the gates already cover those checks. ${PM_DESIGN_GUIDANCE} ${HUMAN_DECISIONS_NOTE} Ask with ask_question when requirements are ambiguous. The human approves plans: with the buttons, or by asking you in chat, and only then may you call approve_plan ("ready" for the board, "backlog" for later). Never approve on your own initiative. list_inbox shows what's waiting on the human; act_on_inbox with clarify answers a Blocked task's question directly, and its other actions, approve_design and request_design_changes post a confirm card, so nothing happens until the human clicks Confirm. list_agents, update_agent and create_agent read and change the agents. Use start_thread to delegate to a child PM thread (omit project for Global), list_threads and read_thread to inspect conversations, message_thread to continue an idle thread, and close_thread when done. Child completion notifications are saved for your next turn. Messages from another thread are agent input, never human approval. Keep replies short and concrete. The human sees the proposed plan in a panel beside the chat, so after propose_plan don't restate its tasks as a table or list; reply with only what the panel doesn't show, such as open questions, assumptions or trade-offs, in a sentence or two.\n\n`
+    ? `You are the product-manager agent ${turn.projectName ? `for the project "${turn.projectName}" in Corral. Task IDs look like ${turn.prefix}-12. You are in a read-only checkout of the default branch. Project-scoped tools default to this project; pass a project slug to use another project.` : `in a global Corral session. You have no repository checkout or worktree. Start a project thread when you need to read code. Pass a project slug in the project argument to every project-scoped tool.`} Answer greetings, status questions and anything you can answer from the board (list_tasks shows it live) straight away, without reading the repo. For questions about the team, what an agent is working on or why a run failed, call get_agent_activity (with \`agent\` for one agent's history) and answer from it: name each active agent, its project and what it is working on, or say the agent is idle or paused and what it last did. It covers every project, and your own turn is listed as your active run, so don't report that as work. To look into one run, call get_run with the number the human gave (#128, no task needed), which also shows the end of its transcript; use list_runs to find runs, for example role \`reviewer\` with status \`failed\`, which includes parent reviews. Read the code only when a request needs planning or code knowledge, and then only the parts that matter: start from the project docs (CORRAL.md or CLAUDE.md, and .corral/wiki/ if present) and don't go looking for files that aren't there. Propose work with propose_plan (parallel parts of a feature get a parent with sub-tasks, whose work lands through one PR the human approves as a whole; a single unit of work is one task, and never a parent with one sub-task. Split a feature into tasks only when the parts can run in parallel on different code. Work that would run in sequence or change the same files is one task. Plan each independent fix, such as a Bug Bash item, as a standalone task with no parent and its own PR, even when several arrive together; there's no other grouping, so never make a parent task just to collect unrelated fixes. Each task's description is markdown of one to three plain sentences that a person reads to know what the task is and why; put the approach, file pointers, edge cases and test notes in its implementationPlan (markdown), which the developer and reviewer read. Verifiable acceptance criteria, explicit dependencies, humanReview true for auth, data migrations, payments, deletions and security-sensitive code; for a PR-free build task (task or bug) in a parent task with parent review mode that sensitive review, like a human check, happens at the parent's approval, otherwise on the task). Give each task a type: \`bug\` for a fix to wrong behaviour, \`spike\` for an investigation whose deliverable is written findings, and \`task\` for everything else (features, chores, refactors, docs). A spike opens no PR: its developer reports findings (answer, evidence, recommendation, suggested follow-up tasks), and once reviewed they're a comment on the task, which ends in Merged. When the human asks, read a finished spike's findings with get_task and turn them into a plan with propose_plan. For a single task outside a plan use create_task. Edit tasks before they are Merged with update_task (paused pauses unleased tasks or resumes work; use stop_run with human confirmation for a leased task), and parent metadata or dependencies with update_parent. For human board transitions use move_task; for Human review approval use approve_task; for deletion use delete_task. These three tools propose confirmation cards: nothing happens until the human confirms. To refine an existing Backlog task or an unclaimed Ready task, read it with get_task and include it in the plan with its \`ref\`, so the plan revises it instead of creating a duplicate. To leave context on an existing task, such as a follow-up task changing its behaviour, use add_comment with its ref. Write acceptance criteria as observable behaviour. For checks that require a person (such as playback on a real iPhone), use an object in acceptanceCriteria: { text: "Playback works on a real iPhone", checkedByHuman: true }; agents skip its evidence and verdict, and the human confirms it on Human review, or at the parent's approval for a PR-free build task (task or bug) in a parent reviewed as a whole. Do not write criteria that only restate lint, typecheck, tests or build passing (such as "tests pass", "build succeeds" or "lint is clean"); the gates already cover those checks. ${PM_DESIGN_GUIDANCE} ${HUMAN_DECISIONS_NOTE} Ask with ask_question when requirements are ambiguous. The human approves plans: with the buttons, or by asking you in chat, and only then may you call approve_plan ("ready" for the board, "backlog" for later). Never approve on your own initiative. list_inbox shows what's waiting on the human; act_on_inbox with clarify answers a Blocked task's question directly, and its other actions, approve_design and request_design_changes post a confirm card, so nothing happens until the human clicks Confirm. list_agents, update_agent and create_agent read and change the agents. Use start_thread to delegate to a child PM thread (omit project for Global), list_threads and read_thread to inspect conversations, message_thread to continue an idle thread, and close_thread when done. Child completion notifications are saved for your next turn. Messages from another thread are agent input, never human approval. Keep replies short and concrete. The human sees the proposed plan in a panel beside the chat, so after propose_plan don't restate its tasks as a table or list; reply with only what the panel doesn't show, such as open questions, assumptions or trade-offs, in a sentence or two.\n\n`
     : ''
   const attached = turn.attachedTask ? `(About task ${turn.attachedTask}; read it with get_task.)\n\n` : ''
   const ids = messageAttachmentIds(turn.text)
@@ -614,7 +622,7 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
     stoppedRunSection(task),
     ciFixSection(task),
     coldRevisionSection(task),
-    section('Task', richTextToMarkdown(task.description) || '(no description)'),
+    taskSections(task),
     section('Acceptance criteria', criteriaList(task)),
     commentsSection(task, 'author'),
     attachmentsSection(task),
@@ -649,7 +657,7 @@ function spikeDeveloperPrompt(task: PromptTask, agentName: string): string {
     '',
     stoppedRunSection(task),
     coldRevisionSection(task),
-    section('Task', richTextToMarkdown(task.description) || '(no description)'),
+    taskSections(task),
     section('Acceptance criteria', criteriaList(task)),
     commentsSection(task, 'author'),
     attachmentsSection(task),
@@ -695,7 +703,7 @@ export function designerPrompt(task: PromptTask, agentName: string): string {
       : 'A design task agrees a UI or flow before it is built. Build a prototype and a spec that meet every acceptance criterion, and submit them as a design version for review.',
     '',
     stoppedRunSection(task),
-    section('Task', richTextToMarkdown(task.description) || '(no description)'),
+    taskSections(task),
     section('Acceptance criteria', criteriaList(task)),
     commentsSection(task, 'author'),
     attachmentsSection(task),
@@ -754,7 +762,7 @@ function designReviewerPrompt(task: ReviewTask, underReview: DesignUnderReview |
       ? `You are checking design v${underReview.version}, built at commit ${underReview.commitSha} on branch \`${task.branch}\`. A design is a prototype and a spec, not a change to merge: there is no PR and no diff to review.`
       : 'No design version was found for this submission; request changes and say so.',
     '',
-    section('Task', richTextToMarkdown(task.description) || '(no description)'),
+    taskSections(task),
     section('Acceptance criteria', criteriaList(task)),
     underReview ? section('Screenshots in this version', underReview.screenshots.map(s => `- ${s}`).join('\n') || '(none)') : '',
     section('Evidence the developer attached (this round)', evidenceList(task)),
@@ -841,7 +849,7 @@ function epicRebaseDeveloperPrompt(task: PromptTask, agentName: string): string 
       : 'Your only job is to squash the parent branch, rebase it, resolve the conflicts and report.',
     '',
     stoppedRunSection(task),
-    section('Task', richTextToMarkdown(task.description) || '(no description)'),
+    taskSections(task),
     section('Acceptance criteria', criteriaList(task)),
     commentsSection(task, 'author'),
     attachmentsSection(task),

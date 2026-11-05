@@ -138,6 +138,7 @@ async function storefrontFoundations(t: Seeder, shop: Project): Promise<void> {
   const images = await t.task(shop, {
     title: 'Lazy-load product images below the fold',
     description: 'The category pages download every product image up front. Load the ones below the fold as they scroll into view.',
+    implementationPlan: '- `src/components/ProductImage.vue`: add `loading` and `decoding="async"`, and set `width` and `height` from the product data so nothing shifts.\n- `src/components/ProductGrid.vue`: pass `eager` to the first row only (`i < columns`).\n- Edge case: the column count changes at breakpoints, so read it from the grid, not a constant.\n- Test: a component test that only the first row is eager; check CLS in Lighthouse on /new.',
     acceptanceCriteria: ['Images below the fold load only when they come within 300 px of the viewport', 'The first row still loads eagerly, with no layout shift'],
     priority: 'high'
   })
@@ -163,6 +164,7 @@ async function storefrontFoundations(t: Seeder, shop: Project): Promise<void> {
   const reviews = await t.task(shop, {
     title: 'Show a review summary on the product page',
     description: 'Under the price: the average star rating and how many reviews, linking down to the reviews section.',
+    implementationPlan: 'Add `ReviewSummary.vue` beside `ProductPrice` in `src/pages/products/[slug].vue`, reading `product.rating` and `product.reviewCount`. Render nothing at zero reviews. Link to `#reviews`, which `ReviewList` already sets.',
     acceptanceCriteria: ['Shows the average rating to one decimal place and the review count', 'Hidden when a product has no reviews', 'Clicking it scrolls to the reviews section']
   })
   await t.approve(shop, reviews)
@@ -229,8 +231,8 @@ async function wishlistParent(t: Seeder, shop: Project): Promise<void> {
     summary: 'Save products from any product card, see them on a wishlist page, and keep them across reloads without an account. Built as one parent so the three parts ship together in one PR.',
     parents: [{ key: 'wishlist', title: 'Wishlist', summary: 'Save products for later, without an account', reviewMode: 'parent' }],
     tasks: [
-      { key: 'store', parent: 'wishlist', title: 'Wishlist store that survives reloads', description: 'A Pinia store for wishlist items, persisted to localStorage, with add, remove and toggle.', type: 'task', priority: 'high', acceptanceCriteria: ['Items survive a page reload', 'Toggling a product twice leaves it out of the wishlist'] },
-      { key: 'button', parent: 'wishlist', title: 'Heart button on product cards', description: 'A heart button in the corner of every product card that toggles the product in the wishlist, with a toast.', type: 'task', dependsOn: ['store'], acceptanceCriteria: ['Every product card has a heart button that toggles the product', 'The header shows how many products are saved'] },
+      { key: 'store', parent: 'wishlist', title: 'Wishlist store that survives reloads', description: 'Shoppers can save products for later, and they are still there after a reload.', implementationPlan: '- New `src/stores/wishlist.ts` Pinia store keyed by product id, with `add`, `remove` and `toggle`.\n- Persist with `useLocalStorage` under `wishlist:v1`; ignore and reset an unreadable value.\n- Edge case: a saved product that no longer exists is dropped when the page loads it.', type: 'task', priority: 'high', acceptanceCriteria: ['Items survive a page reload', 'Toggling a product twice leaves it out of the wishlist'] },
+      { key: 'button', parent: 'wishlist', title: 'Heart button on product cards', description: 'A heart on every product card saves or unsaves the product, so shoppers can collect things as they browse.', implementationPlan: 'Add `WishlistButton.vue` to the corner of `ProductCard.vue`, calling `toggle` on the store and showing a toast. Put the saved count in `AppHeader.vue`. Stop the click reaching the card link.', type: 'task', dependsOn: ['store'], acceptanceCriteria: ['Every product card has a heart button that toggles the product', 'The header shows how many products are saved'] },
       { key: 'page', parent: 'wishlist', title: 'Wishlist page', description: 'A /wishlist page listing saved products with Remove and Add to bag.', type: 'task', dependsOn: ['store'], acceptanceCriteria: ['Lists every saved product with its price and stock', 'Remove takes a product off the list straight away'] }
     ]
   })

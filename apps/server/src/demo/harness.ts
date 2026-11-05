@@ -17,10 +17,11 @@ import { DemoGitHub, demoSha } from './demo-github.ts'
 // state the demo shows is one the server reached itself.
 export type Criteria = Task['acceptanceCriteria']
 
-export interface DemoTaskInput extends Omit<Partial<CreateTaskInput>, 'description'> {
+export interface DemoTaskInput extends Omit<Partial<CreateTaskInput>, 'description' | 'implementationPlan'> {
   title: string
   // Markdown
   description?: string
+  implementationPlan?: string
 }
 
 const DURATION = /^(\d+(?:\.\d+)?)(m|h|d)$/
@@ -156,11 +157,12 @@ export class Seeder {
   }
 
   async task(project: Project, input: DemoTaskInput): Promise<Task> {
-    const { description, ...rest } = input
+    const { description, implementationPlan, ...rest } = input
     return this.request<Task>('POST', `/api/projects/${project.slug}/tasks`, {
       type: 'task',
       ...rest,
-      description: description ? markdownToRichText(description) : null
+      description: description ? markdownToRichText(description) : null,
+      implementationPlan: implementationPlan ? markdownToRichText(implementationPlan) : null
     })
   }
 
