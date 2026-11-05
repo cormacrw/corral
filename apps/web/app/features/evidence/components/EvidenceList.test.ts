@@ -73,3 +73,61 @@ describe('EvidenceList', () => {
     expect(render([]).text()).toContain('No evidence attached.')
   })
 })
+
+describe('EvidenceList across runs', () => {
+  const Button = defineComponent({ emits: ['click'], setup: (_, { emit, attrs }) => () => h('button', { ...attrs, onClick: () => emit('click') }) })
+  const at = (minute: number) => new Date(Date.UTC(2026, 10, 1, 12, minute)).toISOString()
+  const shot = (id: string, criterionId: string, runId: string, round: number, minute: number): Evidence =>
+    ({ id, taskId: 't', criterionId, runId, round, note: '', createdAt: at(minute), kind: 'screenshot', fileName: `${id}.png`, contentType: 'image/png', size: 1, url: `/${id}` })
+  const criteria = [{ id: 'a', text: 'First', position: 0, met: true }, { id: 'b', text: 'Second', position: 1, met: true }]
+  const renderRuns = (items: Evidence[]) => mount(EvidenceList, {
+    props: { evidence: items, criteria, reviews: [] },
+    global: { components: { MarkdownText, Icon: Stub, AppModal: Stub, AppButton: Button } }
+  })
+  // Files listed outside any closed disclosure
+  const listed = (w: ReturnType<typeof renderRuns>) => w.findAll('button')
+    .filter(b => b.text().includes('.png') && !b.element.closest('details'))
+    .map(b => b.text().split('.png')[0])
+  // Run 1 attaches to both criteria; run 2, in the next round, only to the first
+  const twoRuns = [shot('a1', 'a', 'r1', 0, 0), shot('b1', 'b', 'r1', 0, 1), shot('a2', 'a', 'r2', 1, 10)]
+
+  it('shows each criterion\'s latest run, keeping a criterion\'s older evidence marked with its round', () => {
+    const wrapper = renderRuns(twoRuns)
+    const earlier = wrapper.get('[data-testid="evidence-earlier"]')
+    expect(earlier.attributes('open')).toBeUndefined()
+    expect(earlier.get('summary').text()).toBe('Earlier rounds (1)')
+    expect(listed(wrapper)).toEqual(['a2', 'b1'])
+    expect(wrapper.findAll('[data-testid="evidence-carried-from"]').map(b => b.text())).toEqual(['From round 1'])
+    expect(earlier.findAll('[data-testid="evidence-earlier-round"]').map(r => r.text())).toEqual([expect.stringContaining('Round 1')])
+    expect(earlier.text()).toContain('a1.png')
+  })
+
+  it('counts only the later of two runs in one round as current', () => {
+    const wrapper = renderRuns([shot('old', 'a', 'r1', 1, 0), shot('new', 'a', 'r2', 1, 5)])
+    expect(wrapper.find('[data-testid="evidence-carried-from"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="evidence-earlier"]').text()).toContain('old.png')
+    expect(listed(wrapper)).toEqual(['new'])
+  })
+
+  it('flips the viewer through the visible files only, earlier ones once expanded', async () => {
+    const wrapper = renderRuns(twoRuns)
+    const shown = () => wrapper.get('[data-testid="evidence-viewer-body"]').get('img').attributes('src')
+    await wrapper.findAll('button').find(b => b.text().includes('a2.png'))!.trigger('click')
+    await wrapper.get('[aria-label="Next file"]').trigger('click')
+    expect(shown()).toBe('/b1')
+    await wrapper.get('[aria-label="Next file"]').trigger('click')
+    expect(shown()).toBe('/a2')
+    const details = wrapper.get('[data-testid="evidence-earlier"]')
+    ;(details.element as HTMLDetailsElement).open = true
+    await details.trigger('toggle')
+    await wrapper.get('[aria-label="Next file"]').trigger('click')
+    expect(shown()).toBe('/a1')
+  })
+
+  it('has no earlier rounds control for a single run', () => {
+    const wrapper = renderRuns([shot('a1', 'a', 'r1', 0, 0), shot('b1', 'b', 'r1', 0, 1)])
+    expect(wrapper.find('[data-testid="evidence-earlier"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="evidence-carried-from"]').exists()).toBe(false)
+    expect(listed(wrapper)).toEqual(['a1', 'b1'])
+  })
+})

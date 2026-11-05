@@ -359,11 +359,31 @@ async function storefrontFixes(t: Seeder, shop: Project): Promise<void> {
   })
   await t.approve(shop, promo)
   await t.advance('10m')
+  // Two rounds of evidence: the second replaces the first round's and attaches
+  // nothing to the phone check, so that criterion keeps round 1's screenshot
   await develop(t, shop, promo, {
     head: 'v1',
-    minutes: 35,
+    minutes: 30,
+    summary: 'The client only handled 400 from the promo endpoint, so an expired code (410) never settled. It now handles 410 and stops the spinner.',
+    note: 'Stopped the spinner on expired promo codes',
+    files: [patch('src/composables/usePromoCode.ts', ['-  if (res.status === 400) error.value = res.data.message', '+  if (res.status === 400 || res.status === 410) error.value = res.data.message', '+  pending.value = false'])],
+    evidence: async (t, job, task) => {
+      await t.evidenceFile(job, task.acceptanceCriteria[0]!.id, { kind: 'screenshot', fileName: 'checkout-promo-v1.png', contentType: 'image/png', data: asset('checkout-promo.png'), note: 'The spinner is gone and the field says the code is invalid' })
+      await t.evidenceNote(job, task.acceptanceCriteria[0]!.id, 'The message is the generic one: the endpoint sends no expiry date yet.')
+      await t.evidenceNote(job, task.acceptanceCriteria[1]!.id, 'Playwright: apply an expired code, remove it, Pay is enabled.')
+      await t.evidenceFile(job, task.acceptanceCriteria[2]!.id, { kind: 'screenshot', fileName: 'checkout-promo-phone.png', contentType: 'image/png', data: asset('checkout-promo.png'), note: 'iPhone 15 simulator, keyboard open: the message sits above it' })
+      await t.evidenceFile(job, null, testOutput('✓ usePromoCode > settles on 410 (3 ms)\n\nTest Files  1 passed (1)\n     Tests  1 passed (1)'))
+    }
+  })
+  await t.advance('6m')
+  await review(t, promo, 'changes_requested', 'The spinner is fixed, but the message doesn\'t say when the code expired, which the first criterion asks for.', [{ met: false, note: 'Generic "invalid code" message, no date' }, { met: true, note: 'Covered by the Playwright test' }])
+  await t.advance('20m')
+  await develop(t, shop, promo, {
+    head: 'v2',
+    outcome: 'pr_updated',
+    minutes: 15,
     summary: 'The promo endpoint returned 410 for expired codes and the client only handled 400, so the request never settled. The client now handles 410 with the expiry date, and the Pay button no longer waits on the promo request.',
-    note: 'Handled expired promo codes at checkout',
+    note: 'Addressed review: the message names the expiry date',
     files: [
       patch('src/composables/usePromoCode.ts', ['-  if (res.status === 400) error.value = res.data.message', '+  if (res.status === 400 || res.status === 410) error.value = res.data.message', '+  pending.value = false']),
       patch('server/api/promo.post.ts', ['-  throw createError({ statusCode: 410 })', '+  throw createError({ statusCode: 410, message: `This code expired on ${formatDate(code.expiresAt)}` })'])
@@ -371,6 +391,7 @@ async function storefrontFixes(t: Seeder, shop: Project): Promise<void> {
     evidence: async (t, job, task) => {
       await t.evidenceFile(job, task.acceptanceCriteria[0]!.id, { kind: 'screenshot', fileName: 'checkout-promo.png', contentType: 'image/png', data: asset('checkout-promo.png'), note: 'AUTUMN-20 expired on 31 October' })
       await t.evidenceNote(job, task.acceptanceCriteria[1]!.id, 'Playwright: apply an expired code, remove it, Pay is enabled and the order goes through.')
+      await t.evidenceFile(job, null, testOutput('✓ usePromoCode > settles on 410 (3 ms)\n✓ promo.post > names the expiry date (4 ms)\n\nTest Files  2 passed (2)\n     Tests  2 passed (2)'))
     }
   })
   await t.advance('7m')

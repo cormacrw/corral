@@ -3,6 +3,7 @@ import type { Evidence, InboxActionInput, InboxItem, PmActivityItem, Review, Tas
 import { keys } from '~/queries/keys'
 import { taskDesignsQuery, taskPullRequestQuery } from '~/queries/tasks'
 import { inboxTldr } from '~/features/inbox/utils/inbox-summary'
+import { currentEvidence } from '~/features/evidence/utils/evidenceRounds'
 
 // The Inbox message panel, Option D (design/inbox.md). useInboxItem owns the data
 // and the actions; this turns them into what a reviewer decides on: the ask,
@@ -102,7 +103,8 @@ export function useInboxPanel(ctx: InboxPanelContext) {
   const criteria = computed(() => isReview.value ? task.value?.acceptanceCriteria ?? [] : [])
   const met = computed(() => criteria.value.filter(c => c.met).length)
   const gates = computed(() => isReview.value && !isSpike.value ? task.value?.gateChecks ?? [] : [])
-  const files = computed(() => ctx.evidence.filter(e => e.kind !== 'note' && e.url))
+  // Only the latest submission's files, not ones a later run replaced
+  const files = computed(() => currentEvidence(ctx.evidence).filter(e => e.kind !== 'note' && e.url))
   const images = computed(() => files.value.filter(e => e.contentType?.startsWith('image/')))
   const others = computed(() => files.value.filter(e => !e.contentType?.startsWith('image/')))
   const hasVerdict = computed(() => isReview.value && (latestReview.value !== null || gates.value.length > 0 || criteria.value.length > 0))

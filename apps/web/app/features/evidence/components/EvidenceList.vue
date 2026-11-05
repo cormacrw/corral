@@ -2,9 +2,10 @@
 import type { Evidence, Review, Task } from '@corral/contracts'
 import { computed, ref } from 'vue'
 import CriterionMetIcon from '~/features/evidence/components/CriterionMetIcon.vue'
-import EvidenceGroup from '~/features/evidence/components/EvidenceGroup.vue'
+import EvidenceRounds from '~/features/evidence/components/EvidenceRounds.vue'
 import EvidenceViewer from '~/features/evidence/components/EvidenceViewer.vue'
 import { evidenceCriterion } from '~/features/evidence/utils/evidenceFile'
+import { evidenceRounds } from '~/features/evidence/utils/evidenceRounds'
 import type { ViewerFile } from '~/features/evidence/components/EvidenceViewer.vue'
 
 // Criteria next to their evidence (PRD §7.7, design/inbox.md), with the
@@ -14,9 +15,17 @@ const checked = defineModel<string[]>('checked', { default: () => [] })
 const open = ref<ViewerFile | null>(null)
 
 const latest = computed(() => props.reviews[0] ?? null)
-const forTask = computed(() => props.evidence.filter(e => e.criterionId === null))
+// Each criterion shows its latest submission, earlier rounds behind a toggle
+const rounds = computed(() => evidenceRounds(props.evidence))
+const forTask = computed(() => rounds.value.group(null))
+// Groups whose earlier rounds are open, by criterion id ('' for the task)
+const expanded = ref<Record<string, boolean>>({})
+const listed = (id: string | null) => {
+  const group = rounds.value.group(id)
+  return [...group.current, ...(expanded.value[id ?? ''] ? group.earlier.flatMap(r => r.items) : [])]
+}
 // The viewer flips through the files in the order they're listed
-const files = computed(() => [...props.criteria.flatMap(c => props.evidence.filter(e => e.criterionId === c.id)), ...forTask.value].filter(e => e.url))
+const files = computed(() => [...props.criteria.flatMap(c => listed(c.id)), ...listed(null)].filter(e => e.url))
 const note = (id: string) => latest.value?.criteria.find(c => c.criterionId === id)?.note ?? ''
 </script>
 
@@ -61,20 +70,22 @@ const note = (id: string) => latest.value?.criteria.find(c => c.criterionId === 
           />
         </div>
       </div>
-      <EvidenceGroup
-        :evidence="props.evidence.filter(e => e.criterionId === criterion.id)"
+      <EvidenceRounds
+        v-model:expanded="expanded[criterion.id]"
+        :rounds="rounds.group(criterion.id)"
         @open="open = $event"
       />
     </div>
     <div
-      v-if="forTask.length > 0"
+      v-if="forTask.current.length > 0"
       class="rounded-lg border border-border p-3"
     >
       <p class="mb-2 text-sm font-medium">
         Task as a whole
       </p>
-      <EvidenceGroup
-        :evidence="forTask"
+      <EvidenceRounds
+        v-model:expanded="expanded['']"
+        :rounds="forTask"
         @open="open = $event"
       />
     </div>
