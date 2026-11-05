@@ -8,3 +8,8 @@ the existing session message endpoint, including its normal live-turn behaviour.
 Runs without a linked session and every other role still open run transcripts.
 
 The navigation specification is in `docs/design/mobile.md` under Agents.
+
+Phones have no Plan session switcher, including in conversation headers; return
+to `/plan` for Open threads. The mobile dashboard has 48px top padding before
+the avatar and a five-row prompt with a 144px minimum height. Its Send icon
+is 32px with a 44px hit area, positioned inside the prompt’s bottom corner.

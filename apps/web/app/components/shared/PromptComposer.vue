@@ -245,13 +245,13 @@ function onPick(event: Event) {
       :placeholder="props.placeholder"
       :disabled="props.disabled"
       :rows="props.rows"
-      class="max-h-64 min-h-0 px-3"
+      :class="['max-h-64 px-3', props.bare ? 'min-h-36 pr-16 pb-14' : 'min-h-0']"
       @keydown.enter="onEnter"
     />
     <InputGroupAddon
       v-if="props.bare"
       align="inline-end"
-      class="cursor-default self-end pb-2 has-[>button]:mr-0"
+      class="absolute right-2 bottom-2 cursor-default p-0 has-[>button]:mr-0"
     >
       <AppButton
         v-bind="submitAppearance"
@@ -259,7 +259,7 @@ function onPick(event: Event) {
         :disabled="!canSend"
         :loading="props.busy || uploading"
         size="sm"
-        class="tap-target rounded-full"
+        class="relative size-8 rounded-full after:absolute after:-inset-1.5"
         data-testid="composer-send"
         @click="send()"
       />

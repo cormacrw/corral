@@ -58,7 +58,6 @@ const { log, content, onLogScroll } = usePlanThreadScroll(() => {
       compact
     >
       <template #actions>
-        <PlanSessionSwitcher />
         <PlanCloseThread
           v-if="session && accepted"
           :session="session"

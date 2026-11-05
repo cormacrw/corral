@@ -35,9 +35,9 @@ const placeholder = computed(() => {
 
 <template>
   <div class="flex min-h-0 flex-1 max-[1100px]:flex-col">
-    <div :class="['flex min-w-0 flex-1 flex-col items-center', device.isMobile.value ? 'shrink-0 justify-start p-4' : 'min-h-0 overflow-y-auto overscroll-contain p-6']">
+    <div :class="['flex min-w-0 flex-1 flex-col items-center', device.isMobile.value ? 'shrink-0 justify-start px-4 pb-4 pt-12' : 'min-h-0 overflow-y-auto overscroll-contain p-6']">
       <!-- my-auto, not justify-center: a tall page must still scroll to its top -->
-      <div :class="['flex w-full max-w-[720px] flex-col gap-6', !device.isMobile.value && 'my-auto']">
+      <div :class="['flex w-full max-w-[720px] flex-col', device.isMobile.value ? 'gap-8' : 'my-auto gap-6']">
         <div class="flex flex-col items-center gap-2 text-center">
           <AgentAvatar
             :name="pm?.name ?? 'PM'"
@@ -57,7 +57,8 @@ const placeholder = computed(() => {
           :disabled="offline"
           :busy="busy"
           :allow-empty="taskRef !== null"
-          :rows="3"
+          :rows="device.isMobile.value ? 5 : 3"
+          :submit-icon-only="device.isMobile.value"
           :bare="device.isMobile.value"
           :project="project?.slug"
           draft-key="plan:new"

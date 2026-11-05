@@ -71,7 +71,7 @@ async function open(id = 's-1', mobile = false) {
         AgentAvatar: true, PlanTurnSteps: true, PlanDetail: true,
         TaskFlyout: true, PlanSheets: true, AppDrawer: true, AppBadge: true, Icon: true,
         UiSkeleton: true, AppTooltip: true, AppSelectMenu: true,
-        PlanSessionSwitcher: true, PlanGrillButton: true
+        PlanGrillButton: true
       },
       components: {
         PlanLiveTurn, PlanMessages, PlanPill, PlanRefineMenu, PlanRelatedThreads, PlanReplyComposer, PlanRunnerOffline, PlanSessionHeader,
