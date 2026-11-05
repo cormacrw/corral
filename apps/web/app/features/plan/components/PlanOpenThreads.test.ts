@@ -26,13 +26,12 @@ const sessions = [
 ]
 
 describe('PlanOpenThreads', () => {
-  it('lists open threads, most recently updated first, with their status badge and unread dot', () => {
+  it('lists open threads, most recently updated first, with an unread dot and no status badge', () => {
     const wrapper = mount(PlanOpenThreads, { props: { sessions }, global })
     const rows = wrapper.findAll('[data-testid="plan-open-thread"]')
     expect(wrapper.get('h2').text()).toBe('Open threads')
     expect(rows.map(r => r.get('.truncate').text())).toEqual(['Newest', 'Failing', 'Quiet', 'Older'])
-    expect(rows.map(r => r.find('[data-badge]').exists() ? `${r.get('[data-badge]').text()}:${r.get('[data-badge]').attributes('data-badge')}` : null))
-      .toEqual(['Needs approval:primary', 'Failed:error', null, 'Question:info'])
+    expect(wrapper.find('[data-badge]').exists()).toBe(false)
     expect(rows.map(r => r.find('[data-testid="plan-session-unread"]').exists())).toEqual([true, false, false, false])
   })
 
