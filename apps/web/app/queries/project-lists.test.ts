@@ -17,6 +17,8 @@ const task = (over: Partial<Task> = {}) => ({ id: 't1', ref: 'TA-1', number: 1, 
 describe('shared project lists', () => {
   let client: ReturnType<typeof testQueryClient>
   beforeEach(() => {
+    // Unmocked refetches, as after a delete, get the server's 404 instead of the network
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 'not_found' }), { status: 404 })))
     client = testQueryClient()
     client.setDefaultOptions({ queries: { staleTime: 30_000, retry: false, gcTime: Infinity } })
     client.setQueryData(keys.projects.list(), [project])
@@ -26,6 +28,7 @@ describe('shared project lists', () => {
   afterEach(() => {
     client.clear()
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('shares the shell cache across page mounts without a pending render', async () => {

@@ -94,7 +94,7 @@ describe('runner connection', () => {
     socket.close()
     // The server's close handler can run later under load; observe its state
     // instead of assuming the close handshake finishes within 100 ms.
-    await vi.waitFor(() => expect(hub.online).toBe(false))
+    await vi.waitFor(() => expect(hub.online).toBe(false), { timeout: 5000 })
   })
 
   it('marks repos already used by a project, and read-only ones, as not selectable', async () => {

@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
-import { expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
 
@@ -18,6 +18,12 @@ vi.stubGlobal('useProjectMissing', useProjectMissing)
 vi.stubGlobal('provideProject', vi.fn())
 
 const { default: Project } = await import('./[slug].vue')
+
+enableAutoUnmount(afterEach)
+beforeEach(() => {
+  removing.value = null
+  list.mockReset()
+})
 
 function render(client = testQueryClient()) {
   return { client, wrapper: mount(Project, { global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { ProjectNotFound: { template: '<p>not found</p>' }, NuxtPage: { template: '<p>page</p>' } } } }) }

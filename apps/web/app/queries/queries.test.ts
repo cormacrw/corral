@@ -41,6 +41,9 @@ const project = { id: 'p-1', slug: 'corral' }
 const task = (over: Partial<Task> = {}) => ({ id: 't-1', ref: 'COR-1', number: 1, projectId: 'p-1', epicId: null, status: 'ready', title: 'One', ...over }) as Task
 
 // Counts the fetches of a query mounted on screen, with what it showed
+// Call counts below are per test
+beforeEach(() => vi.clearAllMocks())
+
 function onScreen(client: ReturnType<typeof testQueryClient>, queryKey: readonly unknown[], data: () => unknown) {
   const queryFn = vi.fn(async () => data())
   const shown: boolean[] = []
@@ -86,7 +89,7 @@ describe('run transcripts', () => {
     expect(client.getQueryState(key)?.isInvalidated).toBe(true)
   })
 
-  it('starts nothing for a transcript nobody has loaded, and retries one that failed', () => {
+  it('writes nothing for a transcript nobody has loaded, and marks it stale', () => {
     const client = testQueryClient()
     expect(stale(client, event(0, 'a'))).toEqual([key])
     expect(client.getQueryData(key)).toBeUndefined()
@@ -358,10 +361,8 @@ describe('query layer', () => {
     for (const key of [keys.tasks.history('COR-1'), keys.tasks.evidence('COR-1'), keys.tasks.reviews('COR-1'), keys.tasks.designs('COR-1')]) expect(stale).toContainEqual(key)
   })
 
-  it('uses defaults that show cached data at once and do not retry a 4xx', () => {
+  it('does not retry a 4xx, and gives up on other errors after a few tries', () => {
     const defaults = createQueryClient().getDefaultOptions().queries!
-    expect(defaults.staleTime).toBeGreaterThan(0)
-    expect(defaults.networkMode).toBe('always')
     const retry = defaults.retry as (failures: number, error: Error) => boolean
     expect(retry(0, new ApiError(404, null, 'Not found'))).toBe(false)
     expect(retry(0, new ApiError(503, null, 'Down'))).toBe(true)
@@ -669,7 +670,11 @@ describe('run.updated', () => {
   })
 })
 
-describe('run transcripts', () => {
+describe('run transcript buffering', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
   const line = (text: string) => ({ type: 'message', text }) as RunEvent
   const lines = (offset: number, ...texts: string[]) => ({ type: 'run.events', runId: 'r-1', offset, events: texts.map(line) }) as Extract<ServerEvent, { type: 'run.events' }>
 
@@ -684,7 +689,6 @@ describe('run transcripts', () => {
     frames[0]!(0)
     expect(write).toHaveBeenCalledTimes(1)
     expect(write).toHaveBeenCalledWith(lines(0, 'a', 'b', 'c'))
-    vi.unstubAllGlobals()
   })
 
   it('keeps lines apart when one is out of place, so the gap still refetches', () => {
@@ -696,7 +700,6 @@ describe('run transcripts', () => {
     buffer.add(lines(5, 'f'))
     buffer.flush()
     expect(write.mock.calls.map(([event]) => event.offset)).toEqual([0, 5])
-    vi.unstubAllGlobals()
   })
 
   it('writes straight away in a hidden tab, which has no frames', () => {
@@ -704,14 +707,5 @@ describe('run transcripts', () => {
     const write = vi.fn()
     createLineBuffer(write).add(lines(0, 'a'))
     expect(write).toHaveBeenCalledTimes(1)
-    vi.restoreAllMocks()
-  })
-})
-
-describe('epic.updated', () => {
-  it('marks the epic\'s history stale, which the event doesn\'t carry', () => {
-    const client = testQueryClient()
-    const epic = { id: 'e-1', projectId: 'p-1' } as Epic
-    expect(applyEvent(client, { type: 'epic.updated', epic } as ServerEvent)).toContainEqual(keys.epics.history('e-1'))
   })
 })

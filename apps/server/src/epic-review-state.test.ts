@@ -64,7 +64,7 @@ it('publishes no reset when the task edit rolls back', async () => {
   expect(response.status).toBe(400)
   expect(t.events.filter(e => e.type === 'epic.updated')).toEqual([])
   const rows = await t.db.select().from(schema.epics)
-  expect(rows.map(e => e.reviewState)).toEqual(['human_review', 'ready_to_merge'])
+  expect(rows.map(e => e.reviewState).sort()).toEqual(['human_review', 'ready_to_merge'])
 })
 
 it('collects and publishes a reset for a task created directly on the board', async () => {
@@ -168,5 +168,5 @@ it('retries the rebase of a conflicted epic without touching its review', async 
   expect((await t.db.select().from(schema.runs).where(eq(schema.runs.id, run.id)))[0]!.state).toBe('running')
   // Retry publishes an Inbox arrival asynchronously. Let its fallback persist
   // before teardown closes PGlite underneath the pending query.
-  await vi.waitFor(async () => expect(await t.db.select().from(schema.inboxMessages)).toHaveLength(1))
+  await vi.waitFor(async () => expect(await t.db.select().from(schema.inboxMessages)).toHaveLength(1), { timeout: 5000 })
 })

@@ -13,6 +13,10 @@ function alive(pid: number): boolean {
   }
 }
 
+// Long enough for a script to set itself up (write its pid, set its trap)
+// before the timeout fires, even on a busy machine
+const SETUP_MS = 1000
+
 describe('exec', () => {
   let dir: string
 
@@ -29,9 +33,9 @@ describe('exec', () => {
     await writeFile(script, `#!/bin/sh\nsleep 30 &\necho $! > '${join(dir, 'pid')}'\nwait\n`)
     await chmod(script, 0o755)
 
-    const result = await exec(script, [], { timeoutMs: 200, group: true })
+    const result = await exec(script, [], { timeoutMs: SETUP_MS, group: true })
 
-    expect(result).toMatchObject({ code: null, stderr: expect.stringContaining('Timed out after 200 ms') })
+    expect(result).toMatchObject({ code: null, stderr: expect.stringContaining(`Timed out after ${SETUP_MS} ms`) })
     const helper = Number(await readFile(join(dir, 'pid'), 'utf8'))
     await expect.poll(() => alive(helper), { timeout: 3000 }).toBe(false)
   })
@@ -42,7 +46,7 @@ describe('exec', () => {
     await writeFile(script, `#!/bin/sh\ntouch '${lock}'\ntrap "rm -f '${lock}'; exit 1" TERM\nsleep 30 &\nwait\n`)
     await chmod(script, 0o755)
 
-    const result = await exec(script, [], { timeoutMs: 200, group: true })
+    const result = await exec(script, [], { timeoutMs: SETUP_MS, group: true })
 
     expect(result.code).toBeNull()
     expect(await stat(lock).catch(() => null)).toBeNull()
@@ -53,18 +57,25 @@ describe('exec', () => {
     await writeFile(script, `#!/bin/sh\ntrap '' TERM\necho $$ > '${join(dir, 'pid')}'\nwhile true; do sleep 0.1; done\n`)
     await chmod(script, 0o755)
 
-    const result = await exec(script, [], { timeoutMs: 200, group: true })
+    const result = await exec(script, [], { timeoutMs: SETUP_MS, group: true })
 
     expect(result).toMatchObject({ code: null, stderr: expect.stringContaining('Timed out') })
     const pid = Number(await readFile(join(dir, 'pid'), 'utf8'))
     await expect.poll(() => alive(pid), { timeout: 3000 }).toBe(false)
   }, 15_000)
 
-  it('still answers at once for a command outside a group', async () => {
-    const started = Date.now()
-    const result = await exec('sleep', ['30'], { timeoutMs: 100 })
-    expect(result.code).toBeNull()
-    expect(Date.now() - started).toBeLessThan(2000)
+  // Answering at once is bounded by the test timeout, well under the 30 s sleep
+  // and the group's stop grace
+  it('still answers at once for a command outside a group, and kills it', async () => {
+    const script = join(dir, 'sleeper')
+    await writeFile(script, `#!/bin/sh\necho $$ > '${join(dir, 'pid')}'\nexec sleep 30\n`)
+    await chmod(script, 0o755)
+
+    const result = await exec(script, [], { timeoutMs: SETUP_MS })
+
+    expect(result).toMatchObject({ code: null, stderr: expect.stringContaining('Timed out') })
+    const pid = Number(await readFile(join(dir, 'pid'), 'utf8'))
+    await expect.poll(() => alive(pid)).toBe(false)
   })
 
   it('stops a command that prints without end, with a reason', async () => {

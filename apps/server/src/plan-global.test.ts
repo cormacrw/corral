@@ -4,7 +4,7 @@ import { eq, sql } from 'drizzle-orm'
 import { readFile, writeFile } from 'node:fs/promises'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner, sleep } from './test-runner.ts'
+import { FakeRunner } from './test-runner.ts'
 
 // Real HTTP and fenced runner tool requests against an isolated database.
 describe('global and project Plan sessions', () => {
@@ -37,7 +37,6 @@ describe('global and project Plan sessions', () => {
   }
   async function finish(job: RunJob, reply: string) {
     runner.send({ type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [{ type: 'message', text: reply }] })
-    await sleep(50)
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
     await expect.poll(async () => {
       const session = await t.request('GET', `/api/plan/sessions/${job.planSessionId}`).then(r => r.json()) as PlanSessionDetail

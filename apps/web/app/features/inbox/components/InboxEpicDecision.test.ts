@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 import { VueQueryPlugin } from '@tanstack/vue-query'
-import { flushPromises, mount } from '@vue/test-utils'
-import { expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, expect, it, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
 import InboxEpicDecision from '~/features/inbox/components/InboxEpicDecision.vue'
 import { testQueryClient } from '~/queries/mount-with-query'
+
+enableAutoUnmount(afterEach)
 
 const act = vi.hoisted(() => vi.fn(() => Promise.resolve({ task: null })))
 const review = vi.hoisted(() => vi.fn(() => Promise.resolve({ ok: true })))

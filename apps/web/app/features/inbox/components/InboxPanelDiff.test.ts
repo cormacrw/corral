@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
 import type { PullRequestDetail } from '@corral/contracts'
-import { mount } from '@vue/test-utils'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import InboxPanelDiff from '~/features/inbox/components/InboxPanelDiff.vue'
+
+enableAutoUnmount(afterEach)
 
 afterEach(() => {
   vi.unstubAllGlobals()

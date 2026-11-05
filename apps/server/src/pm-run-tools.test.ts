@@ -40,7 +40,7 @@ describe('list_runs and get_run', () => {
     expect(res.status).toBe(201)
     pm = (await runner.next('run.assign', m => m.job.role === 'pm')).job
     runner.send({ type: 'run.started', runId: pm.runId, leaseEpoch: pm.leaseEpoch, agentSessionId: 'sess' })
-    await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, pm.runId)))[0]?.state).toBe('running'))
+    await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, pm.runId)))[0]?.state).toBe('running'), { timeout: 5000 })
 
     // A failed epic review in another project: it has no task to search from
     const other = await t.createProject({ name: 'Another project' })

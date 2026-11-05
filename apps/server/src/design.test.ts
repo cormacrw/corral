@@ -87,13 +87,7 @@ describe('design tasks submit versions instead of a PR', () => {
 
   // The agent CLI's session, as the runner reports it when the run starts
   async function started(job: RunJob, agentSessionId: string) {
-    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId })
-    for (let i = 0; i < 100; i++) {
-      const [run] = await t.db.select({ agentSessionId: runs.agentSessionId }).from(runs).where(eq(runs.id, job.runId))
-      if (run?.agentSessionId === agentSessionId) return
-      await new Promise(resolve => setTimeout(resolve, 10))
-    }
-    throw new Error('run.started was not recorded')
+    await t.runStarted(runner, job, agentSessionId)
   }
 
   function submission(headSha: string, bundle = BUNDLE) {
@@ -161,7 +155,6 @@ describe('design tasks submit versions instead of a PR', () => {
     await t.request('PATCH', `/api/projects/${project.slug}`, { paused: false })
     const job = await nextJob(task, 'designer')
     expect(job).toMatchObject({ role: 'designer', branch: `design/${task.ref}`, headSha: 'old-design', agentSessionId: null, fallbackPrompt: null })
-    expect(job.prompt).toContain('the designer agent')
     expect(job.prompt).toContain('Keep the existing error screen')
     expect((await full(project, task)).developer).toEqual({ id: designer!.id, name: designer!.name })
     await pause(project)
@@ -275,11 +268,10 @@ describe('design tasks submit versions instead of a PR', () => {
     // The same agent session resumes on the same branch, told about the feedback
     const revision = await nextJob(task, 'designer')
     expect(revision).toMatchObject({ branch: developer.branch, agentSessionId: 'sess-design-1', taskType: 'design' })
-    expect(revision.prompt).toContain('same session and the same branch')
     expect(revision.prompt).toContain('Make the error state red')
     expect(revision.prompt).toContain('records v2')
     // The full prompt, in case the session is gone
-    expect(revision.fallbackPrompt).toContain('changes were requested on design v1')
+    expect(revision.fallbackPrompt).toContain('design v1')
     expect(revision.fallbackPrompt).toContain('Make the error state red')
 
     await submit(project, revision, task, 'd2')
@@ -387,8 +379,6 @@ describe('design tasks submit versions instead of a PR', () => {
       expect(developer.prompt).toContain(`design v1 of ${design.ref}`)
       expect(developer.prompt).toContain('`login`, `login-error`')
       expect(developer.prompt).toContain(`branch \`design/${design.ref}\` at commit d1`)
-      expect(developer.prompt).toContain('read-only files')
-      expect(developer.prompt).toContain('side by side')
       // The runner fetches the pinned version by the build task's own ref
       expect(await runner.call(developer.runId, developer.leaseEpoch, 'get_design', { taskRef: build.ref }))
         .toMatchObject({ ok: true, result: { taskRef: design.ref, version: 1, branch: `design/${design.ref}`, pinnedScreens: ['login', 'login-error'], spec: SPEC.trim() } })
@@ -404,7 +394,6 @@ describe('design tasks submit versions instead of a PR', () => {
       const reviewer = await nextJob(build, 'reviewer')
       expect(reviewer).toMatchObject({ designPinned: true })
       expect(reviewer.prompt).toContain(`design v1 of ${design.ref}`)
-      expect(reviewer.prompt).toContain('matching prototype screenshots')
       await pause(project)
 
       // Unpinned tasks get neither

@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { runs } from '~/prototype/fixtures'
@@ -10,20 +10,16 @@ import RunTranscriptPane from '~/features/runs/components/RunTranscriptPane.vue'
 import AgentPage from './[name].vue'
 import AgentRunPage from './[name]/[[runId]].vue'
 
-afterEach(() => {
-  vi.unstubAllGlobals()
-  instances.RunComposer = 0
-  instances.RunTranscript = 0
-})
+enableAutoUnmount(afterEach)
+afterEach(() => vi.unstubAllGlobals())
 
 // RunComposer's draft and RunTranscript's expanded steps live in their
-// instances, so each run must get new ones
-const instances = { RunComposer: 0, RunTranscript: 0 }
-const counted = (name: keyof typeof instances) => vue.defineComponent({
+// instances; these stand-ins hold some state the same way
+const stateful = (name: string) => vue.defineComponent({
   name,
   setup: () => {
-    instances[name]++
-    return () => vue.h('div')
+    const text = vue.ref('')
+    return () => vue.h('textarea', { 'data-testid': name, 'value': text.value, 'onInput': (e: Event) => text.value = (e.target as HTMLTextAreaElement).value })
   }
 })
 
@@ -31,19 +27,20 @@ function runView() {
   const selected = vue.ref(runs[0]!)
   const view = {
     name: vue.ref('Juno'), agent: vue.ref({ name: 'Juno', role: 'pm', activeRuns: 0 }), status: vue.ref(null), limited: vue.ref(false), runs: vue.ref(runs), error: vue.ref(null), events: vue.ref([]),
-    now: vue.ref(Date.now()), selected, load: vi.fn(), today: vue.ref([]), tiles: vue.ref([]), facts: vue.ref(''), stop: vi.fn(), resume: vi.fn(), projectName: () => '', sent: vue.ref({})
+    now: vue.ref(Date.parse('2026-11-04T12:00:00Z')), selected, load: vi.fn(), today: vue.ref([]), tiles: vue.ref([]), facts: vue.ref(''), stop: vi.fn(), resume: vi.fn(), projectName: () => '', sent: vue.ref({})
   }
   return { view, selected }
 }
 
-async function expectNewInstances(selected: vue.Ref<typeof runs[number]>) {
-  expect(instances).toEqual({ RunComposer: 1, RunTranscript: 1 })
+// Typing into both, then opening another run, leaves both empty
+async function expectFreshStatePerRun(wrapper: VueWrapper, selected: vue.Ref<typeof runs[number]>) {
+  for (const name of ['RunComposer', 'RunTranscript']) await wrapper.get(`[data-testid="${name}"]`).setValue('kept for this run')
   selected.value = { ...runs[1]!, id: 'next-run' }
   await flushPromises()
-  expect(instances).toEqual({ RunComposer: 2, RunTranscript: 2 })
+  for (const name of ['RunComposer', 'RunTranscript']) expect(wrapper.get<HTMLTextAreaElement>(`[data-testid="${name}"]`).element.value).toBe('')
 }
 const global = {
-  components: { AgentDetail, AgentRunPanel, RunTranscriptPane, RunComposer: counted('RunComposer'), RunTranscript: counted('RunTranscript'), AppPanel: vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', slots.default?.()) }) },
+  components: { AgentDetail, AgentRunPanel, RunTranscriptPane, RunComposer: stateful('RunComposer'), RunTranscript: stateful('RunTranscript'), AppPanel: vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', slots.default?.()) }) },
   stubs: { AppButton: true, AppBadge: true, AppAlert: true, UiSkeleton: true, AgentAvatar: true, TaskFlyout: true, RunTimingBreakdown: true, NuxtLink: true, Icon: true }
 }
 
@@ -53,16 +50,15 @@ it('gives each run its own composer and transcript on desktop', async () => {
   vi.stubGlobal('definePageMeta', vi.fn())
   vi.stubGlobal('useTaskFlyout', () => ({}))
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(false) }))
-  mount(AgentRunPage, { props: { view: view as never }, global })
-  await expectNewInstances(selected)
+  await expectFreshStatePerRun(mount(AgentRunPage, { props: { view: view as never }, global }), selected)
 })
 
-function mountAgent(params: Record<string, string>, isMobile: boolean) {
+function mountAgent(params: Record<string, string>, isMobile: boolean, push = vi.fn()) {
   vi.stubGlobal('computed', vue.computed)
   vi.stubGlobal('definePageMeta', vi.fn())
   vi.stubGlobal('useSeoMeta', vi.fn())
   vi.stubGlobal('useRoute', () => ({ params }))
-  vi.stubGlobal('useRouter', () => ({}))
+  vi.stubGlobal('useRouter', () => ({ push }))
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(isMobile) }))
   vi.stubGlobal('useAgentRuns', () => runView().view)
   return mount(AgentPage, { global: { ...global, components: { ...global.components, NuxtPage: { render: () => vue.h('main', { 'data-testid': 'child' }) }, MobileAgent: { render: () => vue.h('section', { 'data-testid': 'list' }) } } } })
@@ -77,15 +73,18 @@ it('shows the agent or the run on a phone, never both', () => {
   expect(run.find('[data-testid="child"]').exists()).toBe(true)
 })
 
-it('keeps the runs list beside the transcript with no run in the URL on the web', () => {
-  const wrapper = mountAgent({ name: 'Juno' }, false)
-  expect(wrapper.find('ul').exists()).toBe(true)
+it('keeps the runs list beside the transcript with no run in the URL on the web, and opens a run from it', async () => {
+  const push = vi.fn()
+  const wrapper = mountAgent({ name: 'Juno' }, false, push)
   expect(wrapper.find('[data-testid="child"]').exists()).toBe(true)
+  const items = wrapper.findAll('li button')
+  expect(items).toHaveLength(runs.length)
+  await items[1]!.trigger('click')
+  expect(push).toHaveBeenCalledWith(`/agents/Juno/${runs[1]!.id}`)
 })
 
 it('gives each run its own composer and transcript on mobile', async () => {
   vi.stubGlobal('computed', vue.computed)
   const { view, selected } = runView()
-  mount(MobileAgentRun, { props: { view: view as never }, global })
-  await expectNewInstances(selected)
+  await expectFreshStatePerRun(mount(MobileAgentRun, { props: { view: view as never }, global }), selected)
 })

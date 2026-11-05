@@ -3,9 +3,14 @@ import { flushPromises } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { mountWithQuery } from '~/queries/mount-with-query'
-import { agents, runs } from '~/prototype/fixtures'
+import type { Agent, Run } from '@corral/contracts'
 import { api } from '~/composables/useApi'
 import { useAgentRuns } from '~/features/runs/composables/useAgentRuns'
+
+const agents = [{ id: 'a1', name: 'Atlas', role: 'developer', runtime: 'claude-code', concurrency: 1, paused: false, pausedUntil: null, activeRuns: 0 }] as Agent[]
+const run = (id: string) => ({ id, agentId: 'a1', role: 'developer', state: 'completed', outcome: null, projectId: 'p1', taskId: null, taskRef: null,
+  queuedAt: '2026-10-29T10:00:00Z', startedAt: '2026-10-29T10:00:00Z', endedAt: '2026-10-29T10:05:00Z', inputTokens: 0, cacheWriteTokens: null, outputTokens: 0 }) as unknown as Run
+const list = [run('r-2'), run('r-1')]
 
 vi.mock('~/queries/shell', () => ({
   shell: () => ({ agents: { data: vue.ref(agents) }, projects: { data: vue.ref([]) } })
@@ -16,10 +21,7 @@ vi.mock('~/composables/useApi', () => ({ api: { runs: { list: vi.fn(), transcrip
 afterEach(() => vi.unstubAllGlobals())
 
 it('keeps the runs list and ignores an old transcript after switching runs', async () => {
-  const agent = agents.find(a => a.role === 'developer' && runs.filter(r => r.agentId === a.id).length > 1)!
-  const list = runs.filter(r => r.agentId === agent.id)
-  expect(list.length).toBeGreaterThan(1)
-  const route = vue.reactive({ params: { name: agent.name, runId: list[0]!.id } })
+  const route = vue.reactive({ params: { name: 'Atlas', runId: list[0]!.id } })
   for (const [key, value] of Object.entries(vue)) vi.stubGlobal(key, value)
   vi.stubGlobal('useRoute', () => route)
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))

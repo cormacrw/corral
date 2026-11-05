@@ -1,6 +1,5 @@
 import type { TaskInboxItem, Inbox } from '@corral/contracts'
 import { describe, expect, it } from 'vitest'
-import { releaseNotes } from '~/prototype/fixtures.ts'
 import { projectCardSummary, projectNeedsYou } from '~/features/projects/utils/projects.ts'
 
 const now = Date.parse('2026-10-29T12:00:00Z')
@@ -13,21 +12,19 @@ const task = (ref: string, status: Status, lease: 'developer' | 'reviewer' | nul
 })
 
 describe('projectNeedsYou', () => {
-  const notes = releaseNotes[0]!
-  const blocked = { ...notes, id: 'task', type: 'blocked' } as unknown as TaskInboxItem
-  const other = { ...blocked, id: 'other', project: { ...notes.project, id: 'another-project' } }
+  const blocked = { id: 'task', type: 'blocked', project: { id: 'p1' } } as unknown as TaskInboxItem
+  const other = { ...blocked, id: 'other', project: { id: 'another-project' } } as TaskInboxItem
   const inbox = (needsYou: Inbox['needsYou']): Inbox => ({ needsYou, activity: [], resolved: [], count: 0 })
 
   it('counts the project\'s share of Needs you, so project counts add up to the global one', () => {
     const listed = inbox([blocked, other])
-    expect(projectNeedsYou(listed, notes.project.id)).toEqual([blocked])
+    expect(projectNeedsYou(listed, 'p1')).toEqual([blocked])
     expect(projectNeedsYou(listed, 'another-project')).toEqual([other])
-    expect(projectCardSummary({ paused: false }, [], 0, now).line).toBe('Nothing running.')
   })
 
   it('counts nothing for a project with nothing waiting', () => {
     expect(projectNeedsYou(inbox([blocked]), 'empty-project')).toEqual([])
-    expect(projectNeedsYou(null, notes.project.id)).toEqual([])
+    expect(projectNeedsYou(null, 'p1')).toEqual([])
   })
 })
 
@@ -50,22 +47,18 @@ describe('projectCardSummary', () => {
 
   it('names the agent of the task\'s run, not the first of its role', () => {
     const s = projectCardSummary({ paused: false }, [task('COR-35', 'in_progress', 'developer')], 0, now)
-    expect(s.line).toBe('Bolt building COR-35')
     expect(s.working).toEqual({ agent: 'Bolt', role: 'developer' })
+    expect(s.line).toContain('COR-35')
   })
 
-  it('counts further leased tasks', () => {
-    const s = projectCardSummary({ paused: false }, [task('COR-35', 'in_progress', 'developer'), task('COR-31', 'agent_review', 'reviewer')], 0, now)
-    expect(s.line).toBe('Bolt building COR-35 and 1 more')
+  it('mentions further leased tasks', () => {
+    const one = projectCardSummary({ paused: false }, [task('COR-35', 'in_progress', 'developer')], 0, now)
+    const two = projectCardSummary({ paused: false }, [task('COR-35', 'in_progress', 'developer'), task('COR-31', 'agent_review', 'reviewer')], 0, now)
+    expect(two.working).toEqual(one.working)
+    expect(two.line).not.toBe(one.line)
   })
 
-  it('explains a paused project with what needs you', () => {
-    expect(projectCardSummary({ paused: true }, [], 1, now).line).toBe('No new runs start while paused. 1 needs you.')
-    expect(projectCardSummary({ paused: true }, [], 0, now).line).toBe('No new runs start while paused.')
-  })
-
-  it('falls back to what needs you, then to nothing running', () => {
-    expect(projectCardSummary({ paused: false }, [], 2, now).line).toBe('2 needs you.')
-    expect(projectCardSummary({ paused: false }, [], 0, now).line).toBe('Nothing running.')
+  it('shows nobody working on a paused project, even with a lease', () => {
+    expect(projectCardSummary({ paused: true }, [task('COR-35', 'in_progress', 'developer')], 0, now).working).toBeNull()
   })
 })

@@ -5,6 +5,7 @@ import { expect, it, vi } from 'vitest'
 import type { Run } from '@corral/contracts'
 
 vi.stubGlobal('computed', computed)
+const { formatMs } = await import('~/utils/labels')
 const { default: RunTimingBreakdown } = await import('~/features/runs/components/RunTimingBreakdown.vue')
 const run = {
   queuedAt: '2026-10-30T10:00:00Z', startedAt: '2026-10-30T10:01:00Z',
@@ -18,14 +19,14 @@ const run = {
   }
 } as Run
 
-it('shows queue-to-start wait, sorts phases and tools without mutating the API data', () => {
+it('shows queue-to-start wait, sorts phases and tools slowest first without mutating the API data', () => {
   const wrapper = mount(RunTimingBreakdown, { props: { run } })
-  expect(wrapper.text()).toContain('including preparation): 1m 0s')
-  const tables = wrapper.findAll('table')
-  expect(tables[0]!.findAll('tbody tr').map(row => row.text())).toEqual(['Agent resume· largest9.0 s', 'Push1.0 s'])
-  expect(tables[1]!.findAll('tbody tr').map(row => row.text())).toEqual(['exec_command412.0 s6.0 s', 'get_task2400 ms250 ms'])
-  expect(wrapper.get('[role="img"]').attributes('aria-label')).toContain('Agent resume: 9.0 s')
-  expect(wrapper.findAll('[role="img"] span')[0]!.attributes('style')).toContain('width: 90%')
+  expect(wrapper.text()).toContain(formatMs(60_000))
+  const [phases, tools] = wrapper.findAll('table')
+  const firstCells = (table: typeof phases) => table!.findAll('tbody tr').map(row => row.find('th, td').text())
+  expect(firstCells(phases)[0]).toContain('Agent resume')
+  expect(firstCells(phases)[1]).toContain('Push')
+  expect(firstCells(tools)).toEqual(['exec_command', 'get_task'])
   expect(run.timings!.phases[0]!.phase).toBe('push')
   expect(run.timings!.tools[0]!.tool).toBe('get_task')
 })
@@ -42,6 +43,6 @@ it('handles empty timings and an unavailable start time', () => {
     props: { run: { ...run, startedAt: null, timings: { totalMs: 0, phases: [], tools: [] } } }
   })
   expect(wrapper.text()).toContain('Unavailable')
-  expect(wrapper.text()).toContain('No recorded tool calls.')
+  expect(wrapper.findAll('table')).toHaveLength(1)
   expect(wrapper.html()).not.toMatch(/NaN|Infinity/)
 })

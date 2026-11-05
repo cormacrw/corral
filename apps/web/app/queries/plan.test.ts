@@ -2,14 +2,17 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { PlanSessionDetail } from '@corral/contracts'
 import { api } from '~/composables/useApi'
-import { planMessages, plans, planSessions } from '~/prototype/fixtures'
 import { applyEvent } from './dependencies'
 import { keys } from './keys'
 import { testQueryClient } from './mount-with-query'
 import { markPlanRead, planSessionQuery } from './plan'
 
 vi.mock('~/composables/useApi', () => ({ api: { plan: { session: vi.fn(), read: vi.fn() } } }))
-const detail = (): PlanSessionDetail => structuredClone({ ...planSessions.find(s => s.id === 's-1')!, messages: planMessages['s-1']!, plans: plans['s-1']! })
+const detail = (): PlanSessionDetail => ({
+  id: 's-1', title: 'Search filters', unread: true, updatedAt: '2026-10-29T12:00:00Z',
+  messages: [{ id: 'm-1', sessionId: 's-1', role: 'human', kind: 'message', text: 'Add filters' }],
+  plans: [{ id: 'plan-1', sessionId: 's-1', version: 1, status: 'proposed' }]
+}) as unknown as PlanSessionDetail
 
 describe('Plan session cache', () => {
   it('keeps live replies and plan revisions when an older snapshot finishes, without duplicating messages', async () => {

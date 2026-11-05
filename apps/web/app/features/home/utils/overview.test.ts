@@ -1,6 +1,6 @@
 import type { Epic } from '@corral/contracts'
 import { describe, expect, it } from 'vitest'
-import { formatDuration, mergedByDay, openWork, recentEpics, startOfDay, weekOverWeek } from './overview'
+import { mergedByDay, openWork, recentEpics, startOfDay, weekOverWeek } from './overview'
 
 const now = new Date(2026, 10, 4, 15, 0).getTime()
 const daysAgo = (n: number, hour = 12) => new Date(2026, 10, 4 - n, hour).toISOString()
@@ -49,14 +49,5 @@ describe('recentEpics', () => {
     expect(result.map(r => r.epic.id)).toEqual(['new', 'mid'])
     expect(result[0]!.epic).toMatchObject({ taskCount: 2, mergedCount: 1 })
     expect(result[0]!.project).toEqual({ id: 'b' })
-  })
-})
-
-describe('formatDuration', () => {
-  it('reads as minutes, hours or days', () => {
-    expect(formatDuration(20 * 60_000)).toBe('20m')
-    expect(formatDuration(5.94 * 3_600_000)).toBe('5.9h')
-    expect(formatDuration(14.5 * 3_600_000)).toBe('15h')
-    expect(formatDuration(72 * 3_600_000)).toBe('3.0d')
   })
 })

@@ -146,7 +146,7 @@ describe('confirm-required PM actions', () => {
   it('delivers confirmation and cancellation results on the next warm and cold PM turn', async () => {
     const nextMessage = 'What happened to those tasks?'
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
-    await vi.waitFor(async () => expect((await detail()).activeRunId).toBeNull())
+    await vi.waitFor(async () => expect((await detail()).activeRunId).toBeNull(), { timeout: 5000 })
     expect((await t.request('POST', `/api/plan/sessions/${session.id}/messages`, { text: nextMessage })).status).toBe(201)
     const next = (await runner.next('run.assign', m => m.job.planSessionId === session.id)).job
     expect(next.agentSessionId).toBe('confirmation-session')

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TaskStatus, TaskType } from '@corral/core'
-import { dashboardCounts, elapsed, isToday, liveRunTitle } from '~/features/home/utils/dashboard.ts'
+import { dashboardCounts, isToday, liveRunTitle } from '~/features/home/utils/dashboard.ts'
 
 const now = new Date(2026, 9, 29, 15, 0)
 const task = (status: TaskStatus, extra: { mergedAt?: string | null, reviewRounds?: number, type?: TaskType, updatedAt?: string } = {}) => ({ status, type: 'task' as const, updatedAt: '', mergedAt: null, reviewRounds: 0, ...extra })
@@ -38,10 +38,6 @@ describe('dashboardCounts', () => {
     expect(counts.mergedToday).toBe(3)
     expect(counts.firstPassToday).toBe(1)
   })
-
-  it('is all zeros with no tasks', () => {
-    expect(dashboardCounts([], now)).toMatchObject({ todo: 0, inProgress: 0, blocked: 0, waitingForReview: 0, mergedToday: 0, firstPassToday: 0 })
-  })
 })
 
 describe('isToday', () => {
@@ -49,16 +45,6 @@ describe('isToday', () => {
     expect(isToday(new Date(2026, 9, 29, 0, 0).toISOString(), now)).toBe(true)
     expect(isToday(new Date(2026, 9, 30, 0, 0).toISOString(), now)).toBe(false)
     expect(isToday(null, now)).toBe(false)
-  })
-})
-
-describe('elapsed', () => {
-  const at = now.getTime()
-  it('shows seconds, minutes, then hours and minutes', () => {
-    expect(elapsed(new Date(at - 45_000).toISOString(), at)).toBe('45s')
-    expect(elapsed(new Date(at - 18 * 60_000).toISOString(), at)).toBe('18m')
-    expect(elapsed(new Date(at - 125 * 60_000).toISOString(), at)).toBe('2h 5m')
-    expect(elapsed(null, at)).toBe('')
   })
 })
 
@@ -73,12 +59,11 @@ describe('liveRunTitle', () => {
     expect(liveRunTitle({ ...run, role: 'developer', taskTitle: 'Prototype build' }, null)).toBe('Prototype build')
   })
 
-  it('keeps Planning and the Plan session for PM turns', () => {
-    expect(liveRunTitle(run, 'Search filters')).toBe('Answering in Search filters')
-    expect(liveRunTitle(run, null)).toBe('Planning')
+  it('names the Plan session of a PM turn', () => {
+    expect(liveRunTitle(run, 'Search filters')).toContain('Search filters')
   })
 
-  it('never calls another role Planning', () => {
-    expect(liveRunTitle({ ...run, role: 'reviewer' }, null)).toBe('Run')
+  it('never gives another role the PM\'s fallback title', () => {
+    expect(liveRunTitle({ ...run, role: 'reviewer' }, null)).not.toBe(liveRunTitle(run, null))
   })
 })

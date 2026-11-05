@@ -39,7 +39,7 @@ describe('get_agent_activity', () => {
     expect(res.status).toBe(201)
     pm = (await runner.next('run.assign', m => m.job.role === 'pm')).job
     runner.send({ type: 'run.started', runId: pm.runId, leaseEpoch: pm.leaseEpoch, agentSessionId: 'sess' })
-    await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, pm.runId)))[0]?.state).toBe('running'))
+    await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, pm.runId)))[0]?.state).toBe('running'), { timeout: 5000 })
   })
 
   afterAll(async () => {
@@ -155,7 +155,7 @@ it('lists its own active global PM turn without a project as Global', { timeout:
     const { job } = await runner.next('run.assign', m => m.job.planSessionId === session.id)
     expect(job).toMatchObject({ role: 'pm', projectId: null })
     runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'global-pm' })
-    await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, job.runId)))[0]?.state).toBe('running'))
+    await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, job.runId)))[0]?.state).toBe('running'), { timeout: 5000 })
     const reply = await runner.call(job.runId, job.leaseEpoch, 'get_agent_activity', {})
     expect(reply.ok).toBe(true)
     if (!reply.ok) throw new Error(reply.error)

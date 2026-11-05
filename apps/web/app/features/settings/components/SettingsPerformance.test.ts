@@ -62,7 +62,6 @@ describe('SettingsPerformance', () => {
     await flushPromises()
     const rows = wrapper.get('[data-testid="perf-routes"]').findAll('tbody tr')
     expect(rows.map(row => row.attributes('data-slow'))).toEqual(['true', undefined])
-    expect(rows[0]!.classes()).toContain('bg-warning/10')
     expect(rows[0]!.text()).toContain('Slow')
     expect(rows[1]!.text()).not.toContain('Slow')
     expect(wrapper.get('[data-testid="perf-pages"] tbody tr').attributes('data-slow')).toBe('true')

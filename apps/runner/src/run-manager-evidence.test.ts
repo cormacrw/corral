@@ -86,10 +86,8 @@ describe('RunManager evidence videos', () => {
   }
 
   const original = (size = 4) => Buffer.alloc(size, 'o').toString('base64')
-  const notes = async () => {
-    await new Promise(r => setTimeout(r, 600))
-    return sent.flatMap(m => m.type === 'run.events' ? m.events : []).flatMap(e => e.type === 'system' ? [e.text] : [])
-  }
+  // System notes reach the server in the next event batch
+  const notes = () => sent.flatMap(m => m.type === 'run.events' ? m.events : []).flatMap(e => e.type === 'system' ? [e.text] : [])
   const ffmpegRan = () => access(log).then(() => true, () => false)
 
   it('stores a webm as a converted mp4 and leaves no working files behind', async () => {
@@ -128,7 +126,7 @@ describe('RunManager evidence videos', () => {
 
     expect(outcome.ok).toBe(true)
     expect(input).toMatchObject({ fileName: 'demo.webm', contentType: 'video/webm', dataBase64: original() })
-    expect(await notes()).toContain('Attaching demo.webm as it is, because it could not be converted to MP4: ffmpeg failed: Invalid data found when processing input')
+    await expect.poll(notes).toContain('Attaching demo.webm as it is, because it could not be converted to MP4: ffmpeg failed: Invalid data found when processing input')
   })
 
   it('attaches the original with a note when ffmpeg is missing', async () => {
@@ -138,7 +136,7 @@ describe('RunManager evidence videos', () => {
 
     expect(outcome.ok).toBe(true)
     expect(input).toMatchObject({ fileName: 'demo.webm', contentType: 'video/webm' })
-    expect(await notes()).toContain('Attaching demo.webm as it is, because it could not be converted to MP4: ffmpeg is not installed on this runner')
+    await expect.poll(notes).toContain('Attaching demo.webm as it is, because it could not be converted to MP4: ffmpeg is not installed on this runner')
   })
 
   it('checks the limit against the converted file', async () => {
@@ -153,7 +151,7 @@ describe('RunManager evidence videos', () => {
     const { input } = await attach('demo.webm')
 
     expect(input).toMatchObject({ fileName: 'demo.webm', contentType: 'video/webm' })
-    expect(await notes()).toContain('Attaching demo.webm as it is, because it could not be converted to MP4: the MP4 is 26.0 MB, over the 25 MB limit')
+    await expect.poll(notes).toContain('Attaching demo.webm as it is, because it could not be converted to MP4: the MP4 is 26.0 MB, over the 25 MB limit')
   })
 
   it('refuses a file when neither the original nor the converted copy fits', async () => {

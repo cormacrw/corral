@@ -1,13 +1,16 @@
 // @vitest-environment happy-dom
-import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
-import { defineComponent, h } from 'vue'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { defineComponent, h, nextTick } from 'vue'
 import EvidenceViewer, { type ViewerFile } from '~/features/evidence/components/EvidenceViewer.vue'
 
 const shot = (id: string): ViewerFile => ({ id, fileName: `${id}.png`, kind: 'screenshot', createdAt: new Date().toISOString(), note: '', url: `/${id}`, contentType: 'image/png' })
 const files = ['a', 'b', 'c'].map(shot)
-const Modal = defineComponent({ props: { open: Boolean, title: String, hideHeader: Boolean }, setup: (p, { slots }) => () => h('div', { 'data-open': p.open, 'data-title': p.title, 'data-hide-header': p.hideHeader }, slots.body?.()) })
-const Button = defineComponent({ emits: ['click'], setup: (p, { emit, attrs }) => () => h('button', { ...attrs, onClick: () => emit('click') }) })
+const Modal = defineComponent({ setup: (_, { slots }) => () => h('div', slots.body?.()) })
+const Button = defineComponent({ emits: ['click'], setup: (_, { emit, attrs }) => () => h('button', { ...attrs, onClick: () => emit('click') }) })
+
+enableAutoUnmount(afterEach)
+afterEach(() => vi.useRealTimers())
 
 function render(open: ViewerFile | null, list?: ViewerFile[], captions?: Record<string, string>) {
   const wrapper = mount(EvidenceViewer, {
@@ -17,83 +20,86 @@ function render(open: ViewerFile | null, list?: ViewerFile[], captions?: Record<
   })
   return wrapper
 }
-const title = (w: ReturnType<typeof render>) => w.get('[data-title]').attributes('data-title')
+const body = (w: ReturnType<typeof render>) => w.get('[data-testid="evidence-viewer-body"]')
+// The file on show
+const shown = (w: ReturnType<typeof render>) => body(w).get('img').attributes('src')
 
 describe('EvidenceViewer', () => {
   it('flips through the files with its arrows, wrapping at the ends', async () => {
     const wrapper = render(files[0]!, files)
-    expect(wrapper.text()).toContain('1 of 3')
     await wrapper.get('[aria-label="Next file"]').trigger('click')
-    expect(title(wrapper)).toBe('b.png')
-    expect(wrapper.get('img').attributes('src')).toBe('/b')
+    expect(shown(wrapper)).toBe('/b')
     await wrapper.get('[aria-label="Previous file"]').trigger('click')
     await wrapper.get('[aria-label="Previous file"]').trigger('click')
-    expect(title(wrapper)).toBe('c.png')
-    expect(wrapper.text()).toContain('3 of 3')
-    wrapper.unmount()
+    expect(shown(wrapper)).toBe('/c')
   })
 
   it('flips with the arrow keys and a sideways swipe, not a vertical one', async () => {
     const wrapper = render(files[1]!, files)
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
-    await wrapper.vm.$nextTick()
-    expect(title(wrapper)).toBe('c.png')
-    const body = wrapper.get('[data-testid="evidence-viewer-body"]')
+    await nextTick()
+    expect(shown(wrapper)).toBe('/c')
     const swipe = async (dx: number, dy: number) => {
-      await body.trigger('touchstart', { touches: [{ clientX: 200, clientY: 200 }] })
-      await body.trigger('touchend', { changedTouches: [{ clientX: 200 + dx, clientY: 200 + dy }] })
+      await body(wrapper).trigger('touchstart', { touches: [{ clientX: 200, clientY: 200 }] })
+      await body(wrapper).trigger('touchend', { changedTouches: [{ clientX: 200 + dx, clientY: 200 + dy }] })
     }
     await swipe(120, 10)
-    expect(title(wrapper)).toBe('b.png')
+    expect(shown(wrapper)).toBe('/b')
     await swipe(20, 150)
-    expect(title(wrapper)).toBe('b.png')
+    expect(shown(wrapper)).toBe('/b')
     await swipe(-120, 0)
-    expect(title(wrapper)).toBe('c.png')
-    wrapper.unmount()
+    expect(shown(wrapper)).toBe('/c')
   })
 
-  it('puts what a file proves under it, in place of its name up top', async () => {
+  it('shows what each file proves under it', async () => {
     const plain = render(files[0]!, files)
     expect(plain.find('[data-testid="evidence-viewer-caption"]').exists()).toBe(false)
-    expect(plain.get('[data-title]').attributes('data-hide-header')).toBe('false')
     plain.unmount()
     const wrapper = render(files[0]!, files, { a: 'Expired codes show why', b: 'Task as a whole' })
     expect(wrapper.get('[data-testid="evidence-viewer-caption"]').text()).toContain('Expired codes show why')
-    expect(wrapper.get('[data-title]').attributes('data-hide-header')).toBe('true')
     await wrapper.get('[aria-label="Next file"]').trigger('click')
     expect(wrapper.get('[data-testid="evidence-viewer-caption"]').text()).toContain('Task as a whole')
-    wrapper.unmount()
   })
 
   it('zooms an image with a double tap and swipes no further while zoomed', async () => {
+    vi.useFakeTimers({ toFake: ['performance'] })
     const wrapper = render(files[1]!, files)
     // Its touch listeners attach once it has rendered
-    await wrapper.vm.$nextTick()
-    const body = wrapper.get('[data-testid="evidence-viewer-body"]')
-    // Two taps in quick succession
+    await nextTick()
     const tap = async () => {
-      await body.trigger('touchstart', { touches: [{ clientX: 0, clientY: 0 }] })
-      await body.trigger('touchend', { touches: [], changedTouches: [{ clientX: 0, clientY: 0 }] })
+      await body(wrapper).trigger('touchstart', { touches: [{ clientX: 0, clientY: 0 }] })
+      await body(wrapper).trigger('touchend', { touches: [], changedTouches: [{ clientX: 0, clientY: 0 }] })
     }
+    const zoomed = () => (body(wrapper).get('img').attributes('style') ?? '').includes('scale(2)')
+    // Two taps too far apart are not a double tap
     await tap()
+    vi.advanceTimersByTime(400)
     await tap()
-    expect(wrapper.get('img').attributes('style')).toContain('scale(2)')
+    expect(zoomed()).toBe(false)
+    vi.advanceTimersByTime(400)
+    await tap()
+    vi.advanceTimersByTime(100)
+    await tap()
+    expect(zoomed()).toBe(true)
     // A one-finger drag now pans the image instead of changing file
-    await body.trigger('touchstart', { touches: [{ clientX: 200, clientY: 200 }] })
-    await body.trigger('touchend', { touches: [], changedTouches: [{ clientX: 80, clientY: 200 }] })
-    expect(title(wrapper)).toBe('b.png')
+    await body(wrapper).trigger('touchstart', { touches: [{ clientX: 200, clientY: 200 }] })
+    await body(wrapper).trigger('touchend', { touches: [], changedTouches: [{ clientX: 80, clientY: 200 }] })
+    expect(shown(wrapper)).toBe('/b')
     // Another file starts unzoomed
     await wrapper.get('[aria-label="Next file"]').trigger('click')
-    expect(wrapper.get('img').attributes('style') ?? '').not.toContain('scale')
-    wrapper.unmount()
+    expect(zoomed()).toBe(false)
   })
 
-  it('has no paging for one file or a file outside the list', () => {
-    for (const wrapper of [render(files[0]!), render(files[0]!, [files[0]!]), render(shot('z'), files)]) {
-      expect(wrapper.find('[aria-label="Next file"]').exists()).toBe(false)
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
-      expect(title(wrapper)).toBe(wrapper.props('modelValue')!.fileName)
-      wrapper.unmount()
-    }
+  it.each([
+    ['one file', () => render(files[0]!)],
+    ['a one-file list', () => render(files[0]!, [files[0]!])],
+    ['a file outside the list', () => render(shot('z'), files)]
+  ])('has no paging for %s', async (_name, mountViewer) => {
+    const wrapper = mountViewer()
+    const before = shown(wrapper)
+    expect(wrapper.find('[aria-label="Next file"]').exists()).toBe(false)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }))
+    await nextTick()
+    expect(shown(wrapper)).toBe(before)
   })
 })

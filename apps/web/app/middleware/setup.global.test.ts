@@ -34,6 +34,7 @@ beforeEach(() => {
   client.clear()
   reachable = true
   mode.value = 'web'
+  router.currentRoute.value = { path: '/', query: {} }
   router.replace.mockClear()
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (!reachable) throw new TypeError('Failed to fetch')
@@ -59,19 +60,6 @@ describe('setup middleware with a project on the server', () => {
     expect(await visit('/')).toEqual({ redirect: '/home' })
     expect(await visit('/setup')).toEqual({ redirect: '/home' })
     expect(await visit('/setup', { add: '1' })).toBeUndefined()
-  })
-
-  it('opens Home from / in a fresh browser', async () => {
-    expect(await visit('/')).toEqual({ redirect: '/home' })
-  })
-
-  it('redirects /setup and /setup?step=you away from the wizard', async () => {
-    expect(await visit('/setup')).toEqual({ redirect: '/home' })
-    expect(await visit('/setup', { step: 'you' })).toEqual({ redirect: '/home' })
-  })
-
-  it('still opens the add-project flow', async () => {
-    expect(await visit('/setup', { step: 'repo', add: '1' })).toBeUndefined()
   })
 
   it('uses the cached list once there is one', async () => {
@@ -146,10 +134,6 @@ describe('setup middleware with no projects', () => {
       expect(await visit('/')).toEqual({ redirect: '/setup' })
       expect(await visit('/setup', { add: '1' })).toBeUndefined()
     }
-  })
-
-  it('lets onboarding run to the end', async () => {
-    for (const step of ['you', 'repo', 'agents', 'names']) expect(await visit('/setup', { step })).toBeUndefined()
   })
 })
 

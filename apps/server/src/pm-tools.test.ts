@@ -171,13 +171,13 @@ describe('PM tools for projects, runs and the factory', () => {
     await vi.waitFor(async () => {
       const [ended] = await t.db.select().from(runs).where(eq(runs.id, job.runId))
       expect(ended!.state).toBe('completed')
-    })
+    }, { timeout: 5000 })
     const queued = await (await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Wait for update' })).json() as PlanSessionDetail
     await vi.waitFor(async () => {
       const current = await (await t.request('GET', `/api/plan/sessions/${queued.id}`)).json() as PlanSessionDetail
       queued.activeRunId = current.activeRunId
       expect(queued.activeRunId).not.toBeNull()
-    })
+    }, { timeout: 5000 })
     await t.orchestrator.schedule()
     const [held] = await t.db.select().from(runs).where(eq(runs.id, queued.activeRunId!))
     expect(held).toMatchObject({ state: 'queued', pmJob: expect.any(Object) })
@@ -272,7 +272,7 @@ describe('PM tools for projects, runs and the factory', () => {
     expect(await (await resolve(session.id, confirmStop, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'confirmed' } })
     expect((await (await t.request('GET', '/api/status')).json() as { stopped: boolean }).stopped).toBe(true)
     // The stop ended this PM turn, and the earlier card still works
-    await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, job.runId)))[0]!.state).toBe('interrupted'))
+    await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, job.runId)))[0]!.state).toBe('interrupted'), { timeout: 5000 })
     expect(await (await resolve(session.id, resume, 'confirm')).json()).toMatchObject({ pendingAction: { status: 'confirmed' } })
     expect((await (await t.request('GET', '/api/status')).json() as { stopped: boolean }).stopped).toBe(false)
   })

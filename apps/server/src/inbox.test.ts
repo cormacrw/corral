@@ -3,7 +3,7 @@ import { schema } from '@corral/db'
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner, sleep } from './test-runner.ts'
+import { FakeRunner } from './test-runner.ts'
 
 const { agents, auditLog, planMessages, planSessions, plans, planEpics, planTasks, tasks } = schema
 
@@ -29,7 +29,6 @@ describe('plan threads in the inbox', () => {
 
   async function endTurn(job: RunJob, reply: string) {
     runner.send({ type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [{ type: 'message', text: reply }] })
-    await sleep(50)
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
     await expect.poll(async () => (await t.request('GET', `/api/plan/sessions/${job.planSessionId}`).then(r => r.json()) as PlanSessionDetail).activeRunId).toBeNull()
   }
@@ -98,8 +97,7 @@ describe('plan threads in the inbox', () => {
     const project = await t.createProject()
     const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan it' }).then(r => r.json()) as PlanSessionDetail
     const job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
-    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'sess-q' })
-    await sleep(50)
+    await t.runStarted(runner, job, 'sess-q')
     await runner.call(job.runId, job.leaseEpoch, 'ask_question', { question: 'Fuzzy matching?' })
     await endTurn(job, 'Over to you.')
     const item = async () => (await inbox()).needsYou.find(i => i.id === created.id)
@@ -232,8 +230,7 @@ describe('plan threads in the inbox', () => {
     expect(lastEvent(mark, created.id)).toBeDefined()
     expect(await thread(created.id)).toBeUndefined()
     const job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
-    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'sess-1' })
-    await sleep(50)
+    await t.runStarted(runner, job, 'sess-1')
 
     mark = t.events.length
     expect(await runner.call(job.runId, job.leaseEpoch, 'ask_question', { question: 'Fuzzy matching?' })).toMatchObject({ ok: true })

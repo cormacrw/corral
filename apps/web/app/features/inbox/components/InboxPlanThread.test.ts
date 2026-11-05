@@ -23,7 +23,7 @@ afterEach(() => {
 })
 
 async function mountInbox(sessionPlans = plans['s-1']!) {
-  for (const name of ['ref', 'shallowRef', 'computed', 'watch', 'watchEffect', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
+  for (const name of ['ref', 'shallowRef', 'computed', 'watch', 'watchEffect', 'onMounted', 'onBeforeUnmount', 'nextTick'] as const) vi.stubGlobal(name, vue[name])
   const replace = vi.fn()
   const remove = vi.fn()
   const toasts: { title: string, actions?: { label: string, onClick: () => void }[] }[] = []
@@ -52,15 +52,19 @@ async function mountInbox(sessionPlans = plans['s-1']!) {
   const plain = vue.defineComponent({ name: 'Plain', setup: (_, { slots }) => () => vue.h('div', [slots.default?.(), slots.footer?.()]) })
   const button = vue.defineComponent({ props: ['label', 'ariaLabel'], setup: props => () => vue.h('button', props.label ?? props.ariaLabel) })
   const row = vue.defineComponent({ props: ['item'], setup: props => () => vue.h('span', { 'data-row': props.item.id }, props.item.subject) })
+  const composer = vue.defineComponent({ name: 'PromptComposer', emits: ['submit'], setup: (_, { expose }) => {
+    expose({ focus: () => {} })
+    return () => vue.h('form')
+  } })
   const avatar = vue.defineComponent({ props: ['name'], setup: props => () => vue.h('i', { 'data-avatar': props.name }) })
   const client = testQueryClient()
   // As Nuxt renders the child: keyed by its path
   const NuxtPage = vue.defineComponent({ setup: () => () => params.itemId ? vue.h(InboxItemPage, { key: params.itemId }) : null })
-  const wrapper = mount(InboxPage, { global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { NuxtPage, InboxPlanThread, AppPanel: plain, AppButton: button, PlanThreadRow: row, AgentAvatar: avatar }, stubs: {
+  const wrapper = mount(InboxPage, { global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { NuxtPage, InboxPlanThread, AppPanel: plain, AppButton: button, PlanThreadRow: row, AgentAvatar: avatar, PromptComposer: composer }, stubs: {
     AppBadge: true, AppInput: true, AppTabs: true,
     MarkdownText: true, TaskFlyout: true,
     PlanConversation: true, InboxMobile: true, InboxMobileItem: true, AppAlert: true, AppLoadError: true, UiSkeleton: true, NuxtLink: true,
-    EvidenceList: true, AppSelectMenu: true, PromptComposer: true, Icon: true, PlanQuestion: true, PlanDetail: true
+    EvidenceList: true, AppSelectMenu: true, Icon: true, PlanQuestion: true, PlanDetail: true
   } } })
   await flushPromises()
   // An event as the real stream delivers it, less the coalescing delay
@@ -123,13 +127,12 @@ it('keeps a thread open after it leaves Needs you, until another item is picked'
 it('shows the sender in the detail header, and a renamed PM without a reload', async () => {
   const { wrapper, rename } = await mountInbox()
   try {
-    // The same meta line as a task's panel: kind · project · sender · when
     const meta = wrapper.getComponent(InboxPlanThread).get('[data-testid="inbox-meta"]')
-    expect(meta.text()).toContain('Plan review')
-    expect(meta.text()).toContain(`${projects[0]!.name} · Pam ·`)
+    expect(meta.text()).toContain('Pam')
     rename('Renamed PM')
     await flushPromises()
-    expect(meta.text()).toContain(`${projects[0]!.name} · Renamed PM ·`)
+    expect(meta.text()).toContain('Renamed PM')
+    expect(meta.text()).not.toContain('Pam')
   } finally {
     wrapper.unmount()
   }
@@ -145,8 +148,7 @@ it('deletes from the header at once, selects the next item, and closes when Undo
     await thread.findAll('button').find(b => b.text() === 'Delete thread')!.trigger('click')
     await flushPromises()
     expect(rows()).not.toContain('s-1')
-    expect(toasts.at(-1)?.title).toBe('Thread deleted · its drafts were discarded')
-    expect(toasts.at(-1)?.actions?.[0]?.label).toBe('Undo')
+    expect(toasts.at(-1)?.actions?.map(a => a.label)).toContain('Undo')
     expect(replace).toHaveBeenCalledWith({ path: '/inbox/s-3', query: {} })
     expect(api.plan.close).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(UNDO_MS)
@@ -185,9 +187,10 @@ describe('while a sent reply is waiting on Juno', () => {
     const { wrapper, emitLive } = await mountInbox()
     try {
       vi.mocked(api.plan.message).mockResolvedValue({ id: 'm' } as never)
-      const thread = wrapper.findComponent(InboxPlanThread)
-      await (thread.vm as unknown as { send: (text: string) => Promise<boolean> }).send('Go on')
+      await wrapper.findAll('button').find(b => b.text() === 'Request changes')!.trigger('click')
+      wrapper.findComponent({ name: 'PromptComposer' }).vm.$emit('submit', 'Go on')
       await flushPromises()
+      expect(api.plan.message).toHaveBeenCalledWith('s-1', 'Go on', undefined)
       emitLive({ type: 'plan.session', session: { id: 's-1', unread: false, activeRunId: 'r-1' } })
       await flushPromises()
       expect(wrapper.find('[data-testid="inbox-plan-working"]').exists()).toBe(true)

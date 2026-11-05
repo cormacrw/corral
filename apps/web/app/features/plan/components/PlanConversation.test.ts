@@ -48,7 +48,10 @@ const button = vue.defineComponent({
 })
 const alertComponent = vue.defineComponent({
   props: ['title', 'description', 'actions'],
-  setup: props => () => vue.h('div', { 'data-alert': props.title }, props.description)
+  setup: props => () => vue.h('div', { role: 'alert' }, [
+    props.description,
+    ...(props.actions ?? []).map((a: { label: string, onClick: () => void }) => vue.h('button', { onClick: a.onClick }, a.label))
+  ])
 })
 function detail(id = 's-1'): PlanSessionDetail {
   return structuredClone({
@@ -110,6 +113,10 @@ beforeEach(() => {
   vi.stubGlobal('useShell', () => state.value)
   state.value.runner.online = true
   state.value.runEvents = {}
+  state.value.planSessions = planSessions
+  restored.value = null
+  flyout.ref.value = null
+  flyout.epic.value = null
   flyout.plan.value = false
   vi.mocked(api.plan.session).mockImplementation(async id => detail(id))
   vi.mocked(api.plan.read).mockResolvedValue({ ...planSessions[0]!, unread: false })
@@ -134,12 +141,11 @@ describe('Plan conversation', () => {
     vi.mocked(api.plan.session).mockResolvedValue(current)
     const wrapper = await open(current.id, mobile)
     const nav = wrapper.get('[aria-label="Related threads"]')
-    expect(nav.get('a[href="/plan/parent-thread"]').text()).toBe('Parent: Coordinator')
-    expect(nav.get('a[href="/plan/child-thread"]').text()).toBe('Routing check (closed)')
+    expect(nav.get('a[href="/plan/parent-thread"]').text()).toContain('Coordinator')
+    expect(nav.get('a[href="/plan/child-thread"]').text()).toContain('Routing check')
     const message = wrapper.get('[data-message-id="agent-message"]')
-    expect(message.get('a[href="/plan/parent-thread"]').text()).toBe('Coordinator · Thread')
+    expect(message.get('a[href="/plan/parent-thread"]').text()).toContain('Coordinator')
     expect(message.text()).toContain('Please check the entry point.')
-    expect(message.classes()).toContain('justify-start')
   })
 
   it('renders a pending start without fetching a nonexistent session, including working and failure recovery', async () => {
@@ -157,12 +163,13 @@ describe('Plan conversation', () => {
     await vue.nextTick()
     expect(wrapper.text()).toContain('Not sent')
     expect(wrapper.find('[data-transcript]').exists()).toBe(false)
-    const alert = wrapper.getComponent(alertComponent)
-    expect(alert.props('description')).toBe('Network unavailable')
-    const actions = alert.props('actions') as { label: string, onClick: () => Promise<void> }[]
-    await actions.find(a => a.label === 'Retry')!.onClick()
+    const alert = wrapper.get('[role="alert"]')
+    expect(alert.text()).toContain('Network unavailable')
+    const action = (label: string) => alert.findAll('button').find(b => b.text() === label)!
+    await action('Retry').trigger('click')
     expect(retryStart).toHaveBeenCalledWith(initial.id)
-    await actions.find(a => a.label === 'Back to prompt')!.onClick()
+    await action('Back to prompt').trigger('click')
+    await flushPromises()
     expect(restored.value).toMatchObject({ taskRef: 'TA-1' })
     expect(push).toHaveBeenCalledWith('/plan')
   })
@@ -172,8 +179,7 @@ describe('Plan conversation', () => {
     expect(api.plan.session).toHaveBeenCalledWith('s-1')
     expect(api.plan.read).toHaveBeenCalledWith('s-1')
     expect(flyout.openPlan).toHaveBeenCalledWith({ replace: true })
-    expect(wrapper.find('a').attributes('href')).toBe('/plan')
-    expect(wrapper.text()).toContain('Plan design tasks: prototypes the human approves before the build.')
+    expect(wrapper.text()).toContain(detail().title)
   })
 
   it('switches sessions in place and replaces the composer so drafts and attachments are isolated', async () => {
@@ -222,8 +228,7 @@ describe('Plan conversation', () => {
     Object.defineProperty(log, 'scrollHeight', { value: 1000 })
     log.scrollTop = 120
     listener({ type: 'plan.session', session: { ...planSessions.find(s => s.id === 's-1')!, title: 'Updated thread title', unread: false } })
-    await vue.nextTick()
-    await vue.nextTick()
+    await flushPromises()
     expect(log.scrollTop).toBe(120)
   })
 

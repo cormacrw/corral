@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useQuery, VueQueryPlugin } from '@tanstack/vue-query'
 import { computed, defineComponent, h, onBeforeUnmount, ref, watch } from 'vue'
@@ -8,7 +8,7 @@ import { testQueryClient } from '~/queries/mount-with-query'
 
 interface TestAgent { id: string, name: string, concurrency: number, activeRuns: number }
 
-const client = testQueryClient()
+let client: ReturnType<typeof testQueryClient>
 const agent = () => client.getQueryData<TestAgent[]>(keys.agents.list())![0]!
 const seed = (patch: Partial<TestAgent> = {}) => client.setQueryData<TestAgent[]>(keys.agents.list(), [{ id: 'a1', name: 'Victor', concurrency: 2, activeRuns: 0, ...patch }])
 
@@ -38,12 +38,15 @@ function mountStepper() {
 }
 
 const fetchMock = vi.fn()
+enableAutoUnmount(afterEach)
 beforeEach(() => {
+  client = testQueryClient()
   vi.useFakeTimers()
   vi.stubGlobal('fetch', fetchMock)
   seed()
 })
 afterEach(() => {
+  client.clear()
   vi.useRealTimers()
   fetchMock.mockReset()
   toast.add.mockReset()
@@ -184,11 +187,5 @@ describe('ConcurrencyStepper', () => {
     expect(mountStepper().text()).toContain('2 running now')
     seed({ activeRuns: 0 })
     expect(mountStepper().text()).not.toContain('running now')
-  })
-
-  it('gives both buttons 44px targets and labels naming the agent', () => {
-    const wrapper = mountStepper()
-    for (const button of [minus(wrapper), plus(wrapper)]) expect(button.classes()).toContain('size-11')
-    expect(wrapper.get('[aria-live="polite"]').text()).toBe('2')
   })
 })

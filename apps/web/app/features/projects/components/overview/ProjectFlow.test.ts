@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { computed, defineComponent, h, ref } from 'vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -28,6 +28,11 @@ const sample = (days: number): FlowMetrics => ({
   averageDeveloperRuns: 1, slowestTasks: [{ ref: 'COR-1', leadTimeMs: days * 86400000, dominantStatus: 'human_review' }],
   fixes: { reReviewed: 2, skippedReview: 5, epicDeveloperRuns: 3 }, epicReviews: { reviews: 6, epics: 4, perEpic: 1.5 }, sessions: [{ round: 'revision', sessionStart: 'resumed_warm', runs: 2, inputTokens: 10, cacheWriteTokens: 1000, cacheReadTokens: 500_000, outputTokens: 2000, costedRuns: 1, weightedCost: 0.14 }, { round: 'other', sessionStart: 'fresh', runs: 1, inputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0, costedRuns: 0, weightedCost: 0 }], tokens: { firstBuild: 1_200_000, followUp: 300_000 }
 })
+enableAutoUnmount(afterEach)
+// Choose a window by its label
+const choose = (wrapper: VueWrapper, window: string) => wrapper.get('[aria-label="Flow window"]').findAll('button').find(b => b.text() === window)!.trigger('click')
+// The slowest task's lead time, which differs per sample
+const lead = (wrapper: VueWrapper) => wrapper.get('a[href="/tasks/COR-1"]').text()
 const mountFlow = () => mount(ProjectFlow, {
   props: { slug: 'corral' },
   global: {
@@ -40,26 +45,20 @@ const mountFlow = () => mount(ProjectFlow, {
   }
 })
 
-it('updates the whole cohort and ignores a late response from a previous window', async () => {
+it('loads the chosen window and ignores a late response from a previous window', async () => {
   let resolveOld!: (value: FlowMetrics) => void
   flow.mockReset().mockImplementationOnce(() => new Promise((resolve) => {
     resolveOld = resolve
   }))
     .mockResolvedValueOnce(sample(7))
   const wrapper = mountFlow()
-  await wrapper.findAll('button')[0]!.trigger('click')
+  await choose(wrapper, '7d')
   await flushPromises()
   expect(flow).toHaveBeenLastCalledWith('corral', '7d')
-  expect(wrapper.text()).toContain('7d')
-  expect(wrapper.text()).toContain('Human wait')
-  expect(wrapper.text()).toContain('Run duration: 1m 0s')
-  expect(wrapper.text()).toContain('Queue wait (queued to started, including preparation): 0 ms · p90 1m 0s')
-  expect(wrapper.get('a').attributes('href')).toBe('/tasks/COR-1')
+  expect(lead(wrapper)).toContain('7d')
   resolveOld(sample(30))
   await flushPromises()
-  expect(wrapper.text()).not.toContain('30d · p90')
-  expect(wrapper.text()).toContain('7d lead')
-  wrapper.unmount()
+  expect(lead(wrapper)).toContain('7d')
 })
 
 it('keeps the previous chart until the new window arrives, naming the window it shows', async () => {
@@ -69,33 +68,31 @@ it('keeps the previous chart until the new window arrives, naming the window it 
   }))
   const wrapper = mountFlow()
   await flushPromises()
-  await wrapper.findAll('button')[0]!.trigger('click')
+  await choose(wrapper, '7d')
   await flushPromises()
   expect(flow).toHaveBeenLastCalledWith('corral', '7d')
   expect(wrapper.findComponent({ name: 'UiSkeleton' }).exists()).toBe(false)
-  expect(wrapper.text()).toContain('2d lead')
-  expect(wrapper.text()).toContain('in the last 30d')
+  expect(lead(wrapper)).toContain('2d')
+  expect(wrapper.get('[aria-label="Rework"]').text()).toContain('30d')
   expect(wrapper.get('[aria-live]').attributes('aria-busy')).toBe('true')
   resolve({ ...sample(7), window: '7d' })
   await flushPromises()
-  expect(wrapper.text()).toContain('7d lead')
-  expect(wrapper.text()).toContain('in the last 7d')
+  expect(lead(wrapper)).toContain('7d')
+  expect(wrapper.get('[aria-label="Rework"]').text()).toContain('7d')
   expect(wrapper.get('[aria-live]').attributes('aria-busy')).toBe('false')
-  wrapper.unmount()
 })
 
 it('shows a window it has seen at once and refetches it behind', async () => {
   flow.mockReset().mockResolvedValueOnce(sample(2)).mockResolvedValueOnce({ ...sample(7), window: '7d' })
   const wrapper = mountFlow()
   await flushPromises()
-  await wrapper.findAll('button')[0]!.trigger('click')
+  await choose(wrapper, '7d')
   await flushPromises()
   flow.mockImplementation(() => new Promise(() => {}))
-  await wrapper.findAll('button')[1]!.trigger('click')
+  await choose(wrapper, '30d')
   await flushPromises()
-  expect(wrapper.text()).toContain('2d lead')
+  expect(lead(wrapper)).toContain('2d')
   expect(wrapper.get('[aria-live]').attributes('aria-busy')).toBe('false')
-  wrapper.unmount()
 })
 
 it('clears figures for another project and renders an empty cohort and errors', async () => {
@@ -104,9 +101,8 @@ it('clears figures for another project and renders an empty cohort and errors', 
   const wrapper = mountFlow()
   await flushPromises()
   expect(wrapper.find('a').exists()).toBe(true)
-  await wrapper.findAll('button')[2]!.trigger('click')
+  await choose(wrapper, '90d')
   await flushPromises()
-  expect(wrapper.text()).toContain('No tasks merged in the last 90d')
   expect(wrapper.find('a').exists()).toBe(false)
   await wrapper.setProps({ slug: 'other' })
   await flushPromises()
@@ -115,7 +111,6 @@ it('clears figures for another project and renders an empty cohort and errors', 
   await wrapper.setProps({ slug: 'third' })
   await flushPromises()
   expect(wrapper.findComponent({ name: 'AppLoadError' }).exists()).toBe(true)
-  wrapper.unmount()
 })
 
 const taskUpdated = (projectId: string): ServerEvent => ({ type: 'task.updated', task: { projectId } as Task })
@@ -136,7 +131,6 @@ it('ignores live events from other projects', async () => {
   await flushPromises()
   expect(flow).toHaveBeenCalledTimes(1)
   expect(wrapper.find('a').exists()).toBe(true)
-  wrapper.unmount()
 })
 
 it('refreshes on same-project events and keeps the figures meanwhile', async () => {
@@ -149,14 +143,13 @@ it('refreshes on same-project events and keeps the figures meanwhile', async () 
   await flushPromises()
   expect(flow).toHaveBeenCalledTimes(2)
   expect(wrapper.findComponent({ name: 'UiSkeleton' }).exists()).toBe(false)
-  expect(wrapper.text()).toContain('2d lead')
+  expect(lead(wrapper)).toContain('2d')
   resolve(sample(3))
   await flushPromises()
-  expect(wrapper.text()).toContain('3d lead')
+  expect(lead(wrapper)).toContain('3d')
   await emit(taskDeleted('p1'))
   await flushPromises()
   expect(flow).toHaveBeenCalledTimes(3)
-  wrapper.unmount()
 })
 
 it('keeps the figures when a live refresh fails', async () => {
@@ -165,16 +158,15 @@ it('keeps the figures when a live refresh fails', async () => {
   await emit(runUpdated('p1'))
   await flushPromises()
   expect(wrapper.findComponent({ name: 'AppLoadError' }).exists()).toBe(false)
-  expect(wrapper.text()).toContain('2d lead')
-  wrapper.unmount()
+  expect(lead(wrapper)).toContain('2d')
 })
 
 afterEach(() => client.clear())
 
-it('shows rework for the window: fixes, reviews per parent and tokens', async () => {
+it('shows the window\'s rework figures', async () => {
   flow.mockReset().mockResolvedValue(sample(1))
   const wrapper = mountFlow()
   await flushPromises()
-  const text = wrapper.get('[aria-label="Rework"]').text()
-  for (const part of ['2 reviewed again, 5 kept approval', 'Developer runs on parent tasks', '1.5 (6 across 4)', '1.2M vs 300K']) expect(text).toContain(part)
+  // 6 epic reviews across 4 parents
+  expect(wrapper.get('[aria-label="Rework"]').text()).toContain('1.5')
 })

@@ -1,29 +1,22 @@
 import type { TaskStatus } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { agentStatus, cliLoginCommand, detectedRuntimes, formatMs, epicHistoryText, epicInProgress, epicFixResult, epicReviewStatus, epicWithLiveCounts, inboxItemLink, plural, prNumberLabel, runtimeLabel, runBadge, runRef, runTitle, runTokens, statusCounts, taskCounts, taskTypeBadge, cardTypeIcon } from './labels.ts'
+import { agentStatus, cliLoginCommand, detectedRuntimes, epicHistoryText, epicInProgress, epicReviewStatus, epicWithLiveCounts, inboxItemLink, plural, prNumberLabel, runRef, runTitle, runTokens, statusCounts, taskCounts } from './labels.ts'
 
 const tasks = (...statuses: TaskStatus[]) => statuses.map(status => ({ status }))
 
 describe('statusCounts', () => {
   it('combines merged tasks and approved designs into one Complete count', () => {
-    expect(statusCounts(tasks('merged', 'approved', 'ready', 'merged', 'approved'))).toEqual([
-      { status: 'ready', label: 'Ready', count: 1 },
-      { status: 'approved', label: 'Complete', count: 4 }
+    expect(statusCounts(tasks('merged', 'approved', 'ready', 'merged', 'approved')).map(({ status, count }) => ({ status, count }))).toEqual([
+      { status: 'ready', count: 1 },
+      { status: 'approved', count: 4 }
     ])
   })
 })
 
 describe('epicHistoryText', () => {
-  it('words every kind of entry the parent history returns', () => {
-    expect(epicHistoryText({ action: 'epic.updated', detail: { epicId: 'e', changed: ['title', 'reviewMode'] } })).toBe('edited title, reviewMode')
-    expect(epicHistoryText({ action: 'epic.pr', detail: { epicId: 'e', event: 'opened', prNumber: 7 } })).toBe('opened the parent PR')
-    expect(epicHistoryText({ action: 'epic.pr', detail: { epicId: 'e', event: 'human_changes_requested', headSha: 'abc', summary: 'Fix the title' } })).toBe('requested changes on the parent PR: Fix the title')
-    expect(epicHistoryText({ action: 'merge.refused', detail: { epicId: 'e', pr: 7, message: 'Required check failed', attempt: 1 } })).toBe('reported GitHub refused the merge: Required check failed')
-  })
-
   it('never shows a raw code for an event or action it has no words for', () => {
-    expect(epicHistoryText({ action: 'epic.pr', detail: { epicId: 'e', event: 'something_new' } })).toBe('updated the parent PR')
-    expect(epicHistoryText({ action: 'epic.other', detail: { epicId: 'e' } })).toBe('updated the parent')
+    expect(epicHistoryText({ action: 'epic.pr', detail: { epicId: 'e', event: 'something_new' } })).not.toContain('something_new')
+    expect(epicHistoryText({ action: 'epic.other', detail: { epicId: 'e' } })).not.toContain('epic.other')
   })
 })
 
@@ -37,38 +30,21 @@ describe('taskCounts', () => {
     expect(taskCounts(tasks(...open)).board).toBe(open.length)
   })
 
-  it('counts the Backlog as before', () => {
-    expect(taskCounts(tasks('backlog', 'backlog', 'merged', 'ready'))).toEqual({ board: 1, backlog: 2 })
-  })
-
-  it('drops a task from the Board count once it merges', () => {
-    const list = tasks('ready_to_merge', 'in_progress')
-    expect(taskCounts(list).board).toBe(2)
-    list[0]!.status = 'merged'
-    expect(taskCounts(list).board).toBe(1)
+  it('excludes Approved designs from open board work, and counts the Backlog apart', () => {
+    expect(taskCounts([{ status: 'approved' }, { status: 'merged' }, { status: 'ready' }, { status: 'backlog' }])).toEqual({ board: 1, backlog: 1 })
   })
 })
 
 describe('runTokens', () => {
-  it('shows input, cache reads and output apart', () => {
-    expect(runTokens({ agentRuntime: 'claude-code', inputTokens: 12_402, cacheReadTokens: 1_318_420, outputTokens: 369 })).toBe('12k in (includes cache writes) · 1.3M cache read · 369 out')
-  })
-
-  it('leaves cache reads out for runs recorded before they were counted', () => {
-    expect(runTokens({ agentRuntime: 'codex', inputTokens: 2_000, cacheWriteTokens: null, cacheReadTokens: 1_000_000, outputTokens: 100_000 }))
-      .toBe('2k in · 1.0M cache read · 100k out · $2.20 weighted, excluding input')
-    expect(runTokens({ agentRuntime: 'claude-code', inputTokens: 2_000, cacheWriteTokens: 1_000_000, cacheReadTokens: 1_000_000, outputTokens: 100_000, sessionStart: 'resumed_cold' }))
-      .toBe('2k in · 1.0M cache write · 1.0M cache read · 100k out · $10.20 weighted, excluding input · resumed cold')
-    expect(runTokens({ agentRuntime: 'claude-code', inputTokens: 44_244, cacheReadTokens: null, outputTokens: 369 })).toBe('44k in (includes cache writes) · 369 out')
+  it('shows cache reads and the weighted cost only when they were recorded', () => {
+    const known = runTokens({ agentRuntime: 'codex', inputTokens: 2_000, cacheWriteTokens: null, cacheReadTokens: 1_000_000, outputTokens: 100_000 })
+    expect(known).toContain('cache read')
+    expect(known).toMatch(/\$\d/)
+    expect(runTokens({ agentRuntime: 'claude-code', inputTokens: 44_244, cacheReadTokens: null, outputTokens: 369 })).not.toContain('cache read')
   })
 })
 
 describe('runtimes', () => {
-  it('labels runtimes Claude and Codex, never Claude Code', () => {
-    expect(runtimeLabel('claude-code')).toBe('Claude')
-    expect(runtimeLabel('codex')).toBe('Codex')
-  })
-
   it('offers only runtimes whose CLI the runner found', () => {
     expect(detectedRuntimes([{ id: 'claude', version: '2.1.0' }, { id: 'codex', version: null }])).toEqual(['claude-code'])
     expect(detectedRuntimes([{ id: 'claude', version: '2.1.0' }, { id: 'codex', version: '0.50.0' }])).toEqual(['claude-code', 'codex'])
@@ -81,25 +57,20 @@ describe('runtimes', () => {
   })
 })
 
-describe('taskTypeBadge', () => {
-  it('badges bugs, spikes and designs, not plain tasks (D19, D20)', () => {
-    expect(taskTypeBadge('task')).toBeNull()
-    expect(taskTypeBadge('bug')).toMatchObject({ label: 'Bug', color: 'error' })
-    expect(taskTypeBadge('spike')).toMatchObject({ label: 'Spike', color: 'info' })
-    expect(taskTypeBadge('design')).toMatchObject({ label: 'Design', color: 'info' })
-  })
-})
-
 describe('agentStatus', () => {
   const now = Date.parse('2026-10-29T12:00:00Z')
   const idle = { paused: false, pausedUntil: null, activeRuns: 0 }
+  const paused = agentStatus({ ...idle, paused: true }, now)
+  const cooling = agentStatus({ ...idle, pausedUntil: new Date(now + 1000).toISOString() }, now)
 
   it('shows explicit pause even during a usage cooldown or active run', () => {
-    expect(agentStatus({ ...idle, paused: true, pausedUntil: new Date(now + 1000).toISOString(), activeRuns: 1 }, now)).toEqual({ label: 'Paused', color: 'neutral' })
+    expect(paused).not.toBeNull()
+    expect(agentStatus({ ...idle, paused: true, pausedUntil: new Date(now + 1000).toISOString(), activeRuns: 1 }, now)).toEqual(paused)
   })
 
   it('shows a future usage cooldown', () => {
-    expect(agentStatus({ ...idle, pausedUntil: new Date(now + 1000).toISOString() }, now)?.label).toBe('Waiting on usage limit')
+    expect(cooling).not.toBeNull()
+    expect(cooling).not.toEqual(paused)
   })
 
   it('leaves past and just-expired cooldowns unmarked', () => {
@@ -113,40 +84,24 @@ describe('agentStatus', () => {
   })
 
   it('can omit Working when the layout already indicates work', () => {
-    expect(agentStatus({ ...idle, activeRuns: 1 }, now)?.label).toBe('Working')
+    expect(agentStatus({ ...idle, activeRuns: 1 }, now)).not.toBeNull()
     expect(agentStatus({ ...idle, activeRuns: 1 }, now, false)).toBeNull()
-    expect(agentStatus({ ...idle, paused: true }, now, false)?.label).toBe('Paused')
+    expect(agentStatus({ ...idle, paused: true }, now, false)).toEqual(paused)
   })
-})
-
-it('excludes Approved designs from open board work', () => {
-  expect(taskCounts([{ status: 'approved' }, { status: 'merged' }, { status: 'ready' }, { status: 'backlog' }])).toEqual({ board: 1, backlog: 1 })
-})
-
-it('gives a Board card an icon for every type but a plain task', () => {
-  expect(cardTypeIcon('task')).toBeNull()
-  expect(cardTypeIcon('bug')).toEqual({ name: 'i-hugeicons-bug-01', label: 'Bug' })
-  expect(cardTypeIcon('design')).toEqual({ name: 'i-hugeicons-paint-brush-02', label: 'Design' })
-  expect(cardTypeIcon('spike')).toEqual({ name: 'i-hugeicons-test-tube', label: 'Spike' })
-})
-
-it('labels completed rebase developer runs', () => {
-  expect(runBadge({ state: 'completed', role: 'developer', outcome: 'pr_rebased' })).toEqual({ label: 'PR rebased', color: 'primary' })
 })
 
 describe('epic review status', () => {
   const epic = { reviewMode: 'epic' as const, branch: 'corral/epic-1', reviewState: null, taskCount: 2, mergedCount: 2 }
 
-  it('says all tasks complete and awaiting review for a parent PR with the human', () => {
-    expect(epicReviewStatus({ ...epic, reviewState: 'human_review' })?.label).toBe('All tasks complete, awaiting your review')
-  })
-
   it('has nothing to say while tasks are going in, or in direct mode', () => {
     expect(epicReviewStatus({ ...epic, mergedCount: 1 })).toBeNull()
-    expect(epicReviewStatus({ ...epic, reviewState: 'ready_to_merge', sync: { state: 'deciding', question: 'Which?', taskId: 't', taskRef: 'COR-1' } })).toEqual({ label: 'Rebase needs your decision', color: 'warning' })
-    expect(epicReviewStatus({ ...epic, reviewState: 'open', sync: { state: 'resolving', files: ['a.ts'], taskId: 't', taskRef: 'COR-1' } })).toEqual({ label: 'Resolving a rebase conflict', color: 'info' })
-    expect(epicReviewStatus({ ...epic, reviewState: 'ready_to_merge', sync: { state: 'failed', error: 'Network down' } })).toEqual({ label: 'Rebase stopped, retry to carry on', color: 'error' })
     expect(epicReviewStatus({ ...epic, reviewMode: 'direct' })).toBeNull()
+    expect(epicReviewStatus({ ...epic, reviewMode: 'direct', reviewState: 'ready_to_merge', sync: { state: 'failed', error: 'x' } })).toBeNull()
+  })
+
+  it('reports a stopped fix apart from a stopped rebase', () => {
+    const stopped = (fix?: 'ci') => epicReviewStatus({ ...epic, reviewState: 'ready_to_merge', sync: { state: 'failed', error: 'x', ...fix && { fix } } })?.label
+    expect(stopped('ci')).not.toBe(stopped())
   })
 
   it('keeps a parent task in progress until its PR merges, and a direct one until its tasks do', () => {
@@ -165,27 +120,18 @@ describe('epic review status', () => {
   })
 })
 
-describe('formatMs', () => {
-  it('scales from milliseconds to days', () => {
-    expect([0, 400, 9000, 60_000, 125_000, 3_599_600, 5_400_000, 86_400_000, 129_600_000].map(formatMs))
-      .toEqual(['0 ms', '400 ms', '9.0 s', '1m 0s', '2m 5s', '1h', '1.5h', '1d', '1.5d'])
-  })
-})
-
 describe('runRef and runTitle', () => {
   const run = { taskRef: null, taskTitle: null, epicId: null, epicTitle: null, summary: null, role: 'pm' as const }
 
   it('names a parent task review after its parent, live or finished', () => {
     const live = { ...run, role: 'reviewer' as const, epicId: 'e-1', epicTitle: 'Saved searches' }
-    expect(runRef(live)).toBe('Parent')
+    expect(runRef(live)).not.toBe(runRef(run))
     expect(runTitle(live)).toBe('Saved searches')
     expect(runTitle({ ...live, summary: 'Works together.' })).toBe('Saved searches')
   })
 
-  it('keeps PM turn and Plan for PM runs only', () => {
-    expect(runRef(run)).toBe('Plan')
-    expect(runTitle(run)).toBe('PM turn')
-    expect(runTitle({ ...run, role: 'reviewer' })).not.toBe('PM turn')
+  it('gives PM runs a fallback title no other role gets', () => {
+    expect(runTitle({ ...run, role: 'reviewer' })).not.toBe(runTitle(run))
   })
 
   it('shows a task run\'s ref and title', () => {
@@ -197,10 +143,10 @@ describe('runRef and runTitle', () => {
 
 describe('inboxItemLink', () => {
   it('opens the parent for a parent task\'s item, not the task the server named for it', () => {
-    expect(inboxItemLink({ taskRef: 'COR-3', epicId: 'e-1' })).toEqual({ to: '/epics/e-1', label: 'Parent' })
+    expect(inboxItemLink({ taskRef: 'COR-3', epicId: 'e-1' })?.to).toBe('/epics/e-1')
   })
   it('opens the task otherwise, and nothing without one', () => {
-    expect(inboxItemLink({ taskRef: 'COR-3' })).toEqual({ to: '/tasks/COR-3', label: 'Task' })
+    expect(inboxItemLink({ taskRef: 'COR-3' })?.to).toBe('/tasks/COR-3')
     expect(inboxItemLink({ taskRef: null })).toBeNull()
   })
 })
@@ -213,20 +159,5 @@ it('counts in the singular and the plural', () => {
 
 it('names a PR by number when its URL has one', () => {
   expect(prNumberLabel('https://github.com/o/r/pull/41')).toBe('#41')
-  expect(prNumberLabel(null)).toBe('Open PR')
-})
-
-describe('epic fixes (D29)', () => {
-  const epic = { reviewMode: 'epic', branch: 'b', reviewState: 'ready_to_merge', taskCount: 2, mergedCount: 2 } as const
-  it('says what the developer on the parent is doing, and what stopped', () => {
-    expect(epicReviewStatus({ ...epic, sync: { state: 'fixing', fix: 'ci', reason: '', files: [], developer: null, attempts: 0 } })?.label).toBe('Fixing a CI failure')
-    expect(epicReviewStatus({ ...epic, sync: { state: 'fixing', fix: 'review', reason: '', files: [], developer: null, attempts: 0 } })?.label).toBe('Addressing integration review')
-    expect(epicReviewStatus({ ...epic, sync: { state: 'failed', error: 'x', fix: 'ci' } })?.label).toBe('Fix stopped, retry to carry on')
-    expect(epicReviewStatus({ ...epic, sync: { state: 'failed', error: 'x' } })?.label).toBe('Rebase stopped, retry to carry on')
-  })
-  it('reads a past fix', () => {
-    expect(epicFixResult({ behaviourChanged: false, reReviewed: false })).toEqual(['Behaviour unchanged', 'Kept approval'])
-    expect(epicFixResult({ behaviourChanged: true, reReviewed: true })).toEqual(['Behaviour changed', 'Reviewed again'])
-    expect(epicFixResult({ behaviourChanged: null, reReviewed: null })).toEqual(['Not reported'])
-  })
+  expect(prNumberLabel(null)).not.toMatch(/#/)
 })

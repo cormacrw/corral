@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
-import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import InboxMessage from '~/features/inbox/components/InboxMessage.vue'
 import MarkdownText from '~/components/shared/MarkdownText.vue'
 import TaskRefText from '~/features/tasks/components/TaskRefText.vue'
+
+enableAutoUnmount(afterEach)
 
 vi.mock('~/queries/shell', () => ({ shell: () => ({ projects: { data: { value: [{ prefix: 'COR' }] } } }) }))
 vi.mock('~/features/tasks/components/TaskLink.vue', () => ({ default: { props: ['taskRef'], template: '<a :href="`/tasks/${taskRef}`"><slot /></a>' } }))
@@ -19,8 +21,7 @@ describe('InboxMessage', () => {
     expect(wrapper.get('p').text()).toBe('Ready with **literal** text.')
     expect(wrapper.get('p').find('strong').exists()).toBe(false)
     expect(wrapper.get('details').attributes('open')).toBeUndefined()
-    expect(wrapper.get('summary').text()).toBe('Full message')
-    expect(wrapper.get('details h3').text()).toBe('Findings')
+    expect(wrapper.get('details').text()).toContain('The complete investigation.')
   })
 
   it('links known refs in the message and leaves the rest of it literal', () => {
@@ -37,7 +38,7 @@ describe('InboxMessage', () => {
 
   it('keeps the previous markdown body without disclosures for items without a message', () => {
     const wrapper = render('')
-    expect(wrapper.get('h3').text()).toBe('Findings')
+    expect(wrapper.text()).toContain('The complete investigation.')
     expect(wrapper.find('details').exists()).toBe(false)
   })
 

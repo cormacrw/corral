@@ -59,22 +59,22 @@ describe('runner update status on the wire', () => {
 
   it('advertises its agent tool contract in hello', async () => {
     await start(false, socket => socket.send(JSON.stringify({ type: 'welcome', runnerId: 'r1', commit: 'old', draining: false, updateRequested: false })))
-    await vi.waitFor(() => expect(received.find(m => m.type === 'hello')).toMatchObject({ toolContract: AGENT_TOOL_CONTRACT }))
+    await vi.waitFor(() => expect(received.find(m => m.type === 'hello')).toMatchObject({ toolContract: AGENT_TOOL_CONTRACT }), { timeout: 5000 })
   })
 
   it('leaves the drain to the host updater when the server asks, with auto-update off', async () => {
     await start(false, socket => socket.send(JSON.stringify({ type: 'welcome', runnerId: 'r1', commit: 'new', draining: true, updateRequested: false, toolContractReason: 'Tools differ' })))
-    await vi.waitFor(async () => expect(await status()).toMatchObject({ commit: 'old', serverCommit: 'new', behind: true, draining: true }))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ commit: 'old', serverCommit: 'new', behind: true, draining: true }), { timeout: 5000 })
   })
 
   it('asks the host updater after a protocol refusal, with auto-update off', async () => {
     await start(false, socket => socket.close(4000, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION + 1, commit: 'new' })))
-    await vi.waitFor(async () => expect(await status()).toMatchObject({ commit: 'old', serverCommit: 'new', behind: true, draining: true }))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ commit: 'old', serverCommit: 'new', behind: true, draining: true }), { timeout: 5000 })
   })
 
   it('leaves a failed update for a human after a protocol refusal', async () => {
     await start(false, socket => socket.close(4000, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION + 1, commit: 'new' })))
-    await vi.waitFor(async () => expect(await status()).toMatchObject({ serverCommit: 'new', draining: true }))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ serverCommit: 'new', draining: true }), { timeout: 5000 })
     await writeFile(join(dataDir, 'updater-result.json'), JSON.stringify({ target: 'new', state: 'failed', error: 'Build failed', attempt: '1' }))
     await vi.waitFor(async () => expect(await status()).toMatchObject({ updateState: 'failed', updateError: 'Build failed', draining: false }), { timeout: 3000 })
     connection.updateStatus!.refused('new')
@@ -84,14 +84,14 @@ describe('runner update status on the wire', () => {
   it('releases a failed host build drain and reports the failure without stopping live work', async () => {
     active = [{ runId: 'run-1', leaseEpoch: 1 }]
     await start(true, socket => socket.send(JSON.stringify({ type: 'welcome', runnerId: 'r1', commit: 'new', draining: true, updateRequested: true } satisfies ServerMessage)))
-    await vi.waitFor(async () => expect(await status()).toMatchObject({ draining: true }))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ draining: true }), { timeout: 5000 })
     await writeFile(join(dataDir, 'updater-result.json'), JSON.stringify({ target: 'new', state: 'failed', error: 'Image build failed', attempt: '1' }))
     await vi.waitFor(async () => expect(await status()).toMatchObject({ draining: false, updateRequested: false, updateState: 'failed', activeRunCount: 1 }), { timeout: 2500 })
     expect(active).toHaveLength(1)
-    await vi.waitFor(() => expect(received).toContainEqual(expect.objectContaining({ type: 'runner.update-status', draining: false, updateError: 'Image build failed' })))
+    await vi.waitFor(() => expect(received).toContainEqual(expect.objectContaining({ type: 'runner.update-status', draining: false, updateError: 'Image build failed' })), { timeout: 5000 })
     // Even a retry that fails before polling observes 'building' must release drain.
     server.clients.forEach(socket => socket.send(JSON.stringify({ type: 'runner.drain', updateRequested: true } satisfies ServerMessage)))
-    await vi.waitFor(async () => expect(await status()).toMatchObject({ draining: true }))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ draining: true }), { timeout: 5000 })
     await writeFile(join(dataDir, 'updater-result.json'), JSON.stringify({ target: 'new', state: 'failed', error: 'Image build failed', attempt: '2' }))
     await vi.waitFor(async () => expect(await status()).toMatchObject({ draining: false, updateRequested: false, updateState: 'failed' }), { timeout: 2500 })
   })
@@ -103,7 +103,7 @@ describe('runner update status on the wire', () => {
         for (const raw of ['null', '{', JSON.stringify({ type: 'run.assign', job: {} }), JSON.stringify({ type: 'welcome', commit: 42 })]) socket.send(raw)
         socket.send(JSON.stringify({ type: 'welcome', runnerId: 'r1', commit: 'valid', draining: false, updateRequested: false }))
       })
-      await vi.waitFor(async () => expect(await status()).toMatchObject({ serverCommit: 'valid', activeRunCount: 0 }))
+      await vi.waitFor(async () => expect(await status()).toMatchObject({ serverCommit: 'valid', activeRunCount: 0 }), { timeout: 5000 })
       expect(warnings).toHaveBeenCalledTimes(4)
       const messages = warnings.mock.calls.map(args => args.join(' '))
       expect(messages[0]).toContain('<unknown>')
@@ -122,7 +122,7 @@ describe('runner update status on the wire', () => {
       expect(hello.taskIntegrationProtocols).toEqual([TASK_INTEGRATION_PROTOCOL])
       socket.close(4000, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION + 1, commit: 'new' }))
     })
-    await vi.waitFor(async () => expect(await status()).toMatchObject({ commit: 'old', serverCommit: 'new', behind: true, idle: true, activeRunCount: 0 }))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ commit: 'old', serverCommit: 'new', behind: true, idle: true, activeRunCount: 0 }), { timeout: 5000 })
   })
 
   it.each([false, true])('compares welcome and drains only with auto update = %s, preserving live work until it ends', async (autoUpdate) => {
@@ -134,7 +134,7 @@ describe('runner update status on the wire', () => {
       socket.pause()
       socket.send(JSON.stringify({ type: 'welcome', runnerId: 'r1', commit: 'new', draining: false, updateRequested: false } satisfies ServerMessage))
     })
-    await vi.waitFor(async () => expect(await status()).toMatchObject({ behind: true, draining: autoUpdate, activeRunCount: 1, idle: false, updateRequested: false }))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ behind: true, draining: autoUpdate, activeRunCount: 1, idle: false, updateRequested: false }), { timeout: 5000 })
     expect(received.find(m => m.type === 'hello')).toMatchObject({ commit: 'old', autoUpdate })
     expect(received.some(m => m.type === 'runner.draining')).toBe(false)
     active = []
@@ -142,7 +142,7 @@ describe('runner update status on the wire', () => {
     peer!.resume()
     // Frames arrive in order. Receiving run.ended guarantees any earlier
     // drain notification has arrived before we assert its presence or absence.
-    await vi.waitFor(() => expect(received.some(m => m.type === 'run.ended')).toBe(true))
+    await vi.waitFor(() => expect(received.some(m => m.type === 'run.ended')).toBe(true), { timeout: 5000 })
     expect(received.filter(m => m.type === 'runner.draining')).toEqual(autoUpdate ? [{ type: 'runner.draining', updateRequested: false }] : [])
     await connection.refreshUpdateStatus()
     expect(await status()).toMatchObject({ behind: true, draining: autoUpdate, idle: true })
@@ -151,7 +151,7 @@ describe('runner update status on the wire', () => {
   it('stays busy while a completed process is still preparing its terminal report', async () => {
     finishingCount = 1
     await start(false, socket => socket.send(JSON.stringify({ type: 'welcome', runnerId: 'r1', commit: 'new', draining: true, updateRequested: true } satisfies ServerMessage)))
-    await vi.waitFor(async () => expect(await status()).toMatchObject({ draining: true, updateRequested: true, activeRunCount: 1, idle: false }))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ draining: true, updateRequested: true, activeRunCount: 1, idle: false }), { timeout: 5000 })
     // The heartbeat snapshot has no running process, but the manager still owns the report.
     expect(active).toEqual([])
     finishingCount = 0
@@ -165,7 +165,7 @@ describe('runner update status on the wire', () => {
       socket.send(JSON.stringify({ type: 'welcome', runnerId: 'r1', commit: 'new', draining: false, updateRequested: false } satisfies ServerMessage))
       socket.send(JSON.stringify({ type: 'runner.drain', updateRequested: true } satisfies ServerMessage))
     })
-    await vi.waitFor(async () => expect(await status()).toMatchObject({ draining: true, updateRequested: true, idle: false }))
+    await vi.waitFor(async () => expect(await status()).toMatchObject({ draining: true, updateRequested: true, idle: false }), { timeout: 5000 })
     server.clients.forEach(s => s.close())
     await vi.waitFor(() => expect(received.filter(m => m.type === 'hello')).toHaveLength(2), { timeout: 4000 })
     expect(received.filter(m => m.type === 'hello')[1]).toMatchObject({ draining: true, updateRequested: true })
@@ -212,15 +212,15 @@ describe('runner update status on the wire', () => {
     const detected = Promise.withResolvers<RunnerCapacity>()
     capacity = () => detected.promise
     await start(false, () => {})
-    await vi.waitFor(() => expect(server.clients.size).toBe(1))
-    await vi.waitFor(() => expect([...server.clients][0]!.readyState).toBe(1))
+    await vi.waitFor(() => expect(server.clients.size).toBe(1), { timeout: 5000 })
+    await vi.waitFor(() => expect([...server.clients][0]!.readyState).toBe(1), { timeout: 5000 })
     await new Promise(resolve => setTimeout(resolve, 20))
 
     expect(connection.connected).toBe(false)
     expect(connection.send({ type: 'job.result', jobId: 'j1', ok: true, result: { kind: 'detect_clis', clis: [] } })).toBe(false)
 
     detected.resolve({ slots: 2, runtimes: ['codex'], roles: ['developer'] })
-    await vi.waitFor(() => expect(received.map(m => m.type)).toEqual(['hello']))
+    await vi.waitFor(() => expect(received.map(m => m.type)).toEqual(['hello']), { timeout: 5000 })
     expect(connection.connected).toBe(true)
   })
 
@@ -228,7 +228,7 @@ describe('runner update status on the wire', () => {
     const detected = Promise.withResolvers<RunnerCapacity>()
     capacity = () => detected.promise
     await start(false, () => {})
-    await vi.waitFor(() => expect(server.clients.size).toBe(1))
+    await vi.waitFor(() => expect(server.clients.size).toBe(1), { timeout: 5000 })
     connection.close()
     detected.resolve({ slots: 2, runtimes: ['codex'], roles: ['developer'] })
     await new Promise(resolve => setTimeout(resolve, 20))
@@ -238,19 +238,19 @@ describe('runner update status on the wire', () => {
   it('holds run traffic until welcome, so a replay stays in order', async () => {
     let peer: WebSocket | undefined
     await start(false, socket => (peer = socket))
-    await vi.waitFor(() => expect(connection.connected).toBe(true))
+    await vi.waitFor(() => expect(connection.connected).toBe(true), { timeout: 5000 })
     expect(connection.send(EVENTS)).toBe(false)
 
     peer!.send(JSON.stringify(WELCOME))
-    await vi.waitFor(() => expect(connection.send(EVENTS)).toBe(true))
-    await vi.waitFor(() => expect(received.some(m => m.type === 'run.events')).toBe(true))
+    await vi.waitFor(() => expect(connection.send(EVENTS)).toBe(true), { timeout: 5000 })
+    await vi.waitFor(() => expect(received.some(m => m.type === 'run.events')).toBe(true), { timeout: 5000 })
   })
 
   it.each([4000, 4001, 4003])('waits at least 15 s after a refusal with code %i, even though the socket opened', async (code) => {
     const delays = vi.spyOn(globalThis, 'setTimeout')
     try {
       await start(false, socket => socket.close(code, 'Refused'))
-      await vi.waitFor(() => expect(delays.mock.calls.some(([, ms]) => (ms ?? 0) >= 15_000)).toBe(true))
+      await vi.waitFor(() => expect(delays.mock.calls.some(([, ms]) => (ms ?? 0) >= 15_000)).toBe(true), { timeout: 5000 })
       expect(received.filter(m => m.type === 'hello')).toHaveLength(1)
     } finally {
       delays.mockRestore()
@@ -278,7 +278,7 @@ describe('runner update status on the wire', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     try {
       await start(false, socket => socket.send(JSON.stringify(WELCOME)))
-      await vi.waitFor(() => expect(connection.connected).toBe(true))
+      await vi.waitFor(() => expect(connection.connected).toBe(true), { timeout: 5000 })
       const peer = [...server.clients][0]!
       closed = new Promise(resolve => peer.once('close', resolve))
       await vi.advanceTimersByTimeAsync(RUNNER_HEARTBEAT_MS)
@@ -296,11 +296,11 @@ describe('runner update status on the wire', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     try {
       await start(false, socket => socket.send(JSON.stringify(WELCOME)))
-      await vi.waitFor(() => expect(connection.connected).toBe(true))
+      await vi.waitFor(() => expect(connection.connected).toBe(true), { timeout: 5000 })
       for (let beat = 0; beat < 4; beat++) {
         await vi.advanceTimersByTimeAsync(RUNNER_HEARTBEAT_MS)
         await new Promise(resolve => setImmediate(resolve))
-        await vi.waitFor(() => expect(received.filter(m => m.type === 'heartbeat')).toHaveLength(beat + 1))
+        await vi.waitFor(() => expect(received.filter(m => m.type === 'heartbeat')).toHaveLength(beat + 1), { timeout: 5000 })
         await new Promise(resolve => setTimeout(resolve, 20))
       }
     } finally {

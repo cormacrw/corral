@@ -8,6 +8,9 @@ export default defineConfig({
     maxWorkers: checkCpus(),
     // Opening and migrating a PGlite database is slow when every package's
     // tests run at once
-    hookTimeout: 30_000
+    hookTimeout: 30_000,
+    // Polls read PGlite and wait on git while other workers compete for CPU,
+    // so the 1s default fails under load. Only failing runs take longer
+    expect: { poll: { timeout: 5_000 } }
   }
 })

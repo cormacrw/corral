@@ -24,9 +24,9 @@ it('deletes on the first tap of the revealed button after a touch swipe', async 
   await swipe.trigger('pointermove', pointer(250))
   await swipe.trigger('pointermove', pointer(200))
   await swipe.trigger('pointerup', pointer(200))
-  expect(wrapper.html()).toContain('translateX(-88px)')
-
+  // Revealed: the button can now be reached
   const action = wrapper.get('button')
+  expect(action.attributes('tabindex')).toBe('0')
   await action.trigger('pointerdown', pointer(350))
   await action.trigger('pointerup', pointer(350))
   await action.trigger('click')

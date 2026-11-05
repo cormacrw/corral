@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ref, computed } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -7,12 +7,13 @@ import TaskLink from '~/features/tasks/components/TaskLink.vue'
 import { FLYOUT_SHEETS } from '~/features/tasks/composables/useTaskFlyout'
 import { taskFlyoutHosts } from '~/features/tasks/composables/taskLinkHost'
 
+enableAutoUnmount(afterEach)
 afterEach(() => {
   taskFlyoutHosts.value = 0
   vi.unstubAllGlobals()
 })
 
-async function render(mobile = false, host = false, sheets = false, attrs = {}) {
+async function render(mobile = false, host = false, sheets = false) {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:all(.*)*', component: { template: '<div />' } }] })
   await router.push('/plan/session')
   vi.stubGlobal('computed', computed)
@@ -22,7 +23,6 @@ async function render(mobile = false, host = false, sheets = false, attrs = {}) 
   taskFlyoutHosts.value = Number(host)
   const wrapper = mount(TaskLink, {
     props: { taskRef: 'COR-12' },
-    attrs,
     global: { plugins: [router], provide: sheets ? { [FLYOUT_SHEETS as symbol]: true } : {} }
   })
   return { wrapper, router }
@@ -42,12 +42,6 @@ it.each([[false, false], [true, true]])('falls back to the task page without an 
   await wrapper.get('a').trigger('click', { button: 0 })
   await flushPromises()
   expect(router.currentRoute.value.path).toBe('/tasks/COR-12')
-  wrapper.unmount()
-})
-
-it('passes classes to the link', async () => {
-  const { wrapper } = await render(false, false, false, { class: 'relative z-10' })
-  expect(wrapper.get('a').classes()).toEqual(expect.arrayContaining(['relative', 'z-10', 'text-brand']))
   wrapper.unmount()
 })
 

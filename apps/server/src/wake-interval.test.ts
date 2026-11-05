@@ -104,7 +104,7 @@ describe('agent wake interval', () => {
       await vi.waitFor(async () => {
         const [run] = await t.db.select().from(runs).where(eq(runs.id, job.runId))
         expect(run!.endedAt).not.toBeNull()
-      })
+      }, { timeout: 5000 })
       await t.orchestrator.schedule()
       expect(await runsIn(project)).toBe(1)
 

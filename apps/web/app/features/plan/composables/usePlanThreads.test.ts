@@ -5,7 +5,7 @@ import { keys } from '~/queries/keys'
 import { api } from '~/composables/useApi'
 import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Ref } from 'vue'
+import type { EffectScope, Ref } from 'vue'
 import { computed, defineComponent, effectScope, h, nextTick, reactive, ref, watch } from 'vue'
 import type { PlanSession } from '@corral/contracts'
 
@@ -22,16 +22,21 @@ describe('open Plan threads', () => {
   let route: { params: { sessionId?: string } }
   let stored: Ref<string[]>
   const wrappers: ReturnType<typeof mount>[] = []
+  let scope: EffectScope
 
   beforeEach(() => {
     vi.resetModules()
     client = testQueryClient()
     state = ref({ loaded: false, planSessions: [session('a'), session('b'), session('closed', true)] })
     vi.mocked(api.plan.sessions).mockImplementation(() => new Promise(() => {}))
-    watch(() => state.value.planSessions, sessions => client.setQueryData(keys.plan.sessions(), sessions), { flush: 'sync' })
-    watch(() => state.value.loaded, (loaded) => {
-      if (loaded) client.setQueryData(keys.plan.sessions(), state.value.planSessions)
-    }, { flush: 'sync' })
+    // The server's list, as the live stream writes it to the cache
+    scope = effectScope()
+    scope.run(() => {
+      watch(() => state.value.planSessions, sessions => client.setQueryData(keys.plan.sessions(), sessions), { flush: 'sync' })
+      watch(() => state.value.loaded, (loaded) => {
+        if (loaded) client.setQueryData(keys.plan.sessions(), state.value.planSessions)
+      }, { flush: 'sync' })
+    })
     route = reactive({ params: {} })
     stored = ref(['a', 'b', 'missing', 'closed'])
     vi.stubGlobal('computed', computed)
@@ -45,6 +50,7 @@ describe('open Plan threads', () => {
     vi.stubGlobal('useRoute', () => route)
   })
   afterEach(() => {
+    scope.stop()
     wrappers.splice(0).forEach(w => w.unmount())
     vi.unstubAllGlobals()
   })

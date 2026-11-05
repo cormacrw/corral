@@ -1,11 +1,13 @@
 // @vitest-environment happy-dom
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { testQueryClient } from '~/queries/mount-with-query'
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { computed, defineComponent, h, ref, resolveComponent } from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { PlanSession } from '@corral/contracts'
 import PlanCloseThread from '~/features/plan/components/PlanCloseThread.vue'
+
+enableAutoUnmount(afterEach)
 
 const close = vi.hoisted(() => vi.fn())
 vi.mock('~/composables/useApi', () => ({ api: { plan: { close } } }))
@@ -25,7 +27,15 @@ function setup(current = 's1') {
   vi.stubGlobal('useToast', () => ({ add }))
   vi.stubGlobal('useShell', () => ({ agents: [{ role: 'pm', name: 'Juno' }] }))
   vi.stubGlobal('computed', computed)
-  return mount(PlanCloseThread, { props: { session }, global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]], components: { AppButton: Button, AppModal: Dialog } } })
+  const wrapper = mount(PlanCloseThread, { props: { session }, global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]], components: { AppButton: Button, AppModal: Dialog } } })
+  const click = (label: string, inDialog = false) => (inDialog ? wrapper.get('section') : wrapper).findAll('button').find(b => b.text() === label)!.trigger('click')
+  return {
+    wrapper,
+    // The menu's Close thread, which asks first
+    open: () => click('Close thread'),
+    confirm: () => click('Close thread', true),
+    cancel: () => click('Cancel', true)
+  }
 }
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -33,33 +43,33 @@ afterEach(() => {
 })
 it('requires confirmation and returns to a new session after closing the current one', async () => {
   close.mockResolvedValue({})
-  const wrapper = setup()
-  await wrapper.get('button').trigger('click')
+  const view = setup()
+  await view.open()
   expect(close).not.toHaveBeenCalled()
-  await wrapper.get('section button:last-child').trigger('click')
+  await view.confirm()
   await flushPromises()
   expect(close).toHaveBeenCalledWith('s1')
   expect(remove).toHaveBeenCalledWith('s1')
   expect(push).toHaveBeenCalledWith('/plan')
 })
 it('does not navigate when closing another thread and lets the human cancel', async () => {
-  const wrapper = setup('other')
-  await wrapper.get('button').trigger('click')
-  await wrapper.get('section button').trigger('click')
+  const view = setup('other')
+  await view.open()
+  await view.cancel()
   expect(close).not.toHaveBeenCalled()
-  await wrapper.get('button').trigger('click')
-  await wrapper.get('section button:last-child').trigger('click')
+  await view.open()
+  await view.confirm()
   await flushPromises()
   expect(close).toHaveBeenCalledWith('s1')
   expect(push).not.toHaveBeenCalled()
 })
 it('keeps the session and confirmation when closing fails', async () => {
   close.mockRejectedValue(new Error('Offline'))
-  const wrapper = setup()
-  await wrapper.get('button').trigger('click')
-  await wrapper.get('section button:last-child').trigger('click')
+  const view = setup()
+  await view.open()
+  await view.confirm()
   await flushPromises()
-  expect(wrapper.find('section').exists()).toBe(true)
+  expect(view.wrapper.find('section').exists()).toBe(true)
   expect(remove).not.toHaveBeenCalled()
   expect(push).not.toHaveBeenCalled()
   expect(add).toHaveBeenCalledWith(expect.objectContaining({ description: 'Offline', color: 'error' }))

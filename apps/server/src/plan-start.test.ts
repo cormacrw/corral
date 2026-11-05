@@ -30,7 +30,7 @@ describe('idempotent, asynchronous Plan starts', () => {
         sse += value
       }
     })()
-    await vi.waitFor(() => expect(sse).toContain('event: ready'))
+    await vi.waitFor(() => expect(sse).toContain('event: ready'), { timeout: 5000 })
   })
   afterAll(async () => {
     await stream?.cancel()

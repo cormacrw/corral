@@ -46,7 +46,7 @@ describe('syncRepository', () => {
 
   it('never joins a fetch already running: callers during it share the next one', async () => {
     const first = syncRepository(dataDir, 'acme/app')
-    await vi.waitFor(() => expect(calls.some(c => c.args[0] === 'fetch')).toBe(true), { interval: 1 })
+    await vi.waitFor(() => expect(calls.some(c => c.args[0] === 'fetch')).toBe(true), { timeout: 5000, interval: 1 })
     expect(calls.filter(c => c.args[0] === 'fetch')[0]!.end).toBe(0)
 
     const later = [syncRepository(dataDir, 'acme/app'), syncRepository(dataDir, 'acme/app')]

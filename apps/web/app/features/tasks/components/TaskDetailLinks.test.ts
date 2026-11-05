@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { VueQueryPlugin } from '@tanstack/vue-query'
-import { flushPromises, mount, shallowMount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount, shallowMount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -17,7 +17,11 @@ vi.mock('~/composables/useApi', () => {
   const none = () => vi.fn().mockResolvedValue([])
   return { api: { tasks: { byRef: vi.fn(), comments: none(), history: none(), evidence: none(), reviews: none(), designs: none() }, runs: { list: none() } }, ApiError: class extends Error {} }
 })
-afterEach(() => vi.unstubAllGlobals())
+enableAutoUnmount(afterEach)
+afterEach(() => {
+  vi.unstubAllGlobals()
+  sessionStorage.clear()
+})
 
 async function setup() {
   for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'useTemplateRef'] as const) vi.stubGlobal(name, vue[name])
@@ -42,7 +46,6 @@ it('gives a dependency a real href and navigates from a task page without a flyo
   })
   await flushPromises()
   const dependency = wrapper.get('a[href="/tasks/TA-2"]')
-  expect(dependency.classes()).toContain('font-mono')
   await dependency.trigger('click', { button: 0 })
   await flushPromises()
   expect(router.currentRoute.value.fullPath).toBe('/tasks/TA-2')

@@ -238,7 +238,7 @@ describe('epic scheduling', () => {
     expect(response.status).toBe(200)
     await vi.waitFor(async () => {
       expect((await t.db.select().from(tasks).where(eq(tasks.id, second.id)))[0]?.leaseRunId).not.toBeNull()
-    })
+    }, { timeout: 5000 })
   })
 
   it('reports the same board-only progress used for completion', async () => {
@@ -293,7 +293,7 @@ describe('epic scheduling', () => {
     await t.mergePass()
     await vi.waitFor(async () => {
       expect((await t.db.select().from(tasks).where(eq(tasks.id, second.id)))[0]?.leaseRunId).not.toBeNull()
-    })
+    }, { timeout: 5000 })
     expect(t.events).toContainEqual(expect.objectContaining({ type: 'task.updated', task: expect.objectContaining({ id: second.id }) }))
   })
 })

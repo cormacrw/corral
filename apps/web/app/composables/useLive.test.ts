@@ -38,8 +38,22 @@ async function connected() {
   return { reconnected, silence: STREAM_SILENCE_MS }
 }
 
+// Each test loads a fresh useLive, whose listeners are removed after it so an
+// earlier copy never reacts to a later test's visibility changes
+const added: [EventTarget, string, EventListenerOrEventListenerObject][] = []
+function trackListeners(target: Window | Document) {
+  const add = target.addEventListener.bind(target)
+  vi.spyOn(target, 'addEventListener').mockImplementation((type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions) => {
+    if (!listener) return
+    added.push([target, type, listener])
+    add(type, listener, options)
+  })
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
+  trackListeners(window)
+  trackListeners(document)
   FakeEventSource.opened = []
   vi.stubGlobal('EventSource', FakeEventSource)
   vi.stubGlobal('useRoute', () => ({ params: {} }))
@@ -51,6 +65,8 @@ beforeEach(() => {
   })
 })
 afterEach(() => {
+  for (const [target, type, listener] of added.splice(0)) target.removeEventListener(type, listener)
+  vi.clearAllTimers()
   vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()

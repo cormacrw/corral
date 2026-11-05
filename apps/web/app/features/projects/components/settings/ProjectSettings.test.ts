@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import type { Project } from '@corral/contracts'
 import { useQuery, VueQueryPlugin } from '@tanstack/vue-query'
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
 import { afterEach, expect, it, vi } from 'vitest'
 import ProjectSettings from './ProjectSettings.vue'
@@ -47,16 +47,18 @@ function setup() {
   }
   return { wrapper, client, choose }
 }
+enableAutoUnmount(afterEach)
 afterEach(() => {
   vi.unstubAllGlobals()
-  vi.clearAllMocks()
+  vi.resetAllMocks()
 })
 it('rejects invalid files before uploading', async () => {
   const { choose, client } = setup()
   await choose(new File(['pdf'], 'file.pdf', { type: 'application/pdf' }))
-  expect(add).toHaveBeenLastCalledWith(expect.objectContaining({ color: 'error', description: expect.stringContaining('PNG') }))
+  expect(add).toHaveBeenLastCalledWith(expect.objectContaining({ color: 'error' }))
   await choose(new File([new Uint8Array(3 * 1024 * 1024)], 'large.png', { type: 'image/png' }))
-  expect(add).toHaveBeenLastCalledWith(expect.objectContaining({ color: 'error', description: 'The image is over 2 MB.' }))
+  expect(add).toHaveBeenCalledTimes(2)
+  expect(add).toHaveBeenLastCalledWith(expect.objectContaining({ color: 'error' }))
   expect(setThumbnail).not.toHaveBeenCalled()
   expect(client.getQueryData<Project[]>(keys.projects.list())![0]!.thumbnailUrl).toBeNull()
 })

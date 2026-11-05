@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { VueQueryPlugin } from '@tanstack/vue-query'
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount, type DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import type { Comment, Task } from '@corral/contracts'
@@ -11,7 +11,10 @@ import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
 import TaskActivity from '~/features/activity/components/TaskActivity.vue'
 import TaskActivityFeed from '~/features/activity/components/TaskActivityFeed.vue'
+import DetailLoading from '~/features/tasks/components/DetailLoading.vue'
+import DraftComposer from '~/features/tasks/components/DraftComposer.vue'
 import TaskCriteria from '~/features/tasks/components/TaskCriteria.vue'
+import TaskDeleteSection from '~/features/tasks/components/TaskDeleteSection.vue'
 import TaskDependencies from '~/features/tasks/components/TaskDependencies.vue'
 import TaskDescriptionField from '~/features/tasks/components/TaskDescriptionField.vue'
 import TaskDetail from '~/features/tasks/components/TaskDetail.vue'
@@ -36,19 +39,49 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-const tabs = vue.defineComponent({ name: 'AppTabs', props: ['modelValue'], setup: () => () => vue.h('nav') })
-const composer = vue.defineComponent({
-  name: 'DraftComposer',
-  props: ['draft'],
-  setup: () => () => vue.h('form')
+// Stand-ins for the shared UI kit, with the controls a person uses
+const { defineComponent, h } = vue
+const value = (e: Event) => (e.target as HTMLInputElement).value
+const AppButton = defineComponent({
+  inheritAttrs: false,
+  props: ['label', 'disabled', 'loading', 'type'],
+  setup: (props, { attrs, slots }) => () => h('button', { ...attrs, type: props.type ?? 'button', disabled: props.disabled }, props.label ?? slots.default?.())
 })
-
-const auditActivity = vue.defineComponent({ name: 'AuditActivity', props: ['text'], setup: () => () => vue.h('p') })
+const AppInput = defineComponent({
+  props: ['modelValue', 'placeholder'],
+  emits: ['update:modelValue'],
+  setup: (props, { emit }) => () => h('input', { placeholder: props.placeholder, value: props.modelValue, onInput: (e: Event) => emit('update:modelValue', value(e)) })
+})
+const AppTabs = defineComponent({
+  props: ['modelValue', 'items'],
+  emits: ['update:modelValue'],
+  setup: (props, { emit }) => () => h('div', (props.items as { label: string, value: string }[]).map(item =>
+    h('button', { role: 'tab', onClick: () => emit('update:modelValue', item.value) }, item.label)))
+})
+const AppModal = defineComponent({
+  props: ['open'],
+  setup: (props, { slots }) => () => props.open ? h('div', { role: 'dialog' }, [slots.body?.(), slots.footer?.()]) : null
+})
+const PromptComposer = defineComponent({
+  props: { modelValue: { type: String, default: '' }, onSubmit: { type: Function, default: undefined } },
+  emits: ['update:modelValue'],
+  setup: (props, { emit }) => () => h('form', { onSubmit: (e: Event) => {
+    e.preventDefault()
+    void props.onSubmit?.(props.modelValue)
+  } }, [h('textarea', { 'aria-label': 'Comment', 'value': props.modelValue, 'onInput': (e: Event) => emit('update:modelValue', value(e)) })])
+})
+const MarkdownText = defineComponent({ props: ['text'], setup: props => () => h('p', props.text) })
+const AsyncTaskDescription = defineComponent({ setup: () => () => h('div', { 'data-testid': 'description-editor' }) })
+const UiSkeleton = defineComponent({ name: 'UiSkeleton', setup: () => () => h('div') })
 
 // The detail's own parts render; everything they're built from stays an inert tag
-const parts = { TaskActivity, TaskActivityFeed, TaskCriteria, TaskDependencies, TaskDescriptionField, TaskStatusNotices, DraftComposer: composer, AppTabs: tabs }
-const stubs = { TimeAgo: true, CriterionMetIcon: true, teleport: true }
+const components = {
+  TaskActivity, TaskActivityFeed, TaskCriteria, TaskDeleteSection, TaskDependencies, TaskDescriptionField, TaskStatusNotices, DetailLoading, DraftComposer,
+  AppButton, AppInput, AppTabs, AppModal, PromptComposer, MarkdownText, AsyncTaskDescription, UiSkeleton
+}
+const stubs = { TimeAgo: true, CriterionMetIcon: true, AuditActivity: true, teleport: true }
 
+enableAutoUnmount(afterEach)
 beforeEach(() => {
   sessionStorage.clear()
   for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount', 'useTemplateRef', 'toRaw'] as const) vi.stubGlobal(name, vue[name])
@@ -63,99 +96,93 @@ beforeEach(() => {
 })
 afterEach(() => {
   vi.unstubAllGlobals()
-  vi.clearAllMocks()
+  vi.resetAllMocks()
 })
 
-async function mountDetail(client = testQueryClient()) {
-  const wrapper = mount(TaskDetail, {
+function mountDetail(client = testQueryClient()) {
+  return mount(TaskDetail, {
     props: { taskRef: 'COR-1', mode: 'page' },
-    global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: { ...parts, AuditActivity: auditActivity }, stubs }
+    global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components, stubs }
   })
+}
+async function mounted(client = testQueryClient()) {
+  const wrapper = mountDetail(client)
   await flushPromises()
   return wrapper
 }
 
+const box = (wrapper: VueWrapper) => wrapper.find<HTMLTextAreaElement>('textarea[aria-label="Comment"]')
+async function submitComment(wrapper: VueWrapper, text: string) {
+  await box(wrapper).setValue(text)
+  await box(wrapper).element.form!.dispatchEvent(new Event('submit', { cancelable: true }))
+  await flushPromises()
+}
+const button = (root: VueWrapper | Pick<DOMWrapper<Element>, 'findAll'>, label: string) => root.findAll('button').find(b => b.text() === label)!
+const comment = (over: Partial<Comment> = {}) => ({ id: 'c-1', taskId: taskA.id, author: { kind: 'human', userId: 'me' }, body: 'Hello', pinned: false, createdAt: new Date().toISOString(), ...over }) as Comment
+const switchTo = async (wrapper: VueWrapper, taskRef: string) => {
+  await wrapper.setProps({ taskRef })
+  await flushPromises()
+}
+
 it('opens the next task on the default tab', async () => {
-  const wrapper = await mountDetail()
-  const activityTabs = () => wrapper.findAllComponents(tabs).at(-1)!
-  ;(activityTabs().vm.$attrs['onUpdate:modelValue'] as (tab: string) => void)('evidence')
-  await flushPromises()
-  expect(activityTabs().props('modelValue')).toBe('evidence')
-  await wrapper.setProps({ taskRef: 'COR-2' })
-  await flushPromises()
-  expect(activityTabs().props('modelValue')).toBe('activity')
+  const wrapper = await mounted()
+  await wrapper.findAll('[role="tab"]').find(t => t.text().startsWith('Evidence'))!.trigger('click')
+  expect(box(wrapper).exists()).toBe(false)
+  await switchTo(wrapper, 'COR-2')
+  expect(box(wrapper).exists()).toBe(true)
 })
 
 it('shows a task from a loaded project list while its own entry loads', async () => {
+  vi.mocked(api.tasks.byRef).mockReturnValue(new Promise(() => {}))
+  const loading = await mounted()
+  expect(loading.findComponent(DetailLoading).exists()).toBe(true)
+
   const client = testQueryClient()
   client.setQueryData(keys.tasks.list('corral'), [taskA])
-  vi.mocked(api.tasks.byRef).mockReturnValue(new Promise(() => {}))
-  const wrapper = await mountDetail(client)
-  expect(wrapper.findComponent({ name: 'UiSkeleton' }).exists()).toBe(false)
-  expect(wrapper.find('u-skeleton-stub').exists()).toBe(false)
-  expect(wrapper.html()).toContain(taskA.title)
-})
-
-it('words a PM pause in the Activity', async () => {
-  vi.mocked(api.tasks.history).mockResolvedValue([{ id: 1, action: 'task.paused', detail: {}, createdAt: new Date().toISOString(), actor: { kind: 'agent', role: 'pm', runId: 'r1' } }] as never)
-  const wrapper = await mountDetail()
-  expect(wrapper.findComponent(auditActivity).props('text')).toBe('paused the task')
+  const wrapper = await mounted(client)
+  expect(wrapper.findComponent(DetailLoading).exists()).toBe(false)
+  expect(wrapper.get<HTMLInputElement>('[aria-label="Title"]').element.value).toBe(taskA.title)
 })
 
 it('drops a save that finishes after moving to another task', async () => {
-  const wrapper = await mountDetail()
+  const wrapper = await mounted()
   const save = deferred<Task>()
   vi.mocked(api.tasks.patch).mockReturnValue(save.promise)
   const title = wrapper.get('[aria-label="Title"]')
   await title.trigger('change')
-  await wrapper.setProps({ taskRef: 'COR-2' })
-  await flushPromises()
+  await switchTo(wrapper, 'COR-2')
 
   save.resolve({ ...taskA, title: 'Task A saved' })
   await flushPromises()
+  expect(wrapper.get<HTMLInputElement>('[aria-label="Title"]').element.value).toBe('Task B')
   await title.trigger('change')
   expect(api.tasks.patch).toHaveBeenLastCalledWith(expect.anything(), 2, expect.anything())
 })
 
 it('leaves the next task\'s comments and draft alone when an older comment lands', async () => {
-  const wrapper = await mountDetail()
+  const wrapper = await mounted()
   const sent = deferred<Comment>()
   vi.mocked(api.tasks.comment).mockReturnValue(sent.promise)
-  const submit = wrapper.getComponent(composer).vm.$attrs.onSubmit as (text: string) => Promise<boolean>
-  const sending = submit('For task A')
-  await wrapper.setProps({ taskRef: 'COR-2' })
-  await flushPromises()
-  const draft = wrapper.getComponent(composer)
-  draft.props('draft').text.value = 'Draft for B'
-  await flushPromises()
+  await submitComment(wrapper, 'For task A')
+  await switchTo(wrapper, 'COR-2')
+  await box(wrapper).setValue('Draft for B')
 
-  sent.resolve({ id: 'c-a', taskId: 'task-a', body: 'For task A', createdAt: new Date().toISOString() } as unknown as Comment)
-  expect(await sending).toBe(true)
+  sent.resolve(comment({ id: 'c-a', body: 'For task A' }))
   await flushPromises()
-  expect(wrapper.getComponent(composer).props('draft').text.value).toBe('Draft for B')
+  expect(box(wrapper).element.value).toBe('Draft for B')
   expect(wrapper.text()).not.toContain('For task A')
 })
-
-const submitComment = (wrapper: VueWrapper, text: string) => {
-  const box = wrapper.getComponent(composer)
-  box.props('draft').text.value = text
-  return (box.vm.$attrs.onSubmit as (text: string) => Promise<boolean>)(text)
-}
-const comment = (over: Partial<Comment> = {}) => ({ id: 'c-1', taskId: taskA.id, author: { kind: 'human', userId: 'me' }, body: 'Hello', pinned: false, createdAt: new Date().toISOString(), ...over }) as Comment
 
 it('reopens from cache at once and refetches nothing while the data is fresh', async () => {
   const client = testQueryClient()
   client.setDefaultOptions({ queries: { ...client.getDefaultOptions().queries, staleTime: 30_000 } })
-  const first = await mountDetail(client)
+  const first = await mounted(client)
   first.unmount()
   vi.clearAllMocks()
-  const reopened = mount(TaskDetail, {
-    props: { taskRef: 'COR-1', mode: 'page' },
-    global: { plugins: [[VueQueryPlugin, { queryClient: client }]], components: parts, stubs }
-  })
+  const reopened = mountDetail(client)
   // Before anything has had a chance to resolve
   expect(reopened.find('[aria-label="Title"]').exists()).toBe(true)
-  expect(reopened.findComponent({ name: 'UiSkeleton' }).exists()).toBe(false)
+  expect(reopened.findComponent(DetailLoading).exists()).toBe(false)
   await flushPromises()
   expect(api.tasks.byRef).not.toHaveBeenCalled()
   expect(api.tasks.comments).not.toHaveBeenCalled()
@@ -163,117 +190,108 @@ it('reopens from cache at once and refetches nothing while the data is fresh', a
 
 it('shows an agent\'s comment without refetching history or evidence', async () => {
   const client = testQueryClient()
-  await mountDetail(client)
+  const wrapper = await mounted(client)
   vi.clearAllMocks()
-  const stale = applyEvent(client, { type: 'comment.created', comment: comment({ author: { kind: 'agent', agentId: 'a', runId: 'r', role: 'developer' } as Comment['author'] }) })
-  expect(stale).toEqual([])
+  applyEvent(client, { type: 'comment.created', comment: comment({ body: 'From the agent', author: { kind: 'agent', agentId: 'a', runId: 'r', role: 'developer' } as Comment['author'] }) })
   await flushPromises()
-  expect(client.getQueryData<Comment[]>(keys.tasks.comments('COR-1'))).toHaveLength(1)
+  expect(wrapper.text()).toContain('From the agent')
   expect(api.tasks.history).not.toHaveBeenCalled()
   expect(api.tasks.evidence).not.toHaveBeenCalled()
 })
 
 it('shows a posted comment and empties the box before the server answers', async () => {
   const client = testQueryClient()
-  const wrapper = await mountDetail(client)
+  const wrapper = await mounted(client)
   const sent = deferred<Comment>()
   vi.mocked(api.tasks.comment).mockReturnValue(sent.promise)
-  const sending = submitComment(wrapper, 'Hello')
-  await flushPromises()
-  expect(client.getQueryData<Comment[]>(keys.tasks.comments('COR-1'))?.map(c => c.body)).toEqual(['Hello'])
-  expect(wrapper.getComponent(composer).props('draft').text.value).toBe('')
+  await submitComment(wrapper, 'Hello')
+  expect(wrapper.text()).toContain('Hello')
+  expect(box(wrapper).element.value).toBe('')
 
   // The event can beat the response; only one comment ever stays
   applyEvent(client, { type: 'comment.created', comment: comment() })
   vi.mocked(api.tasks.comments).mockResolvedValue([comment()])
   sent.resolve(comment())
-  expect(await sending).toBe(true)
   await flushPromises()
   expect(client.getQueryData<Comment[]>(keys.tasks.comments('COR-1'))?.map(c => c.id)).toEqual(['c-1'])
 })
 
 it('removes a comment whose post failed and puts its draft back', async () => {
-  const client = testQueryClient()
-  const wrapper = await mountDetail(client)
+  const wrapper = await mounted()
   vi.mocked(api.tasks.comment).mockRejectedValue(new Error('Offline'))
-  expect(await submitComment(wrapper, 'Keep me')).toBe(false)
-  await flushPromises()
-  expect(client.getQueryData(keys.tasks.comments('COR-1'))).toEqual([])
-  expect(wrapper.getComponent(composer).props('draft').text.value).toBe('Keep me')
+  await submitComment(wrapper, 'Keep me')
+  expect(wrapper.findAllComponents(MarkdownText).some(c => c.text() === 'Keep me')).toBe(false)
+  expect(box(wrapper).element.value).toBe('Keep me')
 })
 
 it('keeps a failed comment\'s draft for when you return to its task', async () => {
-  const wrapper = await mountDetail()
+  const wrapper = await mounted()
   const sent = deferred<Comment>()
   vi.mocked(api.tasks.comment).mockReturnValue(sent.promise.then(() => {
     throw new Error('Offline')
   }))
-  const sending = submitComment(wrapper, 'For task A')
-  await flushPromises()
-  await wrapper.setProps({ taskRef: 'COR-2' })
-  await flushPromises()
+  await submitComment(wrapper, 'For task A')
+  await switchTo(wrapper, 'COR-2')
   sent.resolve(comment())
-  expect(await sending).toBe(false)
   await flushPromises()
-  expect(wrapper.getComponent(composer).props('draft').text.value).toBe('')
-  await wrapper.setProps({ taskRef: 'COR-1' })
-  await flushPromises()
-  expect(wrapper.getComponent(composer).props('draft').text.value).toBe('For task A')
+  expect(box(wrapper).element.value).toBe('')
+  await switchTo(wrapper, 'COR-1')
+  expect(box(wrapper).element.value).toBe('For task A')
 })
 
 it('shows a resume in the open task from its response', async () => {
-  const client = testQueryClient()
   vi.mocked(api.tasks.byRef).mockResolvedValue({ ...taskA, paused: true })
-  const wrapper = await mountDetail(client)
+  const wrapper = await mounted()
   const resumed = { ...taskA, paused: false }
   vi.mocked(api.tasks.resume).mockResolvedValue(resumed)
   vi.mocked(api.tasks.byRef).mockResolvedValue(resumed)
-  await wrapper.get('[data-testid="task-paused"] appbutton').trigger('click')
+  await button(wrapper.get('[data-testid="task-paused"]'), 'Resume').trigger('click')
   await flushPromises()
+  expect(api.tasks.resume).toHaveBeenCalledOnce()
   expect(wrapper.find('[data-testid="task-paused"]').exists()).toBe(false)
 })
 
 describe('a save that fails', () => {
   it('keeps the description editor open', async () => {
-    const wrapper = await mountDetail()
-    const view = wrapper.getComponent(TaskDescriptionField).vm as unknown as { startEditDescription: () => void, saveDescription: () => Promise<void>, editingDescription: boolean }
-    view.startEditDescription()
+    const wrapper = await mounted()
+    await wrapper.get('[aria-label="Edit description"]').trigger('click')
+    const editor = () => wrapper.find('[data-testid="description-editor"]')
+    expect(editor().exists()).toBe(true)
     vi.mocked(api.tasks.patch).mockRejectedValue(new Error('Conflict'))
-    await view.saveDescription()
-    expect(view.editingDescription).toBe(true)
+    await button(wrapper, 'Save').trigger('click')
+    await flushPromises()
+    expect(editor().exists()).toBe(true)
     vi.mocked(api.tasks.patch).mockResolvedValue(taskA)
-    await view.saveDescription()
-    expect(view.editingDescription).toBe(false)
+    await button(wrapper, 'Save').trigger('click')
+    await flushPromises()
+    expect(editor().exists()).toBe(false)
   })
 
   it('keeps a new criterion\'s text', async () => {
-    const wrapper = await mountDetail()
-    const view = wrapper.getComponent(TaskCriteria).vm as unknown as { addCriterion: () => Promise<void>, newCriterion: string }
-    view.newCriterion = 'It works'
+    const wrapper = await mounted()
+    const input = () => wrapper.get<HTMLInputElement>('input[placeholder="Add criterion"]')
+    await input().setValue('It works')
     vi.mocked(api.tasks.patch).mockRejectedValue(new Error('Conflict'))
-    await view.addCriterion()
-    expect(view.newCriterion).toBe('It works')
+    await input().element.form!.dispatchEvent(new Event('submit', { cancelable: true }))
+    await flushPromises()
+    expect(api.tasks.patch).toHaveBeenCalledWith(expect.anything(), 1, expect.objectContaining({ acceptanceCriteria: expect.arrayContaining([{ text: 'It works' }]) }))
+    expect(input().element.value).toBe('It works')
     vi.mocked(api.tasks.patch).mockResolvedValue(taskA)
-    await view.addCriterion()
-    expect(view.newCriterion).toBe('')
+    await input().element.form!.dispatchEvent(new Event('submit', { cancelable: true }))
+    await flushPromises()
+    expect(input().element.value).toBe('')
   })
 })
 
-// TaskDetailLinks.test.ts mounts the real link and proves its href and navigation.
-it('links a dependency through the shared task link', async () => {
-  vi.mocked(api.tasks.byRef).mockImplementation(async ref => ref === 'COR-1' ? { ...taskA, dependsOn: ['COR-2'] } : taskB)
-  const wrapper = await mountDetail()
-  expect(wrapper.find('[task-ref="COR-2"]').exists()).toBe(true)
-})
-
-it('asks once however often Delete is pressed', async () => {
-  const wrapper = await mountDetail()
+it('deletes once however often Delete is pressed', async () => {
+  const wrapper = await mounted()
   const removing = deferred<undefined>()
   vi.mocked(api.tasks.remove).mockReturnValue(removing.promise as never)
-  const view = wrapper.vm as unknown as { remove: () => Promise<void> }
-  void view.remove()
+  await button(wrapper, 'Delete task').trigger('click')
+  const dialog = wrapper.get('[role="dialog"]')
+  await button(dialog, 'Delete').trigger('click')
   await flushPromises()
-  await view.remove()
+  await button(dialog, 'Delete').trigger('click')
   expect(api.tasks.remove).toHaveBeenCalledOnce()
   removing.resolve(undefined)
   await flushPromises()

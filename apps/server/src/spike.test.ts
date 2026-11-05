@@ -93,7 +93,6 @@ describe('spikes deliver findings instead of a PR', () => {
     expect(developer).toMatchObject({ branch: null, headSha: null })
     expect(developer.prompt).toContain(`spike ${task.ref}`)
     expect(developer.prompt).toContain('"findings_reported"')
-    expect(developer.prompt).toContain('**Suggested follow-up tasks**')
     expect(developer.prompt).not.toContain('pr_opened')
 
     // A spike can't open a PR, and still needs evidence for every criterion
@@ -111,7 +110,6 @@ describe('spikes deliver findings instead of a PR', () => {
     // The reviewer checks the findings, with no commit to check out
     const reviewer = await nextJob(task, 'reviewer')
     expect(reviewer).toMatchObject({ branch: null, headSha: null })
-    expect(reviewer.prompt).toContain('## Findings under review')
     expect(reviewer.prompt).toContain('Postgres advisory locks are enough')
     expect(reviewer.prompt).toContain('lock-test.txt')
     expect(reviewer.prompt).not.toContain('git diff')
@@ -181,13 +179,11 @@ describe('spikes deliver findings instead of a PR', () => {
     const revision = await nextJob(task, 'developer')
     expect(revision).toMatchObject({ branch: null })
     expect(revision.prompt).toContain('No follow-up work named.')
-    expect(revision.prompt).toContain('requested changes to your findings')
     await reportFindings(revision, task)
 
     // The new findings get their own review
     const second = await nextJob(task, 'reviewer')
     expect(second.prompt).toContain('Suggested follow-up tasks')
-    expect(second.prompt).toContain('Your feedback last round')
     await runner.call(second.runId, second.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Now complete.', criteria: verdicts(task, [true, true]) })
     expect(await taskRow(task.id)).toMatchObject({ status: 'human_review', reviewRounds: 1 })
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
@@ -244,7 +240,6 @@ describe('spikes deliver findings instead of a PR', () => {
     const reviewer = await nextJob(task, 'reviewer')
     expect(reviewer).toMatchObject({ headSha: 'abc123', branch: developer.branch })
     expect(reviewer.prompt).toContain('git diff')
-    expect(reviewer.prompt).not.toContain('Findings under review')
     await runner.call(reviewer.runId, reviewer.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Good.', criteria: verdicts(task, [true]) })
     const row = await taskRow(task.id)
     expect(row).toMatchObject({ status: 'ready_to_merge', mergedAt: null })

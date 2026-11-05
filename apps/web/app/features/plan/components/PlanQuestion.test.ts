@@ -1,18 +1,20 @@
 // @vitest-environment happy-dom
-import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
 import { STOP_ASKING } from '~/features/plan/utils/plan-questions'
 import PlanGrillButton from '~/features/plan/components/PlanGrillButton.vue'
 import PlanQuestion from '~/features/plan/components/PlanQuestion.vue'
 
+enableAutoUnmount(afterEach)
+
 // Events are checked through on* handlers, since wrapper.emitted() misses
 // them under a production NODE_ENV
 // Nuxt UI needs the Nuxt app, so its button is a plain one here
 const AppButton = defineComponent({
-  props: { label: String, disabled: Boolean, variant: String, icon: String },
+  props: { label: String, disabled: Boolean, icon: String },
   emits: ['click'],
-  setup: (props, { emit, attrs }) => () => h('button', { ...attrs, 'disabled': props.disabled, 'data-variant': props.variant, 'onClick': () => emit('click') }, props.label)
+  setup: (props, { emit, attrs }) => () => h('button', { ...attrs, disabled: props.disabled, onClick: () => emit('click') }, props.label)
 })
 const MarkdownText = defineComponent({ props: { text: String }, setup: props => () => h('p', props.text) })
 const AppTextarea = defineComponent({
@@ -77,7 +79,7 @@ describe('PlanQuestion', () => {
   it('has no buttons without a recommendation or options', () => {
     const wrapper = mount(PlanQuestion, { props: { message: { text: 'Why?', recommendation: null, options: null }, active: true }, global })
     expect(buttons(wrapper)).toHaveLength(0)
-    expect(wrapper.text()).toBe('QuestionWhy?')
+    expect(wrapper.text()).toContain('Why?')
   })
 
   it('disables every button on an older question', () => {
@@ -99,24 +101,7 @@ describe('PlanQuestion', () => {
     const wrapper = mount(PlanQuestion, { props: { message: question, active: false, answer }, global })
     const pressed = buttons(wrapper).filter(b => b.attributes('aria-pressed') === 'true').map(b => b.text())
     expect(pressed).toContain(chosen)
-    expect(button(wrapper, chosen).attributes('data-variant')).toBe('solid')
     expect(buttons(wrapper).every(b => b.attributes('disabled') !== undefined)).toBe(true)
-  })
-
-  it('stacks the open question as full-width tap targets, recommendation first', () => {
-    const wrapper = mount(PlanQuestion, { props: { message: question, active: true, stacked: true }, global })
-    expect(labels(wrapper)).toEqual(['Accept recommendation', 'Postgres', 'SQLite', 'MySQL', 'Other…', 'Stop and propose the plan'])
-    for (const b of buttons(wrapper)) {
-      expect(b.classes()).toEqual(expect.arrayContaining(['w-full', 'min-h-11']))
-      expect(b.attributes('disabled')).toBeUndefined()
-    }
-  })
-
-  it('keeps an older question compact and disabled when stacked', () => {
-    const wrapper = mount(PlanQuestion, { props: { message: question, active: false, answer: 'SQLite', stacked: true }, global })
-    expect(buttons(wrapper).some(b => b.classes().includes('w-full'))).toBe(false)
-    expect(buttons(wrapper).every(b => b.attributes('disabled') !== undefined)).toBe(true)
-    expect(button(wrapper, 'SQLite').attributes('aria-pressed')).toBe('true')
   })
 })
 

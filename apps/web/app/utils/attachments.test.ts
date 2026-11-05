@@ -11,11 +11,13 @@ describe('attachmentProblem', () => {
     expect(attachmentProblem({ type: 'image/webp', size: 10 })).toBeNull()
   })
 
-  it('rejects other types, empty files and files over 10 MB', () => {
-    expect(attachmentProblem({ type: 'image/svg+xml', size: 10 })).toMatch(/PNG, JPEG/)
-    expect(attachmentProblem({ type: 'application/pdf', size: 10 })).toMatch(/PNG, JPEG/)
-    expect(attachmentProblem({ type: 'image/png', size: 10 * 1024 * 1024 + 1 })).toMatch(/over 10 MB/)
-    expect(attachmentProblem({ type: 'image/png', size: 0 })).toMatch(/empty/)
+  it('rejects other types, empty files and files over 10 MB, each for its own reason', () => {
+    const wrongType = attachmentProblem({ type: 'image/svg+xml', size: 10 })
+    const tooBig = attachmentProblem({ type: 'image/png', size: 10 * 1024 * 1024 + 1 })
+    const empty = attachmentProblem({ type: 'image/png', size: 0 })
+    expect(attachmentProblem({ type: 'application/pdf', size: 10 })).toBe(wrongType)
+    expect(attachmentProblem({ type: 'image/png', size: 10 * 1024 * 1024 })).toBeNull()
+    expect(new Set([wrongType, tooBig, empty, null]).size).toBe(4)
   })
 })
 

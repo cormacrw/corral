@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import type { EpicReviewItem, Inbox, RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { and, eq } from 'drizzle-orm'
-import { afterAll, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './test-runner.ts'
 import { complete, epicEventText } from './epic-prs.ts'
@@ -20,6 +20,11 @@ databaseFixture('postgres', async () => {
 afterAll(async () => {
   runner?.close()
   await t?.close()
+})
+// Every test works in its own project. Pausing them all here, even after a
+// failure, keeps a test's leftovers out of the next test's scheduler passes.
+afterEach(async () => {
+  await t?.db.update(schema.projects).set({ paused: true })
 })
 const inbox = async () => (await fetch(`${t.server!.url}/api/inbox`)).json() as Promise<Inbox>
 async function capture(name: string, data: unknown) {
@@ -101,11 +106,10 @@ it.each(['epic', 'each_task'] as const)('opens %s PR only after the last board t
   expect(approved.status).toBe(200)
   expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(false)
   expect(t.github.calls.some(c => c.method === 'merge')).toBe(false)
-  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
 it('keeps changes requested out of Inbox and hands them to a developer run on the parent, with no task', async () => {
-  const { project, epic, other } = await setup()
+  const { epic, other } = await setup()
   const job = await lastMerge(other.id, epic.id)
   const before = (await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))).length
   expect(await report(job, 'changes_requested')).toMatchObject({ ok: true })
@@ -116,7 +120,6 @@ it('keeps changes requested out of Inbox and hands them to a developer run on th
   expect(operation!.fixBrief).toContain('wrong search field')
   await capture('changes-requested.json', { reviewerReport: { outcome: 'changes_requested', summary: 'UI sends the wrong search field; align it with the API.' }, request: { method: 'GET', url: `${t.server!.url}/api/inbox` }, status: 200, response: await inbox(), epic: await (await fetch(`${t.server!.url}/api/epics/${epic.id}`)).json() })
   expect(await reviewState(epic.id)).toBe('changes_requested')
-  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
 it('invalidates human and in-flight reviews when Backlog work reaches the board', async () => {
@@ -137,7 +140,6 @@ it('invalidates human and in-flight reviews when Backlog work reaches the board'
   await t.request('POST', `/api/projects/${project.slug}/tasks/${late.number}/transitions`, { type: 'approve' })
   expect(await report(next, 'approved')).toMatchObject({ ok: false })
   expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(false)
-  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
 const reviewState = async (epicId: string) => (await t.db.select().from(schema.epics).where(eq(schema.epics.id, epicId)))[0]!.reviewState
@@ -189,11 +191,10 @@ it('human changes requested create a fix, hold the PR, and bring the same PR bac
   const pullsAfter = [...t.github.pulls.values()].filter(p => p.head === epic.branch)
   expect(pullsAfter.map(p => p.number)).toEqual(pullsBefore.map(p => p.number))
   await capture('fix-merged-inbox.json', { epicReviewState: await reviewState(epic.id), prNumber: pullsAfter[0]!.number, secondReviewAssignment: { runId: second.runId, headSha: second.headSha, role: second.role }, inboxItem: { id: back.id, type: back.type, headSha: back.headSha, prUrl: back.prUrl, tasks: back.tasks.map(e => e.task.ref) } })
-  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
 it('sends the parent PR back to review if its fix task is dropped from the board', async () => {
-  const { project, epic, other } = await setup()
+  const { epic, other } = await setup()
   const job = await lastMerge(other.id, epic.id)
   expect(await report(job, 'approved')).toMatchObject({ ok: true })
   expect((await t.request('POST', `/api/epics/${epic.id}/review`, { action: 'request_changes', headSha: job.headSha, text: 'Deleting needs a confirmation' })).status).toBe(200)
@@ -203,15 +204,13 @@ it('sends the parent PR back to review if its fix task is dropped from the board
   const second = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.runId !== job.runId)).job
   expect(second.headSha).toBe(job.headSha)
   expect(await reviewState(epic.id)).toBe('in_review')
-  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
 it('never opens parent PRs in direct mode', async () => {
-  const { project, epic, other } = await setup('direct')
+  const { epic, other } = await setup('direct')
   await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, other.id))
   await t.orchestrator.schedule()
   expect([...t.github.pulls.values()].some(p => p.head === epic.branch)).toBe(false)
-  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
 it('fences a moved PR head and retries an expired integration lease', async () => {
@@ -234,11 +233,10 @@ it('fences a moved PR head and retries an expired integration lease', async () =
   await t.orchestrator.schedule()
   const retried = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.runId !== next.runId && m.job.runId !== job.runId)).job
   expect(await report(retried, 'approved')).toMatchObject({ ok: true })
-  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
 it('stops retrying after three failed reviews on a head and puts the parent PR in front of the human', async () => {
-  const { project, epic, other } = await setup()
+  const { epic, other } = await setup()
   let job = await lastMerge(other.id, epic.id)
   for (let attempt = 1; attempt < 3; attempt++) {
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 1 }, headSha: null })
@@ -261,11 +259,10 @@ it('stops retrying after three failed reviews on a head and puts the parent PR i
   expect(item.body).toContain('Integration review failed 3 times')
   expect(item.body).toContain('exited (code 1)')
   expect(item.sender.role).toBe('system')
-  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
 it.each(['in_review', 'human_review', 'conflict'] as const)('sends a parent task whose PR was closed in %s back to open, and reopening restarts review', async (state) => {
-  const { project, epic, other } = await setup()
+  const { epic, other } = await setup()
   const job = await lastMerge(other.id, epic.id)
   await t.db.update(schema.epics).set({ reviewState: state }).where(eq(schema.epics.id, epic.id))
   const pr = [...t.github.pulls.values()].find(p => p.head === epic.branch)!
@@ -280,11 +277,10 @@ it.each(['in_review', 'human_review', 'conflict'] as const)('sends a parent task
   t.clock.now = new Date(t.clock.now.getTime() + 121_000)
   await t.orchestrator.schedule()
   expect(await reviewState(epic.id)).toBe('in_review')
-  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
 it('holds no parent lock while GitHub answers a verdict', async () => {
-  const { project, epic, other } = await setup()
+  const { epic, other } = await setup()
   const job = await lastMerge(other.id, epic.id)
   const live = t.github.getPullRequest.bind(t.github)
   const spy = vi.spyOn(t.github, 'getPullRequest').mockImplementationOnce(async (...args) => {
@@ -294,7 +290,6 @@ it('holds no parent lock while GitHub answers a verdict', async () => {
   })
   expect(await report(job, 'approved')).toMatchObject({ ok: true })
   spy.mockRestore()
-  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
 it('starts no integration review until a reviewer runner has a free slot, then records the runner on the run', async () => {
@@ -327,7 +322,7 @@ it('keeps reading history from before parent fixes ran with no task (D29)', () =
 })
 
 it('keeps structured findings and separate rounds at their reviewed heads, including an empty report', async () => {
-  const { project, epic, task, other } = await setup()
+  const { epic, task, other } = await setup()
   const first = await lastMerge(other.id, epic.id)
   const findings = [
     { level: 'blocking', text: 'UI sends query but the API expects search.', taskRefs: [task.ref, other.ref] },
@@ -369,11 +364,10 @@ it('keeps structured findings and separate rounds at their reviewed heads, inclu
     reports: [{ runId: first.runId, input, response }, { runId: second.runId, input: emptyInput, response: emptyResponse }],
     inbox: { request: { method: 'GET', url: `${t.server!.url}/api/inbox` }, status: 200, response: item }
   })
-  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
 it('keeps a pre-round integration review in Inbox with its summary and empty findings', async () => {
-  const { project, epic, other } = await setup()
+  const { epic, other } = await setup()
   const job = await lastMerge(other.id, epic.id)
   // Historical persisted shape: completed run and epic state, no round row.
   const summary = 'Legacy review: API and UI integrate correctly.'
@@ -385,5 +379,4 @@ it('keeps a pre-round integration review in Inbox with its summary and empty fin
     scope: 'Pre-change database shape: approved run with summary and no epic_review_rounds row',
     request: { method: 'GET', url: `${t.server!.url}/api/inbox` }, status: 200, response: item
   })
-  await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })

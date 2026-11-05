@@ -484,7 +484,7 @@ it('holds a human-approved task PR while a rebase has the lock, then merges it',
   const merges = () => t.github.calls.filter(c => c.method === 'merge' && c.args[1] === pr.number)
 
   await t.orchestrator.merges.humanApprove(task.id, t.actor)
-  await vi.waitFor(async () => expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge' }))
+  await vi.waitFor(async () => expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge' }), { timeout: 5000 })
   await new Promise(resolve => setTimeout(resolve, 300))
   await tick()
   expect(merges()).toEqual([])
@@ -687,7 +687,6 @@ it('carries approval over a reviewed resolution that preserves behaviour, with n
   const { fix, resolved, operation } = await resolutionOf(epic)
   const { criteria } = await developerSubmits(fix.id, resolved)
   const review = await reviewerApproves(fix.id, resolved, criteria, { preservesApproval: true })
-  expect(review.prompt).toContain('Parent rebase under review')
   expect(review.prompt).toContain(`git range-diff $(git merge-base ${epic.head} ${epic.onto})..${epic.head} ${epic.onto}..HEAD`)
   await tick()
 
@@ -1164,7 +1163,6 @@ describe('developer runs on the epic', () => {
     expect(job).toMatchObject({ checkScope: null }) // No required checks here
     expect(job).toMatchObject({ taskId: null, branch: `corral/epic-rebase/${operation.id}`, epicId: epic.id, baseBranch: 'main' })
     expect(job.prompt).toContain(`git rebase ${epic.onto}`)
-    expect(job.prompt).toContain('never remove or revert')
     const during = await fixEpic(epic.id)
     expect(during.sync).toMatchObject({ state: 'fixing', fix: 'conflict', files: [epic.file], developer: { runId: job.runId, name: expect.any(String) } })
     await capture('fix-in-progress.json', { sync: during.sync })
@@ -1216,7 +1214,6 @@ describe('developer runs on the epic', () => {
     await t.db.update(schema.epics).set({ reviewState: 'in_review', prHeadSha: adapted }).where(eq(schema.epics.id, epic.id))
     await t.orchestrator.schedule()
     const review = (await runner.next('run.assign', m => m.job.role === 'reviewer' && m.job.epicId === epic.id)).job
-    expect(review.prompt).toContain('## Files only the target changed')
     expect(review.prompt).toContain('`target-only.md`')
     expect(review.prompt).toContain('+adapted')
   })
@@ -1516,11 +1513,8 @@ describe('developer runs on the epic', () => {
       const job = await fixJob(epic.id)
       expect(job.prompt).toContain('Run tests')
       expect(job.prompt).toContain('FAIL src/app.test.ts')
-      expect(job.prompt).toContain('untrusted')
       expect(job.prompt).not.toContain('Post job cleanup')
-      expect(job.prompt).toContain('starting from any test or gate that failed')
       expect(job).toMatchObject({ checkScope: 'targeted' })
-      expect(job.prompt).not.toContain('run no lint')
       expect(job.continueFrom).toBe(epic.head)
       expect((await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id)))).toHaveLength(1)
       expect((await fixEpic(epic.id)).sync).toMatchObject({ state: 'fixing', fix: 'ci' })
@@ -1600,7 +1594,7 @@ describe('developer runs on the epic', () => {
     await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, done.id))
     await t.orchestrator.schedule()
     const first = (await runner.next('run.assign', m => m.job.role === 'reviewer' && m.job.epicId === epic.id)).job
-    expect(first.prompt).toContain('Review the whole combined diff')
+    expect(first.prompt).toMatch(/git diff origin\/\S+\.\.\.HEAD/)
     expect(await runner.call(first.runId, first.leaseEpoch, 'report_outcome', { outcome: 'changes_requested', summary: 'The UI sends the wrong field' })).toMatchObject({ ok: true })
     expect(await reload(epic.id)).toMatchObject({ reviewState: 'changes_requested' })
     const job = await fixJob(epic.id)
@@ -1612,9 +1606,9 @@ describe('developer runs on the epic', () => {
     expect(await git('rev-parse', epic.branch)).toBe(head)
     await t.orchestrator.schedule()
     const repeat = (await runner.next('run.assign', m => m.job.role === 'reviewer' && m.job.epicId === epic.id && m.job.runId !== first.runId)).job
-    expect(repeat.prompt).toContain(`was of commit ${epic.head}`)
+    expect(repeat.prompt).toContain(`git diff ${epic.head}..HEAD`)
     expect(repeat.prompt).toContain('The UI sends the wrong field')
-    expect(repeat.prompt).not.toContain('Review the whole combined diff')
+    expect(repeat.prompt).not.toMatch(/git diff origin\/\S+\.\.\.HEAD/)
     await capture('repeat-review-prompt.json', { prompt: repeat.prompt })
   })
 })

@@ -3,25 +3,23 @@ import { shellTitle } from '~/features/shell/utils/shell'
 
 const projects = [{ slug: 'corral', name: 'Corral' }]
 const agents = [{ name: 'Atlas' }]
+const title = (path: string) => shellTitle(path, projects, agents)
 
 describe('shellTitle', () => {
-  it.each([
-    ['/home', 'Home'],
-    ['/plan/session-1', 'Plan'],
-    ['/inbox/item-1', 'Inbox'],
-    ['/projects', 'Projects'],
-    ['/projects/corral', 'Corral'],
-    ['/projects/corral/board', 'Corral · Board'],
-    ['/projects/corral/pull-requests', 'Corral · Pull requests'],
-    ['/projects/gone/backlog', 'gone · Backlog'],
-    ['/tasks/COR-3', 'COR-3'],
-    ['/epics/e-1', 'Epic'],
-    ['/agents/atlas', 'Atlas'],
-    ['/agents/atlas/run-1', 'Atlas'],
-    ['/agents/nobody', 'Agent'],
-    ['/settings/profile', 'Settings'],
-    ['/', 'Corral']
-  ])('names %s', (path, title) => {
-    expect(shellTitle(path, projects, agents)).toBe(title)
+  it('names a project, task or agent from the path', () => {
+    expect(title('/projects/corral')).toBe('Corral')
+    expect(title('/projects/corral/board')).toContain('Corral')
+    expect(title('/tasks/COR-3')).toBe('COR-3')
+    expect(title('/agents/atlas/run-1')).toBe('Atlas')
+  })
+
+  it('falls back to the slug for a project that isn\'t loaded, and never echoes an unknown agent', () => {
+    expect(title('/projects/gone/backlog')).toContain('gone')
+    expect(title('/agents/nobody')).not.toContain('nobody')
+  })
+
+  it('titles nested pages after their section', () => {
+    expect(title('/plan/session-1')).toBe(title('/plan'))
+    expect(title('/inbox/item-1')).toBe(title('/inbox'))
   })
 })

@@ -32,7 +32,7 @@ describe('two-phase update hold', () => {
       expect((await row(job.runId)).state).toBe('completed')
       const session = await t.request('GET', `/api/plan/sessions/${job.planSessionId}`).then(r => r.json()) as PlanSessionDetail
       expect(session.activeRunId).toBeNull()
-    })
+    }, { timeout: 5000 })
   }
   async function startSession(projectId: string) {
     const res = await t.request('POST', '/api/plan/sessions', { projectId, text: 'Plan this feature' })
@@ -56,7 +56,7 @@ describe('two-phase update hold', () => {
     const session = await startSession(project.id)
     const job = (await runner.next('run.assign', m => m.job.runId === session.activeRunId)).job
     runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'pm-session' })
-    await vi.waitFor(async () => expect((await row(job.runId)).state).toBe('running'))
+    await vi.waitFor(async () => expect((await row(job.runId)).state).toBe('running'), { timeout: 5000 })
     expect(await hold()).toEqual({ busy: 2 })
     expect(await runner.call(job.runId, job.leaseEpoch, 'ask_question', { question: 'Which format?' })).toMatchObject({ ok: true })
     await end(job)
@@ -64,7 +64,7 @@ describe('two-phase update hold', () => {
     expect((await t.request('POST', `/api/plan/sessions/${session.id}/messages`, { text: 'CSV please' })).status).toBe(201)
     const reply = (await runner.next('run.assign', m => m.job.planSessionId === session.id && m.job.runId !== job.runId)).job
     runner.send({ type: 'run.started', runId: reply.runId, leaseEpoch: reply.leaseEpoch, agentSessionId: 'pm-session' })
-    await vi.waitFor(async () => expect((await row(reply.runId)).state).toBe('running'))
+    await vi.waitFor(async () => expect((await row(reply.runId)).state).toBe('running'), { timeout: 5000 })
     await t.db.update(runs).set({ state: 'completed', endedAt: new Date() }).where(eq(runs.id, worker!.id))
     expect(await hold()).toEqual({ busy: 1 })
     expect(await hold()).toEqual({ busy: 1 })

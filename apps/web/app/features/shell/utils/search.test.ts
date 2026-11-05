@@ -1,45 +1,43 @@
+import type { Agent, PlanSession, Project, Task } from '@corral/contracts'
 import { describe, expect, it } from 'vitest'
-import { agents, epics, planSessions, projects, tasks } from '~/prototype/fixtures.ts'
 import { highlight, mobileSearch, searchPages } from '~/features/shell/utils/search.ts'
 
-const data = { projects, agents, tasks, epics, planSessions }
+const projects = [{ id: 'p1', slug: 'corral', name: 'Corral' }] as Project[]
+const agents = [{ id: 'a1', name: 'Atlas', role: 'developer' }] as Agent[]
+const tasks = [
+  { id: 't1', ref: 'COR-1', title: 'Billing export' },
+  { id: 't2', ref: 'COR-2', title: 'Billing page' },
+  { id: 't3', ref: 'COR-3', title: 'Login form' }
+] as Task[]
+const planSessions = [{ id: 's1', title: 'Search filters' }] as PlanSession[]
+const data = { projects, agents, tasks, epics: [], planSessions }
 
 describe('mobileSearch', () => {
   it('offers only pages to go to before you type', () => {
     const results = mobileSearch('  ', data, 3)
-    expect(results.pages.map(p => p.label)).toEqual(['Plan', 'Inbox', 'Settings'])
+    expect(results.pages).toHaveLength(3)
     expect(results.epics).toEqual([])
     expect(results.tasks).toEqual([])
     expect(results.sessions).toEqual([])
   })
 
-  it('matches pages, epics, tasks and Plan sessions case-insensitively', () => {
-    const project = projects[0]!
-    const parent = tasks.find(t => t.status === 'parent')!
-    const session = planSessions[0]!
-    const someTask = tasks[0]!
-    expect(mobileSearch(project.name.toUpperCase(), data).pages.some(p => p.to === `/projects/${project.slug}/board`)).toBe(true)
-    expect(mobileSearch(parent.title.toLowerCase(), data).tasks).toContainEqual(parent)
-    expect(mobileSearch(parent.ref.toLowerCase(), data).tasks).toContainEqual(parent)
-    expect(mobileSearch(session.title, data).sessions).toContainEqual(session)
-    expect(mobileSearch(someTask.title, data).tasks).toContainEqual(someTask)
-  })
-
-  it('finds a task by its ref', () => {
-    const someTask = tasks[0]!
-    expect(mobileSearch(someTask.ref.toLowerCase(), data).tasks[0]?.ref).toBe(someTask.ref)
+  it('matches pages, tasks by title or ref, and Plan sessions case-insensitively', () => {
+    expect(mobileSearch('CORRAL', data).pages.some(p => p.to === '/projects/corral/board')).toBe(true)
+    expect(mobileSearch('login FORM', data).tasks.map(t => t.ref)).toEqual(['COR-3'])
+    expect(mobileSearch('cor-2', data).tasks.map(t => t.ref)).toEqual(['COR-2'])
+    expect(mobileSearch('search', data).sessions).toEqual(planSessions)
   })
 
   it('caps each group', () => {
-    expect(mobileSearch('·', data, 2).pages).toHaveLength(2)
+    expect(mobileSearch('billing', data, 1).tasks).toHaveLength(1)
+    expect(mobileSearch('corral', data, 2).pages).toHaveLength(2)
   })
 })
 
 describe('searchPages', () => {
   it('goes to each project\'s pages and each agent', () => {
-    const pages = searchPages(projects, agents)
-    expect(pages.filter(p => p.to.startsWith('/projects/'))).toHaveLength(projects.length * 4)
-    expect(pages.filter(p => p.to.startsWith('/agents/'))).toHaveLength(agents.length)
+    const to = searchPages(projects, agents).map(p => p.to)
+    expect(to).toEqual(expect.arrayContaining(['/projects/corral', '/projects/corral/board', '/projects/corral/backlog', '/agents/atlas']))
   })
 })
 

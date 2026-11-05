@@ -425,7 +425,7 @@ describe('auto-deploy.sh deciding what to do', { timeout: 30_000 }, () => {
         await vi.waitFor(async () => {
           const free = await exec('flock', ['-n', lock, 'true']).then(() => true, () => false)
           if (free) throw new Error('not held yet')
-        })
+        }, { timeout: 5000 })
         const { code, output } = await run('backup.sh', { CORRAL_BACKUP_LOCK_WAIT: '0' })
         expect(code).toBe(1)
         expect(output).toContain('held the lock')

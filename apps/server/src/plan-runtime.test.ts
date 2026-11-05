@@ -3,7 +3,7 @@ import { schema } from '@corral/db'
 import { and, eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner, sleep } from './test-runner.ts'
+import { FakeRunner } from './test-runner.ts'
 
 const { agents, auditLog, planSessions } = schema
 
@@ -26,10 +26,9 @@ describe('plan session runtime', () => {
   const pmJob = async (sessionId: string): Promise<RunJob> => (await runner.next('run.assign', m => m.job.planSessionId === sessionId)).job
 
   async function endTurn(job: RunJob, agentSessionId: string, reply: string) {
+    // The hub handles a run's messages in order, so no waits are needed between them
     runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId })
-    await sleep(50)
     runner.send({ type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [{ type: 'message', text: reply }] })
-    await sleep(50)
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
     await expect.poll(async () => (await t.request('GET', `/api/plan/sessions/${job.planSessionId}`).then(r => r.json()) as PlanSession).activeRunId).toBeNull()
   }

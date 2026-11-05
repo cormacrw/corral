@@ -41,14 +41,14 @@ describe('runner capacity, runtimes and roles', () => {
         if (message?.type === 'run.assign') return [runner, message] as const
       }
       throw new Error('Not assigned yet')
-    })
+    }, { timeout: 5000 })
     found[0].received.splice(found[0].received.indexOf(found[1]), 1)
     return [found[0], found[1].job] as const
   }
 
   async function started(runner: FakeRunner, job: RunJob, agentSessionId: string) {
     runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId })
-    await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, job.runId)))[0]!.agentSessionId).toBe(agentSessionId))
+    await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, job.runId)))[0]!.agentSessionId).toBe(agentSessionId), { timeout: 5000 })
   }
 
   // The developer pushes and reports; the reviewer requests changes
@@ -78,12 +78,12 @@ describe('runner capacity, runtimes and roles', () => {
     const project = await t.createProject({ repository: 'cormacrw/test-app' })
     const ready = [await readyTask(project), await readyTask(project), await readyTask(project)]
     await t.orchestrator.schedule()
-    await vi.waitFor(() => expect(assigns(a).length + assigns(b).length).toBe(3))
+    await vi.waitFor(() => expect(assigns(a).length + assigns(b).length).toBe(3), { timeout: 5000 })
     expect(assigns(a)).toHaveLength(1)
     expect(assigns(b)).toHaveLength(2)
     // The runner list counts each runner's slots in use, live
     const slots = async () => ((await t.request('GET', '/api/runner').then(r => r.json())) as RunnerStatus).runners.map(r => [r.id, r.slotsInUse, r.slots])
-    await vi.waitFor(async () => expect(await slots()).toEqual([['A', 1, 1], ['B', 2, 2]]))
+    await vi.waitFor(async () => expect(await slots()).toEqual([['A', 1, 1], ['B', 2, 2]]), { timeout: 5000 })
     expect(t.events.filter(e => e.type === 'runner.status').at(-1)).toMatchObject({ status: { runners: [{ id: 'A', slotsInUse: 1 }, { id: 'B', slotsInUse: 2 }] } })
 
     const fourth = await readyTask(project)
@@ -106,7 +106,7 @@ describe('runner capacity, runtimes and roles', () => {
     expect(ready.map(r => r.id)).not.toContain(fourth.id)
     expect((await t.db.select().from(runs).where(eq(runs.id, next.job.runId)))[0]!.runnerId).toBe('B')
     expect(await t.request('GET', `/api/runs/${next.job.runId}`).then(r => r.json())).toMatchObject({ runnerId: 'B', runnerName: 'B' })
-    await vi.waitFor(async () => expect(await slots()).toEqual([['A', 1, 1], ['B', 2, 2]]))
+    await vi.waitFor(async () => expect(await slots()).toEqual([['A', 1, 1], ['B', 2, 2]]), { timeout: 5000 })
   }, 60000)
 
   it('sends PM turns and design runs only to runners that take those roles', async () => {
@@ -135,7 +135,7 @@ describe('runner capacity, runtimes and roles', () => {
     // A build task still goes to A
     const build = await readyTask(project)
     await t.orchestrator.schedule()
-    await vi.waitFor(() => expect(assigns(a).map(m => m.type === 'run.assign' && m.job.taskId)).toEqual([build.id]))
+    await vi.waitFor(() => expect(assigns(a).map(m => m.type === 'run.assign' && m.job.taskId)).toEqual([build.id]), { timeout: 5000 })
     expect(assigns(a).every(m => m.type === 'run.assign' && m.job.role === 'developer' && m.job.taskType !== 'design')).toBe(true)
   }, 60000)
 
@@ -231,7 +231,7 @@ describe('runner capacity, runtimes and roles', () => {
     const revision = (await developer.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
     expect(await runRow(revision.runId)).toMatchObject({ sessionStart: 'resumed_warm' })
     developer.send({ type: 'run.started', runId: revision.runId, leaseEpoch: revision.leaseEpoch, agentSessionId: 'session-2', resumeFailed: true })
-    await vi.waitFor(async () => expect(await runRow(revision.runId)).toMatchObject({ sessionStart: 'fresh' }))
+    await vi.waitFor(async () => expect(await runRow(revision.runId)).toMatchObject({ sessionStart: 'fresh' }), { timeout: 5000 })
   }, 60000)
 
   it('starts a revision fresh from the pushed branch on another runner when the previous one is offline', async () => {
@@ -246,7 +246,7 @@ describe('runner capacity, runtimes and roles', () => {
     const b = await connect('B', { roles: ['reviewer'] })
     await changesRequested(project, task, a, first, [b], async () => {
       a.close()
-      await vi.waitFor(() => expect(t.runner.isOnline('A')).toBe(false))
+      await vi.waitFor(() => expect(t.runner.isOnline('A')).toBe(false), { timeout: 5000 })
     })
     const c = await connect('C', { roles: ['developer'] })
 
@@ -272,7 +272,7 @@ describe('runner capacity, runtimes and roles', () => {
       runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: sessionId })
       runner.send({ type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [{ type: 'message', text: 'Noted.' }] })
       runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
-      await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, job.runId)))[0]!.state).toBe('completed'))
+      await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, job.runId)))[0]!.state).toBe('completed'), { timeout: 5000 })
     }
     await endTurn(home, firstTurn, 'pm-session')
     // Both runners are free; each follow-up still goes to the first turn's runner
@@ -286,7 +286,7 @@ describe('runner capacity, runtimes and roles', () => {
 
     // Its runner goes away: the next turn cold-starts elsewhere from the saved conversation
     home.close()
-    await vi.waitFor(() => expect(t.runner.isOnline(home === a ? 'A' : 'B')).toBe(false))
+    await vi.waitFor(() => expect(t.runner.isOnline(home === a ? 'A' : 'B')).toBe(false), { timeout: 5000 })
     expect((await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'One more thing' })).status).toBe(201)
     const moved = (await away.next('run.assign', m => m.job.role === 'pm')).job
     expect(moved).toMatchObject({ agentSessionId: null, fallbackPrompt: null })

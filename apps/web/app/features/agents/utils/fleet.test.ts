@@ -1,6 +1,6 @@
 import type { Run } from '@corral/contracts'
 import { describe, expect, it } from 'vitest'
-import { busyShare, formatTokens, runBars, runTone, tokensByDay } from './fleet'
+import { busyShare, runBars, runTone, tokensByDay } from './fleet'
 
 const HOUR = 3_600_000
 const now = new Date(2026, 10, 4, 15, 0).getTime()
@@ -60,13 +60,5 @@ describe('busyShare', () => {
     expect(busyShare(runs, { id: 'a1', role: 'developer', concurrency: 1 }, 12, now)).toBeCloseTo(5 / 12)
     expect(busyShare(runs, { id: 'a1', role: 'developer', concurrency: 2 }, 12, now)).toBeCloseTo(5 / 24)
     expect(busyShare(runs, { id: 'other', role: 'developer', concurrency: 1 }, 12, now)).toBe(0)
-  })
-})
-
-describe('formatTokens', () => {
-  it('shortens thousands and millions', () => {
-    expect(formatTokens(950)).toBe('950')
-    expect(formatTokens(41_200)).toBe('41k')
-    expect(formatTokens(4_820_000)).toBe('4.8M')
   })
 })

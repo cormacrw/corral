@@ -53,15 +53,32 @@ async function start() {
   return page
 }
 
+// Each test's plugin adds window and document listeners; removed after it so
+// an earlier instance never flushes into a later test's beacon
+const added: [EventTarget, string, EventListenerOrEventListenerObject][] = []
+function trackListeners(target: Window | Document) {
+  const add = target.addEventListener.bind(target)
+  vi.spyOn(target, 'addEventListener').mockImplementation((type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions) => {
+    if (!listener) return
+    added.push([target, type, listener])
+    add(type, listener, options)
+  })
+}
+
 describe('navigation timing', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    trackListeners(window)
+    trackListeners(document)
     vi.stubGlobal('defineNuxtPlugin', (plugin: unknown) => plugin)
     Object.defineProperty(navigator, 'sendBeacon', { configurable: true, value: vi.fn(() => true) })
   })
   afterEach(() => {
+    for (const [target, type, listener] of added.splice(0)) target.removeEventListener(type, listener)
+    vi.clearAllTimers()
     vi.useRealTimers()
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
   it('records the first page once, from the start of the document', async () => {

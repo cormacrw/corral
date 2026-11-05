@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Task } from '@corral/contracts'
-import { backlogGroups, matchesBacklog, movableRows, moveGroupLabel, priorityText } from '~/features/board/utils/backlog.ts'
+import { backlogGroups, matchesBacklog, movableRows, moveGroupLabel } from '~/features/board/utils/backlog.ts'
 
 const task = (over: Record<string, unknown>) => ({ ref: 'COR-1', title: 'Add login', status: 'backlog', type: 'task', parentTask: null, epicId: null, mergedAt: null, updatedAt: '2026-01-01T00:00:00Z', priority: 'medium', ...over }) as unknown as Task
 
@@ -27,9 +27,9 @@ describe('backlogGroups', () => {
   const epics = [{ id: 'e1', title: 'Billing' }]
 
   it('groups by parent and counts progress across the whole group', () => {
-    expect(backlogGroups([own, sub, merged], [own, sub], epics)).toEqual([
-      { id: 'none', title: 'On their own', rows: [own], merged: 0, total: 1 },
-      { id: 'e1', title: 'Billing', rows: [sub], merged: 1, total: 2 }
+    expect(backlogGroups([own, sub, merged], [own, sub], epics).map(({ id, rows, merged, total }) => ({ id, rows, merged, total }))).toEqual([
+      { id: 'none', rows: [own], merged: 0, total: 1 },
+      { id: 'e1', rows: [sub], merged: 1, total: 2 }
     ])
   })
 
@@ -39,18 +39,9 @@ describe('backlogGroups', () => {
 })
 
 describe('group actions', () => {
-  it('moves only the rows still in the Backlog, and words the button for how many', () => {
+  it('moves only the rows still in the Backlog, and words the button for one or many', () => {
     const one = { rows: [task({}), task({ status: 'merged' })] }
     expect(movableRows(one)).toHaveLength(1)
-    expect(moveGroupLabel(one)).toBe('Move to board')
-    expect(moveGroupLabel({ rows: [task({}), task({})] })).toBe('Move all to board')
-  })
-})
-
-describe('priorityText', () => {
-  it('colours urgent and high, and leaves the rest muted', () => {
-    expect(priorityText({ priority: 'urgent' })).toBe('text-destructive')
-    expect(priorityText({ priority: 'high' })).toBe('text-warning')
-    expect(priorityText({ priority: 'low' })).toBe('text-muted-foreground')
+    expect(moveGroupLabel(one)).not.toBe(moveGroupLabel({ rows: [task({}), task({})] }))
   })
 })

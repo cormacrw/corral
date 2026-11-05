@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
-import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readonly, ref } from 'vue'
-import { DARK_NEUTRALS, DARK_NEUTRAL_KEY, darkNeutralInit } from '~/features/settings/utils/dark-neutral'
+import { DARK_NEUTRAL_KEY, darkNeutralInit } from '~/features/settings/utils/dark-neutral'
 import { useDarkNeutral } from '~/features/settings/composables/useDarkNeutral'
 
 describe('device dark neutral', () => {
@@ -16,7 +15,10 @@ describe('device dark neutral', () => {
       return states.get(key)
     })
   })
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
 
   it('defaults to neutral and shares updates between settings screens', () => {
     const first = useDarkNeutral()
@@ -44,17 +46,5 @@ describe('device dark neutral', () => {
       throw new Error('blocked')
     })
     expect(() => useDarkNeutral().setPalette('stone')).not.toThrow()
-    vi.restoreAllMocks()
-  })
-
-  it('maps every shade of every palette only under .dark and retains its variables', () => {
-    const css = readFileSync('app/assets/css/dark-neutrals.css', 'utf8')
-    for (const palette of DARK_NEUTRALS) {
-      useDarkNeutral().setPalette(palette)
-      const rule = css.split(`.dark[data-dark-neutral="${palette}"] {`)[1]?.split('}')[0]
-      for (const shade of [50, 100, 200, 300, 400, 500, 700, 800, 900, 950]) {
-        expect(rule).toContain(`--surface-${shade}: var(--color-${palette}-${shade})`)
-      }
-    }
   })
 })

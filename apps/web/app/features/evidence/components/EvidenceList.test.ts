@@ -27,44 +27,42 @@ const render = (items = [...evidence('c'), ...evidence(null)]) => mount(Evidence
   global: { components: { MarkdownText, Icon: Stub, AppModal: Stub } }
 })
 
+const fileName = (button: { text: () => string }) => kinds.find(kind => button.text().includes(kind + '.file'))
+
 describe('EvidenceList', () => {
-  it('shows human kinds then inline markdown and collapses all agent kinds in each group', async () => {
+  it('keeps agent artifacts in a closed disclosure per group and human files outside it', () => {
     const wrapper = render()
     const disclosures = wrapper.findAll('details')
     expect(disclosures).toHaveLength(2)
     for (const details of disclosures) {
       expect(details.attributes('open')).toBeUndefined()
-      expect(details.get('summary').text()).toBe('Agent artifacts (4)')
-      expect(details.findAll('button').map(b => b.text())).toEqual(
-        ['test_output', 'log', 'text', 'other'].map(kind => kind + '.file' + kind.replace('_', ' ') + ' · round 1')
-      )
-      // Native details controls visibility and supports pointer and keyboard activation.
-      details.element.open = true
-      expect(details.element.open).toBe(true)
+      expect(details.findAll('button').map(fileName).sort()).toEqual(['log', 'other', 'test_output', 'text'])
     }
-    const humanButtons = wrapper.findAll('button').filter(b => !b.element.closest('details'))
-    expect(humanButtons.map(b => b.text())).toEqual(
-      [...kinds.slice(0, 3), ...kinds.slice(0, 3)].map(kind => kind + '.file' + kind + ' · round 1')
-    )
-    expect(wrapper.findAll('strong').map(n => n.text())).toEqual(['Explained', 'Explained'])
-    expect(wrapper.findAll('code').map(n => n.text())).toEqual(['code', 'code'])
-    expect(wrapper.findAll('a')).toHaveLength(0)
-    const html = wrapper.html()
-    expect(html.indexOf('Reviewer first')).toBeLessThan(html.indexOf('screenshot.file'))
-    expect(html.indexOf('request.file')).toBeLessThan(html.indexOf('Explained'))
-    await humanButtons[0]!.trigger('click')
-    expect(wrapper.get('[data-title="screenshot.file"]').attributes('data-open')).toBe('true')
+    const human = wrapper.findAll('button').filter(b => !b.element.closest('details'))
+    expect(human.map(fileName).sort()).toEqual(['request', 'request', 'screenshot', 'screenshot', 'video', 'video'])
   })
 
-  it('shows a Download link for the file under the video player', async () => {
+  it('renders notes as markdown and shows the reviewer\'s note on its criterion', () => {
+    const wrapper = render()
+    expect(wrapper.findAll('strong').map(n => n.text())).toEqual(['Explained', 'Explained'])
+    expect(wrapper.text()).toContain('Reviewer first')
+  })
+
+  it('opens a file in the viewer', async () => {
+    const wrapper = render()
+    const body = () => wrapper.get('[data-testid="evidence-viewer-body"]')
+    expect(body().find('img').exists()).toBe(false)
+    await wrapper.findAll('button').find(b => fileName(b) === 'screenshot')!.trigger('click')
+    expect(body().get('img').attributes('src')).toBe('/screenshot')
+  })
+
+  it('offers the video file for download', async () => {
     const wrapper = render(evidence('c').filter(e => e.kind === 'video'))
-    await wrapper.findAll('button').find(b => b.text().startsWith('video.file'))!.trigger('click')
-    const link = wrapper.get('a')
+    await wrapper.findAll('button').find(b => fileName(b) === 'video')!.trigger('click')
     expect(wrapper.find('video').exists()).toBe(true)
-    expect(link.text()).toBe('Download')
+    const link = wrapper.get('a[download]')
     expect(link.attributes('href')).toBe('/video')
     expect(link.attributes('download')).toBe('video.file')
-    expect(wrapper.find('video + a').exists()).toBe(true)
   })
 
   it('leaves artifact-only main areas empty and distinguishes missing evidence', () => {

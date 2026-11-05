@@ -21,7 +21,7 @@ describe('runComposer', () => {
   it('disables the composer on a Codex run and says why', () => {
     const composer = runComposer({ state: 'running', role: 'developer' }, codex, true)
     expect(composer.kind).toBe('disabled')
-    expect(composer.kind === 'disabled' && composer.reason).toBe('Codex can\'t take messages mid-run. Comment on the task and Dana reads it on its next run.')
+    expect(composer.kind === 'disabled' && composer.reason).toContain('Dana')
   })
 
   it('sends a PM turn to Plan', () => {

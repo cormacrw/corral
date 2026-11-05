@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm'
 import { writeFile } from 'node:fs/promises'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner, sleep } from './test-runner.ts'
+import { FakeRunner } from './test-runner.ts'
 
 // Exercise the actual HTTP session services and fenced runner WebSocket tools.
 describe('PM threads', () => {
@@ -41,7 +41,6 @@ describe('PM threads', () => {
   }
   async function finish(job: RunJob, reply: string) {
     runner.send({ type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [{ type: 'message', text: reply }] })
-    await sleep(50)
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
     await expect.poll(async () => (await t.plans.getSession(job.planSessionId!)).activeRunId).toBeNull()
   }
@@ -215,7 +214,8 @@ describe('PM threads', () => {
     const stopping = await runner.next('run.stop', m => m.runId === stoppedJob.runId)
     evidence.push({ event: 'explicit stop', response: stopping })
     runner.send({ type: 'run.ended', runId: stoppedJob.runId, leaseEpoch: stoppedJob.leaseEpoch, exit: { kind: 'stopped' }, headSha: null })
-    await sleep(50)
+    const fromStopped = async () => (await request('GET', `/plan/sessions/${coordinator.id}`) as PlanSessionDetail).messages.filter(m => m.senderSessionId === stopped.id)
+    await expect.poll(fromStopped).toHaveLength(1)
     const detail = await request('GET', `/plan/sessions/${coordinator.id}`) as PlanSessionDetail
     expect(detail.unread).toBe(false)
     expect(detail.messages.filter(m => m.senderSessionId === stopped.id)).toMatchObject([{ text: 'Thread “Stop helper” was stopped.' }])

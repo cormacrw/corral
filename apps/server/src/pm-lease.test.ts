@@ -108,6 +108,6 @@ describe('PM turns the runner lost', () => {
     await vi.waitFor(async () => {
       const [ended] = await t.db.select().from(runs).where(eq(runs.planSessionId, lost.id))
       expect(ended).toMatchObject({ state: 'interrupted', error: expect.stringContaining('Socket write failed') })
-    })
+    }, { timeout: 5000 })
   })
 })

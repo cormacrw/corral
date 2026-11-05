@@ -4,6 +4,7 @@ import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed } from 'vue'
 import { projects, task as fixture } from '~/prototype/fixtures'
+import { PRIORITY } from '~/utils/labels'
 import TaskCard from '~/features/tasks/components/TaskCard.vue'
 import TaskCardAssignee from '~/features/tasks/components/TaskCardAssignee.vue'
 import TaskCardMeta from '~/features/tasks/components/TaskCardMeta.vue'
@@ -36,9 +37,10 @@ const render = (props: { task: Task, epic?: string | null, to?: string, pressed?
 
 describe('TaskCard', () => {
   it('shows the title, epic and priority and no line for a missing epic', () => {
-    const withEpic = render({ task: task({ status: 'ready', priority: 'urgent' }), epic: 'Login' }).text()
-    expect(withEpic).toContain('Fix the loginLogin')
-    expect(withEpic).toContain('Urgent')
+    const withEpic = render({ task: task({ status: 'ready', priority: 'urgent' }), epic: 'Login' })
+    expect(withEpic.get('[data-card-title]').text()).toBe('Fix the login')
+    expect(withEpic.text()).toContain('Login')
+    expect(withEpic.text()).toContain(PRIORITY.urgent.label)
     expect(render({ task: task({ status: 'ready', priority: 'low' }), epic: null }).text()).not.toContain('Login')
   })
 
@@ -74,17 +76,15 @@ describe('TaskCard', () => {
 })
 
 describe('TaskCardAssignee', () => {
-  it('shows a dashed circle, labelled Unassigned, rather than the other role', () => {
+  it('shows Unassigned rather than the other role', () => {
     const card = render({ task: task({ status: 'agent_review', developer: dana, reviewer: null }) })
     expect(card.find('[data-testid=card-unassigned]').exists()).toBe(true)
-    expect(card.find('[data-tooltip=Unassigned]').exists()).toBe(true)
+    expect(card.find('[data-avatar]').exists()).toBe(false)
   })
 
-  it('names the agent on hover only', () => {
+  it('shows the reviewer during agent review', () => {
     const card = render({ task: task({ status: 'agent_review', developer: dana, reviewer: rita }) })
-    expect(card.find('[data-avatar=Rita]').exists()).toBe(true)
-    expect(card.find('[data-tooltip=Rita]').exists()).toBe(true)
-    expect(card.text()).not.toContain('Rita')
+    expect(card.get('[data-avatar]').attributes('data-avatar')).toBe('Rita')
   })
 
   it('shows the dot only when the displayed agent holds the lease', () => {

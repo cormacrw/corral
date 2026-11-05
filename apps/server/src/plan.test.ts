@@ -4,7 +4,7 @@ import { richTextToMarkdown } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, desc, eq, inArray, ne } from 'drizzle-orm'
 import { writeFile } from 'node:fs/promises'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
 
@@ -26,6 +26,12 @@ describe('plan sessions', () => {
     await t?.close()
   })
 
+  // Every test works in its own project. Pausing them all here, even after a
+  // failure, keeps a test's leftovers out of the next test's scheduler passes.
+  afterEach(async () => {
+    await t?.db.update(schema.projects).set({ paused: true })
+  })
+
   const plan = (tasksIn: Partial<{ key: string, ref: string, title: string, type: string, description: string, acceptanceCriteria: string[], dependsOn: string[], priority: string, humanReview: boolean, design: { taskRef: string, version: number, screens: string[] } }>[]) => ({
     title: 'Login',
     summary: 'Email and password login',
@@ -44,11 +50,10 @@ describe('plan sessions', () => {
   async function endTurn(job: RunJob, reply: string, code = 0) {
     const before = t.events.length
     runner.send({ type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [{ type: 'message', text: reply }] })
-    await sleep(50)
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code }, headSha: null })
     await vi.waitFor(() => {
       expect(t.events.slice(before).find(e => e.type === 'plan.session' && e.session.id === job.planSessionId && e.session.activeRunId === null)).toBeDefined()
-    })
+    }, { timeout: 5000 })
   }
 
   async function session(id: string): Promise<PlanSessionDetail> {
@@ -171,8 +176,7 @@ describe('plan sessions', () => {
     expect(job).toMatchObject({ role: 'pm', runtime: 'claude-code', taskId: null, planSessionId: created.id, agentSessionId: null, repository: project.repository })
     expect(job.prompt).toContain('product-manager agent')
     expect(job.prompt).toContain('Plan a login feature')
-    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'claude-sess-1' })
-    await sleep(100)
+    await t.runStarted(runner, job, 'claude-sess-1')
 
     // Tools the PM doesn't have are refused by role
     expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('can’t use') })
@@ -241,15 +245,13 @@ describe('plan sessions', () => {
     // Approving to the board closes the session
     expect(list.find(s => s.id === created.id)).toMatchObject({ status: 'none', closed: true })
     expect(t.events.findLast(e => e.type === 'plan.session' && e.session.id === created.id)).toMatchObject({ session: { closed: true } })
-    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
   })
 
   it('records a question\'s optional recommendation and options, and shows them in the PM\'s history', async () => {
     const project = await t.createProject()
     const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan exports' }).then(r => r.json()) as PlanSessionDetail
     const job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
-    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'claude-sess-q' })
-    await sleep(100)
+    await t.runStarted(runner, job, 'claude-sess-q')
 
     // A plain question has neither
     expect(await runner.call(job.runId, job.leaseEpoch, 'ask_question', { question: 'Who uses exports?' })).toMatchObject({ ok: true })
@@ -287,7 +289,6 @@ describe('plan sessions', () => {
     expect(next.fallbackPrompt).toContain('**PM (question):** Which format?\n\nOptions:\n1. CSV\n2. Excel\n3. JSON\n\nRecommended: CSV')
     expect(next.fallbackPrompt).toContain('**PM (question):** Daily?\n\nRecommended: Yes')
     await endTurn(next, 'Excel it is.')
-    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
   })
 
   it('lets the PM read any task by ref, and names a ref that doesn\'t exist', async () => {
@@ -1103,10 +1104,10 @@ describe('plan sessions', () => {
     const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
     expect((await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Again' })).status).toBe(409)
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 1 }, headSha: null })
-    await sleep(150)
-    const detail = await session(created.id)
-    expect(detail.messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: 'The PM exited with code 1' })
-    expect(detail.activeRunId).toBeNull()
+    await expect.poll(async () => {
+      const detail = await session(created.id)
+      return { last: detail.messages.at(-1), activeRunId: detail.activeRunId }
+    }).toMatchObject({ last: { role: 'pm', kind: 'error', text: 'The PM exited with code 1' }, activeRunId: null })
   })
 
   it('names a renamed PM in the errors of turns that fail', async () => {
@@ -1122,7 +1123,7 @@ describe('plan sessions', () => {
         const detail = await session(created.id)
         expect(detail.messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: `Renamed PM hit a usage limit; try again after ${resetsAt}` })
         expect(detail.activeRunId).toBeNull()
-      })
+      }, { timeout: 5000 })
 
       await t.db.update(agents).set({ pausedUntil: null }).where(eq(agents.id, pm!.id))
       expect((await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Again' })).status).toBe(201)
@@ -1132,7 +1133,7 @@ describe('plan sessions', () => {
         const detail = await session(created.id)
         expect(detail.messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: 'Renamed PM finished without replying' })
         expect(detail.activeRunId).toBeNull()
-      })
+      }, { timeout: 5000 })
     } finally {
       await t.db.update(agents).set({ name: pm!.name, pausedUntil: null }).where(eq(agents.id, pm!.id))
     }
@@ -1197,7 +1198,7 @@ describe('plan sessions', () => {
     await vi.waitFor(async () => {
       const rows = await t.db.select().from(runs).where(inArray(runs.id, jobs.map(j => j.runId)))
       expect(rows.map(r => r.state)).toEqual(['running', 'running', 'running'])
-    })
+    }, { timeout: 5000 })
 
     // Still one turn at a time per session
     const again = await t.request('POST', `/api/plan/sessions/${sessions[1]!.id}/messages`, { text: 'Again' })
@@ -1287,7 +1288,6 @@ describe('plan sessions', () => {
     await sleep(100)
     expect(runner.received.filter(m => m.type === 'run.assign' && m.job.role === 'pm' && m.job.projectId === project.id && m.job.runId !== job.runId)).toHaveLength(0)
     expect((await session(created.id)).unread).toBe(false)
-    await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
   })
 
   // Each Draft belongs to a Plan session, so it's listed on the Plan tab

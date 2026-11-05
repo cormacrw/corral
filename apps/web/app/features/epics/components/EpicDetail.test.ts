@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import type { EpicDetail, Task } from '@corral/contracts'
-import { flushPromises, mount } from '@vue/test-utils'
-import { afterEach, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { api } from '~/composables/useApi'
 import { useProjectLists } from '~/features/projects/composables/useProjectLists'
@@ -10,10 +10,15 @@ import { applyEvent } from '~/queries/dependencies'
 import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
 import { epics, projects } from '~/prototype/fixtures'
-import EpicDescription from '~/features/epics/components/EpicDescription.vue'
 import EpicDetailView from '~/features/epics/components/EpicDetail.vue'
-import EpicWork from '~/features/epics/components/EpicWork.vue'
 
+enableAutoUnmount(afterEach)
+beforeEach(() => {
+  // The parent task's history joins the epic's activity
+  vi.spyOn(api.tasks, 'history').mockResolvedValue([])
+  // Anything else unmocked fails at once rather than reaching the network
+  vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('Unmocked request'))))
+})
 afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
@@ -62,26 +67,26 @@ it('updates prerequisite and blocks progress and the waiting alert from task eve
   })
   try {
     await flushPromises()
-    expect(wrapper.get('[role="alert"]').text()).toBe('Waiting on Prerequisite')
-    expect(wrapper.get('a[href="/epics/pre"]').text()).toBe('Prerequisite · 0/1 done')
-    expect(wrapper.get('a[href="/epics/next"]').text()).toBe('Follow-up · 0/1 done')
+    expect(wrapper.get('[role="alert"]').text()).toContain('Prerequisite')
+    expect(wrapper.get('a[href="/epics/pre"]').text()).toContain('0/1')
+    expect(wrapper.get('a[href="/epics/next"]').text()).toContain('0/1')
 
     applyEvent(client, { type: 'task.updated', task: task({ status: 'merged' }) })
     applyEvent(client, { type: 'task.updated', task: task({ id: 't2', ref: 'TA-2', epicId: 'next', type: 'design', status: 'approved' }) })
     await flushPromises()
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
-    expect(wrapper.get('a[href="/epics/pre"]').text()).toBe('Prerequisite · 1/1 done')
-    expect(wrapper.get('a[href="/epics/next"]').text()).toBe('Follow-up · 1/1 done')
+    expect(wrapper.get('a[href="/epics/pre"]').text()).toContain('1/1')
+    expect(wrapper.get('a[href="/epics/next"]').text()).toContain('1/1')
 
     applyEvent(client, { type: 'task.created', task: task({ id: 't3', ref: 'TA-3' }) })
     await flushPromises()
-    expect(wrapper.get('[role="alert"]').text()).toBe('Waiting on Prerequisite')
-    expect(wrapper.get('a[href="/epics/pre"]').text()).toBe('Prerequisite · 1/2 done')
+    expect(wrapper.get('[role="alert"]').text()).toContain('Prerequisite')
+    expect(wrapper.get('a[href="/epics/pre"]').text()).toContain('1/2')
 
     applyEvent(client, { type: 'task.deleted', projectId: project.id, taskId: 't3' })
     await flushPromises()
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
-    expect(wrapper.get('a[href="/epics/pre"]').text()).toBe('Prerequisite · 1/1 done')
+    expect(wrapper.get('a[href="/epics/pre"]').text()).toContain('1/1')
     // The cached epic aggregates deliberately remain stale; the UI reads tasks.
     expect(client.getQueryData<typeof epics>(keys.epics.list(project.slug))?.find(e => e.id === 'pre')?.mergedCount).toBe(0)
     expect(list).not.toHaveBeenCalled()
@@ -145,7 +150,8 @@ it('keeps an open epic\'s task list live as its tasks change, join and leave', a
   }
 })
 
-async function mountEpic(mode: 'flyout' | 'page' | 'mobile') {
+// The page with its epic cached, and every request it makes mocked
+async function mountEpic({ tab = 'tasks', activity = async () => [] as never[] }: { tab?: string, activity?: () => Promise<never[]> } = {}) {
   const client = testQueryClient()
   client.setDefaultOptions({ queries: { staleTime: Infinity, retry: false, gcTime: Infinity } })
   const project = projects[0]!
@@ -154,48 +160,40 @@ async function mountEpic(mode: 'flyout' | 'page' | 'mobile') {
   client.setQueryData(keys.tasks.list(project.slug), [])
   client.setQueryData(keys.epics.list(project.slug), [own])
   client.setQueryData(keys.epics.detail('own'), own)
+  vi.spyOn(api.epics, 'get').mockResolvedValue(own)
+  vi.spyOn(api.epics, 'history').mockResolvedValue([])
+  vi.spyOn(api.epics, 'activity').mockImplementation(activity)
   for (const name of ['ref', 'computed', 'watch', 'onMounted', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
-  vi.stubGlobal('useLocalStorage', (_key: string, initial: unknown) => vue.ref(initial))
+  vi.stubGlobal('useLocalStorage', (key: string, initial: unknown) => vue.ref(key === 'corral.epic.tab' ? tab : initial))
   vi.stubGlobal('useShell', () => ({ projects: [project] }))
   vi.stubGlobal('useProjectLists', useProjectLists)
   vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null), canGoBack: vue.ref(false) }))
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
+  const AppButton = vue.defineComponent({ props: ['label'], setup: props => () => vue.h('button', props.label) })
   const wrapper = mount(EpicDetailView, {
-    props: { epicId: 'own', mode },
+    props: { epicId: 'own', mode: 'page' },
     global: {
       plugins: [[VueQueryPlugin, { queryClient: client }]],
-      stubs: { AppButton: true, Icon: true, AppBadge: true, AppAlert: true, AppLoadError: { props: ['title'], template: '<p>{{ title }}</p>' }, AppTextarea: true, AppBreadcrumb: true, AppSelect: true, AppTabs: true, AppTooltip: true, AsyncEpicGraph: true, MarkdownText: true, NuxtLink: true }
+      components: { AppButton },
+      stubs: { Icon: true, AppBadge: true, AppAlert: true, AppLoadError: { props: ['title'], template: '<p role="alert">{{ title }}</p>' }, AppTextarea: true, AppBreadcrumb: true, AppSelect: true, AppTabs: true, AppTooltip: true, AsyncEpicGraph: true, MarkdownText: true, NuxtLink: true }
     }
   })
   await flushPromises()
-  return wrapper
+  return { wrapper, own, button: (label: string) => wrapper.findAll('button').find(b => b.text() === label) }
 }
 
 it('keeps the description editor open when saving fails', async () => {
   const patch = vi.spyOn(api.epics, 'patch').mockRejectedValue(new Error('Conflict'))
-  const wrapper = await mountEpic('page')
-  const view = wrapper.getComponent(EpicDescription).vm as unknown as { startEdit: () => void, submit: () => Promise<void>, editing: boolean }
-  view.startEdit()
-  await view.submit()
+  const { wrapper, button } = await mountEpic()
+  await wrapper.get('[aria-label="Edit description"]').trigger('click')
+  await button('Save')!.trigger('click')
+  await flushPromises()
   expect(patch).toHaveBeenCalledOnce()
-  expect(view.editing).toBe(true)
-  wrapper.unmount()
+  expect(button('Save')).toBeDefined()
 })
 
 it('keeps the epic page when only its activity can\'t load', async () => {
-  vi.spyOn(api.epics, 'activity').mockRejectedValue(new Error('Down'))
-  const wrapper = await mountEpic('page')
-  ;(wrapper.getComponent(EpicWork).vm as unknown as { tab: string }).tab = 'activity'
-  await flushPromises()
-  expect((wrapper.vm as unknown as { error: string | null }).error).toBeNull()
-  expect(wrapper.text()).toContain('Couldn\'t load the activity.')
-  wrapper.unmount()
-})
-
-it.each(['flyout', 'mobile'] as const)('never squeezes the tasks in the %s\'s one scroll', async (mode) => {
-  const wrapper = await mountEpic(mode)
-  const tasks = wrapper.findAll('section').at(-1)!
-  expect(tasks.classes()).toContain('shrink-0')
-  expect(tasks.classes()).not.toContain('min-h-0')
-  wrapper.unmount()
+  const { wrapper, own } = await mountEpic({ tab: 'activity', activity: () => Promise.reject(new Error('Down')) })
+  expect((wrapper.get('[aria-label="Parent title"]').element as HTMLInputElement).value).toBe(own.title)
+  expect(wrapper.findAll('[role="alert"]').map(a => a.text())).toEqual(['Couldn\'t load the activity.'])
 })

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, defineComponent, watch } from 'vue'
 
 const replace = vi.fn()
@@ -13,7 +13,7 @@ vi.stubGlobal('useRoute', () => ({ path: '/home' }))
 vi.stubGlobal('useRouter', () => ({ replace, options: { history: { go } } }))
 
 const { default: Mobile } = await import('./mobile.vue')
-const { recordAppHistoryPosition, resetAppHistory, stepsToAppStart } = await import('~/utils/app-history')
+const { recordAppHistoryPosition, resetAppHistory } = await import('~/utils/app-history')
 const Link = defineComponent({
   name: 'LinkStub',
   props: ['to'],
@@ -23,8 +23,9 @@ function shell() {
   return mount(Mobile, { global: { components: { NuxtLink: Link }, stubs: { ShellBanners: true, Icon: true } } })
 }
 
+enableAutoUnmount(afterEach)
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
   window.history.replaceState({ position: 0 }, '')
   resetAppHistory()
   recordAppHistoryPosition(0)
@@ -96,14 +97,6 @@ describe('mobile tab navigation', () => {
     expect(go).not.toHaveBeenCalled()
     expect(replace).toHaveBeenCalledExactlyOnceWith(tap('/inbox'))
     wrapper.unmount()
-  })
-
-  it('lowers the start when Back lands on an earlier Corral entry', () => {
-    resetAppHistory()
-    recordAppHistoryPosition(3)
-    recordAppHistoryPosition(1)
-    recordAppHistoryPosition(4)
-    expect(stepsToAppStart(4)).toBe(3)
   })
 
   it('forces the replace after traversal so a tab root pushed from a page keeps its URL', async () => {

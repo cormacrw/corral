@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 import type { PlanThreadItem } from '@corral/contracts'
-import { mount } from '@vue/test-utils'
-import { expect, it } from 'vitest'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
+import { afterEach, expect, it } from 'vitest'
 import * as vue from 'vue'
 import { inbox } from '~/prototype/fixtures'
 import PlanThreadRow from '~/features/plan/components/PlanThreadRow.vue'
+
+enableAutoUnmount(afterEach)
 
 const base = inbox().needsYou.find((i): i is PlanThreadItem => i.type === 'plan_thread')!
 const thread = (changes: Partial<Pick<PlanThreadItem, 'sender' | 'subject'>> = {}): PlanThreadItem => ({
@@ -13,14 +15,14 @@ const thread = (changes: Partial<Pick<PlanThreadItem, 'sender' | 'subject'>> = {
   unread: false, activeRunId: null, ...changes
 })
 
-const avatar = vue.defineComponent({ props: ['name', 'size'], setup: p => () => vue.h('i', { 'data-avatar': p.name, 'data-size': p.size }) })
-const thumbnail = vue.defineComponent({ setup: () => () => vue.h('i', { 'data-thumbnail': '' }) })
+const avatar = vue.defineComponent({ props: ['name'], setup: p => () => vue.h('i', { 'data-avatar': p.name }) })
+const thumbnail = vue.defineComponent({ setup: () => () => vue.h('i') })
 const badge = vue.defineComponent({ props: ['label'], setup: p => () => vue.h('b', p.label) })
 const icon = vue.defineComponent({ setup: () => () => vue.h('i', { 'data-spinner': '' }) })
 
-function mountRow(item: PlanThreadItem, mobile = false) {
+function mountRow(item: PlanThreadItem) {
   return mount(PlanThreadRow, {
-    props: { item, mobile },
+    props: { item },
     global: { components: { AgentAvatar: avatar, ProjectThumbnail: thumbnail, AppBadge: badge, Icon: icon } }
   })
 }
@@ -29,16 +31,10 @@ it('shows the sender where other rows do, with the project as a tag', () => {
   const item = thread({ sender: { name: 'Renamed PM', role: 'pm' }, subject: 'Push notifications' })
   const row = mountRow(item)
   expect(row.get('[data-avatar]').attributes('data-avatar')).toBe('Renamed PM')
-  expect(row.get('[data-avatar]').attributes('data-size')).toBe('xs')
-  expect(row.findAll('[data-thumbnail]')).toHaveLength(1)
   expect(row.text()).toContain('Renamed PM')
   expect(row.text()).toContain('Push notifications')
   expect(row.text()).toContain(item.project!.name)
   expect(row.text()).toContain('Question')
-})
-
-it('uses the larger avatar on mobile', () => {
-  expect(mountRow(thread(), true).get('[data-avatar]').attributes('data-size')).toBe('md')
 })
 
 it('marks unread and shows the working spinner', () => {

@@ -49,3 +49,4 @@ Short implementation notes written while building. Not binding: `docs/README.md`
 - [Task PR bases](task-pr-bases.md)
 - [Trustworthy test exit status](test-exit-status.md)
 - [Worktree sweep](worktree-sweep.md)
+- [Writing tests](writing-tests.md)

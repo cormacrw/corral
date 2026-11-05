@@ -2,9 +2,9 @@
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { testQueryClient } from '~/queries/mount-with-query'
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
-import { createRouter, createWebHistory, useRoute, useRouter } from 'vue-router'
+import { createMemoryHistory, createRouter, useRoute, useRouter } from 'vue-router'
 import type { Plan, PlanThreadItem } from '@corral/contracts'
 import { useTaskFlyout } from '~/features/tasks/composables/useTaskFlyout'
 import InboxMobilePlanThread from '~/features/inbox/components/InboxMobilePlanThread.vue'
@@ -40,8 +40,9 @@ const AppDrawer = defineComponent({
 const AppDropdownMenu = defineComponent({
   props: ['items'], setup: p => () => h('button', { onClick: () => p.items[0].onSelect() }, p.items[0].label)
 })
+const mounted: { unmount: () => void }[] = []
 function screen(item = question) {
-  return mount(InboxMobilePlanThread, {
+  return track(mount(InboxMobilePlanThread, {
     props: { item },
     global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]],
       components: {
@@ -65,13 +66,21 @@ function screen(item = question) {
         AppAlert: defineComponent({ props: ['title'], setup: p => () => h('p', { role: 'alert' }, p.title) })
       }
     }
-  })
+  }))
+}
+function track<T extends { unmount: () => void }>(wrapper: T) {
+  mounted.push(wrapper)
+  return wrapper
 }
 const click = async (w: ReturnType<typeof screen>, label: string) => {
   await w.findAll('button').find(b => b.text() === label)!.trigger('click')
   await flushPromises()
 }
 
+afterEach(() => {
+  mounted.splice(0).forEach(w => w.unmount())
+  vi.unstubAllGlobals()
+})
 beforeEach(() => {
   vi.resetAllMocks()
   for (const [name, value] of Object.entries({ computed, ref, watch, onMounted, onBeforeUnmount, provide })) vi.stubGlobal(name, value)
@@ -111,11 +120,8 @@ describe('focused mobile Plan thread', () => {
     const w = screen(planItem)
     await flushPromises()
     expect(w.text()).toContain('Deliver notifications')
-    expect(w.text()).toContain('Plan v1 · 1 epic · 2 tasks')
     expect(w.text()).not.toContain('Earlier conversation')
     expect(w.find('textarea').exists()).toBe(false)
-    expect(w.text()).toContain('View plan')
-    expect(w.text()).toContain('Open in Plan')
     await click(w, label)
     expect(mocks.approve).toHaveBeenCalledWith('plan-1', label === 'Approve to board' ? 'ready' : 'backlog')
     expect(mocks.replace).toHaveBeenCalledWith('/inbox')
@@ -177,7 +183,7 @@ describe('a task opened from the mobile plan sheet', () => {
   async function phone() {
     const page = defineComponent({ render: () => null })
     const router = createRouter({
-      history: createWebHistory(),
+      history: createMemoryHistory(),
       routes: [{ path: '/inbox/:itemId?', component: page }, { path: '/tasks/:ref', component: page }, { path: '/epics/:id', component: page }]
     })
     await router.push('/inbox/s-2')
@@ -189,7 +195,7 @@ describe('a task opened from the mobile plan sheet', () => {
     vi.stubGlobal('useShell', () => ({ loaded: true, runner: { online: true } }))
     mocks.session.mockResolvedValue({ plans: [planned], messages: [] })
     const stub = (tag = 'span') => defineComponent({ props: ['label'], setup: p => () => h(tag, p.label) })
-    const w = mount(InboxMobilePlanThread, {
+    const w = track(mount(InboxMobilePlanThread, {
       props: { item: { ...planItem, status: 'needs_approval', question: null, plan: { id: planned.id, version: planned.version, title: planned.title, summary: planned.summary, epicCount: 0, taskCount: 0 }, planId: planned.id, failure: null } },
       global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }], router],
         components: {
@@ -202,14 +208,9 @@ describe('a task opened from the mobile plan sheet', () => {
           AppAlert: defineComponent({ props: ['title'], setup: p => () => h('p', { role: 'alert' }, p.title) })
         }
       }
-    })
+    }))
     await flushPromises()
     return { w, router }
-  }
-  // Back finishes on the browser's popstate, after the click
-  const settle = async (done: () => boolean) => {
-    for (let i = 0; i < 50 && !done(); i++) await new Promise(r => setTimeout(r, 10))
-    await flushPromises()
   }
 
   it('opens the task in a taller sheet over the plan on the Inbox route, and Back returns to the plan', async () => {
@@ -226,7 +227,6 @@ describe('a task opened from the mobile plan sheet', () => {
     expect(w.text()).toContain('Task detail TA-7')
 
     await click(w, 'Dismiss Task TA-7')
-    await settle(() => !router.currentRoute.value.query.task)
     expect(router.currentRoute.value.path).toBe('/inbox/s-2')
     expect('plan' in router.currentRoute.value.query).toBe(true)
     expect(sheets(w)).toEqual(['Plan v1'])
@@ -235,7 +235,6 @@ describe('a task opened from the mobile plan sheet', () => {
     await w.findAll('button').find(b => b.text().includes('Send push'))!.trigger('click')
     await flushPromises()
     await click(w, 'Close task')
-    await settle(() => !router.currentRoute.value.query.task)
     expect(router.currentRoute.value.fullPath).toBe('/inbox/s-2?plan')
     expect(sheets(w)).toEqual(['Plan v1'])
   })

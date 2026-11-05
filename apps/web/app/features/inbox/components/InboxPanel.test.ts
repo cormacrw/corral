@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import type { TaskInboxItem } from '@corral/contracts'
 import { VueQueryPlugin } from '@tanstack/vue-query'
-import { mount } from '@vue/test-utils'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import type { InboxPanelContext } from '~/features/inbox/composables/useInboxPanel'
@@ -9,6 +9,8 @@ import { testQueryClient } from '~/queries/mount-with-query'
 import { inbox } from '~/prototype/fixtures'
 import InboxPanel from '~/features/inbox/components/InboxPanel.vue'
 import TaskRefText from '~/features/tasks/components/TaskRefText.vue'
+
+enableAutoUnmount(afterEach)
 
 vi.mock('~/queries/shell', () => ({ shell: () => ({ projects: { data: { value: [{ prefix: 'COR' }] } } }) }))
 vi.mock('~/features/tasks/components/TaskLink.vue', () => ({ default: { props: ['taskRef'], template: '<a :href="`/tasks/${taskRef}`"><slot /></a>' } }))
@@ -30,8 +32,7 @@ it('links known refs in the TL;DR of an item with no message', () => {
       stubs: { InboxPanelMeta: true, InboxPanelVerdict: true, InboxPanelActions: true, InboxPanelArtifacts: true, InboxPanelDetails: true, InboxPanelTray: true, InboxPanelThumbBar: true, EvidenceViewer: true, AppButton: true, AppAlert: true, AppTabs: true, UiSkeleton: true, Icon: true }
     }
   })
-  const tldr = wrapper.get('p.line-clamp-2')
-  expect(tldr.text()).toBe('TL;DR Blocked on COR-12, not XX-3.')
-  expect(tldr.get('.text-muted-foreground a[href="/tasks/COR-12"]').text()).toBe('COR-12')
-  expect(tldr.findAll('a')).toHaveLength(1)
+  expect(wrapper.text()).toContain('Blocked on COR-12, not XX-3.')
+  expect(wrapper.text()).not.toContain('More detail.')
+  expect(wrapper.findAll('a').map(a => [a.attributes('href'), a.text()])).toEqual([['/tasks/COR-12', 'COR-12']])
 })

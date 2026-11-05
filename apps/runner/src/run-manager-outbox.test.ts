@@ -17,6 +17,8 @@ describe('RunManager with the server out of reach', () => {
   let dataDir: string
   let config: RunnerConfig
   let sent: RunnerMessage[]
+  // Everything offered to the socket, taken or not
+  let offered: RunnerMessage[]
   let up: boolean
   let handler: ToolHandler
   let line: (parsed: Partial<ParsedLine>) => void
@@ -26,7 +28,7 @@ describe('RunManager with the server out of reach', () => {
     get connected() {
       return up
     },
-    send: (message: RunnerMessage) => up && sent.push(message) > 0,
+    send: (message: RunnerMessage) => offered.push(message) > 0 && up && sent.push(message) > 0,
     refreshUpdateStatus: () => void refreshes++
   } as unknown as ServerConnection
   const tools = {
@@ -71,6 +73,7 @@ describe('RunManager with the server out of reach', () => {
     dataDir = await createTestDataDir()
     config = { dataDir, claudeBin: '/nonexistent/claude', codexBin: '/nonexistent/codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0, titleModel: 'haiku', slots: 4, roles: ['pm', 'developer', 'reviewer', 'design'] }
     sent = []
+    offered = []
     up = true
     refreshes = 0
     line = undefined as unknown as typeof line
@@ -110,14 +113,15 @@ describe('RunManager with the server out of reach', () => {
   it('keeps new traffic behind what is still waiting', async () => {
     const manager = await start()
     up = false
+    const texts = (messages: RunnerMessage[]) => messages.flatMap(m => m.type === 'run.events' ? m.events : []).flatMap(e => e.type === 'message' ? [e.text] : [])
     line({ events: [{ type: 'message', text: 'While down' }] })
-    await new Promise(resolve => setTimeout(resolve, 600))
+    // Its batch was offered while down, so it waits in the outbox
+    await expect.poll(() => texts(offered)).toContain('While down')
+    expect(texts(sent)).toEqual([])
     reconnect(manager)
     line({ events: [{ type: 'message', text: 'After' }] })
-    await new Promise(resolve => setTimeout(resolve, 600))
-
-    const said = sent.flatMap(m => m.type === 'run.events' ? m.events : []).flatMap(e => e.type === 'message' ? [e.text] : [])
-    expect(said).toEqual(['While down', 'After'])
+    await expect.poll(() => texts(sent)).toContain('After')
+    expect(texts(sent)).toEqual(['While down', 'After'])
     manager.stop('r1', 'timed_out', '60 s')
     await manager.shutdown()
   })

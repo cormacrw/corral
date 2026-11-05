@@ -12,6 +12,7 @@ import { EventBus } from './events.ts'
 import { FakeGitHub } from './fake-github.ts'
 import { startServer, type RunningServer } from './server.ts'
 import { createServices, type Services } from './services.ts'
+import type { FakeRunner } from './test-runner.ts'
 
 // A server app on a throwaway database, for tests
 export interface TestApp extends Services {
@@ -29,6 +30,11 @@ export interface TestApp extends Services {
   request(method: string, path: string, body?: unknown): Promise<Response>
   createProject(overrides?: Partial<CreateProjectInput>): Promise<Project>
   createTask(slug: string, input?: Partial<CreateTaskInput>): Promise<Task>
+  // Sends run.started and waits for the server to finish handling it (its
+  // last step publishes run.updated). Tool calls and stops skip the per-run
+  // queue, so sending one straight after run.started can land on a run
+  // that is still starting.
+  runStarted(runner: FakeRunner, job: { runId: string, leaseEpoch: number }, agentSessionId: string): Promise<void>
   // A merge pass after long enough that nothing is left waiting to be polled
   mergePass(): Promise<void>
   // A crash and a fresh start on the same database: the old process gets nothing
@@ -99,6 +105,22 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
     clock,
     server: current.server,
     request,
+    async runStarted(runner, job, agentSessionId) {
+      const handled = new Promise<void>((resolve, reject) => {
+        const unsubscribe = bus.subscribe((event) => {
+          if (event.type !== 'run.updated' || event.run.id !== job.runId) return
+          clearTimeout(timer)
+          unsubscribe()
+          resolve()
+        })
+        const timer = setTimeout(() => {
+          unsubscribe()
+          reject(new Error(`run.started for ${job.runId} was not handled within 5 s`))
+        }, 5000)
+      })
+      runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId })
+      await handled
+    },
     mergePass() {
       clock.now = new Date(clock.now.getTime() + 121_000)
       return current.services.orchestrator.merges.tick()

@@ -411,7 +411,7 @@ it('keeps PR-free tasks off a legacy runner, tells it why, and carries on once a
 
   // Only an old build is left: approved work waits, and nothing counts as failed
   runner.close()
-  await vi.waitFor(() => expect(t.runner.online).toBe(false))
+  await vi.waitFor(() => expect(t.runner.online).toBe(false), { timeout: 5000 })
   runner = await connectRunner('old', {})
   const pending = await t.createTask(project.slug, { epicId: epic.id, humanReview: false })
   await t.db.update(schema.tasks).set({ integrationProtocol: 1 }).where(eq(schema.tasks.id, pending.id))
@@ -426,7 +426,7 @@ it('keeps PR-free tasks off a legacy runner, tells it why, and carries on once a
   expect(old.integrationCompatibilityReason).toContain('Update the runner')
 
   runner.close()
-  await vi.waitFor(() => expect(t.runner.online).toBe(false))
+  await vi.waitFor(() => expect(t.runner.online).toBe(false), { timeout: 5000 })
   runner = await connectRunner()
   await passes(1)
   expect(await taskRow(task.id)).toMatchObject({ status: 'merged' })

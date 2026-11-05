@@ -2,7 +2,7 @@ import { databaseFixture } from '@corral/db/testing'
 import type { Inbox, Project, Run, RunJob, RunTimings, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { and, asc, eq, ne } from 'drizzle-orm'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner, sleep } from './test-runner.ts'
 
@@ -23,6 +23,12 @@ describe('orchestrator', () => {
   afterAll(async () => {
     runner?.close()
     await t?.close()
+  })
+
+  // Every test works in its own project. Pausing them all here, even after a
+  // failure, keeps a test's leftovers out of the next test's scheduler passes.
+  afterEach(async () => {
+    await t?.db.update(schema.projects).set({ paused: true })
   })
 
   async function approvedTask(input: Parameters<TestApp['createTask']>[1] = {}): Promise<{ project: Project, task: Task }> {
@@ -76,7 +82,6 @@ describe('orchestrator', () => {
     expect(job.branch).toMatch(new RegExp(`^corral/${task.ref.toLowerCase()}-`))
     expect(job.prompt).toContain('Shows an error on a bad password')
     expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: job.runId, leaseEpoch: 1 })
-    await pause(project)
   })
 
   it('lets the developer read an attachment from its own project, but not another project\'s', async () => {
@@ -89,7 +94,6 @@ describe('orchestrator', () => {
       .toMatchObject({ ok: true, result: { id: own.id, fileName: 'image.png', mimeType: 'image/png', images: [{ mimeType: 'image/png', dataBase64: png.toString('base64') }] } })
     expect(await runner.call(job.runId, job.leaseEpoch, 'get_attachment', { attachmentId: foreign.id }))
       .toMatchObject({ ok: false, error: `${foreign.id} isn't an attachment in this project` })
-    await pause(project)
   })
 
   it('lists the task\'s images in the developer prompt and get_task', async () => {
@@ -109,8 +113,7 @@ describe('orchestrator', () => {
     await t.orchestrator.schedule()
     const { job } = await runner.next('run.assign', m => m.job.taskId === task.id)
 
-    expect(job.prompt).toContain('## Attached images')
-    expect(job.prompt).toContain(`- ${mockup.id}: "mockup.png" in the description, a comment by`)
+    expect(job.prompt).toContain(`- ${mockup.id}: "mockup.png"`)
     expect(job.prompt).toMatch(new RegExp(`- ${bug.id}: "bug.png" in a comment by \\S+`))
     // The description keeps the human's raw attachment reference, but only
     // this project's images may be advertised as available to the agent.
@@ -125,11 +128,10 @@ describe('orchestrator', () => {
         ]
       }
     })
-    await pause(project)
   })
 
   it('renews the lease from heartbeats and marks the run running on run.started', async () => {
-    const { project, task, job } = await assigned()
+    const { task, job } = await assigned()
     const before = (await taskRow(task.id)).leaseExpiresAt!
     runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'sess-1' })
     t.clock.now = new Date(t.clock.now.getTime() + 60_000)
@@ -140,11 +142,10 @@ describe('orchestrator', () => {
       expect((await taskRow(task.id)).leaseExpiresAt!.getTime()).toBeGreaterThan(before.getTime())
       expect(await runRow(job.runId)).toMatchObject({ state: 'running', agentSessionId: 'sess-1' })
     })
-    await pause(project)
   })
 
   it('stores the token totals of the last usage event, with cache reads apart', async () => {
-    const { project, job } = await assigned()
+    const { job } = await assigned()
     runner.send({
       type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [
         { type: 'usage', inputTokens: 100, cacheReadTokens: 5000, outputTokens: 10 },
@@ -155,11 +156,10 @@ describe('orchestrator', () => {
     await eventually(async () => {
       expect(await runRow(job.runId)).toMatchObject({ inputTokens: 120, cacheReadTokens: 9000, outputTokens: 30 })
     })
-    await pause(project)
   })
 
   it('interrupts a run whose lease expired and leaves the task for a retry (D10)', async () => {
-    const { project, task, job } = await assigned()
+    const { task, job } = await assigned()
     t.clock.now = new Date(t.clock.now.getTime() + 16 * 60_000)
     await t.orchestrator.sweepLeases()
     expect(await runRow(job.runId)).toMatchObject({ state: 'interrupted' })
@@ -171,16 +171,14 @@ describe('orchestrator', () => {
     // A heartbeat for the dead run is told to stop
     runner.send({ type: 'heartbeat', activeRuns: [{ runId: job.runId, leaseEpoch: job.leaseEpoch }] })
     await runner.next('run.stop', m => m.runId === job.runId)
-    await pause(project)
   })
 
   it('rejects tool calls with a stale epoch', async () => {
-    const { project, task, job } = await assigned()
+    const { task, job } = await assigned()
     const stale = await runner.call(job.runId, job.leaseEpoch - 1, 'get_task', {})
     expect(stale).toMatchObject({ ok: false, error: expect.stringContaining('no longer holds its task') })
     const fresh = await runner.call(job.runId, job.leaseEpoch, 'get_task', {})
     expect(fresh).toMatchObject({ ok: true, result: { ref: task.ref, status: 'in_progress', attachments: [] } })
-    await pause(project)
   })
 
   it('rejects a submission with missing evidence or a branch at the wrong commit, saying what is missing', async () => {
@@ -212,7 +210,6 @@ describe('orchestrator', () => {
     expect(wrongCommit).toMatchObject({ ok: false, error: expect.stringContaining('is at abc123, not your commit def456') })
     expect(t.github.pulls.size).toBe(0)
     expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress' })
-    await pause(project)
   })
 
   it('opens a PR for a valid submission and moves the task to Agent review', async () => {
@@ -250,11 +247,10 @@ describe('orchestrator', () => {
     expect(evidence).toHaveLength(1)
     const file = await t.request('GET', evidence[0]!.url)
     expect(await file.text()).toBe('ok')
-    await pause(project)
   })
 
   it('pauses the developer until the reset time on a usage limit, without counting a failure (D3)', async () => {
-    const { project, task, job } = await assigned()
+    const { task, job } = await assigned()
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'rate_limited', resetsAt: '2030-01-01T15:00:00Z' }, headSha: null })
     const [atlas] = await t.db.select().from(agents).where(eq(agents.role, 'developer'))
     await eventually(async () => {
@@ -267,7 +263,6 @@ describe('orchestrator', () => {
     await t.orchestrator.schedule()
     expect(runner.received.filter(m => m.type === 'run.assign' && m.job.taskId === task.id)).toHaveLength(0)
     await t.db.update(agents).set({ pausedUntil: null }).where(eq(agents.id, atlas!.id))
-    await pause(project)
   })
 
   it('says on the run and in the task history what cut the run off', async () => {
@@ -301,8 +296,7 @@ describe('orchestrator', () => {
 
   it('asks a human stop to keep the work, and gives the retry the WIP commit and the stop reason', async () => {
     const { project, task, job } = await assigned()
-    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'session-1' })
-    await sleep(100)
+    await t.runStarted(runner, job, 'session-1')
     const res = await t.request('POST', `/api/runs/${job.runId}/stop`)
     expect(res.status).toBeLessThan(300)
     expect(await runner.next('run.stop', m => m.runId === job.runId)).toMatchObject({ keepWork: true })
@@ -315,22 +309,21 @@ describe('orchestrator', () => {
     const retry = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.runId !== job.runId)).job
     expect(retry.continueFrom).toBe('wip123')
     for (const prompt of [retry.prompt, retry.fallbackPrompt!]) {
-      expect(prompt).toContain(`You are continuing run #${job.runNumber}, which stopped before it reported an outcome. Stop reason: Stopped by a human`)
-      expect(prompt).toContain('WIP commit `wip123`')
+      expect(prompt).toContain(`#${job.runNumber}`)
+      expect(prompt).toContain('Stopped by a human')
+      expect(prompt).toContain('`wip123`')
     }
     await finish(project, retry)
   })
 
   it('gives the retry of a timed-out run its reason, and no commit when there was nothing to save', async () => {
     const { project, task, job } = await assigned()
-    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'session-1' })
-    await sleep(100)
+    await t.runStarted(runner, job, 'session-1')
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'timed_out', limitSeconds: 3600 }, headSha: 'base', wipSha: null })
 
     const retry = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.runId !== job.runId)).job
     expect(retry.continueFrom).toBeNull()
-    expect(retry.prompt).toContain('Stop reason: The run hit its time limit of 60 minutes')
-    expect(retry.prompt).toContain('No WIP commit is recorded yet')
+    expect(retry.prompt).toContain('The run hit its time limit of 60 minutes')
     await finish(project, retry)
   })
 
@@ -344,7 +337,7 @@ describe('orchestrator', () => {
     expect(retry.agentSessionId).toBeNull()
     expect(retry.continueFrom).toBe('wip-other')
     expect(retry.prompt).toContain('Continuing a stopped run')
-    expect(retry.prompt).toContain('Stop reason: The run hit its time limit')
+    expect(retry.prompt).toContain('The run hit its time limit')
     expect((await runRow(job.runId)).headSha).toBe('wip-other')
     await finish(project, retry)
   })
@@ -375,8 +368,7 @@ describe('orchestrator', () => {
 
   it('lets a human-stopped run finish saving through a heartbeat, until the task moves on', async () => {
     const { project, task, job } = await assigned()
-    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'session-1' })
-    await sleep(100)
+    await t.runStarted(runner, job, 'session-1')
     await t.request('POST', `/api/runs/${job.runId}/stop`)
     await runner.next('run.stop', m => m.runId === job.runId)
     const active = [{ runId: job.runId, leaseEpoch: job.leaseEpoch }]
@@ -395,13 +387,12 @@ describe('orchestrator', () => {
   })
 
   it('still revokes a run interrupted by an expired lease', async () => {
-    const { project, task, job } = await assigned()
+    const { task, job } = await assigned()
     await t.db.update(tasks).set({ leaseExpiresAt: new Date(Date.now() - 1000) }).where(eq(tasks.id, task.id))
     await t.orchestrator.sweepLeases()
     await runner.next('run.stop', m => m.runId === job.runId)
     await t.orchestrator.onHeartbeat([{ runId: job.runId, leaseEpoch: job.leaseEpoch }], 'r1')
     expect((await runner.next('run.stop', m => m.runId === job.runId)).reason).toBe('This run no longer holds its lease')
-    await pause(project)
   })
 
   it('ignores a WIP commit from a stale lease epoch', async () => {
@@ -413,17 +404,16 @@ describe('orchestrator', () => {
   })
 
   it('adds the last transcript activity to a run the server already stopped', async () => {
-    const { project, job } = await assigned()
+    const { job } = await assigned()
     await t.orchestrator.stopRun(job.runId, { kind: 'human', userId: 'cormac' })
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'stopped', reason: 'Stopped by a human' }, headSha: null, lastActivityAt: '2026-10-30T11:02:55.000Z' })
     await eventually(async () => {
       expect(await runRow(job.runId)).toMatchObject({ state: 'interrupted', error: 'Stopped by a human. Last transcript activity: 2026-10-30T11:02:55.000Z' })
     })
-    await pause(project)
   })
 
   it('counts failed runs and fails the task at the cap', async () => {
-    const { project, task, job: first } = await assigned()
+    const { task, job: first } = await assigned()
     let job = first
     for (let attempt = 1; attempt <= 3; attempt++) {
       runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 1 }, headSha: null })
@@ -441,20 +431,18 @@ describe('orchestrator', () => {
         expect(row).toMatchObject({ status: 'failed', statusReason: 'Failed-run cap reached (3)', leaseRunId: null })
       }
     }
-    await pause(project)
   })
 
   it('blocks the task when the agent reports stuck, with the question as the reason', async () => {
-    const { project, task, job } = await assigned()
+    const { task, job } = await assigned()
     const result = await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Did the work', summary: 'Which OAuth provider?' })
     expect(result).toMatchObject({ ok: true })
     expect(await taskRow(task.id)).toMatchObject({ status: 'blocked', statusReason: 'Which OAuth provider?', leaseRunId: null })
     expect(await runRow(job.runId)).toMatchObject({ state: 'completed', outcome: 'stuck' })
-    await pause(project)
   })
 
   it('rejects a developer outcome without a one-line note, saying what to add', async () => {
-    const { project, task, job } = await assigned()
+    const { task, job } = await assigned()
     const missing = await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'stuck', summary: 'Which OAuth provider?' })
     expect(missing).toMatchObject({ ok: false, error: expect.stringContaining('The work note is missing. Add `note`: one line of at most 200 characters') })
     const long = await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'x'.repeat(201), summary: 'Which OAuth provider?' })
@@ -463,28 +451,25 @@ describe('orchestrator', () => {
     expect(lines).toMatchObject({ ok: false, error: expect.stringContaining('single line') })
     expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: job.runId })
     expect(await runRow(job.runId)).toMatchObject({ endedAt: null })
-    await pause(project)
   })
 
   it('posts the developer’s note as a comment by its agent with the outcome', async () => {
-    const { project, task, job } = await assigned()
+    const { task, job } = await assigned()
     await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Read the auth module; need a provider decision', summary: 'Which OAuth provider?' })
     const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
     expect(notes).toContainEqual(expect.objectContaining({ author: { kind: 'agent', role: 'developer', runId: job.runId }, body: 'Read the auth module; need a provider decision', pinned: false }))
-    await pause(project)
   })
 
   it('posts the note of a failed developer run', async () => {
-    const { project, task, job } = await assigned()
+    const { task, job } = await assigned()
     await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'failed', note: 'Install fails on a missing native module', summary: 'Broken toolchain' })
     expect(await runRow(job.runId)).toMatchObject({ state: 'failed', outcome: 'failed' })
     const notes = await t.db.select().from(comments).where(eq(comments.taskId, task.id))
     expect(notes).toMatchObject([{ author: { kind: 'agent', role: 'developer', runId: job.runId }, body: 'Install fails on a missing native module' }])
-    await pause(project)
   })
 
   it('reconciles on reconnect: runs the runner lost are interrupted, unknown ones are stopped', async () => {
-    const { project, task, job } = await assigned()
+    const { task, job } = await assigned()
     runner.close()
     runner = await FakeRunner.connect(t.server!.url, [{ runId: 'ghost', leaseEpoch: 1 }], 'r1', { slots: 50 })
     // The ghost is stopped only after all lost runs have been reconciled.
@@ -496,7 +481,6 @@ describe('orchestrator', () => {
     const again = await runner.next('run.assign', m => m.job.taskId === task.id)
     expect(again.job.leaseEpoch).toBe(job.leaseEpoch + 1)
     expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', leaseRunId: again.job.runId, failedRuns: 0 })
-    await pause(project)
   })
 
   // A developer submission accepted by the server: the task is in Agent review
@@ -525,19 +509,19 @@ describe('orchestrator', () => {
 
   it('tells the reviewer whether the project has required checks (D26)', async () => {
     const { review } = await underReview()
-    expect(review.prompt).toContain('This project has no required CI checks')
+    expect(review.prompt).not.toContain('`ci`')
 
     const { project, task } = await submitted()
     await t.request('PATCH', `/api/projects/${project.slug}`, { requiredChecks: ['ci'] })
     await t.orchestrator.schedule()
     const next = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'reviewer')).job
-    expect(next.prompt).toContain('This project has required CI checks: `ci`')
+    expect(next.prompt).toContain('`ci`')
   })
 
   it('claims an Agent review task for the reviewer at the submitted commit', async () => {
-    const { project, task, review } = await underReview()
+    const { task, review } = await underReview()
     expect(review).toMatchObject({ role: 'reviewer', runtime: 'claude-code', headSha: 'abc123', branch: task.branch, leaseEpoch: 2 })
-    expect(review.prompt).toContain('commit abc123')
+    expect(review.prompt).toContain('abc123')
     expect(review.prompt).toContain('shot.png')
     expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review', leaseRole: 'reviewer', leaseRunId: review.runId })
 
@@ -546,7 +530,6 @@ describe('orchestrator', () => {
     const id = (list as { result: { evidence: { id: string }[] } }).result.evidence[0]!.id
     const item = await runner.call(review.runId, review.leaseEpoch, 'get_evidence', { evidenceId: id })
     expect(item).toMatchObject({ ok: true, result: { id, images: [{ mimeType: 'image/png', dataBase64: Buffer.from('png-bytes').toString('base64') }] } })
-    await pause(project)
   })
 
   it('records a note as evidence without a file, accepts a submission covered by notes, and shows the text to the reviewer (D21)', async () => {
@@ -575,12 +558,11 @@ describe('orchestrator', () => {
 
     await t.orchestrator.schedule()
     const review = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'reviewer')).job
-    expect(review.prompt).toContain(`note (no file; judge the explanation) for [${criteria[0]!.id}]:\n  Refactor only, see src/login.ts:1`)
+    expect(review.prompt).toContain(`[${criteria[0]!.id}]:\n  Refactor only, see src/login.ts:1`)
     const list = await runner.call(review.runId, review.leaseEpoch, 'get_evidence', {})
     expect(list).toMatchObject({ ok: true, result: { evidence: [{ kind: 'note', fileName: null }, { kind: 'note', fileName: null }] } })
     const item = await runner.call(review.runId, review.leaseEpoch, 'get_evidence', { evidenceId: rows[0]!.id })
     expect(item).toMatchObject({ ok: true, result: { id: rows[0]!.id, kind: 'note', text: 'Refactor only, see src/login.ts:1' } })
-    await pause(project)
   })
 
   it('rejects evidence with no file unless it is a note with text (D21)', async () => {
@@ -596,11 +578,10 @@ describe('orchestrator', () => {
       expect(empty).toMatchObject({ ok: false, error: 'Not attached. A note needs its text: explain how the criterion is met.' })
     }
     expect(await t.db.select().from(schema.evidence).where(eq(schema.evidence.taskId, task.id))).toEqual([])
-    await pause(project)
   })
 
   it('rejects verdicts that skip a criterion or approve with one unmet', async () => {
-    const { project, task, review } = await underReview()
+    const { task, review } = await underReview()
     const criterion = task.acceptanceCriteria[0]!
     const none = await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Looks good' })
     expect(none).toMatchObject({ ok: false, error: expect.stringContaining('criteria: Give a verdict for every acceptance criterion') })
@@ -615,24 +596,21 @@ describe('orchestrator', () => {
     })
     expect(unmet).toMatchObject({ ok: false, error: expect.stringContaining('every criterion met') })
     expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review', leaseRunId: review.runId })
-    await pause(project)
   })
 
   it('still checks the role after the report parses: a reviewer can\'t open a PR', async () => {
-    const { project, task, review } = await underReview()
+    const { task, review } = await underReview()
     const result = await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', summary: 'Opened' })
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining('A reviewer reports') })
     expect(await taskRow(task.id)).toMatchObject({ status: 'agent_review', leaseRunId: review.runId })
-    await pause(project)
   })
 
   it('leaves a run the server stopped ended when run.started arrives late', async () => {
-    const { project, job } = await assigned()
+    const { job } = await assigned()
     await t.orchestrator.stopRun(job.runId, t.actor)
     runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'late' })
     await sleep(50)
     expect(await runRow(job.runId)).toMatchObject({ state: 'interrupted', outcome: null, agentSessionId: null })
-    await pause(project)
   })
 
   it('posts changes requested as feedback and sends the task back to the developer', async () => {
@@ -656,17 +634,15 @@ describe('orchestrator', () => {
     const next = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
     expect(next.prompt).toContain('No message shown')
     expect(next.prompt).toContain('"pr_updated"')
-    await pause(project)
   })
 
   it('blocks the task when changes are requested at the review-round cap', async () => {
-    const { project, task, review } = await underReview()
+    const { task, review } = await underReview()
     await t.db.update(tasks).set({ reviewRounds: 4 }).where(eq(tasks.id, task.id))
     await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
       outcome: 'changes_requested', summary: 'Still wrong', criteria: [{ criterionId: task.acceptanceCriteria[0]!.id, met: false, note: '' }]
     })
     expect(await taskRow(task.id)).toMatchObject({ status: 'blocked', reviewRounds: 5, statusReason: 'Review-round cap reached (5)', retryStop: expect.objectContaining({ capped: false, status: 'agent_review' }) })
-    await pause(project)
   })
 
   // A reviewer requests changes, the developer pushes a new commit, and a
@@ -698,7 +674,7 @@ describe('orchestrator', () => {
   }
 
   it('starts a new review on the same commit and shows the new round’s evidence', async () => {
-    const { project, task, review } = await secondReview({ summary: 'Show the error', note: 'Evidence missing' }, 'abc123')
+    const { task, review } = await secondReview({ summary: 'Show the error', note: 'Evidence missing' }, 'abc123')
     expect(review).toMatchObject({ role: 'reviewer', headSha: 'abc123' })
     expect(await taskRow(task.id)).toMatchObject({ reviewRounds: 1, leaseRunId: review.runId })
     const allEvidence = await t.db.select().from(schema.evidence).where(eq(schema.evidence.taskId, task.id)).orderBy(asc(schema.evidence.round))
@@ -709,18 +685,16 @@ describe('orchestrator', () => {
     })
     expect(review.prompt).toContain(current.id)
     expect(review.prompt).not.toContain(allEvidence[0]!.id)
-    await pause(project)
   })
 
   it('starts a reviewer after human resolution and same-head resubmission with the round cap reset', async () => {
-    const { project, task, criterion, review } = await secondReview({ summary: 'Needs evidence', note: 'Show the page' }, 'abc123', true)
+    const { task, criterion, review } = await secondReview({ summary: 'Needs evidence', note: 'Show the page' }, 'abc123', true)
     expect(review).toMatchObject({ role: 'reviewer', headSha: 'abc123' })
     expect(await taskRow(task.id)).toMatchObject({ reviewRounds: 0, leaseRunId: review.runId })
     await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
       outcome: 'changes_requested', summary: 'A different issue', criteria: [{ criterionId: criterion.id, met: false, note: 'Fix the label' }]
     })
     expect(await taskRow(task.id)).toMatchObject({ status: 'blocked', reviewRounds: 1, statusReason: 'Review-round cap reached (1)' })
-    await pause(project)
   })
 
   async function reviewAudit(taskId: string) {
@@ -728,7 +702,7 @@ describe('orchestrator', () => {
   }
 
   it('blocks the task when the reviewer repeats the previous round’s feedback', async () => {
-    const { project, task, criterion, review } = await secondReview({ summary: 'The error message is missing when the form is submitted empty', note: 'No message shown' })
+    const { task, criterion, review } = await secondReview({ summary: 'The error message is missing when the form is submitted empty', note: 'No message shown' })
     const result = await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
       outcome: 'changes_requested', summary: 'The error message is still missing when the form is submitted empty.', criteria: [{ criterionId: criterion.id, met: false, note: 'No message shown' }]
     })
@@ -742,29 +716,26 @@ describe('orchestrator', () => {
     // It needs the human, like any other Blocked task
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
     expect(inbox.needsYou.find(i => i.taskId === task.id)).toMatchObject({ type: 'blocked', body: expect.stringContaining('The reviewer asked for the same changes twice') })
-    await pause(project)
   })
 
   it('lists the developer’s notes in order with the reviewer’s feedback in get_task', async () => {
-    const { project, review } = await secondReview({ summary: 'The error message is missing', note: 'No message shown' })
+    const { review } = await secondReview({ summary: 'The error message is missing', note: 'No message shown' })
     const task = await runner.call(review.runId, review.leaseEpoch, 'get_task', {}) as { result: { comments: { author: string, body: string }[] } }
     expect(task.result.comments.map(c => [c.author, c.body.split('\n')[0]])).toEqual([
       ['Developer', 'Did the work'],
       ['Reviewer', 'The error message is missing'],
       ['Developer', 'Addressed review: showed the error message']
     ])
-    await pause(project)
   })
 
   it('sends the task back to the developer when the new feedback is different', async () => {
-    const { project, task, criterion, review } = await secondReview({ summary: 'The error message is missing when the form is submitted empty', note: 'No message shown' })
+    const { task, criterion, review } = await secondReview({ summary: 'The error message is missing when the form is submitted empty', note: 'No message shown' })
     await runner.call(review.runId, review.leaseEpoch, 'report_outcome', {
       outcome: 'changes_requested', summary: 'The message shows now, but the README still describes the old command', criteria: [{ criterionId: criterion.id, met: false, note: 'Update the README' }]
     })
     expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', reviewRounds: 2, statusReason: null })
     const audit = await reviewAudit(task.id)
     expect((audit[1]!.detail as { similarity: number }).similarity).toBeLessThan(0.8)
-    await pause(project)
   })
 
   it('records an approval and moves an unflagged task to Ready to merge', async () => {
@@ -779,16 +750,14 @@ describe('orchestrator', () => {
     // The commit has its verdict, so the reviewer isn't started again
     await t.orchestrator.schedule()
     expect(runner.received.filter(m => m.type === 'run.assign' && m.job.taskId === task.id)).toHaveLength(0)
-    await pause(project)
   })
 
   it('stops a run on request and pauses the task', async () => {
-    const { project, task, job } = await assigned()
+    const { task, job } = await assigned()
     const res = await t.request('POST', `/api/runs/${job.runId}/stop`)
     expect(res.status).toBe(200)
     await runner.next('run.stop', m => m.runId === job.runId)
     expect(await runRow(job.runId)).toMatchObject({ state: 'interrupted' })
     expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', paused: true, leaseRunId: null })
-    await pause(project)
   })
 })

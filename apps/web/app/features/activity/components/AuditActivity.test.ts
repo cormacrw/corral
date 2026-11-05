@@ -16,5 +16,5 @@ it.each(AGENT_ROLES)('attributes a %s action to its role', (role) => {
     props: { entry, text: 'edited the epic' },
     global: { stubs: { AgentAvatar: true, NuxtLink: true } }
   })
-  expect(wrapper.get('span.font-medium').text()).toBe(ROLE[role])
+  expect(wrapper.get('[data-testid="audit-activity"]').text().replace(/\s+/g, ' ')).toContain(`${ROLE[role]} edited the epic`)
 })
