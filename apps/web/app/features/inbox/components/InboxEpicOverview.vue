@@ -3,6 +3,7 @@ import type { EpicReview, EpicReviewFeedback, EpicReviewRound, EpicReviewTaskRow
 import type { EpicInboxItem } from '~/features/inbox/composables/useInboxView'
 import { EPIC_REVIEW_MODE, plural } from '~/utils/labels'
 import { evidenceCriterion } from '~/features/evidence/utils/evidenceFile'
+import { currentEvidence } from '~/features/evidence/utils/evidenceRounds'
 import InboxEvidenceCarousel from '~/features/inbox/components/InboxEvidenceCarousel.vue'
 
 // The Overview tab of an epic in the Inbox (design/inbox.md): what changed
@@ -24,7 +25,7 @@ defineEmits<{ seeChanges: [] }>()
 
 const viewing = ref<Evidence | null>(null)
 const notes = computed(() => (props.rounds[0]?.findings ?? []).filter(f => f.level === 'non_blocking'))
-const screenshots = computed(() => props.rows.flatMap(row => row.evidence
+const screenshots = computed(() => props.rows.flatMap(row => currentEvidence(row.evidence)
   .filter(e => e.url && e.contentType?.startsWith('image/'))
   .map(evidence => ({ evidence, caption: `${row.ref} · ${evidenceCriterion(evidence, row.criteria)}` }))))
 const conflict = computed(() => props.item.type === 'epic_conflict' ? props.item : null)

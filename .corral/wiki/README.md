@@ -16,6 +16,7 @@ Short implementation notes written while building. Not binding: `docs/README.md`
 - [Parent fixes and fix tasks](epic-fix-tasks.md)
 - [Parent rebases](epic-rebases.md)
 - [Parent review in the Inbox](epic-inbox-panel.md)
+- [Evidence rounds: latest by default, earlier behind a toggle](evidence-rounds.md)
 - [Evidence videos](evidence-videos.md)
 - [Flow metrics](flow-metrics.md)
 - [Frontend structure](frontend-structure.md)
