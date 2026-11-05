@@ -167,7 +167,7 @@ export type ApprovePlanInput = z.input<typeof approvePlanInput>
 
 export const listTasksInput = z.object({
   status: z.union([z.enum(TASK_STATUSES), z.array(z.enum(TASK_STATUSES)).min(1)]).optional().describe('Only tasks in this status, or in any of these. Naming merged returns Merged tasks without includeMerged.'),
-  parent: z.string().trim().min(1).optional().describe('Only the sub-tasks of this parent, by its ref'),
+  parent: z.string().trim().min(1).optional().describe('Only the subtasks of this task, by its ref'),
   // Runners from before parent tasks (D31)
   epic: z.string().trim().min(1).optional(),
   query: z.string().trim().min(1).optional().describe('Only tasks whose ref or title contains this, ignoring case'),

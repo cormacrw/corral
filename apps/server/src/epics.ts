@@ -60,7 +60,7 @@ export async function patchEpic(db: Executor, epicId: string, input: PatchEpicIn
     const changed = (Object.keys(input) as (keyof PatchEpicInput)[]).filter(k => input[k] !== undefined && input[k] !== epic![k])
     if (changed.includes('reviewMode')) {
       const taskRows = await tx.select({ status: tasks.status, type: tasks.type, prNumber: tasks.prNumber, integrationProtocol: tasks.integrationProtocol }).from(tasks).where(eq(tasks.epicId, epicId))
-      if (reviewModeLocked(epic!, taskRows)) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'The review mode can\'t change once a task in the parent has submitted work or opened a PR' }] })
+      if (reviewModeLocked(epic!, taskRows)) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'The review mode can\'t change once a subtask in the task has submitted work or opened a PR' }] })
     }
     if (changed.length > 0) {
       await tx.update(epics).set({ ...input, updatedAt: new Date() }).where(eq(epics.id, epicId))

@@ -10,7 +10,7 @@ import { FakeRunner } from './test-runner.ts'
 const { agents, comments, epics, epicDependencies, tasks, taskDependencies } = schema
 
 // Parents at the edges: cycles, plan keys, promotion from every state, delivery
-describe('parent task edges', () => {
+describe('delivery dependencies', () => {
   let t: TestApp
   let runner: FakeRunner
   let seq = 0
@@ -56,12 +56,12 @@ describe('parent task edges', () => {
   const addSub = (slug: string, number: number, body: Record<string, unknown> = {}) => t.request('POST', `/api/projects/${slug}/tasks/${number}/subtasks`, { title: 'Sub', type: 'task', ...body })
 
   describe('dependency cycles', () => {
-    it('refuses a sub-task that depends on its own parent', async () => {
+    it('refuses a subtask that depends on its own task', async () => {
       const { project, a, parent } = await parentSetup()
       expect((await patch(project.slug, a.number, { dependsOn: [parent.number] })).status).toBe(400)
     })
 
-    it('refuses a cycle through a parent, on update and on create', async () => {
+    it('refuses a cycle through a task, on update and on create', async () => {
       const { project, delivery, b, parent } = await parentSetup()
       const other = await t.createTask(project.slug)
       expect((await patch(project.slug, other.number, { dependsOn: [parent.number] })).status).toBe(200)
@@ -70,7 +70,7 @@ describe('parent task edges', () => {
       expect(created.status).toBe(400)
     })
 
-    it('refuses moving a dependent into the parent it waits on', async () => {
+    it('refuses moving a dependent into the task it waits on', async () => {
       const { project, delivery, parent } = await parentSetup()
       const other = await t.createTask(project.slug)
       await patch(project.slug, other.number, { dependsOn: [parent.number] })
@@ -85,7 +85,7 @@ describe('parent task edges', () => {
       expect(await propose({ [field]: [{ key: 'epic-1', title: 'A' }, { key: 'epic-2', title: 'B', dependsOn: ['epic-1'] }], tasks: [item('a', { [link]: 'epic-1' }), item('c', { [link]: 'epic-1' }), item('b', { [link]: 'epic-2' }), item('d', { [link]: 'epic-2' })] })).toMatchObject({ ok: true })
     })
 
-    it('keeps an existing parent\'s prerequisites when the plan leaves them out', async () => {
+    it('keeps an existing task\'s prerequisites when the plan leaves them out', async () => {
       const { project, delivery, parent } = await parentSetup()
       const [q] = await t.db.insert(epics).values({ projectId: project.id, title: 'Q', createdBy: t.actor }).returning()
       await t.db.insert(epicDependencies).values({ projectId: project.id, epicId: delivery.id, dependsOnEpicId: q!.id })
@@ -95,7 +95,7 @@ describe('parent task edges', () => {
       expect(await t.db.select().from(epicDependencies).where(eq(epicDependencies.epicId, delivery.id))).toHaveLength(1)
     })
 
-    it('keeps a Draft and its comments when a revision makes it a parent', async () => {
+    it('keeps a Draft and its comments when a revision makes it a task', async () => {
       const { project, propose, plans } = await start()
       await propose({ tasks: [item('a')] })
       const [draft] = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))
@@ -141,10 +141,10 @@ describe('parent task edges', () => {
       const two = [item('a', { parent: 'p' }), item('b', { parent: 'p' })]
       expect(await propose({ parents: [{ key: 'p', ref: big.ref }], tasks: two })).toMatchObject({ ok: true })
       const other = await turn(project.id)
-      expect(JSON.stringify(await other.propose({ parents: [{ key: 'p', ref: big.ref }], tasks: two }))).toContain('another plan already turns')
+      expect(JSON.stringify(await other.propose({ parents: [{ key: 'p', ref: big.ref }], tasks: two }))).toContain('another plan already gives')
     })
 
-    it('never deletes a commented parent because its plan was discarded', async () => {
+    it('never deletes a commented task because its plan was discarded', async () => {
       const { project, propose, plans } = await start()
       await propose({ parents: [{ key: 'p', title: 'New' }], tasks: [item('a', { parent: 'p' }), item('b', { parent: 'p' })] })
       const [delivery] = await t.db.select().from(epics).where(eq(epics.projectId, project.id))
@@ -165,7 +165,7 @@ describe('parent task edges', () => {
   })
 
   describe('promotion from every state', () => {
-    it('merges a dependency the first sub-task already has', async () => {
+    it('merges a dependency the first subtask already has', async () => {
       const project = await newProject()
       const dep = await t.createTask(project.slug)
       const back = await t.createTask(project.slug, { dependsOn: [dep.number] })
@@ -174,7 +174,7 @@ describe('parent task edges', () => {
       expect(await res.json()).toMatchObject({ dependsOn: [dep.ref] })
     })
 
-    it('makes a parent of a Ready task, and a title is enough: the description comes along', async () => {
+    it('makes a task of a Ready task, and a title is enough: the description comes along', async () => {
       const project = await newProject()
       await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
       const ready = await t.createTask(project.slug, { description: doc })
@@ -185,7 +185,7 @@ describe('parent task edges', () => {
       expect((await list(project.slug, 'board')).find(task => task.id === ready.id)).toMatchObject({ status: 'parent', rollup: { planned: true } })
     })
 
-    it('keeps a Draft\'s sub-tasks in its plan, through approval and through discarding', async () => {
+    it('keeps a Draft\'s subtasks in its plan, through approval and through discarding', async () => {
       for (const ending of ['approve', 'discard'] as const) {
         const { project, propose, plans } = await start()
         await propose({ tasks: [item('a')] })
@@ -206,7 +206,7 @@ describe('parent task edges', () => {
       }
     })
 
-    it('moves a pause to the first sub-task', async () => {
+    it('moves a pause to the first subtask', async () => {
       const project = await newProject()
       const back = await t.createTask(project.slug)
       await t.db.update(tasks).set({ paused: true }).where(eq(tasks.id, back.id))
@@ -214,7 +214,7 @@ describe('parent task edges', () => {
       expect((await t.db.select().from(tasks).where(eq(tasks.id, back.id)))[0]).toMatchObject({ paused: false })
     })
 
-    it('refuses a sub-task on a delivered parent', async () => {
+    it('refuses a subtask on a delivered task', async () => {
       const { project, delivery, parent } = await parentSetup()
       await t.db.update(epics).set({ reviewState: 'merged', branch: 'corral/x', mergedAt: new Date() }).where(eq(epics.id, delivery.id))
       expect((await addSub(project.slug, parent.number)).status).toBe(409)
@@ -222,7 +222,7 @@ describe('parent task edges', () => {
   })
 
   describe('delivery', () => {
-    it('refuses to delete a parent with an unmerged branch, and keeps one with comments', async () => {
+    it('refuses to delete a task with an unmerged branch, and keeps one with comments', async () => {
       const { project, delivery, parent, a, b } = await parentSetup()
       for (const sub of [a, b]) await t.db.update(tasks).set({ deletedAt: new Date() }).where(eq(tasks.id, sub.id))
       await t.db.update(epics).set({ branch: 'corral/epic-x' }).where(eq(epics.id, delivery.id))
@@ -236,18 +236,18 @@ describe('parent task edges', () => {
       expect(await t.db.select().from(comments).where(eq(comments.taskId, parent.id))).toHaveLength(1)
     })
 
-    it('gives a sub-task\'s run its parent\'s pinned comments', async () => {
+    it('gives a subtask\'s run its task\'s pinned comments', async () => {
       const { project, parent, a } = await parentSetup()
-      await t.db.insert(comments).values([{ taskId: parent.id, author: t.actor, body: 'Pinned on the parent', pinned: true }, { taskId: parent.id, author: t.actor, body: 'Not pinned' }])
+      await t.db.insert(comments).values([{ taskId: parent.id, author: t.actor, body: 'Pinned on the task', pinned: true }, { taskId: parent.id, author: t.actor, body: 'Not pinned' }])
       await t.request('PATCH', `/api/projects/${project.slug}`, { paused: false })
       await t.db.update(tasks).set({ status: 'ready' }).where(eq(tasks.id, a.id))
       await t.orchestrator.schedule()
       const { job } = await runner.next('run.assign', m => m.job.taskId === a.id)
-      expect(job.prompt).toContain('Pinned on the parent')
+      expect(job.prompt).toContain('Pinned on the task')
       expect(job.prompt).not.toContain('Not pinned')
     })
 
-    it('holds a dependent of a direct parent while a sub-task is in Backlog', async () => {
+    it('holds a dependent of a direct task while a subtask is in Backlog', async () => {
       const { project, parent, a } = await parentSetup('direct')
       await t.db.update(tasks).set({ status: 'merged' }).where(eq(tasks.id, a.id))
       const waiting = await t.createTask(project.slug)
@@ -258,7 +258,7 @@ describe('parent task edges', () => {
       expect(await claimNextTask(t.db, developer!.id, new Date(), [waiting.id])).toBeNull()
     })
 
-    it('records when a direct parent\'s last sub-task lands', async () => {
+    it('records when a direct task\'s last subtask lands', async () => {
       const { delivery, a, b } = await parentSetup('direct')
       await t.db.update(tasks).set({ status: 'merged' }).where(eq(tasks.id, a.id))
       await publishDependents(t.db, t.bus, a.id)
@@ -268,7 +268,7 @@ describe('parent task edges', () => {
       expect((await t.db.select().from(epics).where(eq(epics.id, delivery.id)))[0]!.mergedAt).toBeInstanceOf(Date)
     })
 
-    it('deletes an empty parent whose deleted sub-task submitted commits, and shows it until then', async () => {
+    it('deletes an empty task whose deleted subtask submitted commits, and shows it until then', async () => {
       const { project, delivery, parent, a, b } = await parentSetup()
       await t.db.update(tasks).set({ integrationProtocol: 1, deletedAt: new Date() }).where(eq(tasks.id, a.id))
       await t.db.update(tasks).set({ deletedAt: new Date() }).where(eq(tasks.id, b.id))

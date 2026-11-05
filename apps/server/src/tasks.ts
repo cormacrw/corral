@@ -360,7 +360,7 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
     if (input.epicId) {
       const [epic] = await tx.select({ id: epics.id }).from(epics)
         .where(and(eq(epics.id, input.epicId), eq(epics.projectId, project.id)))
-      if (!epic) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['epicId'], message: 'Unknown parent' }] })
+      if (!epic) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['epicId'], message: 'Unknown task' }] })
     }
 
     // A brand-new task has no dependents, so it can't close a cycle; it can
@@ -416,14 +416,14 @@ export async function createTask(db: Executor, project: ProjectRow, rawInput: Cr
 // Why a task can't gain sub-tasks, or null when it can (D31): nobody has
 // started it, and nothing else depends on it staying a single task
 export async function promotionRefusal(db: Executor, task: TaskRow): Promise<string | null> {
-  if (task.epicId) return 'A sub-task can\'t have sub-tasks; they go one level deep. Add a separate follow-up task instead.'
-  if (!['draft', 'backlog', 'ready'].includes(task.status) || task.leaseRunId) return `${task.status === 'merged' ? 'Merged' : 'Started'} work can't gain sub-tasks. Add a separate follow-up task instead.`
-  if (task.type !== 'task' && task.type !== 'bug') return 'Only a task or a bug can gain sub-tasks.'
+  if (task.epicId) return 'A subtask can\'t have subtasks; they go one level deep. Add a separate follow-up task instead.'
+  if (!['draft', 'backlog', 'ready'].includes(task.status) || task.leaseRunId) return `${task.status === 'merged' ? 'Merged' : 'Started'} work can't gain subtasks. Add a separate follow-up task instead.`
+  if (task.type !== 'task' && task.type !== 'bug') return 'Only a task or a bug can gain subtasks.'
   const [run] = await db.select({ id: runs.id }).from(runs).where(eq(runs.taskId, task.id)).limit(1)
   const [submission] = await db.select({ id: taskSubmissions.id }).from(taskSubmissions).where(eq(taskSubmissions.taskId, task.id)).limit(1)
   if (run || submission || task.prNumber !== null) return 'This task has already had a run. Add a separate follow-up task instead.'
   const [pin] = await db.select({ taskId: taskDesignPins.taskId }).from(taskDesignPins).where(eq(taskDesignPins.taskId, task.id)).limit(1)
-  if (pin) return 'A task pinned to a design can\'t gain sub-tasks.'
+  if (pin) return 'A task pinned to a design can\'t gain subtasks.'
   return null
 }
 
@@ -473,7 +473,7 @@ export async function addSubtask(db: Executor, project: ProjectRow, taskId: stri
     const { task } = await lockTask(tx, taskId)
     if (task.status === 'parent') {
       const [delivery] = await tx.select().from(epics).where(eq(epics.taskId, taskId))
-      if (delivery!.reviewState === 'merged' || delivery!.mergedAt) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'This parent has delivered. Add a separate follow-up task instead.' }] })
+      if (delivery!.reviewState === 'merged' || delivery!.mergedAt) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'This task has delivered. Add a separate follow-up task instead.' }] })
       const live = await tx.select({ id: tasks.id, status: tasks.status }).from(tasks).where(and(eq(tasks.epicId, delivery!.id), isNull(tasks.deletedAt)))
       const subId = await createTask(tx, project, { ...input, epicId: delivery!.id }, actor)
       const drafted = live[0] && live.every(t => t.status === 'draft')
@@ -483,7 +483,7 @@ export async function addSubtask(db: Executor, project: ProjectRow, taskId: stri
     const refusal = await promotionRefusal(tx, task)
     if (refusal) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: refusal }] })
     const [claimed] = await tx.select({ id: epics.id }).from(epics).where(eq(epics.taskId, taskId))
-    if (claimed) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'A plan waiting for approval already turns this task into a parent.' }] })
+    if (claimed) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'A plan waiting for approval already gives this task subtasks.' }] })
     const [delivery] = await tx.insert(epics).values({
       projectId: project.id, taskId, title: task.title, description: richTextToMarkdown(task.description), priority: task.priority, reviewMode: project.epicReviewModeDefault, createdBy: actor
     }).returning({ id: epics.id })
@@ -629,11 +629,11 @@ export async function patchTask(db: Executor, project: ProjectRow, taskId: strin
     if ((fields.type ?? task.type) === 'design') fields.humanReview = true
     if (fields.epicId) {
       const [epic] = await tx.select({ id: epics.id }).from(epics).where(and(eq(epics.id, fields.epicId), eq(epics.projectId, project.id)))
-      if (!epic) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['epicId'], message: 'Unknown parent' }] })
+      if (!epic) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['epicId'], message: 'Unknown task' }] })
     }
     // A selected task's submissions target this epic's branch and it can't take another path
     if (task.integrationProtocol > 0 && ((fields.epicId !== undefined && fields.epicId !== task.epicId) || (fields.type !== undefined && fields.type !== task.type))) {
-      throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'A task submitting commits to its parent branch can\'t change parent or type' }] })
+      throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: 'A subtask submitting commits to the task\'s branch can\'t change membership or type' }] })
     }
     const descriptionChanged = fields.description !== undefined && JSON.stringify(fields.description) !== JSON.stringify(task.description)
     let criteriaChange: TaskContentEdit['criteria'] = null
@@ -736,7 +736,7 @@ export async function checkParentCycles(tx: Executor, project: ProjectRow, chang
     rows.map(t => ({ ...t, dependsOn: changed.get(t.id) ?? (dependsOn.get(t.id) ?? []).map(e => e.dependsOnId) })),
     new Map(projectEpics.map(e => [e.id, e.title]))
   )
-  if (problems.length > 0) throw new ApiFailure(400, { code: 'invalid_input', issues: problems.map(p => ({ message: `Dependency cycle: ${p.epics.join(' → ') || 'a task waits on its own parent'}` })) })
+  if (problems.length > 0) throw new ApiFailure(400, { code: 'invalid_input', issues: problems.map(p => ({ message: `Dependency cycle: ${p.epics.join(' → ') || 'a subtask waits on the task it belongs to'}` })) })
 }
 
 // Stamped with the clock, not the transaction's start, so comments posted in
@@ -789,7 +789,7 @@ export async function deleteTaskRows(db: Executor, taskId: string, actor: Actor,
       const [sub] = await tx.select({ id: tasks.id }).from(tasks).where(and(eq(tasks.epicId, delivery.id), isNull(tasks.deletedAt))).limit(1)
       if (sub) throw new ApiFailure(409, { code: 'conflict', constraint: 'parent_has_subtasks' })
       if (delivery.reviewState === 'merged') throw new ApiFailure(409, { code: 'conflict', constraint: 'parent_delivered' })
-      if (delivery.branch) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: `${delivery.branch} isn't merged, so deleting this parent would lose its work. Close its PR and delete the branch first.` }] })
+      if (delivery.branch) throw new ApiFailure(409, { code: 'invalid_input', issues: [{ message: `${delivery.branch} isn't merged, so deleting this task would lose its work. Close its PR and delete the branch first.` }] })
       // Comments and history stay with the record
       const [comment] = await tx.select({ id: comments.id }).from(comments).where(eq(comments.taskId, taskId)).limit(1)
       const [history] = await tx.select({ id: auditLog.id }).from(auditLog).where(and(eq(auditLog.taskId, taskId), ne(auditLog.action, 'task.created'))).limit(1)

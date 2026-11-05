@@ -33,7 +33,7 @@ function oneLine(text: string): string {
 // Every confirm-required tool uses this lifecycle. Its message is also the
 // durable pending-action record, so the card survives reloads and restarts.
 // What a card agreed to, whichever names it was saved under
-const neutralSummary = (summary: string) => summary.replaceAll(/\bepicId\b/g, 'parentId').replaceAll(/\bepic\b/g, 'parent')
+const neutralSummary = (summary: string) => summary.replaceAll(/\bepicId\b/g, 'parentId').replaceAll(/\b(?:epic|parent)\b/g, 'task')
 
 export class PmActions {
   #d: Deps

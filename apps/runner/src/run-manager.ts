@@ -1049,7 +1049,7 @@ function wipMessage(job: RunJob, exit: RunExit, stopDetail: string): string {
     : exit.kind === 'runner_shutdown'
       ? 'The runner shut down'
       : exit.kind === 'signalled' ? exit.signal : stopDetail
-  return `WIP: ${job.taskRef ?? 'Parent fix'} run #${job.runNumber} stopped: ${reason}\n\nCorral saved this unfinished work when the run stopped. It may not build.`
+  return `WIP: ${job.taskRef ?? 'Task fix'} run #${job.runNumber} stopped: ${reason}\n\nCorral saved this unfinished work when the run stopped. It may not build.`
 }
 
 // Machine-specific details the agent needs, kept out of RunJob (PRD §8.5)

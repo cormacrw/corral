@@ -24,12 +24,12 @@ type Stopped = () => boolean
 const server: Actor = { kind: 'system', component: 'server' }
 
 // Endings that say nothing against these commits: they retry at once
-const EPIC_MOVED = 'The parent branch moved'
+const EPIC_MOVED = 'The task\'s branch moved'
 const INTERRUPTED = 'Interrupted before a candidate was ready'
-const EPIC_MERGED = 'The parent PR merged'
+const EPIC_MERGED = 'The task\'s PR merged'
 // Operations are read back by their stored error: rows from before D31 say epic
-const RETRY_AT_ONCE = [EPIC_MOVED, INTERRUPTED, EPIC_MERGED, 'The epic branch moved', 'The epic PR merged']
-const NOT_FAILURES = [...RETRY_AT_ONCE, CONFLICT_DEFERRED, CONFLICT_GONE, 'The epic branch no longer conflicts']
+const RETRY_AT_ONCE = [EPIC_MOVED, INTERRUPTED, EPIC_MERGED, 'The epic branch moved', 'The epic PR merged', 'The parent branch moved', 'The parent PR merged']
+const NOT_FAILURES = [...RETRY_AT_ONCE, CONFLICT_DEFERRED, CONFLICT_GONE, 'The epic branch no longer conflicts', 'The parent branch no longer conflicts']
 const RESOLUTION_FAILED = 'The conflict resolution failed and the target has moved on'
 // Failures on the same commits before it takes a human to retry. Each waits a
 // little longer, so one bad minute doesn't use them all.
@@ -445,7 +445,7 @@ export class EpicSynchronizer {
     await db.transaction(async (tx) => {
       const { task, project } = await lockTask(tx, operation.resolutionTaskId!)
       await applyTransition(tx, task, project, { type: 'ci_failed' }, server, { event: 'ci_failed', checks: [] })
-      await tx.insert(comments).values({ taskId: task.id, author: server, body: `The rebased branch can't go onto the parent branch. ${reason} Fix that and report pr_updated.` })
+      await tx.insert(comments).values({ taskId: task.id, author: server, body: `The rebased branch can't go onto the task's branch. ${reason} Fix that and report pr_updated.` })
     })
     await this.#settled(operation.resolutionTaskId)
   }
@@ -455,7 +455,7 @@ export class EpicSynchronizer {
     const { db } = this.#d
     const attempts = operation.fixAttempts + 1
     await db.transaction(async (tx) => {
-      await tx.update(operations).set({ fixReport: null, fixAttempts: attempts, fixBrief: `${operation.fixBrief}\n\nCorral refused your last candidate, and the parent branch didn't move: ${reason}`, updatedAt: this.#now() }).where(eq(operations.id, operation.id))
+      await tx.update(operations).set({ fixReport: null, fixAttempts: attempts, fixBrief: `${operation.fixBrief}\n\nCorral refused your last candidate, and the task's branch didn't move: ${reason}`, updatedAt: this.#now() }).where(eq(operations.id, operation.id))
       await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'fix_refused', fix: operation.fix!, operationId: operation.id, summary: reason }))
       if (attempts >= MAX_FAILED_ATTEMPTS) await recordSyncFailure(tx, project, epic.id, `Corral refused the candidate ${attempts} times: ${reason}`, this.#now())
     })
@@ -479,7 +479,7 @@ export class EpicSynchronizer {
       return true
     }
     if (head !== operation.expectedTargetSha) return this.#fail(operation, ctx, EPIC_MOVED)
-    const error = operation.error ?? 'The push did not reach the parent branch'
+    const error = operation.error ?? 'The push did not reach the task\'s branch'
     if (!operation.resolutionTaskId && !operation.fix) return this.#fail(operation, ctx, error)
     // A reviewed resolution or a reported fix is worth keeping: push it again, within a bound
     await db.update(operations).set({ state: 'running', updatedAt: this.#now() }).where(eq(operations.id, operation.id))

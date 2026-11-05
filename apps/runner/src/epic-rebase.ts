@@ -109,7 +109,7 @@ async function candidateProblem(bare: string, job: Job<'epic_rebase_push'>): Pro
   for (const [from, to] of carried) {
     if (await exists(bare, job.expectedHeadSha, from) && !await exists(bare, job.candidateSha, to)) return `It undoes the target's rename of ${from} to ${to}. Keep the file at ${to}, with the epic's change in it.`
   }
-  return undone.length > 0 && !job.reviewed ? `It changes target branch work the parent never touched: ${undone.join(', ')}. Keep the target's version of these files.` : null
+  return undone.length > 0 && !job.reviewed ? `It changes target branch work the task never touched: ${undone.join(', ')}. Keep the target's version of these files.` : null
 }
 
 // A prompt can hold only so much. The reviewer has the checkout for the rest.

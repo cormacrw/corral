@@ -50,7 +50,7 @@ describe('pmPrompt', () => {
     expect(prompt.endsWith('hi')).toBe(true)
   })
 
-  // The UI says "parent"; only branch names keep the old word
+  // People see tasks and subtasks; literal branch names keep their identifiers
   it.each([
     { fresh: true, projectName: 'Test app', prefix: 'TA' },
     { fresh: true, projectName: null, prefix: null },
@@ -322,7 +322,7 @@ describe('how much a developer checks locally', () => {
     expect(developerPrompt({ ...spike, checkScope: 'targeted' }, 'Tam')).toBe(developerPrompt({ ...spike, checkScope: null }, 'Tam'))
   })
 
-  it('changes a parent fix only when the project has required CI', () => {
+  it('changes a task fix only when the project has required CI', () => {
     const input = { agentName: 'Tam', epicTitle: 'E', goal: '', brief: '', branch: 'c', epicBranch: 'e', target: 'main', ontoSha: 'abc', files: [], failures: [], decisions: [] }
     expect(epicFixPrompt({ ...input, fix: 'ci', requiredChecks: [] })).not.toBe(epicFixPrompt({ ...input, fix: 'ci', requiredChecks: ['ci'] }))
   })
@@ -336,19 +336,19 @@ describe('how much a developer checks locally', () => {
   })
 })
 
-describe('parent rebase prompts', () => {
-  const parent: PromptTask = { ...task, ref: 'TA-9', title: 'Rebase parent: Search', branch: 'corral/epic-1-search', defaultBranch: 'develop' }
+describe('task rebase prompts', () => {
+  const parent: PromptTask = { ...task, ref: 'TA-9', title: 'Rebase task: Search', branch: 'corral/epic-1-search', defaultBranch: 'develop' }
 
   it.each([
     ['fresh', developerPrompt({ ...parent, squashRebase: true }, 'Tam')],
     ['resumed', developerRevisionPrompt({ ...parent, squashRebase: true, reviewRounds: 1 }, [])]
-  ])('updates the parent PR from a %s session', (_name, prompt) => {
+  ])('updates the task\'s PR from a %s session', (_name, prompt) => {
     expect(prompt).toContain('corral/epic-1-search')
     expect(prompt).toContain('"pr_updated"')
     expect(prompt).not.toContain('pr_opened')
   })
 
-  it('rebases onto the target, and names the submission trailers only on a parent rebase', () => {
+  it('rebases onto the target, and names the submission trailers only on a task rebase', () => {
     expect(developerPrompt({ ...parent, squashRebase: true }, 'Tam')).toContain('git rebase origin/develop')
     expect(developerPrompt({ ...parent, squashRebase: true }, 'Tam')).toContain('Corral-Submission:')
     expect(developerPrompt(parent, 'Tam')).not.toContain('Corral-Submission')
@@ -436,7 +436,7 @@ describe('human decisions contract (D11)', () => {
     ['developer', developerPrompt(decisions, 'Tam')],
     ['spike developer', developerPrompt({ ...decisions, spike: true, branch: null }, 'Tam')],
     ['designer', designerPrompt({ ...decisions, design: { version: null } }, 'Dee')],
-    ['parent rebase developer', developerPrompt({ ...decisions, squashRebase: true }, 'Tam')],
+    ['task rebase developer', developerPrompt({ ...decisions, squashRebase: true }, 'Tam')],
     ['rebase developer', developerRevisionPrompt({ ...decisions, rebaseOnly: true }, [])],
     ['PR-free rebase developer', developerRevisionPrompt({ ...decisions, rebaseOnly: true, prFree: true }, [])],
     ['rebase reviewer', reviewerPrompt({ ...review, ...decisions, headSha: 'new-head', rebaseOnly: true }, 'Rae')]
@@ -452,7 +452,7 @@ describe('integration review prompts', () => {
     expect(epicReviewPrompt({ ...input, requiredChecks: [] })).not.toBe(epicReviewPrompt(input))
   })
 
-  it('covers the whole parent the first time, and what changed since on a repeat', () => {
+  it('covers the whole task the first time, and what changed since on a repeat', () => {
     expect(epicReviewPrompt(input)).toContain('git diff origin/main...HEAD')
     const repeat = epicReviewPrompt({ ...input, lastReview: { headSha: 'old999', summary: 'The UI sends the wrong field', outcome: 'changes_requested', fixes: ['Renamed the field'] } })
     expect(repeat).toContain('The UI sends the wrong field')
