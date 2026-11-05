@@ -10,7 +10,8 @@ import { currentEvidence } from '~/features/evidence/utils/evidenceRounds'
 // the verdict and the artifacts.
 type Action = InboxActionInput['action']
 export type ResolveTo = 'backlog' | 'ready' | 'in_progress'
-export type InboxPanelTab = 'overview' | 'criteria' | 'review' | 'pr' | 'diff' | 'message'
+// `guide` is option A of the guided review design (COR-518), prototype only
+export type InboxPanelTab = 'overview' | 'criteria' | 'review' | 'pr' | 'diff' | 'guide' | 'message'
 // What the actions and the composer need, for a task item or an epic
 export interface InboxComposerContext {
   item: { type: InboxItem['type'], project: { slug: string } }

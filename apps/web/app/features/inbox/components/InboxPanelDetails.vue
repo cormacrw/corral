@@ -3,11 +3,17 @@ import type { InboxPanel, InboxPanelContext } from '~/features/inbox/composables
 import { verdictMark } from '~/features/inbox/utils/inbox-summary'
 import { timeAgo } from '~/utils/labels'
 import InboxPrDescription from '~/features/inbox/components/InboxPrDescription.vue'
+import InboxPanelCodeDiff from '~/features/inbox/components/InboxPanelCodeDiff.vue'
+import InboxPanelGuideTab from '~/features/inbox/components/InboxPanelGuideTab.vue'
 
 // What the panel keeps a click away, one tab at a time: the criteria with their
 // notes and evidence, the review history, the PR and the full message
-const props = defineProps<{ ctx: InboxPanelContext, p: InboxPanel, section: 'criteria' | 'review' | 'pr' | 'diff' | 'message' }>()
+// `codeMode` puts guided review inside Code diff (COR-518, option B); without
+// it, option A's Guide tab shows the steps one at a time.
+const props = defineProps<{ ctx: InboxPanelContext, p: InboxPanel, section: 'criteria' | 'review' | 'pr' | 'diff' | 'guide' | 'message', mobile?: boolean, codeMode?: boolean }>()
+defineEmits<{ openDiff: [] }>()
 const reviews = computed(() => props.p.history.value)
+
 </script>
 
 <template>
@@ -42,7 +48,7 @@ const reviews = computed(() => props.p.history.value)
     </li>
   </ol>
   <div
-    v-else-if="(section === 'pr' || section === 'diff') && p.prLoading.value"
+    v-else-if="(section === 'pr' || section === 'diff' || section === 'guide') && p.prLoading.value"
     class="flex flex-col gap-3"
     data-testid="inbox-pr-loading"
   >
@@ -50,7 +56,7 @@ const reviews = computed(() => props.p.history.value)
     <UiSkeleton class="h-40 w-full" />
   </div>
   <AppLoadError
-    v-else-if="(section === 'pr' || section === 'diff') && p.prFailed.value"
+    v-else-if="(section === 'pr' || section === 'diff' || section === 'guide') && p.prFailed.value"
     title="Couldn't load this pull request"
     :description="p.prError.value ?? undefined"
     :retry="p.retryPullRequest"
@@ -61,9 +67,28 @@ const reviews = computed(() => props.p.history.value)
     :pr="p.prDetail.value"
     icon
   />
+  <InboxPanelCodeDiff
+    v-else-if="section === 'diff' && p.prDetail.value && codeMode && ctx.item.taskRef"
+    :key="p.prDetail.value.number"
+    :pr="p.prDetail.value"
+    :slug="ctx.item.project.slug"
+    :task-ref="ctx.item.taskRef"
+    :criteria="p.criteria.value"
+    :mobile="mobile"
+  />
   <InboxPanelDiff
     v-else-if="section === 'diff' && p.prDetail.value"
     :pr="p.prDetail.value"
+  />
+  <InboxPanelGuideTab
+    v-else-if="section === 'guide' && p.prDetail.value && ctx.item.taskRef"
+    :key="p.prDetail.value.number"
+    :pr="p.prDetail.value"
+    :slug="ctx.item.project.slug"
+    :task-ref="ctx.item.taskRef"
+    :criteria="p.criteria.value"
+    :mobile="mobile"
+    @open-diff="$emit('openDiff')"
   />
   <MarkdownText
     v-else

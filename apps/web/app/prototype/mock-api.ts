@@ -217,6 +217,33 @@ route('GET', '/projects/:slug/pull-requests/:number', ([slug, number]) => {
   if (!detail) throw new ApiError(404, { code: 'pull_request_unavailable', number: Number(number), message: 'Not Found' }, `GitHub couldn't return PR #${number}`)
   return detail
 })
+// Guided code review (COR-518). A PR with no fixture has no guide yet; asking
+// for one generates for a few seconds, and a failing fixture fails once more
+// before its Retry works.
+const GUIDE_SECONDS = 3
+function guideOf(number: number) {
+  f.guides[number] ??= { status: 'none', headSha: null, steps: [], error: null, generatedAt: null }
+  const g = f.guides[number]
+  if (g.status === 'generating' && g.startedAt !== undefined && Date.now() - g.startedAt > GUIDE_SECONDS * 1000) {
+    Object.assign(g, { status: 'ready', steps: g.planned ?? [], generatedAt: new Date().toISOString(), headSha: '5b030d7e1c' })
+  }
+  const { planned: _planned, startedAt: _startedAt, ...guide } = g
+  return guide
+}
+route('GET', '/projects/:slug/pull-requests/:number/guide', ([slug, number]) => {
+  project(slug)
+  return guideOf(Number(number))
+})
+route('POST', '/projects/:slug/pull-requests/:number/guide', ([slug, number]) => {
+  project(slug)
+  const g = (f.guides[Number(number)] ??= { status: 'none', headSha: null, steps: [], error: null, generatedAt: null })
+  // A PR with no planned steps gets one step per file
+  g.planned ??= (f.pullRequestDetails.find(d => d.number === Number(number))?.files ?? []).map((file, i) => ({
+    id: `g-${i + 1}`, title: file.path.split('/').at(-1)!, why: 'Changes this file.', criterionIds: [], hunks: [{ path: file.path, hunk: 0 }]
+  }))
+  Object.assign(g, { status: 'generating', error: null, startedAt: Date.now() })
+  return guideOf(Number(number))
+})
 route('GET', '/projects/:slug/tasks/:number/pull-request', ([slug, number]) => {
   const { pr } = taskIn(slug!, number!)
   if (pr === null) throw new ApiError(404, { code: 'no_pull_request' }, 'This task has no pull request yet')

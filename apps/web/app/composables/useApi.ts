@@ -1,4 +1,5 @@
 import type {
+  PullRequestGuide,
   Agent,
   AgentRuntime,
   ApiErrorBody,
@@ -147,7 +148,10 @@ export const api = {
     clearThumbnail: (slug: string) => call<Project>('DELETE', `/projects/${slug}/thumbnail`),
     // Open PRs and their merge gates, read live from GitHub
     pullRequests: (slug: string) => call<PullRequestStatus[]>('GET', `/projects/${slug}/pull-requests`),
-    pullRequest: (slug: string, number: number) => call<PullRequestDetail>('GET', `/projects/${slug}/pull-requests/${number}`)
+    pullRequest: (slug: string, number: number) => call<PullRequestDetail>('GET', `/projects/${slug}/pull-requests/${number}`),
+    // A PR's guided review (COR-518): read it, or ask for one for the head commit
+    pullRequestGuide: (slug: string, number: number) => call<PullRequestGuide>('GET', `/projects/${slug}/pull-requests/${number}/guide`),
+    generatePullRequestGuide: (slug: string, number: number) => call<PullRequestGuide>('POST', `/projects/${slug}/pull-requests/${number}/guide`)
   },
 
   tasks: {

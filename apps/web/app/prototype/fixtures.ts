@@ -29,6 +29,8 @@ import type {
   Project,
   TaskInboxItem,
   PullRequestDetail,
+  PullRequestGuide,
+  PullRequestGuideStep,
   PullRequestFile,
   PullRequestStatus,
   RepoList,
@@ -396,6 +398,19 @@ export const tasks: Task[] = [
     acceptanceCriteria: criteria('Undelivered webhooks are sent again after a restart')
   }),
   task(corral, 19, { title: 'Keep the run log open across reloads', status: 'in_progress', paused: true, branch: 'corral/cor-19-run-log' }),
+  // Guided code review (COR-518): one PR per state of the guide in the Code diff tab
+  ...([
+    [60, 'Group the run log by step', 70, ['Each log line records the step it belongs to', 'The run log folds lines under collapsible steps', 'A long run log stays scrollable on a phone']],
+    [61, 'Rename agent roles across the app', 71, ['Every screen says designer, developer and reviewer', 'Old role names still load from the database']],
+    [62, 'Show CI check names on the PR card', 72, ['The PR card lists each failing check by name']],
+    [63, 'Cancel a Plan turn from the composer', 73, ['Stop ends the PM turn and keeps the draft']],
+    [64, 'Fix the Approve button tooltip', 74, ['The tooltip says the PR merges once the checks pass']]
+  ] as const).map(([number, title, pr, texts]) => task(corral, number, {
+    title, status: 'human_review', humanReview: true, branch: `corral/cor-${number}`, reviewRounds: 1,
+    pr: { number: pr, url: `https://github.com/cormacrw/corral/pull/${pr}` },
+    acceptanceCriteria: criteria(...texts).map(c => ({ ...c, met: true })),
+    updatedAt: ago(number - 55)
+  })),
   ...epicTasks('e-searches', 36, ['Save a board search', 'List saved searches', 'Share a saved search']),
   task(corral, 21, { title: 'Export the board as CSV', status: 'ready', epicId: 'e-exports' }),
   task(corral, 22, { title: 'Export run history as CSV', status: 'ready', epicId: 'e-exports', dependsOn: ['COR-21'] }),
@@ -770,6 +785,244 @@ export const pullRequestDetails: PullRequestDetail[] = [
   // Over the cap: the rest of the diff is on GitHub
   prDetail('COR-7', '## What\n\nThe PM drafts tasks from an approved design.', { totalFiles: 34, truncated: true })
 ]
+
+// Guided code review (COR-518): realistic diffs, and the guide each PR has
+const lines = (...l: string[]) => l.join('\n')
+const runLogFiles: PullRequestFile[] = [
+  {
+    path: 'packages/contracts/src/runs.ts', status: 'modified', additions: 4, deletions: 0,
+    patch: lines(
+      '@@ -88,6 +88,10 @@ export interface RunLogLine {',
+      '   at: string',
+      '   stream: \'stdout\' | \'stderr\' | \'event\'',
+      '   text: string',
+      '+  // The step the line belongs to: a tool call, or the agent\'s reply before',
+      '+  // the first one. Lines from before this change have none.',
+      '+  step: { index: number, label: string } | null',
+      '+',
+      ' }'
+    )
+  },
+  {
+    path: 'apps/server/src/runs/log.ts', status: 'modified', additions: 22, deletions: 4,
+    patch: lines(
+      '@@ -14,9 +14,14 @@ import type { RunLogLine } from \'@corral/contracts\'',
+      ' export function appendRunLog(state: RunLogState, chunk: RunnerChunk): RunLogLine[] {',
+      '-  return chunk.lines.map(text => ({ at: chunk.at, stream: chunk.stream, text }))',
+      '+  return chunk.lines.map((text) => {',
+      '+    const marker = toolCallMarker(text)',
+      '+    if (marker) state.step = { index: (state.step?.index ?? 0) + 1, label: marker }',
+      '+    return { at: chunk.at, stream: chunk.stream, text, step: state.step }',
+      '+  })',
+      ' }',
+      ' ',
+      '-export interface RunLogState { offset: number }',
+      '+export interface RunLogState { offset: number, step: RunLogLine[\'step\'] }',
+      '@@ -61,6 +66,19 @@ export function readRunLog(db: Database, runId: string, after = 0) {',
+      '   return rows.map(r => r.line)',
+      ' }',
+      ' ',
+      '+// A tool call starts a step. Claude prints `⏺ Bash(pnpm test)`, Codex',
+      '+// prints `exec pnpm test`: both become the label `Bash · pnpm test`.',
+      '+const CLAUDE_TOOL = /^⏺ (\\w+)\\((.*)\\)$/',
+      '+const CODEX_EXEC = /^exec (.+)$/',
+      '+export function toolCallMarker(text: string): string | null {',
+      '+  const claude = CLAUDE_TOOL.exec(text)',
+      '+  if (claude) return `${claude[1]} · ${claude[2]}`.slice(0, 80)',
+      '+  const codex = CODEX_EXEC.exec(text)',
+      '+  if (codex) return `Bash · ${codex[1]}`.slice(0, 80)',
+      '+  return null',
+      '+}',
+      '+',
+      ' export function trimRunLog(lines: RunLogLine[], max: number) {'
+    )
+  },
+  {
+    path: 'apps/web/app/features/runs/components/RunLog.vue', status: 'modified', additions: 21, deletions: 6,
+    patch: lines(
+      '@@ -3,12 +3,20 @@ import type { RunLogLine } from \'@corral/contracts\'',
+      ' const props = defineProps<{ lines: RunLogLine[], live: boolean }>()',
+      '-const visible = computed(() => props.lines.slice(-500))',
+      '+// Lines fold under the step that printed them; the running step stays open',
+      '+const groups = computed(() => groupBySteps(props.lines.slice(-500)))',
+      '+const folded = ref(new Set<number>())',
+      '+const toggle = (index: number) => {',
+      '+  const next = new Set(folded.value)',
+      '+  if (!next.delete(index)) next.add(index)',
+      '+  folded.value = next',
+      '+}',
+      ' </script>',
+      ' ',
+      ' <template>',
+      '-  <pre class="overflow-x-auto font-mono text-xs/5">',
+      '-    <span v-for="(line, i) in visible" :key="i">{{ line.text }}</span>',
+      '-  </pre>',
+      '+  <div class="min-w-0 font-mono text-xs/5">',
+      '+    <RunLogStep',
+      '+      v-for="group in groups"',
+      '+      :key="group.index"',
+      '+      :group="group"',
+      '+      :folded="folded.has(group.index) && group.index !== groups.at(-1)?.index"',
+      '+      @toggle="toggle(group.index)"',
+      '+    />',
+      '+  </div>',
+      ' </template>',
+      '@@ -40,7 +48,4 @@ watch(() => props.lines.length, () => {',
+      '   if (props.live) scroller.value?.scrollTo({ top: scroller.value.scrollHeight })',
+      ' })',
+      '-const wrap = ref(false)',
+      '-const toggleWrap = () => { wrap.value = !wrap.value }',
+      '-defineExpose({ toggleWrap })',
+      ' </script>'
+    )
+  },
+  {
+    path: 'apps/server/src/runs/log.test.ts', status: 'added', additions: 18, deletions: 0,
+    patch: lines(
+      '@@ -0,0 +1,18 @@',
+      '+import { describe, expect, it } from \'vitest\'',
+      '+import { appendRunLog, toolCallMarker } from \'./log.ts\'',
+      '+',
+      '+describe(\'run log steps\', () => {',
+      '+  it(\'labels Claude and Codex tool calls the same way\', () => {',
+      '+    expect(toolCallMarker(\'⏺ Bash(pnpm test)\')).toBe(\'Bash · pnpm test\')',
+      '+    expect(toolCallMarker(\'exec pnpm test\')).toBe(\'Bash · pnpm test\')',
+      '+    expect(toolCallMarker(\'All tests passed\')).toBeNull()',
+      '+  })',
+      '+',
+      '+  it(\'gives every line after a tool call that step\', () => {',
+      '+    const state = { offset: 0, step: null }',
+      '+    const lines = appendRunLog(state, { at: \'t\', stream: \'stdout\', lines: [\'Reading the task\', \'⏺ Read(log.ts)\', \'42 lines\'] })',
+      '+    expect(lines.map(l => l.step?.index ?? null)).toEqual([null, 1, 1])',
+      '+  })',
+      '+})',
+      '+'
+    )
+  },
+  {
+    path: 'apps/web/app/features/runs/components/RunLogStep.vue', status: 'added', additions: 24, deletions: 0,
+    patch: lines(
+      '@@ -0,0 +1,24 @@',
+      '+<script setup lang="ts">',
+      '+import type { RunLogGroup } from \'~/features/runs/utils/run-log\'',
+      '+',
+      '+// One step of a run log: its tool call, then the lines it printed',
+      '+defineProps<{ group: RunLogGroup, folded: boolean }>()',
+      '+defineEmits<{ toggle: [] }>()',
+      '+</script>',
+      '+',
+      '+<template>',
+      '+  <section class="border-b border-border last:border-0">',
+      '+    <button type="button" class="flex w-full items-center gap-2 px-3 py-1.5 text-start hover:bg-muted" @click="$emit(\'toggle\')">',
+      '+      <Icon :name="folded ? \'i-hugeicons-arrow-right-01\' : \'i-hugeicons-arrow-down-01\'" class="size-3.5" />',
+      '+      <span class="min-w-0 flex-1 truncate">{{ group.label ?? \'Reply\' }}</span>',
+      '+      <span class="text-muted-foreground">{{ group.lines.length }}</span>',
+      '+    </button>',
+      '+    <div v-if="!folded" class="px-3 pb-2 whitespace-pre-wrap [overflow-wrap:anywhere]">',
+      '+      <div v-for="(line, i) in group.lines" :key="i" :class="line.stream === \'stderr\' && \'text-destructive\'">',
+      '+        {{ line.text }}',
+      '+      </div>',
+      '+    </div>',
+      '+  </section>',
+      '+</template>'
+    )
+  },
+  {
+    path: 'apps/web/app/features/runs/utils/format.ts', status: 'modified', additions: 1, deletions: 1,
+    patch: lines(
+      '@@ -1,4 +1,4 @@',
+      '-import { formatDuration } from \'~/utils/time\'',
+      '+import { formatDuration } from \'~/utils/labels\'',
+      ' ',
+      ' export const runLabel = (n: number) => `Run #${n}`'
+    )
+  },
+  {
+    path: '.corral/wiki/agent-activity.md', status: 'modified', additions: 2, deletions: 0,
+    patch: lines(
+      '@@ -22,3 +22,5 @@ The Activity tab shows each run with its outcome.',
+      ' A live run streams its log over SSE; a finished one reads it once.',
+      '+',
+      '+The log folds under the steps that printed it (`RunLogLine.step`). Older lines have no step and show ungrouped.'
+    )
+  }
+]
+const tooltipFile: PullRequestFile = {
+  path: 'apps/web/app/features/inbox/utils/inbox-actions.ts', status: 'modified', additions: 1, deletions: 1,
+  patch: lines(
+    '@@ -18,7 +18,7 @@ export const ACTION_LABELS: Record<InboxAction, ActionLabel> = {',
+    '   approve: {',
+    '     label: \'Approve\',',
+    '     icon: \'i-hugeicons-checkmark-circle-02\',',
+    '-    tooltip: \'Merges the PR\',',
+    '+    tooltip: \'Merges the PR once the checks pass\',',
+    '   },',
+    '   request_changes: {'
+  )
+}
+function guidePullRequests(): PullRequestDetail[] {
+  const body = (ref: string) => `## What\n\n${at(ref).title}.\n\n## How it was checked\n\n- Unit tests for the new parts\n- Screenshots attached as evidence`
+  const total = (files: PullRequestFile[]) => files.length
+  return [
+    prDetail('COR-60', body('COR-60'), { files: runLogFiles, totalFiles: total(runLogFiles) }),
+    // Over the cap: the guide's steps reach into files that aren't here
+    prDetail('COR-61', body('COR-61'), { files: runLogFiles.slice(0, 4), totalFiles: 34, truncated: true }),
+    prDetail('COR-62', body('COR-62'), { files: runLogFiles.slice(0, 3), totalFiles: 3 }),
+    prDetail('COR-63', body('COR-63'), { files: runLogFiles.slice(1, 4), totalFiles: 3 }),
+    prDetail('COR-64', body('COR-64'), { files: [tooltipFile], totalFiles: 1 })
+  ]
+}
+
+const criterionIdsOf = (ref: string, ...positions: number[]) => positions.flatMap(p => at(ref).acceptanceCriteria[p]?.id ?? [])
+const runLogSteps = (ref: string): PullRequestGuideStep[] => [
+  {
+    id: 'g-1', title: 'Every log line now says which step printed it',
+    why: 'The contract gains a `step` on each line, so the grouping is stored once on the server and the run log only reads it. This is the data behind "Each log line records the step it belongs to".',
+    criterionIds: criterionIdsOf(ref, 0), hunks: [{ path: 'packages/contracts/src/runs.ts', hunk: 0 }, { path: 'apps/server/src/runs/log.ts', hunk: 0 }]
+  },
+  {
+    id: 'g-2', title: 'A tool call starts a new step, for Claude and Codex alike',
+    why: 'Both CLIs print tool calls differently; one marker function turns either into the same label, and the tests pin both formats down.',
+    criterionIds: criterionIdsOf(ref, 0), hunks: [{ path: 'apps/server/src/runs/log.ts', hunk: 1 }, { path: 'apps/server/src/runs/log.test.ts', hunk: 0 }]
+  },
+  {
+    id: 'g-3', title: 'The run log folds lines under each step',
+    why: 'RunLog groups the lines and keeps the running step open, which is "The run log folds lines under collapsible steps".',
+    criterionIds: criterionIdsOf(ref, 1), hunks: [{ path: 'apps/web/app/features/runs/components/RunLog.vue', hunk: 0 }, { path: 'apps/web/app/features/runs/components/RunLog.vue', hunk: 1 }]
+  },
+  {
+    id: 'g-4', title: 'Long lines wrap instead of scrolling sideways',
+    why: 'Each step wraps its lines, so a long run stays readable on a phone without the page scrolling sideways.',
+    criterionIds: criterionIdsOf(ref, 2), hunks: [{ path: 'apps/web/app/features/runs/components/RunLogStep.vue', hunk: 0 }]
+  }
+]
+pullRequestDetails.push(...guidePullRequests())
+// By PR number. `none` is the default: a guide is made only when asked for.
+// A generating guide becomes `ready` with `planned` after a few seconds.
+export const guides: Record<number, PullRequestGuide & { planned?: PullRequestGuideStep[], startedAt?: number, failNext?: boolean }> = {
+  64: { status: 'none', headSha: null, steps: [], error: null, generatedAt: null, planned: [
+    { id: 'g-1', title: 'Approving supersedes the earlier versions in one transaction', why: 'Both updates now run in one transaction, so "Earlier versions are superseded" holds even if the second update fails.', criterionIds: criterionIdsOf('COR-5', 1), hunks: [{ path: 'apps/server/src/designs.ts', hunk: 0 }] }
+  ] },
+  70: { status: 'ready', headSha: '5b030d7e1c', steps: runLogSteps('COR-60'), error: null, generatedAt: ago(12) },
+  71: {
+    status: 'ready', headSha: '5b030d7e1c', error: null, generatedAt: ago(8), steps: [
+      ...runLogSteps('COR-61').slice(0, 2).map((s, i) => ({ ...s, criterionIds: criterionIdsOf('COR-61', i) })),
+      {
+        id: 'g-3', title: 'Every screen reads the new role names',
+        why: 'The labels move to one map, so "Every screen says designer, developer and reviewer" comes from a single place.',
+        criterionIds: criterionIdsOf('COR-61', 0),
+        hunks: [{ path: 'apps/web/app/features/runs/components/RunLog.vue', hunk: 0 }, { path: 'apps/web/app/utils/roles.ts', hunk: 0 }, { path: 'apps/web/app/features/agents/components/AgentCard.vue', hunk: 1 }]
+      }
+    ]
+  },
+  72: { status: 'generating', headSha: '5b030d7e1c', steps: [], error: null, generatedAt: null, startedAt: Number.POSITIVE_INFINITY },
+  73: { status: 'failed', headSha: '5b030d7e1c', steps: [], error: 'The model stopped before it finished the steps (timed out after 60 s).', generatedAt: null, planned: runLogSteps('COR-60').slice(1, 2) },
+  74: {
+    status: 'ready', headSha: '5b030d7e1c', error: null, generatedAt: ago(3), steps: [
+      { id: 'g-1', title: 'The tooltip says the merge waits for the checks', why: 'Approve only merges once the checks pass, and the tooltip now says so, as "The tooltip says the PR merges once the checks pass" asks.', criterionIds: criterionIdsOf('COR-64', 0), hunks: [{ path: tooltipFile.path, hunk: 0 }] }
+    ]
+  }
+}
 
 // What the real epic review reads live from GitHub and the audit log
 const epicReviewExtras: Record<string, Partial<EpicReview>> = {

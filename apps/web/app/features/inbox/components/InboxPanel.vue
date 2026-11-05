@@ -14,6 +14,10 @@ const tray = ref<{ send: () => Promise<boolean> } | null>(null)
 // images. Closed, the action goes alone: no hidden draft goes with it.
 defineExpose({ send: () => tray.value?.send() ?? props.ctx.submit('') })
 
+// Guided review option A (COR-518 design): a third tab, shown in the prototype
+// with `?option=a` so the two options can be compared on the same PR
+const route = useRoute()
+const optionA = computed(() => !!import.meta.prototype && route.query.option === 'a')
 const tabs = computed(() => [
   { label: 'Overview', value: 'overview' },
   ...(p.criteria.value.length ? [{ label: `Criteria ${p.met.value}/${p.criteria.value.length}`, value: 'criteria' }] : []),
@@ -22,7 +26,8 @@ const tabs = computed(() => [
   ...(p.hasPullRequest.value
     ? [
         { label: 'PR description', value: 'pr' },
-        { label: p.prDetail.value ? `Code diff ${p.prDetail.value.totalFiles}` : 'Code diff', value: 'diff' }
+        { label: p.prDetail.value ? `Code diff ${p.prDetail.value.totalFiles}` : 'Code diff', value: 'diff' },
+        ...(optionA.value ? [{ label: 'Guide', value: 'guide' }] : [])
       ]
     : []),
   { label: 'Message', value: 'message' }
@@ -90,6 +95,9 @@ const details = computed(() => openTab.value as Exclude<InboxPanelTab, 'overview
       :ctx="ctx"
       :p="p"
       :section="details"
+      :mobile="mobile"
+      :code-mode="!optionA"
+      @open-diff="ctx.setTab('diff')"
     />
 
     <template #footer>

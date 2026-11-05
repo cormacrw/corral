@@ -7,11 +7,19 @@ import { plural } from '~/utils/labels'
 // files with their line counts, each opening to its unified diff. The first
 // file starts open; a diff over the server's cap says so and links to the rest.
 // `githubUrl` replaces the PR's files page, for a diff that isn't the whole PR
-const props = defineProps<{ pr: PullRequestDetail, githubUrl?: string }>()
+// `focus` opens a file and scrolls to it, for a guide step's "In Files"
+const props = defineProps<{ pr: PullRequestDetail, githubUrl?: string, focus?: string | null }>()
 const github = computed(() => props.githubUrl ?? `${props.pr.url}/files`)
 const open = ref<string[]>([])
 watch(() => props.pr.number, () => {
   open.value = props.pr.files.slice(0, 1).map(f => f.path)
+}, { immediate: true })
+const root = ref<HTMLElement | null>(null)
+watch(() => props.focus, async (path) => {
+  if (!path) return
+  if (!open.value.includes(path)) open.value = [...open.value, path]
+  await nextTick()
+  root.value?.querySelector(`[data-path="${CSS.escape(path)}"]`)?.scrollIntoView({ block: 'start' })
 }, { immediate: true })
 const toggle = (path: string) => {
   open.value = open.value.includes(path) ? open.value.filter(p => p !== path) : [...open.value, path]
@@ -31,6 +39,7 @@ const lineClass = (line: string) => line.startsWith('@@')
 
 <template>
   <div
+    ref="root"
     class="flex flex-col gap-3"
     data-testid="inbox-diff"
   >
@@ -64,7 +73,8 @@ const lineClass = (line: string) => line.startsWith('@@')
     <div
       v-for="file in pr.files"
       :key="file.path"
-      class="overflow-hidden rounded-md border border-border"
+      :data-path="file.path"
+      :class="['scroll-mt-2 overflow-hidden rounded-md border', file.path === focus ? 'border-primary/50' : 'border-border']"
       data-testid="inbox-diff-file"
     >
       <button
