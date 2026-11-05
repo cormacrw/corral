@@ -25,7 +25,7 @@ const { open, confirm, confirmed, removing, ask, remove } = useProjectRemoval(()
   <AppModal
     v-model:open="open"
     :title="`Remove ${project.name}?`"
-    description="Stops every run and removes the project with its tasks, parent tasks and plans from Corral. Your repository, branches and PRs on GitHub are left alone."
+    description="Stops every run and removes the project with its tasks, subtasks and plans from Corral. Your repository, branches and PRs on GitHub are left alone."
   >
     <template #body>
       <form

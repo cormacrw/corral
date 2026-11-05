@@ -79,7 +79,7 @@ function openTask(ref: string) {
               @click="open = false"
             >
               <span class="wrap-anywhere font-medium text-foreground">{{ epic.title }}</span>
-              <span class="text-xs text-muted-foreground">Parent</span>
+              <span class="text-xs text-muted-foreground">Task</span>
             </NuxtLink>
           </li>
         </ul>

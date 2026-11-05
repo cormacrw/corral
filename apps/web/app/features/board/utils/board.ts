@@ -33,7 +33,7 @@ export const BOARD_COLUMNS: { key: string, label: string, statuses: TaskStatus[]
 // The Board's two views: top-level tasks, the default until one is chosen, or
 // every sub-task (design/board.md)
 export type BoardView = 'top' | 'all'
-export const BOARD_VIEW_ITEMS = [{ label: 'Top-level', value: 'top' }, { label: 'All sub-tasks', value: 'all' }]
+export const BOARD_VIEW_ITEMS = [{ label: 'Top-level', value: 'top' }, { label: 'All subtasks', value: 'all' }]
 
 // The view from ?view=, falling back to the one last used. Links from before
 // parent tasks say `epics` for cards per parent and `tasks` for every task.
@@ -192,7 +192,7 @@ export function hasFilters(filters: BoardFilters): boolean {
 // The four filters and their options, for both Boards' controls
 export function boardFilterGroups(epics: { id: string, label: string }[], agents: { id: string, name: string }[]) {
   return [
-    { key: 'epics', name: 'Parent', plural: 'parents', icon: 'i-hugeicons-hierarchy', items: epics.map(e => ({ value: e.id, label: e.label })) },
+    { key: 'epics', name: 'Task with subtasks', plural: 'tasks with subtasks', icon: 'i-hugeicons-hierarchy', items: epics.map(e => ({ value: e.id, label: e.label })) },
     { key: 'statuses', name: 'Status', plural: 'statuses', icon: 'i-hugeicons-layout-2-column', items: BOARD_COLUMNS.map(c => ({ value: c.key, label: c.label })) },
     { key: 'priorities', name: 'Priority', plural: 'priorities', icon: 'i-hugeicons-wifi-01', items: Object.entries(PRIORITY).map(([value, p]) => ({ value, label: p.label })) },
     { key: 'agents', name: 'Agent', plural: 'agents', icon: 'i-hugeicons-robot-01', items: agents.map(a => ({ value: a.id, label: a.name })) }

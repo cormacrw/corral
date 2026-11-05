@@ -42,6 +42,6 @@ defineProps<{ epics: { epic: Epic, project: Project & { color: string } }[] }>()
     v-else
     class="text-sm text-muted-foreground"
   >
-    No parent tasks yet.
+    No tasks with subtasks yet.
   </p>
 </template>

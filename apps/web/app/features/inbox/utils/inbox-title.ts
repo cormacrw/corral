@@ -10,7 +10,7 @@ export function inboxTitlePrefix(item: Pick<InboxItem, 'type'> & { status?: stri
     case 'failed': return 'Failed'
     case 'stopped': return 'Stopped'
     case 'plan_thread': return item.status === 'question' ? 'Question' : item.status === 'failed' ? 'Failed' : 'Plan Review'
-    case 'epic_review': return 'Parent Review'
+    case 'epic_review': return 'Task Review'
     case 'epic_conflict': return 'Conflict'
     // Its subject already says what it is
     case 'release_notes': return ''

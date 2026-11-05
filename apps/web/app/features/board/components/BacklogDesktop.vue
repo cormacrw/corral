@@ -81,7 +81,7 @@ const prefetch = useTaskPrefetch()
           />
           <AppButton
             v-if="group.id !== 'none'"
-            label="Parent details"
+            label="Task details"
             icon="i-hugeicons-hierarchy"
             variant="link"
             color="neutral"

@@ -41,7 +41,7 @@ async function remove() {
     <AppModal
       v-model:open="confirming"
       :title="`Delete ${parent.ref}?`"
-      description="It has no sub-tasks left. Any comments and history are kept with the record."
+      description="It has no subtasks left. Any comments and history are kept with the record."
     >
       <template #body>
         <p

@@ -19,7 +19,7 @@ async function submit() {
     title.value = ''
     open.value = false
   } catch (e) {
-    toast.add({ title: 'Could not add the sub-task', description: errorMessage(e), color: 'error' })
+    toast.add({ title: 'Could not add the subtask', description: errorMessage(e), color: 'error' })
   }
 }
 </script>
@@ -28,7 +28,7 @@ async function submit() {
   <div class="flex flex-wrap items-center gap-2">
     <AppButton
       v-if="!open"
-      label="Add sub-task"
+      label="Add subtask"
       icon="i-hugeicons-play-list-add"
       size="sm"
       variant="outline"
@@ -44,8 +44,8 @@ async function submit() {
         v-model="title"
         autofocus
         size="sm"
-        placeholder="Sub-task title"
-        aria-label="Sub-task title"
+        placeholder="Subtask title"
+        aria-label="Subtask title"
         class="min-w-0 flex-1"
       />
       <AppButton
@@ -66,7 +66,7 @@ async function submit() {
       v-if="open && props.promotes"
       class="w-full text-xs text-muted-foreground"
     >
-      This task becomes a parent. Its criteria move to the new sub-task.
+      This task gets its first subtask. Its criteria move to the new subtask.
     </p>
   </div>
 </template>
