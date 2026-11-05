@@ -9,10 +9,9 @@ import { usePlanRunner } from '~/features/plan/composables/usePlanRunner'
 import { usePlanStart } from '~/features/plan/composables/usePlanStart'
 
 // Plan, new session (design/plan.md): the prompt that starts a session, and
-// the project's Drafts under it
+// the scope's Open threads and the project's Drafts under it
 const props = defineProps<{ tagline: string, initialProjectId?: string }>()
 const shell = useShell()
-const router = useRouter()
 const device = useDevice()
 const { pm, offline, unavailable } = usePlanRunner()
 const { projectId, project, runtime, runtimeItems, lastRuntime, restoredImages, text, taskRef, busy, start } = usePlanStart(() => props.initialProjectId)
@@ -22,7 +21,8 @@ provide(FLYOUT_SHEETS, true)
 
 const projectItems = computed(() => [{ label: 'Global', value: 'global', project: null }, ...shell.projects.map(p => ({ label: p.name, value: p.id, project: p }))])
 const sessions = useQuery(planSessionsQuery()).data
-const sessionItems = computed(() => (sessions.value ?? []).map(s => ({ label: `${s.title} · ${shell.projects.find(p => p.id === s.projectId)?.name ?? 'Global'}`, value: s.id })))
+// The scope's sessions for Open threads, kept current by plan.session
+const scopedSessions = computed(() => (sessions.value ?? []).filter(s => s.projectId === (project.value?.id ?? null)))
 // The project's Drafts by session, kept current by plan.drafts, which
 // follows every propose, approve and discard
 const draftsQuery = useQuery(computed(() => ({ ...planDraftsQuery(project.value?.slug ?? ''), enabled: Boolean(project.value) })))
@@ -117,19 +117,6 @@ const placeholder = computed(() => {
               />
             </template>
           </AppSelectMenu>
-          <AppSelectMenu
-            v-if="!device.isMobile.value"
-            :items="sessionItems"
-            value-key="value"
-            size="sm"
-            icon="i-hugeicons-history"
-            placeholder="Resume"
-            :search-input="{ placeholder: 'Search sessions' }"
-            aria-label="Resume a session"
-            content-class="w-80 max-w-[calc(100vw-2rem)]"
-            class="w-auto max-w-56 rounded-full px-3"
-            @update:model-value="router.push(`/plan/${$event}`)"
-          />
         </div>
 
         <p
@@ -138,6 +125,11 @@ const placeholder = computed(() => {
         >
           You can still read the Inbox, the board and past runs.
         </p>
+
+        <PlanOpenThreads
+          :sessions="scopedSessions"
+          :mobile="device.isMobile.value"
+        />
 
         <PlanDrafts
           :sessions="drafts"
