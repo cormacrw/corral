@@ -136,6 +136,14 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
         v-else-if="pending"
         class="h-16 w-full"
       />
+      <!-- Without the runs nobody knows if it's idle: say so, never guess -->
+      <p
+        v-else-if="error"
+        class="text-sm text-muted-foreground"
+        data-testid="current-run-unavailable"
+      >
+        Unavailable
+      </p>
       <p
         v-else
         class="text-sm text-muted-foreground"
@@ -250,6 +258,13 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
         v-else-if="pending"
         class="mx-4 h-16"
       />
+      <p
+        v-else-if="error"
+        class="px-4 text-sm text-muted-foreground"
+        data-testid="previous-runs-unavailable"
+      >
+        Unavailable
+      </p>
       <p
         v-else
         class="px-4 text-sm text-muted-foreground"

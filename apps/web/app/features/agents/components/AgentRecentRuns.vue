@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import type { Run } from '@corral/contracts'
 import type { AgentRuns } from '~/features/runs/composables/useAgentRuns'
-import { RUN_TONE, runTone } from '~/features/agents/utils/fleet'
-import { duration, isLiveRun, runRef, runTitle, timeAgo } from '~/utils/labels'
+import { duration, isLiveRun, projectColor, runRef, runTitle, timeAgo } from '~/utils/labels'
 
 // The agent page's Recent runs card (design/agent.md, Activity): the live run
-// pinned first, then the API's latest runs. Each row opens its run.
+// pinned first, then the API's latest runs. Like the mobile rows, each shows
+// its project's dot; outcome colour lives in the charts. Each row opens its run.
 const props = defineProps<{ view: AgentRuns }>()
 const { name, agent, runs, pending, error, now, load, project } = props.view
 const router = useRouter()
@@ -52,11 +52,6 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, duration(r
         @click="router.push(`/agents/${name}/${run.id}`)"
       >
         <span class="flex items-center gap-2">
-          <span
-            class="size-2 shrink-0 rounded-full"
-            :style="{ backgroundColor: RUN_TONE[runTone(run)].color }"
-            :title="RUN_TONE[runTone(run)].label"
-          />
           <span class="font-mono text-xs text-muted-foreground">{{ runRef(run) }}</span>
           <AppBadge
             v-if="isLiveRun(run)"
@@ -68,7 +63,15 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, duration(r
           <span class="ms-auto text-xs text-muted-foreground/70 tabular-nums">{{ isLiveRun(run) ? duration(run.startedAt, null, now) : timeAgo(run.queuedAt, now) }}</span>
         </span>
         <span class="truncate">{{ runTitle(run) }}</span>
-        <span class="truncate text-xs text-muted-foreground">{{ meta(run) }}</span>
+        <span class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <span
+            v-if="project(run)"
+            class="size-2 shrink-0 rounded-full"
+            :style="{ backgroundColor: projectColor(project(run)!) }"
+            aria-hidden="true"
+          />
+          <span class="truncate">{{ meta(run) }}</span>
+        </span>
         <span
           v-if="run.error"
           class="line-clamp-2 text-xs text-destructive"

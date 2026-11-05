@@ -15,8 +15,8 @@ Prototype: `pnpm --filter web prototype`, routes `#/agents/<name>`. Built from t
 1. **Header**, as today: avatar with working dot, name, a status badge (Paused or Waiting on usage limit), "{Role} · {runtime} · N runs today", **Resume now** (only while waiting on a usage limit) and **Agent settings**.
 2. **Stat tiles**: `StatTile`s in the Agents dashboard's grid (2 / 3 / 5 columns), each with an icon. The Avg tile also has a sparkline of the median run length per day. The facts line goes under the tiles.
 3. Grid `lg:grid-cols-3`:
-   - left, 2 columns wide: **Runs** (`AgentsRunTimeline`, last 7 days, one lane per day, x is the hour of day 00:00–24:00), then **Outcomes** (finished runs per day for 14 days, stacked Finished / Changes requested / Failed or stuck / Interrupted or rate limited) and **Tokens** (`AgentsTokenChart` with `only=<role>`, 14 days, in the role's dashboard colour, no legend).
-   - right: **Recent runs** card, up to 42rem tall, scrolling inside the card. A live run is pinned first with a primary edge and a **Live** badge. Each row has an outcome dot in the timeline colour, the ref, when it ran (or the elapsed time while live), the title, "project · Run #n · duration" and any error (2 lines). **Selecting a row opens `/agents/:name/:runId`** (`agent-run-desktop`).
+   - left, 2 columns wide: **Runs** (`AgentsRunTimeline`, last 7 days, one lane per day **that has runs**, x is the hour of day 00:00–24:00). A day with no runs gets no lane, because unovis Timeline draws only the rows in its data. Each lane label names its day (Today, Yesterday, "3 Tue"…), so a gap shows as a missing date, and the lane count changes from agent to agent (Pax 5, Victor 6). With no runs in 7 days the card shows "No runs in the last 7 days.", then **Outcomes** (finished runs per day for 14 days, stacked Finished / Changes requested / Failed or stuck / Interrupted or rate limited) and **Tokens** (`AgentsTokenChart` with `only=<role>`, 14 days, in the role's dashboard colour, no legend).
+   - right: **Recent runs** card, up to 42rem tall, scrolling inside the card. A live run is pinned first with a primary edge and a **Live** badge. Each row has the ref, when it ran (or the elapsed time while live), the title, "{project dot} project · Run #n · duration" and any error (2 lines). **Selecting a row opens `/agents/:name/:runId`** (`agent-run-desktop`).
 
 On desktop, `/agents/:name` no longer selects the latest run on its own. The dashboard is the landing view, and a live run is one click away at the top of Recent runs.
 
@@ -29,7 +29,7 @@ On desktop, `/agents/:name` no longer selects the latest run on its own. The das
 | Waiting on usage limit | `#/agents/uma` | Badge, "until hh:mm", **Resume now** |
 | No runs | `#/agents/nova` | Tiles show real zeros and "—" for Avg run. Charts show their empty text ("No runs in the last 7 days.", "No finished runs…", "No tokens used…"). Recent runs: "No runs yet. Runs show here once Nova picks up its first task." |
 | Loading | `#/agents/victor?mock=loading` | Skeleton tiles, a skeleton in each chart card, skeleton rows. The header leaves out "N runs today" |
-| Load error | `#/agents/victor?mock=error` | Tiles show **—** with "Couldn't load runs". A "Couldn't load {name}'s activity" alert with Retry. Chart cards read "Unavailable" (on mobile the cards are replaced by the alert). Recent runs shows `AppLoadError` with Retry. The header leaves out the run count. **No zeros are made up.** |
+| Load error | `#/agents/victor?mock=error` | Tiles show **—** with "Couldn't load runs". A "Couldn't load {name}'s activity" alert with Retry. The header leaves out the run count. Desktop: chart cards read "Unavailable" and Recent runs shows `AppLoadError` with Retry. Mobile: the runs `AppLoadError` (Retry) sits above Current run, the activity alert replaces the chart cards, and **Current run and Previous runs both read "Unavailable"**. Mobile never shows "{name} is idle." or "No runs yet." when the runs failed to load: nobody knows that. **Nothing is made up.** (The avatar's working dot comes from the agents list, which loaded, so it's still real.) |
 
 `?mock=loading|error` is prototype-only (in `mock-api.ts`) and makes `GET /runs` hang or return a 500.
 
@@ -62,6 +62,9 @@ Chart source: `GET /api/runs?since=<local midnight 13 days ago>` (`useRunHistory
 - `Run[]` adds 13 days of generated runs for each agent except Nova (seeded, deterministic, ≥1 day old so they never become a task's latest run). Each agent has its own mix of outcomes.
 - New agent `a-new` "Nova" (developer, no runs).
 - `mock-api` `GET /runs`: when filtered by `agentId` (and no `since`), it sorts newest first and returns 50, as the server does.
+
+## Run row dots (one rule, desktop and mobile)
+Run rows show the **project dot** (`projectColor`) before the project name, as `AgentRunSummary` does on mobile. They have no outcome dot or tag (`docs/design/agent.md`: run rows have no tags). Outcome colour belongs to the charts (Runs and Outcomes, `RUN_TONE`); a finished run's outcome is shown as a badge when the run is open.
 
 ## Interactions
 - Recent runs row: click → `/agents/:name/:runId`. Desktop then shows the runs list and transcript; mobile shows the transcript (a PM turn with a Plan session opens Plan, as today).
