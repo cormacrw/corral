@@ -32,4 +32,12 @@ describe('guideSteps', () => {
     const steps = guideSteps(pr, guide([{ id: 's1', title: 'All', why: 'w', criterionIds: [], hunks: [{ path: 'a.ts', hunk: 0 }, { path: 'a.ts', hunk: 1 }, { path: 'b.ts', hunk: 0 }] }]), [])
     expect(steps.map(s => s.id)).toEqual(['s1'])
   })
+  it('marks the last hunk of a file the line cap cut partway', () => {
+    // b.ts has 3 changed lines but its patch kept only the first hunk and one line of the second
+    const cut = { ...pr, files: [pr.files[0]!, { path: 'b.ts', status: 'modified' as const, additions: 3, deletions: 0, patch: '@@ -1 +1 @@\n+b0\n@@ -9 +9,2 @@\n+b1' }] }
+    const steps = guideSteps(cut, guide([{ id: 's1', title: 'B', why: 'w', criterionIds: [], hunks: [{ path: 'b.ts', hunk: 1 }, { path: 'b.ts', hunk: 0 }] }]), [])
+    expect(steps[0]!.hunks.map(h => [h.index, h.partial])).toEqual([[1, true], [0, false]])
+    expect(steps.at(-1)!.hunks.every(h => !h.partial)).toBe(true)
+    expect(guideSteps({ ...cut, truncated: false }, guide([]), []).flatMap(s => s.hunks).some(h => h.partial)).toBe(false)
+  })
 })

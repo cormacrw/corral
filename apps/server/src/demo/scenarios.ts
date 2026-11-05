@@ -802,7 +802,7 @@ async function guidedReviews(t: Seeder, shop: Project): Promise<void> {
         ['-  <RunLogLine v-for="line in lines" :key="line.id" :line="line" />', '+  <RunLogLine v-for="line in lines" :key="line.id" :line="line" :zone="zone" />'],
         ['+const zone = useTimeZone()']
       ]),
-      patch('src/composables/useTimeZone.ts', ['+export const useTimeZone = () => useState(\'zone\', () => Intl.DateTimeFormat().resolvedOptions().timeZone)'], 'added'),
+      patch('src/features/run-logs/composables/useViewerTimeZone.ts', ['+export const useTimeZone = () => useState(\'zone\', () => Intl.DateTimeFormat().resolvedOptions().timeZone)'], 'added'),
       patch('docs/run-logs.md', ['-Times are in UTC.', '+Times are in your browser\'s time zone; hover one for UTC.'])
     ],
     answer: demoGuideAnswer

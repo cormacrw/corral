@@ -43,8 +43,9 @@ defineEmits<{ openFile: [path: string] }>()
         v-text="line || ' '"
       />
     </div>
+    <!-- Past the cap, or cut partway by it: the rest is only on GitHub -->
     <div
-      v-else
+      v-if="!hunk.lines || hunk.partial"
       class="flex flex-wrap items-center gap-x-2 border-t border-border px-3 py-2 text-sm text-muted-foreground"
       data-testid="inbox-guide-hunk-cut"
     >
@@ -52,7 +53,7 @@ defineEmits<{ openFile: [path: string] }>()
         name="i-hugeicons-scissor-01"
         class="size-4 shrink-0 text-warning"
       />
-      <span>Past the diff's cap, so not shown here.</span>
+      <span>{{ hunk.partial ? 'The rest of this hunk is past the diff\'s cap, so not shown here.' : 'Past the diff\'s cap, so not shown here.' }}</span>
       <AppButton
         :to="githubUrl"
         target="_blank"

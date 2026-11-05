@@ -27,7 +27,7 @@ A new push never regenerates; the panel shows *Made for an older commit* with
 `apps/web/app/features/inbox/utils/guide.ts` resolves steps against the panel's
 capped diff and adds a final **Other changes** step of every uncovered hunk, so
 each shown hunk appears exactly once. A step hunk in a file past the cap renders
-as *Past the diff's cap* with a GitHub link.
+as *Past the diff's cap* with a GitHub link. When the line cap cut the last shown file partway (its patch has fewer changed lines than its counts), that file's last hunk is marked `partial` and shows its lines with the same cap row under them.
 
 **Read marks.** Browser only, in `useLocalStorage` under
 `corral:guide-read:<taskRef>:<PR head sha>`, so a push starts them over. They
