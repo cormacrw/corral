@@ -682,6 +682,21 @@ async function planConversations(t: Seeder, notes: Project): Promise<void> {
     ]
   })
   await t.pmReply(sync.job, 'I\'ve turned the spike\'s follow-ups into three tasks in order: Yjs storage first, then the relay, then the sync state the design already shows. The last one has a check for you to do on a real phone. Approve it when it looks right and I\'ll put them on the board.', 'The spike recommends Yjs with a relay. Three follow-ups, strictly sequential since each builds on the last.')
+  await t.advance('20m')
+  // The human asks for a change, so the session has a v2 with its changes from v1
+  const revise = await t.planMessage(sync.session.id, 'Two people can edit a shared note. Show who changed what after a merge.')
+  await t.started(revise)
+  await t.call(revise, 'propose_plan', {
+    title: 'Offline sync',
+    summary: 'Notes edited offline merge cleanly when the phone reconnects, on one device or several, using Yjs as the spike recommended, and a merged note shows who changed what.',
+    tasks: [
+      { key: 'docs', title: 'Store notes as Yjs documents', description: 'Keep each note as a Yjs document in SQLite, migrating existing notes on first launch.', type: 'task', priority: 'high', acceptanceCriteria: ['Existing notes migrate on first launch with nothing lost', 'Edits persist across an app restart'] },
+      { key: 'relay', title: 'Sync relay endpoint', description: 'An API endpoint that stores and forwards Yjs updates per note, tagged with the author of each update.', type: 'task', dependsOn: ['docs'], acceptanceCriteria: ['Two devices editing offline converge after both reconnect', 'Updates are authorised per user', 'Each stored update records its author'] },
+      { key: 'state', title: 'Show sync state on each note', description: 'The dashed "waiting to sync" style from the approved design, cleared once the relay acknowledges.', type: 'task', dependsOn: ['relay'], acceptanceCriteria: ['Unsynced notes show "waiting to sync"', { text: 'Tested in airplane mode on a real phone', checkedByHuman: true }] },
+      { key: 'authors', title: 'Show who changed a merged note', description: 'After a merge, highlight each paragraph another person changed, with their name.', type: 'task', priority: 'low', dependsOn: ['relay'], acceptanceCriteria: ['Paragraphs changed by someone else are highlighted with their name', 'The highlight clears once the note is opened'] }
+    ]
+  })
+  await t.pmReply(revise, 'v2 adds a task to show who changed a merged note, and the relay now records each update\'s author so that task has something to show. It can run alongside the sync state once the relay is in.', 'Authorship needs the relay to keep authors; the display is separate work after it.')
   await t.advance('2h')
 
   // A question the PM is waiting on

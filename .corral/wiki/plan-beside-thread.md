@@ -18,10 +18,18 @@ below 876px (a 480px thread, the card and margins) there is no card, and the
 plan opens in the flyout as before, including on arrival for a proposed plan.
 A task flyout opened beside a 1600px window still leaves room for the card.
 
-**Links.** `?plan` is dropped once the card shows (the flyout closes it), so
-an old link opens the page with the card. With the card shown, the chat's
-"Open plan" link focuses the card instead of the flyout. Task rows open
-`flyout.open(ref)` and parent headers `flyout.openEpic`. A plan's new tasks
-are Draft tasks with refs from the moment it is proposed, so they open in the
-normal task flyout with their criteria, dependencies and implementation plan;
-no separate plan-task view is needed. The flyout has no plan to go back to.
+**Links.** When the card shows, a `?plan` in the URL is dropped (the flyout
+closes it), so an old link on a wide window opens the page with the card. At a
+mid width the flyout plan can itself narrow the column below the threshold;
+then the card never shows and `?plan` stays, which is the flyout fallback.
+With the card shown, the chat's "Open plan" link focuses the card instead.
+Task rows open `flyout.open(ref)` and parent headers `flyout.openEpic`. A
+plan's new tasks are Draft tasks with refs from the moment it is proposed, so
+they open in the normal task flyout with their criteria, dependencies and
+implementation plan; no separate plan-task view is needed. A row whose ref is
+null (its task row is gone) stays unclickable, since there is nothing to
+open. The flyout has no plan to go back to.
+
+The demo's offline-sync session (`planConversations` in
+`apps/server/src/demo/scenarios.ts`) has a v2, so the card's Changes from v1
+can be seen in `pnpm dev:demo`.
