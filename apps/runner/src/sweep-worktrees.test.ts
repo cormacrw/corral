@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { chmod, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readdir, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { RunnerMessage, RunJob } from '@corral/contracts'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -12,7 +12,7 @@ import type { ToolServer } from './mcp.ts'
 import { barePath } from './repos.ts'
 import { RunManager } from './run-manager.ts'
 import { createTestDataDir, pmJob, TEST_REPOSITORY } from './test-repo.ts'
-import { pmWorktreePath, prepareWorkspace, worktreePath } from './workspace.ts'
+import { pmWorktreePath, prepareWorkspace, pruneTurboCaches, worktreePath } from './workspace.ts'
 
 const PROJECT = randomUUID()
 
@@ -252,6 +252,53 @@ describe('sweep_worktrees', () => {
       await sweepFiles([], () => false, () => false)
       expect(await exists(scratch(run))).toBe(false)
       expect(await exists(scratch('notes'))).toBe(true)
+    })
+  })
+
+  describe('Turbo caches', () => {
+    const DAY = 24 * 60 * 60_000
+    const cache = (project: string) => join(dataDir, 'turbo-cache', project)
+
+    // A Turbo entry: an archive, its meta and manifest files, last used daysAgo
+    async function entry(project: string, hash: string, daysAgo: number, bytes = 10): Promise<void> {
+      await mkdir(cache(project), { recursive: true })
+      const when = new Date(Date.now() - daysAgo * DAY)
+      for (const [name, size] of [[`${hash}.tar.zst`, bytes], [`${hash}-meta.json`, 2], [`${hash}-manifest.json`, 2]] as const) {
+        await writeFile(join(cache(project), name), 'x'.repeat(size))
+        await utimes(join(cache(project), name), when, when)
+      }
+    }
+
+    async function hashes(project: string): Promise<string[]> {
+      return [...new Set((await readdir(cache(project))).map(name => name.split(/[-.]/)[0]!))].sort()
+    }
+
+    it('deletes entries unused for longer than the age limit, all of their files together', async () => {
+      await Promise.all([entry('p1', 'old', 8), entry('p1', 'recent', 6)])
+      await pruneTurboCaches(dataDir, () => false)
+      expect(await hashes('p1')).toEqual(['recent'])
+      expect((await readdir(cache('p1'))).sort()).toEqual(['recent-manifest.json', 'recent-meta.json', 'recent.tar.zst'])
+    })
+
+    it('deletes the oldest entries until the project is under the size cap', async () => {
+      await Promise.all([entry('p1', 'a', 3, 100), entry('p1', 'b', 2, 100), entry('p1', 'c', 1, 100), entry('p2', 'z', 3, 100)])
+      await pruneTurboCaches(dataDir, () => false, Date.now(), { maxAgeMs: 7 * DAY, maxBytes: 250 })
+      expect(await hashes('p1')).toEqual(['b', 'c'])
+      expect(await hashes('p2')).toEqual(['z'])
+    })
+
+    it('leaves the cache of a project with an active run alone, through the sweep job', async () => {
+      await Promise.all([entry('busy', 'old', 30), entry('idle', 'old', 30)])
+      await runSetupJob(config, { kind: 'sweep_worktrees', keepTaskIds: [], keepPlanSessionIds: [] }, () => false, () => false, project => project === 'busy')
+      expect(await hashes('busy')).toEqual(['old'])
+      expect(await exists(cache('idle'))).toBe(true)
+      expect(await hashes('idle')).toEqual([])
+    })
+
+    it('prunes nothing when the sweep cannot tell which projects are running', async () => {
+      await entry('p1', 'old', 30)
+      await sweep([], [])
+      expect(await hashes('p1')).toEqual(['old'])
     })
   })
 })

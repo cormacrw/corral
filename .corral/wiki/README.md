@@ -7,6 +7,7 @@ Short implementation notes written while building. Not binding: `docs/README.md`
 - [Agent headers and run tags](agent-run-tags.md)
 - [Audit log](audit-log.md)
 - [Bounded checks](bounded-checks.md)
+- [Shared Turbo cache](turbo-cache.md)
 - [Developer claim order](claim-order.md)
 - [Database setup failures](database-setup-failures.md)
 - [Design completion (D20)](design-approval.md)

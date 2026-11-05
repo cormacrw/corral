@@ -12,8 +12,9 @@ import { removeWorktree, sweepWorktrees, worktreePath } from './workspace.ts'
 // runs"). Tokens stay in `gh`'s, `claude`'s and `codex`'s own config; these only report
 // whether a login exists (D2, D12). `pmTurnRunning` says whether a Plan
 // session has a turn in progress on this runner, and `runIsHere` whether a run
-// is still this runner's, so the sweep leaves its files alone.
-export async function runSetupJob(config: RunnerConfig, job: SetupJob, pmTurnRunning: (planSessionId: string) => boolean = () => false, runIsHere?: (runId: string) => boolean): Promise<SetupJobResult> {
+// is still this runner's, so the sweep leaves its files alone. `projectRunning`
+// says whether a project has a run here, so its Turbo cache isn't pruned.
+export async function runSetupJob(config: RunnerConfig, job: SetupJob, pmTurnRunning: (planSessionId: string) => boolean = () => false, runIsHere?: (runId: string) => boolean, projectRunning?: (projectId: string) => boolean): Promise<SetupJobResult> {
   switch (job.kind) {
     case 'list_repos': {
       if (!(await ghSignedIn())) return { kind: 'list_repos', signedIn: false }
@@ -75,7 +76,7 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob, pmTurnRun
       return inspectEpicRebase(config.dataDir, job)
 
     case 'sweep_worktrees':
-      return { kind: 'sweep_worktrees', ...await sweepWorktrees(config.dataDir, job, pmTurnRunning, runIsHere) }
+      return { kind: 'sweep_worktrees', ...await sweepWorktrees(config.dataDir, job, pmTurnRunning, runIsHere, projectRunning) }
 
     case 'inbox_message':
       return { kind: 'inbox_message', message: await sessionTitle(config, job.prompt) }

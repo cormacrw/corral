@@ -1,7 +1,7 @@
 import type { RunnerMessage } from '@corral/contracts'
 import { chmod, mkdir, readdir, readFile, realpath, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ServerConnection } from './connection.ts'
 import type { ToolHandler, ToolServer } from './mcp.ts'
 import { RunManager } from './run-manager.ts'
@@ -17,7 +17,7 @@ import { pmWorktreePath } from './workspace.ts'
 const FAKE_CLAUDE = `#!/usr/bin/env node
 const { appendFileSync } = require('node:fs')
 const args = process.argv.slice(2)
-appendFileSync(process.env.FAKE_CLAUDE_LOG || __filename + '.log', JSON.stringify({ args, cwd: process.cwd(), checkScope: process.env.CORRAL_CHECK_SCOPE }) + '\\n')
+appendFileSync(process.env.FAKE_CLAUDE_LOG || __filename + '.log', JSON.stringify({ args, cwd: process.cwd(), checkScope: process.env.CORRAL_CHECK_SCOPE, turboCacheDir: process.env.TURBO_CACHE_DIR }) + '\\n')
 const resume = args[args.indexOf('--resume') + 1]
 if (args.includes('--resume') && resume !== 'fresh-session') {
   console.error('No conversation found with session ID: ' + resume)
@@ -70,6 +70,21 @@ describe('RunManager PM turns', () => {
   it('tells a developer run what to check through its environment', async () => {
     manager.assign(pmJob({ runId: 'r1', role: 'developer', planSessionId: null, taskId: 'task-1', taskRef: 'APP-1', branch: 'corral/app-1', ...{ checkScope: 'targeted' } }))
     await expect.poll(async () => (await calls().catch(() => []))[0]).toMatchObject({ checkScope: 'targeted' })
+  })
+
+  it('gives each project its own Turbo cache folder under the data dir', async () => {
+    // An agent run of these tests may inherit a cache dir from its own runner
+    vi.stubEnv('TURBO_CACHE_DIR', '')
+    try {
+      manager.assign(pmJob({ runId: 'r1', projectId: 'project-a', role: 'developer', planSessionId: null, taskId: 'task-1', taskRef: 'APP-1', branch: 'corral/app-1' }))
+      manager.assign(pmJob({ runId: 'r2', projectId: 'project-b', role: 'developer', planSessionId: null, taskId: 'task-2', taskRef: 'APP-2', branch: 'corral/app-2' }))
+      await expect.poll(async () => [...new Set((await calls().catch(() => [])).map(c => (c as { turboCacheDir?: string }).turboCacheDir))].sort()).toEqual([
+        join(dataDir, 'turbo-cache', 'project-a'),
+        join(dataDir, 'turbo-cache', 'project-b')
+      ])
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it.each(['pm', 'developer'] as const)('checks scratch paths and size for %s evidence', async (role) => {

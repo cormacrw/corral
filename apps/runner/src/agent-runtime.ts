@@ -25,6 +25,8 @@ export interface RuntimeOptions {
   quietResume?: boolean
   gitAuthor: GitAuthor | null
   checkScope?: CheckScope | null | undefined
+  // The project's shared Turbo cache on this runner (turboCachePath)
+  turboCacheDir?: string | null | undefined
   onLine(raw: string, parsed: ParsedLine): void
 }
 
