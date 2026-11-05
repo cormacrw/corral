@@ -84,7 +84,11 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
   })
   const today = computed(() => runs.value.filter(r => sameDay(r.queuedAt, minute.value)))
   const usageToday = computed(() => tokens(today.value.reduce((n, r) => n + usedTokens(r), 0)))
-  const tiles = computed(() => {
+  // Without the runs every count is unknown: a dash and the reason, never a zero
+  const tiles = computed(() => list.error.value
+    ? roleTiles.value.map(tile => ({ ...tile, value: '—', sub: 'Couldn\'t load runs' }))
+    : roleTiles.value)
+  const roleTiles = computed(() => {
     if (!agent.value) return []
     const count = (outcome: string) => thisWeek.value.filter(r => r.outcome === outcome).length
     switch (agent.value.role) {

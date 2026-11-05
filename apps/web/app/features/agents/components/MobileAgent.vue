@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import type { Run } from '@corral/contracts'
 import type { AgentRuns } from '~/features/runs/composables/useAgentRuns'
-import { agentIdleNote } from '~/features/agents/utils/agents'
+import { agentIdleNote, tileIcon } from '~/features/agents/utils/agents'
+import { ACTIVITY_DAYS, hourTick } from '~/features/agents/composables/useAgentActivity'
 import { duration, isLiveRun, plural, ROLE, runtimeLabel, timeAgo } from '~/utils/labels'
 
 // An agent's page on mobile (design/agent.md, design/mobile.md): the
-// header and stat tiles, then the current run and previous runs. Each run
+// header and stat tiles, the current run, the dashboard's charts scoped to
+// this agent, then previous runs. Each run
 // opens its transcript, or its linked Plan conversation for a PM turn.
 const props = defineProps<{ view: AgentRuns }>()
 const { name, agent, status, limited, missing, runs, pending, error, now, current, today, tiles, facts, load, project, resume } = props.view
 
+const activity = useAgentActivity(agent)
+const { bars, outcomes, tokens, loading: chartsLoading, failed: chartsFailed } = activity
 const previous = computed(() => runs.value.filter(r => !isLiveRun(r)))
 const to = (run: Run) => run.role === 'pm' && run.planSessionId
   ? { path: `/plan/${run.planSessionId}`, query: { project: run.projectId } }
@@ -48,7 +52,9 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
           />
         </div>
         <p class="text-sm text-muted-foreground">
-          {{ ROLE[agent.role] }} · {{ runtimeLabel(agent.runtime) }} · {{ plural(today.length, 'run') }} today
+          {{ ROLE[agent.role] }} · {{ runtimeLabel(agent.runtime) }}<template v-if="!error && !pending">
+            · {{ plural(today.length, 'run') }} today
+          </template>
         </p>
         <p
           v-if="limited"
@@ -71,21 +77,24 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
     <div class="flex flex-col gap-3">
       <!-- The tiles scroll sideways rather than wrap -->
       <div class="flex snap-x gap-2 overflow-x-auto overscroll-x-contain px-4 pb-1">
-        <dl
-          v-for="tile in tiles"
-          :key="tile.label"
-          class="w-48 shrink-0 snap-start rounded-lg border border-border p-3"
-        >
-          <dt class="truncate text-xs text-muted-foreground">
-            {{ tile.label }}
-          </dt>
-          <dd class="text-2xl font-semibold text-foreground tabular-nums">
-            {{ tile.value }}
-          </dd>
-          <dd class="truncate text-xs text-muted-foreground">
-            {{ tile.sub || '\u00A0' }}
-          </dd>
-        </dl>
+        <template v-if="pending && !error">
+          <UiSkeleton
+            v-for="i in 3"
+            :key="i"
+            class="h-[94px] w-44 shrink-0 rounded-xl"
+          />
+        </template>
+        <template v-else>
+          <StatTile
+            v-for="tile in tiles"
+            :key="tile.label"
+            :label="tile.label"
+            :value="tile.value"
+            :hint="tile.sub || undefined"
+            :icon="tileIcon(tile.label)"
+            class="w-44 shrink-0 snap-start"
+          />
+        </template>
       </div>
       <p class="px-4 text-xs text-muted-foreground">
         {{ facts }}
@@ -133,6 +142,73 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
       >
         {{ agentIdleNote(agent) }}
       </p>
+    </section>
+
+    <section
+      aria-labelledby="agent-activity"
+      class="flex flex-col gap-3 px-4"
+      data-testid="agent-activity"
+    >
+      <h3
+        id="agent-activity"
+        class="text-sm font-semibold text-foreground"
+      >
+        Activity
+      </h3>
+      <AppLoadError
+        v-if="chartsFailed"
+        :title="`Couldn't load ${agent.name}'s activity`"
+        :description="activity.error.value"
+        :retry="activity.retry"
+      />
+      <template v-else>
+        <DashboardCard
+          title="Runs"
+          :subtitle="`Last ${ACTIVITY_DAYS} days, by time of day`"
+        >
+          <UiSkeleton
+            v-if="chartsLoading"
+            class="h-[246px] w-full"
+          />
+          <AgentsRunTimeline
+            v-else
+            :bars="bars"
+            :hours="24"
+            :ticks="[0, 6, 12, 18, 24]"
+            :tick="hourTick"
+            :empty="`No runs in the last ${ACTIVITY_DAYS} days.`"
+          />
+        </DashboardCard>
+        <DashboardCard
+          title="Outcomes"
+          :subtitle="`Finished runs per day, last ${outcomes.length} days`"
+        >
+          <UiSkeleton
+            v-if="chartsLoading"
+            class="h-[180px] w-full"
+          />
+          <AgentOutcomeChart
+            v-else
+            :days="outcomes"
+            :height="180"
+          />
+        </DashboardCard>
+        <DashboardCard
+          title="Tokens"
+          :subtitle="`Per day, last ${tokens.length} days`"
+        >
+          <UiSkeleton
+            v-if="chartsLoading"
+            class="h-[180px] w-full"
+          />
+          <AgentsTokenChart
+            v-else
+            :days="tokens"
+            :only="agent.role"
+            :height="180"
+          />
+        </DashboardCard>
+      </template>
     </section>
 
     <section

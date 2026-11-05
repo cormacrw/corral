@@ -2,11 +2,14 @@
 import type { AgentRuns } from '~/features/runs/composables/useAgentRuns'
 import { duration, isLiveRun as isLive, plural, ROLE, runRef, runTitle, runtimeLabel, timeAgo } from '~/utils/labels'
 
-// An agent's page on the web (design/agent.md): the header, stats and runs
-// list, with the selected run in the slot.
+// An agent's page on the web (design/agent.md): the header, then its
+// activity dashboard (stat tiles, charts, recent runs), or with a run open
+// the runs list and the selected run in the slot.
 const props = defineProps<{ view: AgentRuns }>()
-const { name, agent, status, limited, missing, runs, error, now, selected, load, today, tiles, facts, resume, projectName } = props.view
+const { name, agent, status, limited, missing, runs, pending, error, now, selected, load, today, resume, projectName } = props.view
 const router = useRouter()
+const route = useRoute()
+const open = computed(() => typeof route.params.runId === 'string' && route.params.runId !== '')
 </script>
 
 <template>
@@ -39,7 +42,9 @@ const router = useRouter()
           />
         </div>
         <p class="text-sm text-muted-foreground">
-          {{ ROLE[agent.role] }} · <span data-testid="agent-runtime-label">{{ runtimeLabel(agent.runtime) }}</span> · {{ plural(today.length, 'run') }} today
+          {{ ROLE[agent.role] }} · <span data-testid="agent-runtime-label">{{ runtimeLabel(agent.runtime) }}</span><template v-if="!error && !pending">
+            · {{ plural(today.length, 'run') }} today
+          </template>
           <span v-if="limited"> · Waiting on usage limit until {{ new Date(agent.pausedUntil!).toLocaleTimeString() }}</span>
         </p>
       </div>
@@ -59,30 +64,26 @@ const router = useRouter()
         size="sm"
       />
     </header>
-    <div class="border-b border-border px-4 py-3">
-      <div class="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
-        <dl
-          v-for="tile in tiles"
-          :key="tile.label"
-        >
-          <dt class="text-xs text-muted-foreground">
-            {{ tile.label }}
-          </dt>
-          <dd class="text-xl font-semibold tabular-nums">
-            {{ tile.value }}
-          </dd>
-          <dd class="text-xs text-muted-foreground">
-            {{ tile.sub }}
-          </dd>
-        </dl>
-      </div>
-      <p class="mt-2 text-xs text-muted-foreground">
-        {{ facts }}
-      </p>
-    </div>
-
-    <div class="flex min-h-0 flex-1">
+    <AgentDashboard
+      v-if="!open"
+      :view="view"
+    />
+    <div
+      v-else
+      class="flex min-h-0 flex-1"
+    >
       <div class="flex w-80 shrink-0 flex-col border-e border-border">
+        <NuxtLink
+          :to="`/agents/${name}`"
+          class="flex items-center gap-1.5 border-b border-border px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
+          data-testid="agent-activity-link"
+        >
+          <Icon
+            name="i-hugeicons-arrow-left-01"
+            class="size-4"
+          />
+          Activity
+        </NuxtLink>
         <AppLoadError
           v-if="error"
           :title="error"

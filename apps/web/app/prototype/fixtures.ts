@@ -133,7 +133,9 @@ export const agents: Agent[] = [
   { id: 'a-pm', name: 'Pam', role: 'pm', runtime: 'claude-code', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: ago(60), activeRuns: 0, avatarUrl: null },
   { id: 'a-dev', name: 'Victor', role: 'developer', runtime: 'claude-code', concurrency: 2, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 1, avatarUrl: null },
   { id: 'a-dev2', name: 'Dana', role: 'developer', runtime: 'codex', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 1, avatarUrl: null },
-  { id: 'a-rev', name: 'Rita', role: 'reviewer', runtime: 'claude-code', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 2, avatarUrl: null }
+  { id: 'a-rev', name: 'Rita', role: 'reviewer', runtime: 'claude-code', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 2, avatarUrl: null },
+  // Just added: no runs yet (design/agent.md, Activity: no runs)
+  { id: 'a-new', name: 'Nova', role: 'developer', runtime: 'claude-code', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 0, avatarUrl: null }
 ]
 
 const epicRows: Omit<Epic, 'taskId' | 'taskRef' | 'mergedAt'>[] = [
@@ -591,6 +593,50 @@ export const runs: Run[] = [
     queuedAt: ago(300), startedAt: ago(299), endedAt: ago(297), timings: null
   }
 ]
+
+// Two weeks of earlier runs for every agent but Nova, so each agent page's
+// charts have a history (design/agent.md, Activity). Deterministic, and at
+// least a day old, so they never become a task's latest run.
+{
+  let seed = 7
+  const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647
+  const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rand() * xs.length)]!
+  type Outcome = Run['outcome']
+  const plan: { agent: string, role: Run['role'], runtime: Run['agentRuntime'], tasks: string[], outcomes: ['completed' | 'failed' | 'interrupted', Outcome][], perDay: number, minutes: [number, number] }[] = [
+    { agent: 'a-dev', role: 'developer', runtime: 'claude-code', tasks: ['COR-3', 'COR-5'], perDay: 4, minutes: [12, 70], outcomes: [['completed', 'pr_opened'], ['completed', 'pr_opened'], ['completed', 'pr_updated'], ['completed', 'pr_updated'], ['completed', 'stuck'], ['failed', 'failed'], ['completed', 'rate_limited'], ['interrupted', null]] },
+    { agent: 'a-dev2', role: 'developer', runtime: 'codex', tasks: ['COR-3'], perDay: 3, minutes: [15, 55], outcomes: [['completed', 'pr_opened'], ['completed', 'pr_updated'], ['completed', 'commit_submitted'], ['failed', 'failed'], ['interrupted', null]] },
+    { agent: 'a-paused', role: 'developer', runtime: 'codex', tasks: ['COR-3', 'COR-5'], perDay: 2, minutes: [20, 60], outcomes: [['completed', 'pr_opened'], ['completed', 'pr_updated'], ['completed', 'stuck'], ['failed', 'failed']] },
+    { agent: 'a-rev', role: 'reviewer', runtime: 'claude-code', tasks: ['COR-4', 'COR-5'], perDay: 4, minutes: [4, 18], outcomes: [['completed', 'approved'], ['completed', 'approved'], ['completed', 'changes_requested'], ['completed', 'rate_limited']] },
+    { agent: 'a-limited', role: 'reviewer', runtime: 'codex', tasks: ['COR-4', 'COR-5'], perDay: 3, minutes: [5, 20], outcomes: [['completed', 'approved'], ['completed', 'changes_requested'], ['completed', 'rate_limited']] },
+    { agent: 'a-design', role: 'designer', runtime: 'claude-code', tasks: ['COR-20'], perDay: 1, minutes: [25, 55], outcomes: [['completed', 'design_submitted'], ['completed', 'design_submitted'], ['completed', 'stuck']] },
+    { agent: 'a-pm', role: 'pm', runtime: 'claude-code', tasks: [], perDay: 3, minutes: [1, 6], outcomes: [['completed', null], ['completed', null], ['completed', null], ['interrupted', null]] }
+  ]
+  let number = 2000
+  for (const p of plan) {
+    const a = agents.find(x => x.id === p.agent)!
+    for (let day = 1; day < 14; day++) {
+      // Quieter days now and then, and the weekend-ish gaps
+      const count = Math.max(0, Math.round(p.perDay * (0.3 + rand() * 1.1)) - (day % 6 === 0 ? p.perDay : 0))
+      for (let n = 0; n < count; n++) {
+        const startHour = 7 + rand() * 15
+        const length = p.minutes[0] + rand() * (p.minutes[1] - p.minutes[0])
+        const midnight = new Date(loadedAt)
+        midnight.setHours(0, 0, 0, 0)
+        const start = (loadedAt - (midnight.getTime() - day * 86_400_000 + startHour * 3_600_000)) / 60_000
+        const [state, outcome] = pick(p.outcomes)
+        const ref = p.tasks.length ? pick(p.tasks) : null
+        const inputTokens = Math.round((p.role === 'pm' ? 1_500 : 6_000) + rand() * (p.role === 'developer' ? 30_000 : 10_000))
+        runs.push(<Run>{
+          runnerId: 'runner-1', runnerName: 'home-server', id: `r-h-${number}`, number: number++, agentId: a.id, agentName: a.name, agentRuntime: p.runtime, role: p.role, projectId: 'p-corral',
+          planSessionId: null, taskId: ref ? at(ref).id : null, taskRef: ref, taskTitle: ref ? at(ref).title : null, epicId: null, epicTitle: null,
+          state, outcome, summary: null, error: state === 'failed' ? 'The run hit its time limit of 60 minutes.' : null, headSha: null,
+          inputTokens, cacheWriteTokens: Math.round(inputTokens * 0.4), cacheReadTokens: inputTokens * 8, outputTokens: Math.round(inputTokens * 0.25), rateLimitResetAt: null,
+          queuedAt: ago(start + 1), startedAt: ago(start), endedAt: ago(start - length), timings: null
+        })
+      }
+    }
+  }
+}
 
 // A task's author and reviewer are the agents of its latest run of each
 // role, as the server fills them; tasks with no run stay "Any available"

@@ -296,11 +296,23 @@ route('PATCH', '/agents/:id', ([id], body) => Object.assign(f.agents.find(a => a
 route('GET', '/me', () => f.profile)
 route('PATCH', '/me', (_, body) => Object.assign(f.profile, body))
 
-route('GET', '/runs', (_, __, query) => f.runs.filter(r =>
-  (!query.get('agentId') || r.agentId === query.get('agentId'))
-  && (!query.get('taskId') || r.taskId === query.get('taskId'))
-  && (!query.get('active') || ['queued', 'starting', 'running', 'waiting_for_input', 'stopping'].includes(r.state))
-  && (!query.get('since') || Date.parse(r.queuedAt) >= Date.parse(query.get('since')!))))
+// `#/agents/victor?mock=loading` or `?mock=error` shows a page's loading or
+// load-error state for the runs it reads (design tasks' state screens)
+async function runsState(): Promise<void> {
+  const mock = new URLSearchParams(location.hash.split('?')[1] ?? '').get('mock')
+  if (mock === 'loading') await new Promise<void>(() => {})
+  if (mock === 'error') throw new ApiError(500, null, 'The server could not load runs')
+}
+route('GET', '/runs', async (_, __, query) => {
+  await runsState()
+  const found = f.runs.filter(r =>
+    (!query.get('agentId') || r.agentId === query.get('agentId'))
+    && (!query.get('taskId') || r.taskId === query.get('taskId'))
+    && (!query.get('active') || ['queued', 'starting', 'running', 'waiting_for_input', 'stopping'].includes(r.state))
+    && (!query.get('since') || Date.parse(r.queuedAt) >= Date.parse(query.get('since')!)))
+  // An agent's runs are its latest 50, newest first, as the server sends them
+  return query.get('agentId') && !query.get('since') ? found.sort((a, b) => b.queuedAt.localeCompare(a.queuedAt)).slice(0, 50) : found
+})
 route('GET', '/runs/:id', ([id]) => f.runs.find(r => r.id === id) ?? notFound())
 route('GET', '/runs/:id/transcript', ([id]) => f.runEvents[id!] ?? [])
 

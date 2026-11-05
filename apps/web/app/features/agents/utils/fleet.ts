@@ -24,7 +24,8 @@ export function runTone(run: Pick<Run, 'state' | 'outcome'>): RunTone {
   if (isLiveRun(run)) return 'live'
   if (run.outcome === 'changes_requested') return 'changes'
   if (run.outcome === 'failed' || run.outcome === 'stuck' || run.outcome === 'blocked' || run.state === 'failed') return 'failed'
-  if (run.outcome === null || run.outcome === 'rate_limited') return 'quiet'
+  // A PM turn finishes with no outcome to report; only a stopped run is quiet
+  if ((run.outcome === null && run.state !== 'completed') || run.outcome === 'rate_limited') return 'quiet'
   return 'done'
 }
 
@@ -88,4 +89,64 @@ export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1000) return `${Math.round(n / 1000)}k`
   return String(n)
+}
+
+// One agent's page (design/agent.md, Activity): its runs over the last
+// `days` days, one lane per local day (today first) and x the hour of day,
+// so a week reads as when the agent works. A run over midnight is clipped at
+// the end of its first day.
+const LANE_DAY = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric' })
+export function dayLane(index: number, date: Date): string {
+  return index === 0 ? 'Today' : index === 1 ? 'Yesterday' : LANE_DAY.format(date)
+}
+export function dayBars(runs: Run[], days: number, now: number): RunBar[] {
+  const today = startOfDay(now)
+  return runs
+    .flatMap((run) => {
+      const at = span(run, now)
+      if (!at) return []
+      const day = startOfDay(at[0])
+      const index = Math.round((today - day) / DAY)
+      if (index < 0 || index >= days) return []
+      const end = Math.min(at[1], day + DAY)
+      return [{ run, lane: dayLane(index, new Date(day)), x: (at[0] - day) / HOUR, hours: Math.max(0, end - at[0]) / HOUR, tone: runTone(run), order: index }]
+    })
+    .sort((a, b) => a.order - b.order || a.x - b.x)
+    .map(({ order: _, ...bar }) => bar)
+}
+// Finished runs per local day by how they ended, oldest first. Live runs
+// haven't ended, so they're left out.
+export type EndTone = Exclude<RunTone, 'live'>
+export const END_TONES = ['done', 'changes', 'failed', 'quiet'] as const satisfies readonly EndTone[]
+export interface OutcomeDay { date: Date, index: number, byTone: Record<EndTone, number>, total: number }
+export function outcomesByDay(runs: Run[], days: number, now: number): OutcomeDay[] {
+  const first = startOfDay(now) - (days - 1) * DAY
+  const rows: OutcomeDay[] = Array.from({ length: days }, (_, index) => ({ date: new Date(first + index * DAY), index, byTone: { done: 0, changes: 0, failed: 0, quiet: 0 }, total: 0 }))
+  for (const run of runs) {
+    const tone = runTone(run)
+    if (tone === 'live') continue
+    const row = rows[Math.round((startOfDay(Date.parse(run.queuedAt)) - first) / DAY)]
+    if (row) {
+      row.byTone[tone] += 1
+      row.total += 1
+    }
+  }
+  return rows
+}
+
+// The median minutes of the runs that started and ended each day, oldest
+// first; null for a day with none (a gap, never a zero)
+export function medianMinutesByDay(runs: Run[], days: number, now: number): (number | null)[] {
+  const first = startOfDay(now) - (days - 1) * DAY
+  const byDay: number[][] = Array.from({ length: days }, () => [])
+  for (const run of runs) {
+    if (!run.startedAt || !run.endedAt) continue
+    byDay[Math.round((startOfDay(Date.parse(run.queuedAt)) - first) / DAY)]?.push((Date.parse(run.endedAt) - Date.parse(run.startedAt)) / 60_000)
+  }
+  return byDay.map((ms) => {
+    if (!ms.length) return null
+    const sorted = ms.sort((a, b) => a - b)
+    const mid = Math.floor(sorted.length / 2)
+    return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2
+  })
 }
