@@ -48,7 +48,7 @@ export function storedProjectFields<T extends { defaultReviewMode?: EpicReviewMo
 export const pmActionTools = {
   create_task: {
     confirmRequired: false,
-    description: 'Create a single Backlog task in the selected project, outside a plan. Setting humanReview to false where the project reviews by default takes a confirm card.',
+    description: 'Create a Backlog task in the selected project directly, without a plan. Use it only when the human explicitly asks for a task to be created directly; propose all other new work, even a single task, with propose_plan so the human sees it first. Setting humanReview to false where the project reviews by default takes a confirm card.',
     input: taskFields(createTaskInput.shape)
   },
   update_task: {

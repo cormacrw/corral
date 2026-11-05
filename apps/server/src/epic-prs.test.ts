@@ -322,7 +322,7 @@ it('keeps reading history from before parent fixes ran with no task (D29)', () =
 })
 
 it('keeps structured findings and separate rounds at their reviewed heads, including an empty report', async () => {
-  const { epic, task, other } = await setup()
+  const { project, epic, task, other } = await setup()
   const first = await lastMerge(other.id, epic.id)
   const findings = [
     { level: 'blocking', text: 'UI sends query but the API expects search.', taskRefs: [task.ref, other.ref] },
@@ -341,8 +341,8 @@ it('keeps structured findings and separate rounds at their reviewed heads, inclu
   // The fix's own path is covered in epic-sync.test.ts; here it only moves the head
   await t.db.update(schema.taskIntegrationOperations).set({ state: 'failed' }).where(eq(schema.taskIntegrationOperations.epicId, epic.id))
   await t.db.update(schema.runs).set({ state: 'failed', endedAt: new Date() }).where(and(eq(schema.runs.epicId, epic.id), eq(schema.runs.role, 'developer')))
-  const pr = [...t.github.pulls.values()].find(p => p.head === epic.branch)!
-  pr.headSha = 'fixed-integration-head'
+  // Push the head the way the runner does, so the branch and the PR agree
+  t.github.setBranch(project.repository, epic.branch!, 'fixed-integration-head')
   await t.db.update(schema.epics).set({ reviewState: 'open', prHeadSha: 'fixed-integration-head' }).where(eq(schema.epics.id, epic.id))
   await t.mergePass()
   await t.orchestrator.schedule()
