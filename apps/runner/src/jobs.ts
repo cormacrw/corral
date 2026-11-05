@@ -84,20 +84,26 @@ export async function runSetupJob(config: RunnerConfig, job: SetupJob, pmTurnRun
     case 'session_title':
       return { kind: 'session_title', title: await sessionTitle(config, job.prompt) }
 
+    case 'pr_guide':
+      return { kind: 'pr_guide', text: await sessionTitle(config, job.prompt, PR_GUIDE_TIMEOUT_MS) }
+
     case 'release_notes':
       return { kind: 'release_notes', notes: await releaseNotes(config, job.runtime, job.prompt) }
   }
 }
 
 export const TITLE_TIMEOUT_MS = 30_000
+// A PR guide reads the whole diff, so it gets longer than a title (COR-525)
+export const PR_GUIDE_TIMEOUT_MS = 150_000
 
 // One non-interactive `claude` call with the small model, no tools, no MCP
 // servers and no saved session, run from a folder with no CLAUDE.md. It runs
 // outside the RunManager, so it never takes a PM slot or waits for one (COR-40).
-async function sessionTitle(config: RunnerConfig, prompt: string): Promise<string> {
+// Titles, Inbox messages and PR guides all go through it.
+async function sessionTitle(config: RunnerConfig, prompt: string, timeoutMs = TITLE_TIMEOUT_MS): Promise<string> {
   const result = await exec(config.claudeBin, [
     '-p', '--model', config.titleModel, '--tools', '', '--strict-mcp-config', '--no-session-persistence', '--output-format', 'text'
-  ], { cwd: tmpdir(), input: prompt, timeoutMs: TITLE_TIMEOUT_MS })
+  ], { cwd: tmpdir(), input: prompt, timeoutMs })
   const title = result.stdout.trim()
   if (result.code !== 0 || !title) throw new Error(result.stderr.trim() || `claude exited with code ${result.code}`)
   return title

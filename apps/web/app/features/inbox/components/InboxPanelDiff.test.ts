@@ -17,7 +17,7 @@ const alertStub = vue.defineComponent({
   setup: props => () => vue.h('div', { 'data-alert': true }, [props.title, ...(props.actions ?? []).map((a: { label: string, to: string }) => vue.h('a', { href: a.to }, a.label))])
 })
 const pr: PullRequestDetail = {
-  number: 7, url: 'https://github.com/o/r/pull/7', title: 'T', body: '', baseBranch: 'main', headBranch: 'corral/x',
+  number: 7, url: 'https://github.com/o/r/pull/7', title: 'T', body: '', baseBranch: 'main', headBranch: 'corral/x', headSha: 'sha-x',
   files: [
     { path: 'a.ts', status: 'modified', additions: 2, deletions: 1, patch: '@@ -1 +1,2 @@\n-old\n+new\n+more' },
     { path: 'logo.png', status: 'added', additions: 0, deletions: 0, patch: '' }

@@ -323,6 +323,8 @@ export const setupJobSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('sweep_worktrees'), keepTaskIds: z.array(z.string()), keepPlanSessionIds: z.array(z.string()), keepEpicIds: z.array(z.string()).optional() }),
   z.object({ kind: z.literal('session_title'), prompt: z.string() }),
   z.object({ kind: z.literal('inbox_message'), prompt: z.string() }),
+  // A PR's guided review (COR-525): the small model's JSON steps, as text
+  z.object({ kind: z.literal('pr_guide'), prompt: z.string() }),
   z.object({ kind: z.literal('release_notes'), runtime: z.string(), prompt: z.string() })
 ])
 
@@ -346,6 +348,7 @@ export const setupJobResultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('sweep_worktrees'), removed: z.array(z.string()), kept: z.array(z.string()) }),
   z.object({ kind: z.literal('session_title'), title: z.string() }),
   z.object({ kind: z.literal('inbox_message'), message: z.string() }),
+  z.object({ kind: z.literal('pr_guide'), text: z.string() }),
   z.object({ kind: z.literal('release_notes'), notes: z.string() })
 ])
 

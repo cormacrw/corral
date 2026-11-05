@@ -75,6 +75,8 @@ export const pmRouteExclusions: Record<string, string> = {
   'GET /api/epics/:id': 'Detailed human epic view; list_tasks exposes epic identity and dependencies, but no PM tool reads the full epic detail.',
   'GET /api/projects/:slug/pull-requests': 'Human GitHub PR overview; PM reads task PR links via list_tasks and cannot merge PRs.',
   'GET /api/projects/:slug/pull-requests/:number': 'Human GitHub PR detail for the Inbox panel; PM reads task PR links via list_tasks.',
+  'GET /api/projects/:slug/pull-requests/:number/guide': 'Human guided code review in the Inbox panel; a reading aid for the reviewer, not a PM action.',
+  'POST /api/projects/:slug/pull-requests/:number/guide': 'Human asks for a guided code review in the Inbox panel; a reading aid for the reviewer, not a PM action.',
   'GET /api/projects/:slug/tasks/:number/pull-request': 'Human PR tabs in the Inbox panel; PM reads task PR links via list_tasks.',
   'GET /api/projects/:slug/tasks/:number/history': 'Human Activity audit view; no PM task audit-history reader currently exists.',
   'GET /api/projects/:slug/tasks/:number/evidence': 'Human review evidence listing; get_evidence is a reviewer tool, not a PM tool.',

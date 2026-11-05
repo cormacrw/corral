@@ -1,5 +1,6 @@
 import { RUNNER_HEARTBEAT_MS } from '@corral/contracts'
 import { FakeRunner } from '../test-runner.ts'
+import { demoGuideAnswer } from './demo-guide.ts'
 
 const PM_REPLY = 'This is a demo instance (`pnpm dev:demo`), so I don\'t run here and nothing you send reaches an agent. Run `pnpm dev` with a runner to plan for real.'
 
@@ -20,6 +21,10 @@ export async function startDemoRunner(serverUrl: string, repositories: () => Pro
       case 'session_title': throw new Error('No titles in the demo')
       case 'inbox_message': throw new Error('No Inbox messages in the demo')
       case 'release_notes': throw new Error('No release notes in the demo')
+      // A guide takes a few seconds for real, so the generating state shows
+      case 'pr_guide':
+        await new Promise(resolve => setTimeout(resolve, 3000))
+        return { kind: 'pr_guide', text: demoGuideAnswer(job.prompt) }
       default: throw new Error(`The demo runner can't do ${job.kind}`)
     }
   }

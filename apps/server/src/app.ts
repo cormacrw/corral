@@ -64,6 +64,7 @@ import { evidenceHeaders } from './evidence-file.ts'
 import type { Orchestrator } from './orchestrator.ts'
 import type { PlanService } from './plan.ts'
 import type { RunnerHub } from './runner-hub.ts'
+import { PullRequestGuides } from './pull-request-guides.ts'
 import { createAgent, getRun, listAgents, listEvidence, listReviews, listRuns, patchAgent } from './runs.ts'
 import type { Transcripts } from './transcripts.ts'
 import { checkRepository, detectClis, RepoCatalog, requireRuntimeCli } from './setup.ts'
@@ -134,6 +135,7 @@ const taskNumber = (value: string) => {
 
 export function createApp({ db, events, actor, runner, orchestrator, github, blobs, transcripts, plans, releaseNotes, performance }: AppDeps) {
   const repos = new RepoCatalog(db, runner)
+  const guides = new PullRequestGuides({ db, github, runner })
 
   const publishTask = async (taskId: string) => {
     const task = await loadTask(db, taskId)
@@ -357,6 +359,16 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
     .get('/projects/:slug/pull-requests/:number', async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
       return c.json(await readPullRequest(github, project, taskNumber(c.req.param('number'))))
+    })
+
+    // A PR's guided review (COR-525): read it, or start one for the head commit
+    .get('/projects/:slug/pull-requests/:number/guide', async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      return c.json(await guides.get(project, taskNumber(c.req.param('number'))))
+    })
+    .post('/projects/:slug/pull-requests/:number/guide', async (c) => {
+      const project = await findProjectBySlug(db, c.req.param('slug'))
+      return c.json(await guides.generate(project, taskNumber(c.req.param('number'))), 202)
     })
 
     .post('/projects/:slug/tasks/:number/subtasks', validate('json', createTaskInput), async (c) => {

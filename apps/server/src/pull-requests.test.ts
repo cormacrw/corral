@@ -189,6 +189,7 @@ describe('pull request detail', () => {
       body: 'Body of whole',
       baseBranch: 'main',
       headBranch: 'whole',
+      headSha: 'whole-sha',
       files: [{ path: 'a.ts', status: 'renamed', additions: 1, deletions: 2, patch: '@@ -1,2 +1 @@\n-a\n-b\n+c' }],
       totalFiles: 1,
       truncated: false

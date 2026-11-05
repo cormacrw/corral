@@ -463,6 +463,13 @@
       "when": 1793843940217,
       "tag": "0065_condemned_ser_duncan",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1793849217486,
+      "tag": "0066_amazing_ricochet",
+      "breakpoints": true
     }
   ]
 }

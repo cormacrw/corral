@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { demoGuideAnswer } from './demo-guide.ts'
 import { demoSha, type Seeder } from './harness.ts'
 
 // The demo's story: two projects over about two weeks, told in order. Each
@@ -32,6 +33,7 @@ export async function seedDemo(t: Seeder): Promise<void> {
   await offlineSpike(t, notes)
   await storefrontStuck(t, shop)
   await releaseNotes(t, shop)
+  await guidedReviews(t, shop)
   await planConversations(t, notes)
   await inFlight(t, shop, notes)
   await backlogs(t, shop, notes)
@@ -743,4 +745,130 @@ async function backlogs(t: Seeder, shop: Project, notes: Project): Promise<void>
   }
   const [cart] = (await t.db.select().from(schema.tasks).where(eq(schema.tasks.projectId, shop.id))).filter(row => row.title.startsWith('Cart badge'))
   await t.comment(shop, cart as unknown as Task, 'Seen on iOS Safari and Chrome. Probably the cart store not being reset when the last line is deleted.')
+}
+
+// ---- Guided code review (COR-525) ----
+
+// A file whose patch has several `@@` hunks
+function hunks(path: string, blocks: string[][]): PullRequestFile {
+  const all = blocks.flat()
+  const added = all.filter(l => l.startsWith('+')).length
+  const removed = all.filter(l => l.startsWith('-')).length
+  return { path, status: 'modified', additions: added, deletions: removed, patch: blocks.map((lines, i) => `@@ -${i * 40 + 1},${lines.length} +${i * 40 + 1},${lines.length} @@\n${lines.join('\n')}`).join('\n') }
+}
+
+// Asks for a task PR's guide the way the Inbox does, and waits for it
+async function guide(t: Seeder, project: Project, task: Task, answer: (prompt: string) => string): Promise<void> {
+  const { pr } = await t.get(project, task)
+  t.prGuide = answer
+  await t.request('POST', `/api/projects/${project.slug}/pull-requests/${pr!.number}/guide`, undefined, [202])
+  for (;;) {
+    const g = await t.request<{ status: string }>('GET', `/api/projects/${project.slug}/pull-requests/${pr!.number}/guide`)
+    if (g.status !== 'generating') break
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+}
+
+// One task in Human review per guide state: ready (with Other changes),
+// truncated past the cap, failed, a single hunk and made for an older commit.
+// Expired promo codes (SHOP) has none yet.
+async function guidedReviews(t: Seeder, shop: Project): Promise<void> {
+  const reviewed = async (input: { title: string, description: string, criteria: string[], files: PullRequestFile[], summary: string, answer: (prompt: string) => string, review: string }) => {
+    const task = await t.task(shop, { title: input.title, type: 'task', description: input.description, acceptanceCriteria: input.criteria, humanReview: true })
+    await t.approve(shop, task)
+    await t.advance('5m')
+    await develop(t, shop, task, { head: 'v1', summary: input.summary, note: input.title, files: input.files })
+    await t.advance('6m')
+    await review(t, task, 'approved', input.review, [])
+    await guide(t, shop, task, input.answer)
+    await t.advance('12m')
+    return task
+  }
+
+  await reviewed({
+    title: 'Show run log times in the viewer\'s time zone',
+    description: 'Run logs print UTC timestamps, so a reviewer in London or Tokyo has to do sums to match a log line to a deploy. Show each line in the viewer\'s own zone, with UTC on hover.',
+    criteria: ['Each log line shows its time in the browser\'s time zone', 'Hovering a time shows the UTC time', 'Times stay right across a daylight saving change'],
+    summary: 'Log times are formatted once with Intl in the viewer\'s zone, and the line keeps the UTC time as its title.',
+    review: 'Formatting is centralised and tested across the October clock change.',
+    files: [
+      patch('src/utils/time.ts', ['+export function localTime(iso: string, zone = Intl.DateTimeFormat().resolvedOptions().timeZone) {', '+  return new Intl.DateTimeFormat(undefined, { timeStyle: \'medium\', timeZone: zone }).format(new Date(iso))', '+}'], 'added'),
+      hunks('src/components/RunLogLine.vue', [
+        ['   <span class="time">', '-    {{ line.at.slice(11, 19) }}', '+    <time :datetime="line.at" :title="utc(line.at)">{{ localTime(line.at) }}</time>', '   </span>'],
+        ['-import { formatUtc } from \'~/utils/format\'', '+import { localTime, utc } from \'~/utils/time\'']
+      ]),
+      patch('src/utils/time.test.ts', ['+it(\'keeps the hour across the October change\', () => {', '+  expect(localTime(\'2026-10-25T00:30:00Z\', \'Europe/London\')).toBe(\'01:30:00\')', '+  expect(localTime(\'2026-10-25T01:30:00Z\', \'Europe/London\')).toBe(\'01:30:00\')', '+})'], 'added'),
+      hunks('src/components/RunLog.vue', [
+        ['-  <RunLogLine v-for="line in lines" :key="line.id" :line="line" />', '+  <RunLogLine v-for="line in lines" :key="line.id" :line="line" :zone="zone" />'],
+        ['+const zone = useTimeZone()']
+      ]),
+      patch('src/composables/useTimeZone.ts', ['+export const useTimeZone = () => useState(\'zone\', () => Intl.DateTimeFormat().resolvedOptions().timeZone)'], 'added'),
+      patch('docs/run-logs.md', ['-Times are in UTC.', '+Times are in your browser\'s time zone; hover one for UTC.'])
+    ],
+    answer: demoGuideAnswer
+  })
+
+  // Over the diff's cap: 24 files, and step 3 reaches two files past it
+  const renamed = Array.from({ length: 24 }, (_, i) => patch(i === 22 ? 'src/components/board/TaskCard.vue' : i === 23 ? 'src/components/runs/RunHeader.vue' : `src/roles/role-${String(i + 1).padStart(2, '0')}.ts`, ['-import { AgentRole } from \'~/types\'', '+import { Role } from \'~/roles\'']))
+  await reviewed({
+    title: 'Rename agent roles to the new map',
+    description: 'Roles are named three different ways across the app. Move every screen to the one role map in `~/roles`.',
+    criteria: ['Every screen reads role names from the role map', 'No file still imports AgentRole'],
+    summary: 'Every role reference now goes through the role map; AgentRole is gone.',
+    review: 'A mechanical rename, checked file by file.',
+    files: renamed,
+    answer: () => JSON.stringify({
+      steps: [
+        { title: 'The role map', why: 'Every other change reads from this map, so start here.', criterionIds: [], hunks: [{ path: 'src/roles/role-01.ts', hunk: 0 }] },
+        { title: 'Roles that build on it', why: 'These roles move to the map without changing what they do.', criterionIds: [], hunks: [{ path: 'src/roles/role-02.ts', hunk: 0 }, { path: 'src/roles/role-03.ts', hunk: 0 }] },
+        { title: 'Every screen reads the map', why: 'The board card and run header show role names, so they read them from the map too.', criterionIds: [], hunks: [{ path: 'src/roles/role-04.ts', hunk: 0 }, { path: 'src/components/board/TaskCard.vue', hunk: 0 }, { path: 'src/components/runs/RunHeader.vue', hunk: 0 }] }
+      ]
+    })
+  })
+
+  await reviewed({
+    title: 'Keep the cart open after adding an item',
+    description: 'Adding an item closes the cart drawer, so shoppers can\'t see what they added.',
+    criteria: ['The cart drawer stays open after Add to cart'],
+    summary: 'The drawer no longer closes on add.',
+    review: 'One-line change with a test.',
+    files: [patch('src/components/CartDrawer.vue', ['-  cart.add(item); open.value = false', '+  cart.add(item)'])],
+    answer: () => 'I can\'t order these hunks without more context about the cart.'
+  })
+
+  await reviewed({
+    title: 'Fix the tooltip delay on product badges',
+    description: 'Badge tooltips take a second to appear, so most people never see them.',
+    criteria: ['Badge tooltips appear after 300 ms'],
+    summary: 'The badge tooltip now opens after 300 ms, like the rest of the app.',
+    review: 'Matches the shared tooltip delay.',
+    files: [patch('src/components/ProductBadge.vue', ['-  <UiTooltip :delay-duration="1000">', '+  <UiTooltip :delay-duration="300">'])],
+    answer: demoGuideAnswer
+  })
+
+  // Made for v1; the developer pushed v2 after review, so it's for an older commit
+  const sort = await t.task(shop, {
+    title: 'Sort search results by relevance by default',
+    type: 'task',
+    description: 'Search sorts by newest, so exact matches end up on page three.',
+    acceptanceCriteria: ['Search results sort by relevance unless the shopper picks another order'],
+    humanReview: true
+  })
+  await t.approve(shop, sort)
+  await t.advance('5m')
+  await develop(t, shop, sort, { head: 'v1', summary: 'Relevance is the default sort.', note: 'Default to relevance', files: [patch('src/pages/search.vue', ['-const sort = ref(\'newest\')', '+const sort = ref(\'relevance\')'])] })
+  await guide(t, shop, sort, demoGuideAnswer)
+  await t.advance('6m')
+  await review(t, sort, 'changes_requested', 'The default is right, but the sort menu still shows Newest as selected.', [{ met: false, note: 'The menu shows Newest' }])
+  await t.advance('20m')
+  await develop(t, shop, sort, {
+    head: 'v2',
+    outcome: 'pr_updated',
+    summary: 'The sort menu now reads the same default.',
+    note: 'Menu shows relevance too',
+    files: [patch('src/pages/search.vue', ['-const sort = ref(\'newest\')', '+const sort = ref(\'relevance\')']), patch('src/components/SortMenu.vue', ['-  <option value="newest" selected>', '+  <option value="relevance" selected>'])]
+  })
+  await t.advance('6m')
+  await review(t, sort, 'approved', 'The menu and the default agree now.', [])
+  await t.advance('10m')
 }
