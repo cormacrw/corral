@@ -48,7 +48,7 @@ import { checkThumbnail, readThumbnail, thumbnailHash, THUMBNAIL_MAX_BYTES } fro
 import { byteRange } from './byte-range.ts'
 import { createAttachment, readAttachment } from './attachments.ts'
 import { recordDeployment, updateDeploymentInbox, type ReleaseNotes } from './deployments.ts'
-import { flowMetrics } from './flow-metrics.ts'
+import { flowMetrics, workspaceFlow } from './flow-metrics.ts'
 import { DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
 import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
 import { epicHistory } from './epic-prs.ts'
@@ -248,6 +248,9 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
       const project = await findProjectBySlug(db, c.req.param('slug'))
       return c.json(await flowMetrics(db, project, c.req.valid('query').window))
     })
+
+    // Cycle time across every project, for Home
+    .get('/metrics/flow', validate('query', flowMetricsQuery), async c => c.json(await workspaceFlow(db, c.req.valid('query').window)))
 
     .put('/projects/:slug/thumbnail', thumbnailBodyLimit, async (c) => {
       const project = await findProjectBySlug(db, c.req.param('slug'))
@@ -669,9 +672,14 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
     .get('/runs', async (c) => {
       const agentId = c.req.query('agentId')
       const taskId = c.req.query('taskId')
+      // Every run queued since then, for the Agents page's history (ISO time)
+      const sinceText = c.req.query('since')
+      const since = sinceText ? new Date(sinceText) : undefined
+      if (since && Number.isNaN(since.getTime())) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['since'], message: 'Expected an ISO time' }] })
       return c.json(await listRuns(db, {
         ...(agentId && { agentId }),
         ...(taskId && { taskId }),
+        ...(since && { since }),
         active: c.req.query('active') === '1'
       }))
     })

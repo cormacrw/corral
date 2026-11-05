@@ -86,3 +86,15 @@ Juno only runs when you message it in Plan (D9). With no live run, the transcrip
 
 - How long are run transcripts kept? Finished runs open read-only (PRD §12), but storage isn't sized yet.
 - Should the developer group allow more than one Atlas (concurrency above 1), shown as several live runs?
+
+## Agents page
+
+**Route:** `/agents`, from the sidebar's **Agents** item and Home's **All agents**. Every agent at once; the sections above are one agent's page.
+
+- **Header:** "Agents" and **Add agent** (outline), which opens Settings › Agents.
+- **Stat tiles:** Runs today (with how many failed), Tokens today (input, cache writes and output, against the daily average of the rest of the 14 days), Working (working of total, with how many are paused), Usage limits (agents waiting out a usage limit, D3) and Runner (online or offline, with `runnerSummary`). Corral has no plan-usage percentage to show: it never handles provider credentials (D1–D2), so there are no usage gauges.
+- **Runs:** a swimlane timeline of the last 12 hours, one lane per agent in the shell's order, with now at the right. Each run is a bar from start to end, or to now while live; runs that never started aren't shown. Colour says how it ended: Live, Finished, Changes requested, Failed or stuck, and Interrupted or rate limited (muted, since neither is a failure). Hovering a bar names the agent, the task ref (or Parent, or Plan), the outcome and the duration.
+- **Tokens by role:** a stacked area chart of tokens per day over 14 days for developers, reviewers, the PM and the designer, with a crosshair tooltip.
+- **Agents:** one row per agent linking to its page: avatar with the working dot, name, role and runtime, a status label for Paused or Waiting on usage limit, a bar for the share of the last 12 hours spent running (out of its concurrency; the PM counts as one slot), and today's run count.
+- **Data:** `GET /api/runs?since=<local midnight 13 days ago>` returns every run queued since then (up to 2000), shared with Home; `run.updated` events keep it current.
+

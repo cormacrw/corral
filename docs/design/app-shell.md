@@ -16,6 +16,8 @@ There is no top header on desktop; every page owns the full height. Below 1024px
 1. **Brand:** the Corral logo (28px `primary` square with the fence icon) and "Corral". There is no project picker.
 2. **Search:** an outline button showing "Search…" and the `⌘` `K` keys (`UKbd`). Opens the command palette (`UCommandPalette`).
 3. **Global nav** (`UNavigationMenu`, vertical):
+   - **Home:** home icon, opens the workspace dashboard ([home.md](home.md)).
+   - **Agents:** people icon, opens the Agents page ([agent.md](agent.md#agents-page)).
    - **Plan:** chat icon and a count badge of open threads needing attention. Open sessions appear as indented sub-items with their project dot, title and attention indicator; see [Plan](plan.md#side-nav-threads).
    - **Inbox:** inbox icon and a count badge (solid primary) of open "Needs you" items across all projects.
 4. **Projects:**

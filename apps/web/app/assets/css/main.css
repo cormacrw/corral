@@ -67,3 +67,29 @@ html {
     font-size: max(16px, 1em);
   }
 }
+
+/* Chart colours and unovis styling (Home, Agents). Series slots are stepped
+   for each mode (dataviz palette), not flipped; ordered stages use --chart-*.
+   On body, not :root: unovis injects its own :root defaults after this file. */
+body {
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --vis-font-family: var(--font-sans);
+  --vis-axis-tick-label-color: var(--muted-foreground);
+  --vis-axis-grid-color: var(--border);
+  --vis-timeline-row-label-color: var(--muted-foreground);
+  --vis-timeline-row-even-fill-color: transparent;
+  --vis-timeline-row-odd-fill-color: transparent;
+  --vis-timeline-scrollbar-background-color: transparent;
+  --vis-tooltip-background-color: var(--popover);
+  --vis-tooltip-text-color: var(--popover-foreground);
+  --vis-tooltip-border-color: var(--border);
+}
+.dark body {
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+}

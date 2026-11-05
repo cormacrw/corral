@@ -56,13 +56,16 @@ export const withComment = (comments: Comment[], comment: Comment): Comment[] =>
 
 // Keeps a filtered list as the server would return it, newest first. The server
 // returns the latest 50, so one that's full can't say what fell off the end.
+// A history window (`since`) returns up to RUN_HISTORY_LIMIT instead.
 const RUN_LIST_LIMIT = 50
-const runMatches = (run: Run, { agentId, taskId, active }: RunFilter) =>
+const RUN_HISTORY_LIMIT = 2000
+const runMatches = (run: Run, { agentId, taskId, active, since }: RunFilter) =>
   (!agentId || run.agentId === agentId) && (!taskId || run.taskId === taskId) && (!active || (ACTIVE_RUN_STATES as readonly string[]).includes(run.state))
+  && (!since || Date.parse(run.queuedAt) >= Date.parse(since))
 const placeRun = (run: Run, filter: RunFilter): Update<Run[]> => (runs) => {
   if (!runs) return runs
   if (!runMatches(run, filter)) return runs.some(r => r.id === run.id) ? runs.filter(r => r.id !== run.id) : runs
-  return runs.some(r => r.id === run.id) ? upsert(runs, run) : [run, ...runs].slice(0, RUN_LIST_LIMIT)
+  return runs.some(r => r.id === run.id) ? upsert(runs, run) : [run, ...runs].slice(0, filter.since ? RUN_HISTORY_LIMIT : RUN_LIST_LIMIT)
 }
 
 const taskEpics = (task: Task, cache: EventCache): string[] =>
@@ -92,7 +95,7 @@ export function inboxWithRead(current: Inbox, id: string): Inbox {
 // cached yet has no slug, so its lists go stale across all projects.
 function projectStale(projectId: string, cache: EventCache): QueryKey[] {
   const slug = cache.slug(projectId)
-  return slug ? [keys.projects.flow(slug), keys.projects.pullRequests(slug)] : [keys.projects.all()]
+  return slug ? [keys.projects.flow(slug), keys.projects.pullRequests(slug), keys.projects.workspaceFlow()] : [keys.projects.all()]
 }
 
 function taskStale(task: Task, cache: EventCache): QueryKey[] {

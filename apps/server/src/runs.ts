@@ -1,7 +1,7 @@
 import { runLifecycleSchema, type Agent, type CreateAgentInput, type Evidence, type PatchAgentInput, type Review, type Run, type RunTimings } from '@corral/contracts'
 import { ACTIVE_RUN_STATES, taskRef, type Actor, type AgentRole, type RunState } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, count, desc, eq, inArray, type SQL } from 'drizzle-orm'
+import { and, count, desc, eq, gte, inArray, type SQL } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { avatarUrl } from './avatars.ts'
@@ -63,7 +63,11 @@ function toRun({ run, agentName, agentRuntime, prefix, taskNumber, taskTitle, ep
   }
 }
 
-export async function listRuns(db: Executor, filter: { agentId?: string, taskId?: string, projectId?: string, role?: AgentRole, state?: RunState, active?: boolean }, limit?: number): Promise<Run[]> {
+// A history window (`since`) returns every run queued since then, up to this
+// many, so a dashboard's chart isn't cut at the default page of 50
+export const RUN_HISTORY_LIMIT = 2000
+
+export async function listRuns(db: Executor, filter: { agentId?: string, taskId?: string, projectId?: string, role?: AgentRole, state?: RunState, active?: boolean, since?: Date }, limit?: number): Promise<Run[]> {
   const where: SQL[] = []
   if (filter.agentId) where.push(eq(runs.agentId, filter.agentId))
   if (filter.taskId) where.push(eq(runs.taskId, filter.taskId))
@@ -71,6 +75,7 @@ export async function listRuns(db: Executor, filter: { agentId?: string, taskId?
   if (filter.role) where.push(eq(runs.role, filter.role))
   if (filter.state) where.push(eq(runs.state, filter.state))
   if (filter.active) where.push(inArray(runs.state, [...ACTIVE_RUN_STATES]))
+  if (filter.since) where.push(gte(runs.queuedAt, filter.since))
   const query = db.select(runColumns).from(runs)
     .innerJoin(agents, eq(agents.id, runs.agentId))
     .leftJoin(projects, eq(projects.id, runs.projectId))
@@ -81,7 +86,7 @@ export async function listRuns(db: Executor, filter: { agentId?: string, taskId?
   // Active runs are a live snapshot, not a page of history: truncating it
   // would hide epic workers behind runs from other projects. Explicit tool
   // limits still apply, and history keeps its default page size.
-  const rows = await (limit === undefined && filter.active ? query : query.limit(limit ?? 50))
+  const rows = await (limit === undefined && filter.active ? query : query.limit(limit ?? (filter.since ? RUN_HISTORY_LIMIT : 50)))
   return rows.map(toRun)
 }
 

@@ -101,6 +101,7 @@ export const pmRouteExclusions: Record<string, string> = {
   'POST /api/deployments/:id/read': 'Human release-note read receipt; PM must not clear human unread state.',
   'POST /api/deployments/:id/dismiss': 'Human release-note dismissal; no PM deployment dismissal tool.',
   'GET /api/projects/:slug/metrics/flow': 'Human flow dashboard cohort and timing analytics; run tools report individual runs rather than aggregate flow metrics.',
+  'GET /api/metrics/flow': 'Home dashboard cycle time across projects; the PM works per project and per run.',
   'GET /api/events': 'Browser SSE subscription; tools return snapshots and do not hold event streams open.'
 }
 

@@ -16,6 +16,10 @@ export const flowQuery = (slug: string, window: FlowMetricsQuery['window']) => q
   queryFn: () => api.projects.flow(slug, window),
   placeholderData: (previous, query) => query && partialMatchKey(query.queryKey, keys.projects.flow(slug)) ? previous : undefined
 })
+export const workspaceFlowQuery = (window: FlowMetricsQuery['window']) => queryOptions({
+  queryKey: keys.projects.workspaceFlow(window),
+  queryFn: () => api.projects.workspaceFlow(window)
+})
 // CI and the base branch move on GitHub without an event, so this polls, only
 // while the tab is visible (refetchIntervalInBackground defaults to false), and
 // is the one query that refreshes on return

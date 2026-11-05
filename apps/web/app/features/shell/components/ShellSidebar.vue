@@ -57,6 +57,18 @@ const PROJECT_PAGES = [
           <!-- A gap, so neighbouring highlights don't touch -->
           <UiSidebarMenu class="gap-0.5">
             <ShellNavItem
+              to="/home"
+              label="Home"
+              icon="i-hugeicons-home-01"
+              :active="isActive('/home')"
+            />
+            <ShellNavItem
+              to="/agents"
+              label="Agents"
+              icon="i-hugeicons-user-multiple"
+              :active="route.path === '/agents'"
+            />
+            <ShellNavItem
               to="/plan"
               label="Plan"
               icon="i-hugeicons-message-01"

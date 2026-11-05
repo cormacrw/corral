@@ -61,13 +61,13 @@ describe('setup middleware with a project on the server', () => {
     expect(await visit('/setup', { add: '1' })).toBeUndefined()
   })
 
-  it('opens the project from / in a fresh browser', async () => {
-    expect(await visit('/')).toEqual({ redirect: '/projects/test-app' })
+  it('opens Home from / in a fresh browser', async () => {
+    expect(await visit('/')).toEqual({ redirect: '/home' })
   })
 
   it('redirects /setup and /setup?step=you away from the wizard', async () => {
-    expect(await visit('/setup')).toEqual({ redirect: '/projects/test-app' })
-    expect(await visit('/setup', { step: 'you' })).toEqual({ redirect: '/projects/test-app' })
+    expect(await visit('/setup')).toEqual({ redirect: '/home' })
+    expect(await visit('/setup', { step: 'you' })).toEqual({ redirect: '/home' })
   })
 
   it('still opens the add-project flow', async () => {
@@ -76,7 +76,7 @@ describe('setup middleware with a project on the server', () => {
 
   it('uses the cached list once there is one', async () => {
     client.setQueryData(keys.projects.list(), [{ slug: 'live' }])
-    expect(await visit('/setup', { step: 'you' })).toEqual({ redirect: '/projects/live' })
+    expect(await visit('/setup', { step: 'you' })).toEqual({ redirect: '/home' })
     expect(fetch).not.toHaveBeenCalled()
   })
 
@@ -125,7 +125,7 @@ describe('setup middleware on a deep link', () => {
     projects = [{ slug: 'test-app' }]
     router.currentRoute.value = { path: '/setup', query: {} }
     await visit('/inbox')
-    await vi.waitFor(() => expect(router.replace).toHaveBeenCalledWith('/projects/test-app'))
+    await vi.waitFor(() => expect(router.replace).toHaveBeenCalledWith('/home'))
   })
 
   it('stays put when the server is unreachable', async () => {

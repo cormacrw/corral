@@ -17,7 +17,7 @@ import type {
   EpicReviewActionInput,
   Evidence,
   GlobalStatus,
-  FlowMetrics,
+  FlowMetrics, WorkspaceFlow,
   FlowMetricsQuery,
   ServerStatus,
   HumanTransitionInput,
@@ -133,6 +133,7 @@ export const api = {
 
   projects: {
     flow: (slug: string, window: FlowMetricsQuery['window']) => call<FlowMetrics>('GET', `/projects/${slug}/metrics/flow?window=${window}`),
+    workspaceFlow: (window: FlowMetricsQuery['window']) => call<WorkspaceFlow>('GET', `/metrics/flow?window=${window}`),
     list: () => call<Project[]>('GET', '/projects'),
     get: (slug: string) => call<Project>('GET', `/projects/${slug}`),
     create: (input: CreateProjectInput) => call<Project>('POST', '/projects', input),
@@ -189,8 +190,9 @@ export const api = {
   },
 
   runs: {
-    list: (filter: { agentId?: string, taskId?: string, active?: boolean } = {}) => {
+    list: (filter: { agentId?: string, taskId?: string, active?: boolean, since?: string } = {}) => {
       const query = new URLSearchParams()
+      if (filter.since) query.set('since', filter.since)
       if (filter.agentId) query.set('agentId', filter.agentId)
       if (filter.taskId) query.set('taskId', filter.taskId)
       if (filter.active) query.set('active', '1')

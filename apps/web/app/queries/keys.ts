@@ -4,6 +4,8 @@ export interface RunFilter {
   agentId?: string
   taskId?: string
   active?: boolean
+  // Every run queued since this ISO time, not just the latest page
+  since?: string
 }
 
 // Every query key in one hierarchy, so invalidating a key covers everything
@@ -14,7 +16,9 @@ export const keys = {
     list: () => [...keys.projects.all(), 'list'] as const,
     detail: (slug: string) => [...keys.projects.all(), 'detail', slug] as const,
     flow: (slug: string, window?: FlowMetricsQuery['window']) => [...keys.projects.detail(slug), 'flow', ...(window ? [window] : [])] as const,
-    pullRequests: (slug: string) => [...keys.projects.detail(slug), 'pull-requests'] as const
+    pullRequests: (slug: string) => [...keys.projects.detail(slug), 'pull-requests'] as const,
+    // Cycle time across every project (Home)
+    workspaceFlow: (window?: FlowMetricsQuery['window']) => [...keys.projects.all(), 'workspace-flow', ...(window ? [window] : [])] as const
   },
   tasks: {
     all: () => ['tasks'] as const,

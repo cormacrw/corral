@@ -9,6 +9,13 @@ export interface FlowPercentiles {
   medianMs: number
   p90Ms: number
 }
+// Cycle time across every project (GET /api/metrics/flow), for the window and
+// the same span before it
+export interface WorkspaceFlow {
+  window: FlowMetricsQuery['window']
+  current: { mergedTaskCount: number, cycleTime: FlowPercentiles }
+  previous: { mergedTaskCount: number, cycleTime: FlowPercentiles }
+}
 export interface FlowMetrics {
   window: FlowMetricsQuery['window']
   mergedTaskCount: number

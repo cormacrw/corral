@@ -23,7 +23,7 @@ Short implementation notes written while building. Not binding: `docs/README.md`
 - [Criteria checked by a human](human-checked-criteria.md)
 - [Inbox quick actions](inbox-quick-actions.md)
 - [Inbox review changes](inbox-review-changes.md)
-- [Mobile launch destination](mobile-landing.md)
+- [Launch destination](mobile-landing.md)
 - [Mobile PM conversations](mobile-pm-conversations.md)
 - [Starting a Plan thread](optimistic-plan-starts.md)
 - [No-progress stops and PM recovery](retry-recovery.md)

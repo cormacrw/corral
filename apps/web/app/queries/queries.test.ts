@@ -655,6 +655,18 @@ describe('run.updated', () => {
     expect(list).toHaveLength(50)
     expect(list[0]?.id).toBe('r-1')
   })
+
+  it('keeps a history list to runs queued since its time, past the page of 50', () => {
+    const client = testQueryClient()
+    const since = '2026-11-01T00:00:00.000Z'
+    const full = Array.from({ length: 50 }, (_, i) => run({ id: `old-${i}`, queuedAt: '2026-11-02T00:00:00.000Z' }))
+    client.setQueryData(keys.runs.list({ since }), full)
+    applyEvent(client, event(run({ queuedAt: '2026-11-03T00:00:00.000Z' })))
+    applyEvent(client, event(run({ id: 'before', queuedAt: '2026-10-31T00:00:00.000Z' })))
+    const list = client.getQueryData<Run[]>(keys.runs.list({ since }))!
+    expect(list).toHaveLength(51)
+    expect(list.map(r => r.id)).not.toContain('before')
+  })
 })
 
 describe('run transcripts', () => {

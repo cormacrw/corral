@@ -8,8 +8,6 @@ import { isSetupPath, onboardingRedirect } from '~/features/setup/utils/onboardi
 // server has one, onboarding is over on every device (design/onboarding.md)
 export default defineNuxtRouteMiddleware(async (to) => {
   // Resolve media queries and the saved override before choosing a landing page.
-  // useDevice initializes synchronously, including on a cold standalone launch.
-  const { mode } = useDevice()
   const client = useQueryClient()
   let projects = client.getQueryData<Project[]>(keys.projects.list())
   if (!projects) {
@@ -23,7 +21,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
         // The first navigation may still be landing, and currentRoute isn't
         // the page until it has. By then the human may have moved on.
         await router.isReady()
-        const target = onboardingRedirect(router.currentRoute.value, list, mode.value)
+        const target = onboardingRedirect(router.currentRoute.value, list)
         if (target) await router.replace(target)
       }, () => {
         // The server is unreachable; pages show the error themselves
@@ -42,6 +40,6 @@ export default defineNuxtRouteMiddleware(async (to) => {
       return
     }
   }
-  const target = onboardingRedirect(to, projects, mode.value)
+  const target = onboardingRedirect(to, projects)
   if (target) return navigateTo(target)
 })

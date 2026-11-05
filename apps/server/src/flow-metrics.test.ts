@@ -3,7 +3,7 @@ import type { FlowMetrics } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, describe, expect, it } from 'vitest'
-import { flowMetrics, percentiles } from './flow-metrics.ts'
+import { cycleStart, flowMetrics, percentiles, workspaceFlow } from './flow-metrics.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
 const hour = 3_600_000
@@ -141,4 +141,72 @@ it('uses continuous percentiles for empty, singleton, odd and even samples', () 
   expect(percentiles([5])).toEqual({ medianMs: 5, p90Ms: 5 })
   expect(percentiles([30, 10, 20])).toEqual({ medianMs: 20, p90Ms: 28 })
   expect(percentiles([10, 20])).toEqual({ medianMs: 15, p90Ms: 19 })
+})
+
+describe('cycle start', () => {
+  const step = (from: string, to: string, hours: number) => ({ from, to, createdAt: at(hours) })
+  it('starts at the first move from waiting into work, and never resets', () => {
+    expect(cycleStart(at(-10).getTime(), [step('backlog', 'ready', -9), step('ready', 'in_progress', -8), step('in_progress', 'ready', -7), step('ready', 'in_progress', -6)])).toBe(at(-8).getTime())
+  })
+  it('starts at creation for a task created in a working status', () => {
+    expect(cycleStart(at(-10).getTime(), [step('in_progress', 'human_review', -5)])).toBe(at(-10).getTime())
+  })
+  it('has no start for a direct merge', () => {
+    expect(cycleStart(at(-10).getTime(), [step('ready', 'merged', -5)])).toBeNull()
+    expect(cycleStart(at(-10).getTime(), [])).toBeNull()
+  })
+})
+
+describe.each(['pglite', 'postgres'] as const)('workspace flow on %s', (driver) => {
+  let t: TestApp
+  databaseFixture(driver, async () => {
+    t = await createTestApp(driver)
+  })
+  afterAll(async () => {
+    await t?.close()
+  })
+
+  it('pools cycle times across projects for the window and the one before', async () => {
+    const a = await t.createProject()
+    const b = await t.createProject()
+    const seed = async (projectId: string, number: number, startHours: number | null, mergedHours: number, extra = {}) => {
+      const [task] = await t.db.insert(schema.tasks).values({ projectId, number, createdBy: t.actor, title: 'Flow sample', description: {}, type: 'task', status: 'merged', createdAt: at(mergedHours - 200), mergedAt: at(mergedHours), ...extra }).returning()
+      if (startHours !== null) {
+        await t.db.insert(schema.auditLog).values({ projectId, taskId: task!.id, actor: t.actor, action: 'task.transition', detail: { from: 'ready', to: 'in_progress' }, createdAt: at(startHours) })
+      }
+    }
+    // This week: 2h and 6h in different projects
+    await seed(a.id, 1, -3, -1)
+    await seed(b.id, 1, -10, -4)
+    // The week before: 20h
+    await seed(a.id, 2, -24 * 8 - 20, -24 * 8)
+    // Too old, deleted, or not merged yet: left out
+    await seed(a.id, 3, -24 * 20, -24 * 15)
+    await seed(b.id, 2, -5, -2, { deletedAt: at(0) })
+    await seed(b.id, 3, -5, 2)
+
+    const result = await workspaceFlow(t.db, '7d', now)
+    const response = await t.request('GET', '/api/metrics/flow?window=7d')
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual(result)
+    expect(result).toEqual({
+      window: '7d',
+      current: { mergedTaskCount: 2, cycleTime: { medianMs: 4 * hour, p90Ms: 5.6 * hour } },
+      previous: { mergedTaskCount: 1, cycleTime: { medianMs: 20 * hour, p90Ms: 20 * hour } }
+    })
+    expect((await t.request('GET', '/api/metrics/flow?window=1y')).status).toBe(400)
+  })
+
+  it('lists every run queued since a time, past the default page', async () => {
+    const p = await t.createProject()
+    const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'developer'))
+    const [task] = await t.db.insert(schema.tasks).values({ projectId: p.id, number: 1, createdBy: t.actor, title: 'Busy task', description: {}, type: 'task', status: 'in_progress' }).returning()
+    await t.db.insert(schema.runs).values(Array.from({ length: 60 }, (_, i) => ({ projectId: p.id, taskId: task!.id, agentId: agent!.id, role: 'developer' as const, queuedAt: at(-i), state: 'completed' as const, startedAt: at(-i), endedAt: at(-i) })))
+    const since = at(-55.5).toISOString()
+    const runs = await t.request('GET', `/api/runs?since=${encodeURIComponent(since)}`).then(r => r.json()) as { queuedAt: string }[]
+    expect(runs).toHaveLength(56)
+    expect(runs.every(r => r.queuedAt >= since)).toBe(true)
+    expect(await t.request('GET', '/api/runs').then(r => r.json())).toHaveLength(50)
+    expect((await t.request('GET', '/api/runs?since=yesterday')).status).toBe(400)
+  })
 })

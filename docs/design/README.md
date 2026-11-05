@@ -11,6 +11,7 @@ These specs describe the UI only. Behaviour rules come from [decisions.md](../de
 | Page | Spec | Route | Scope |
 |---|---|---|---|
 | Onboarding | [onboarding.md](onboarding.md) | `/setup` | Global, first run |
+| Home | [home.md](home.md) | `/home` | Global, every project |
 | App shell (sidebar) | [app-shell.md](app-shell.md) | wraps everything | Global |
 | Mobile shell (tab bar) | [mobile.md](mobile.md) | wraps everything on mobile | Global |
 | Plan | [plan.md](plan.md) | `/plan`, `/plan/:sessionId` | Global, picks a project |
@@ -22,12 +23,12 @@ These specs describe the UI only. Behaviour rules come from [decisions.md](../de
 | Backlog | [backlog.md](backlog.md) | `/projects/:slug/backlog` | Per project |
 | Pull requests | [pull-requests.md](pull-requests.md) | `/projects/:slug/pull-requests` | Per project |
 | Project settings | [project-settings.md](project-settings.md) | `/projects/:slug/settings` | Per project |
-| Agent | [agent.md](agent.md) | `/agents/:name`, `/agents/:name/runs/:runId` | Global |
+| Agents and Agent | [agent.md](agent.md) | `/agents`, `/agents/:name`, `/agents/:name/runs/:runId` | Global |
 | Settings | [settings.md](settings.md) | `/settings/:section` | Global |
 
 ## Information architecture
 
-- **Global:** Plan, Inbox, Agents, Settings. They work across every project and always show which project a thing belongs to.
+- **Global:** Home, Plan, Inbox, Agents, Settings. They work across every project and always show which project a thing belongs to.
 - **Per project:** Overview, Board, Backlog, Pull requests, Settings. Reached from the project's entry in the sidebar.
 - **Agents are global.** Juno (PM), Atlas (developer), Vera (reviewer) and the designer serve every project (D23). They are configured in Settings, not per project.
 - **Planning happens in Plan.** The PM never creates Inbox items of its own; open Plan sessions with a question or a plan needing approval appear in the Inbox as Plan threads, where the question can be answered or the plan approved too (D11, amended).

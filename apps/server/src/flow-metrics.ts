@@ -1,5 +1,5 @@
 import { AGENT_ROLES, TASK_STATUSES, type TaskStatus } from '@corral/core'
-import type { FlowMetrics, FlowMetricsQuery, FlowPercentiles } from '@corral/contracts'
+import type { FlowMetrics, FlowMetricsQuery, FlowPercentiles, WorkspaceFlow } from '@corral/contracts'
 import { weightedRunCost } from '@corral/contracts/client'
 import { schema, type Executor } from '@corral/db'
 import { and, asc, eq, gte, inArray, isNull, lte, min } from 'drizzle-orm'
@@ -23,6 +23,56 @@ const SUBMISSIONS = ['pr_opened', 'commit_submitted', 'findings_reported', 'desi
 const validStatus = (value: unknown): value is TaskStatus => TASK_STATUSES.includes(value as TaskStatus)
 const waiting = (status: TaskStatus) => status === 'draft' || status === 'backlog' || status === 'ready'
 
+type Transition = { createdAt: Date, from: unknown, to: unknown }
+
+// When a task's cycle started: its first move out of Draft, Backlog or Ready
+// into work, or its creation if it began in a working status. Null for a
+// direct merge with no recorded work. `history` is in order, within the task's
+// lifetime up to merge.
+export function cycleStart(created: number, history: Transition[]): number | null {
+  const from = history[0]?.from
+  let status: TaskStatus = validStatus(from) ? from : 'backlog'
+  if (!waiting(status)) return created
+  for (const entry of history) {
+    const { to } = entry
+    if (!validStatus(to)) continue
+    if (waiting(status) && !waiting(to) && to !== 'merged') return entry.createdAt.getTime()
+    status = to
+  }
+  return null
+}
+
+const transitionsOf = (db: Executor, ids: string[]) => db.select({ taskId: schema.auditLog.taskId, createdAt: schema.auditLog.createdAt, from: auditText('task.transition', 'from'), to: auditText('task.transition', 'to') }).from(schema.auditLog)
+  .where(and(inArray(schema.auditLog.taskId, ids), eq(schema.auditLog.action, 'task.transition')))
+  .orderBy(asc(schema.auditLog.createdAt), asc(schema.auditLog.id))
+
+// Cycle time across every project (Home), for the window and the one before
+// it, so the page can show the change. Same cohort and cycle rules as
+// flowMetrics, pooled rather than averaged across projects.
+export async function workspaceFlow(db: Executor, window: FlowMetricsQuery['window'], now = new Date()): Promise<WorkspaceFlow> {
+  const span = Number.parseInt(window) * 86_400_000
+  const start = new Date(now.getTime() - span)
+  const tasks = await db.select({ id: schema.tasks.id, createdAt: schema.tasks.createdAt, mergedAt: schema.tasks.mergedAt }).from(schema.tasks).where(and(
+    eq(schema.tasks.status, 'merged'), isNull(schema.tasks.deletedAt),
+    gte(schema.tasks.mergedAt, new Date(now.getTime() - 2 * span)), lte(schema.tasks.mergedAt, now)
+  ))
+  const histories = Map.groupBy(tasks.length ? await transitionsOf(db, tasks.map(t => t.id)) : [], entry => entry.taskId)
+  const current: number[] = []
+  const previous: number[] = []
+  for (const task of tasks) {
+    const created = task.createdAt.getTime()
+    const merged = task.mergedAt!.getTime()
+    const history = (histories.get(task.id) ?? []).filter(entry => entry.createdAt.getTime() >= created && entry.createdAt.getTime() <= merged)
+    const begun = cycleStart(created, history)
+    ;(task.mergedAt! >= start ? current : previous).push(begun === null ? 0 : Math.max(0, merged - begun))
+  }
+  return {
+    window,
+    current: { mergedTaskCount: current.length, cycleTime: percentiles(current) },
+    previous: { mergedTaskCount: previous.length, cycleTime: percentiles(previous) }
+  }
+}
+
 export async function flowMetrics(db: Executor, project: Pick<typeof schema.projects.$inferSelect, 'id' | 'prefix'>, window: FlowMetricsQuery['window'], now = new Date()): Promise<FlowMetrics> {
   const since = new Date(now.getTime() - Number.parseInt(window) * 86_400_000)
   const tasks = await db.select({ id: schema.tasks.id, number: schema.tasks.number, createdAt: schema.tasks.createdAt, mergedAt: schema.tasks.mergedAt }).from(schema.tasks).where(and(
@@ -32,9 +82,7 @@ export async function flowMetrics(db: Executor, project: Pick<typeof schema.proj
   const ids = tasks.map(task => task.id)
   const [transitions, runs] = ids.length
     ? await Promise.all([
-        db.select({ taskId: schema.auditLog.taskId, createdAt: schema.auditLog.createdAt, from: auditText('task.transition', 'from'), to: auditText('task.transition', 'to') }).from(schema.auditLog)
-          .where(and(inArray(schema.auditLog.taskId, ids), eq(schema.auditLog.action, 'task.transition')))
-          .orderBy(asc(schema.auditLog.createdAt), asc(schema.auditLog.id)),
+        transitionsOf(db, ids),
         db.select({ taskId: schema.runs.taskId, role: schema.runs.role, queuedAt: schema.runs.queuedAt, startedAt: schema.runs.startedAt, endedAt: schema.runs.endedAt }).from(schema.runs).where(inArray(schema.runs.taskId, ids))
       ])
     : [[], []]
@@ -53,7 +101,7 @@ export async function flowMetrics(db: Executor, project: Pick<typeof schema.proj
     const from = history[0]?.from
     let status: TaskStatus = validStatus(from) ? from : 'backlog'
     let cursor = created
-    let cycleStart: number | null = waiting(status) ? null : created
+    const start = cycleStart(created, history)
     const spent = new Map<TaskStatus, number>()
     // Merged is terminal, not time spent waiting. The audit row uses the
     // transaction's start time, so it can fall just before mergedAt.
@@ -65,14 +113,13 @@ export async function flowMetrics(db: Executor, project: Pick<typeof schema.proj
       const { to } = entry
       if (!validStatus(to)) continue
       accrue(entry.createdAt.getTime())
-      if (cycleStart === null && waiting(status) && !waiting(to) && to !== 'merged') cycleStart = cursor
       status = to
     }
     accrue(merged)
     const leadTimeMs = Math.max(0, merged - created)
     leads.push(leadTimeMs)
     // A direct merge with no recorded work has zero observable cycle time.
-    cycles.push(cycleStart === null ? 0 : Math.max(0, merged - cycleStart))
+    cycles.push(start === null ? 0 : Math.max(0, merged - start))
     for (const [key, duration] of spent) statusSamples.get(key)!.push(duration)
     const dominantStatus = [...spent].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'backlog'
     slowest.push({ ref: `${project.prefix}-${task.number}`, leadTimeMs, dominantStatus })

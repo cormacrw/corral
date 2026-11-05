@@ -79,7 +79,7 @@ The Board shares the desktop **Tasks / Parents** toggle, `?view=` and saved view
 
 ## Agents
 
-Agent detail and run screens follow [agent.md](agent.md); the web and mobile pages share `useAgentRuns()`. The former Agents list is retired: `/agents` redirects to `/home` on both layouts. Home’s Agents cards and the web sidebar open individual agents.
+Agent detail and run screens follow [agent.md](agent.md); the web and mobile pages share `useAgentRuns()`. `/agents` is the Agents page ([agent.md](agent.md#agents-page)) on both layouts; phones have no tab for it. Home’s Agents cards and the web sidebar open individual agents. Phones keep this single-column Home; the web Home is [home.md](home.md).
 
 - **Agent** (`/agents/:name`): the header gets a back arrow to Home (`/home`) and an **Agent settings** button; no tab is active. The avatar, name and status, the role's stat tiles (they scroll sideways), the facts line, the **Current run** card and **Previous runs**. Current and previous PM turns with a linked Plan session open `/plan/:sessionId?project=:projectId`, using that run’s session and project so the conversation can be continued. Runs without a linked session and all developer, designer and reviewer runs open their transcripts. Mobile doesn't auto-select a run here, unlike the web.
 - **Run** (`/agents/:name/:runId`): full screen, without the shell's header or tab bar. Its own header has a back arrow to the agent, "{Agent} · Run #n", the task, **Open task** (goes to the task page), the outcome badge for finished runs only, elapsed time and tokens (input, cache read and output), and **Stop run** while live. The body starts with the run timing breakdown when the run has timings ([agent.md](agent.md)), then `RunTranscript`, thinking included, streamed while live. The footer is the same as the web's (the composer while live, disabled with the reason on a Codex run, the read-only note once finished), padded for the home indicator.
@@ -127,7 +127,7 @@ Built from the **Install Corral** frame. Corral is an installable PWA, served by
   - Chrome and Android: when `beforeinstallprompt` has fired, **Install app** shows the browser's prompt. The plugin catches the event early and suppresses Chrome's own mini-bar.
   - iOS (iPadOS included), which has no prompt: the three Add to Home Screen steps.
   - Already running standalone, or a browser that can't install: no Settings entry, and the sheet closes.
-- Launched from the home screen, `(display-mode: standalone)` matches, so `useDevice()` picks the mobile layout whatever the window size. The setup middleware resolves this mode before redirecting: with a project, `/` and completed `/setup` open `/home` on mobile; desktop keeps the first project overview. With no projects, both layouts open onboarding, and `/setup?add=1` keeps the add-project flow.
+- Launched from the home screen, `(display-mode: standalone)` matches, so `useDevice()` picks the mobile layout whatever the window size. With a project, `/` and completed `/setup` open `/home` on both layouts; the page picks the mobile or web Home. With no projects, both layouts open onboarding, and `/setup?add=1` keeps the add-project flow.
 
 ## Setup
 

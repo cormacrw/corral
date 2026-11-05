@@ -78,6 +78,17 @@ route('GET', '/projects/:slug/metrics/flow', ([slug], _, query) => {
   if (!parsed.success) throw new ApiError(400, null, 'Invalid flow window')
   return f.flowMetrics(slug!, parsed.data.window)
 })
+// Cycle time across projects (Home): the busiest project's figures stand in
+route('GET', '/metrics/flow', (_, __, query) => {
+  const parsed = flowMetricsQuery.safeParse({ window: query.get('window') ?? undefined })
+  if (!parsed.success) throw new ApiError(400, null, 'Invalid flow window')
+  const { mergedTaskCount, cycleTime } = f.flowMetrics(f.projects[0]!.slug, parsed.data.window)
+  return {
+    window: parsed.data.window,
+    current: { mergedTaskCount, cycleTime },
+    previous: { mergedTaskCount, cycleTime: { medianMs: cycleTime.medianMs * 1.2, p90Ms: cycleTime.p90Ms * 1.1 } }
+  }
+})
 route('GET', '/projects/:slug', ([slug]) => project(slug!))
 route('PATCH', '/projects/:slug', ([slug], body) => {
   const p = Object.assign(project(slug!), body)
@@ -288,7 +299,8 @@ route('PATCH', '/me', (_, body) => Object.assign(f.profile, body))
 route('GET', '/runs', (_, __, query) => f.runs.filter(r =>
   (!query.get('agentId') || r.agentId === query.get('agentId'))
   && (!query.get('taskId') || r.taskId === query.get('taskId'))
-  && (!query.get('active') || ['queued', 'starting', 'running', 'waiting_for_input', 'stopping'].includes(r.state))))
+  && (!query.get('active') || ['queued', 'starting', 'running', 'waiting_for_input', 'stopping'].includes(r.state))
+  && (!query.get('since') || Date.parse(r.queuedAt) >= Date.parse(query.get('since')!))))
 route('GET', '/runs/:id', ([id]) => f.runs.find(r => r.id === id) ?? notFound())
 route('GET', '/runs/:id/transcript', ([id]) => f.runEvents[id!] ?? [])
 
