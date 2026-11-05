@@ -122,6 +122,7 @@ export class FakeGitHub implements GitHubClient {
       body: pr.body,
       baseBranch: pr.base,
       headBranch: pr.head,
+      headSha: pr.headSha,
       changedFiles: files.length,
       files: files.slice(0, fileLimit)
     }

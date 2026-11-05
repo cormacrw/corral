@@ -759,7 +759,7 @@ const approveFiles: PullRequestFile[] = [
 function prDetail(ref: string, body: string, fields: Partial<PullRequestDetail> = {}): PullRequestDetail {
   const t = at(ref)
   return {
-    ...t.pr!, title: t.title, body, headBranch: t.branch ?? `corral/${t.ref.toLowerCase()}`,
+    ...t.pr!, title: t.title, body, headBranch: t.branch ?? `corral/${t.ref.toLowerCase()}`, headSha: 'a1b2c3d',
     // In an `epic` or `each_task` epic, a task PR's base is the epic branch (D23)
     baseBranch: epics.find(e => e.id === t.epicId)?.branch ?? 'main',
     files: approveFiles, totalFiles: approveFiles.length, truncated: false, ...fields
@@ -839,7 +839,7 @@ export function epicReview(id: string): EpicReview | null {
   return {
     epicId: id, title: epic.title, goal: epic.description, reviewMode: epic.reviewMode, state: epic.reviewState,
     targetBranch: 'main', headSha: id === 'e-moved' && epic.reviewState === 'human_review' ? 'stale-head' : epic.prHeadSha,
-    pr: epic.prNumber === null ? null : { number: epic.prNumber, url: epic.prUrl!, title: epic.title, body: `## What\n\n${epic.description}`, baseBranch: 'main', headBranch: epic.branch!, files: approveFiles, totalFiles: approveFiles.length, truncated: false },
+    pr: epic.prNumber === null ? null : { number: epic.prNumber, url: epic.prUrl!, title: epic.title, body: `## What\n\n${epic.description}`, baseBranch: 'main', headBranch: epic.branch!, headSha: 'e7c2a91', files: approveFiles, totalFiles: approveFiles.length, truncated: false },
     gateChecks: [{ name: 'lint', conclusion: 'success', url: null }, { name: 'test', conclusion: 'success', url: null }],
     targetMovedBy: 0, rounds: [], tasks: rows, seenByHuman: rows.filter(r => r.reviewedBy === 'human').length,
     lastFeedback: null, conflictTaskRef: board.find(t => t.kind === 'conflict' && t.status !== 'merged')?.ref ?? null, conflictPending: false,

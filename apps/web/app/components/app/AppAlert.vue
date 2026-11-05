@@ -31,13 +31,15 @@ const props = withDefaults(defineProps<{
 </script>
 
 <template>
-  <Alert :class="cn(TONE_CLASSES[color][variant], props.class)">
+  <!-- Nuxt Icon can render a span, not an svg, so the stock has-[>svg]
+       grid misses it: the icon column is set here instead -->
+  <Alert :class="cn(TONE_CLASSES[color][variant], icon && 'grid-cols-[auto_1fr] gap-x-2', props.class)">
     <Icon
       v-if="icon"
       :name="icon"
-      class="size-4"
+      class="row-span-2 size-4 translate-y-0.5"
     />
-    <div :class="['col-start-[-1] flex min-w-0 gap-2', orientation === 'horizontal' ? 'items-center justify-between' : 'flex-col']">
+    <div :class="[icon ? 'col-start-2' : 'col-start-[-1]', 'flex min-w-0 gap-2', orientation === 'horizontal' ? 'items-center justify-between' : 'flex-col']">
       <div class="min-w-0">
         <AlertTitle v-if="title">
           {{ title }}

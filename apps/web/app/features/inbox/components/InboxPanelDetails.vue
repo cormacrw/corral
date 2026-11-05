@@ -3,10 +3,11 @@ import type { InboxPanel, InboxPanelContext } from '~/features/inbox/composables
 import { verdictMark } from '~/features/inbox/utils/inbox-summary'
 import { timeAgo } from '~/utils/labels'
 import InboxPrDescription from '~/features/inbox/components/InboxPrDescription.vue'
+import InboxPanelCodeDiff from '~/features/inbox/components/InboxPanelCodeDiff.vue'
 
 // What the panel keeps a click away, one tab at a time: the criteria with their
 // notes and evidence, the review history, the PR and the full message
-const props = defineProps<{ ctx: InboxPanelContext, p: InboxPanel, section: 'criteria' | 'review' | 'pr' | 'diff' | 'message' }>()
+const props = defineProps<{ ctx: InboxPanelContext, p: InboxPanel, section: 'criteria' | 'review' | 'pr' | 'diff' | 'message', mobile?: boolean }>()
 const reviews = computed(() => props.p.history.value)
 </script>
 
@@ -60,6 +61,16 @@ const reviews = computed(() => props.p.history.value)
     v-else-if="section === 'pr' && p.prDetail.value"
     :pr="p.prDetail.value"
     icon
+  />
+  <!-- Guided · Files (COR-525); an item with no task ref has only the files -->
+  <InboxPanelCodeDiff
+    v-else-if="section === 'diff' && p.prDetail.value && ctx.item.taskRef"
+    :key="p.prDetail.value.number"
+    :pr="p.prDetail.value"
+    :slug="ctx.item.project.slug"
+    :task-ref="ctx.item.taskRef"
+    :criteria="p.criteria.value"
+    :mobile="mobile"
   />
   <InboxPanelDiff
     v-else-if="section === 'diff' && p.prDetail.value"

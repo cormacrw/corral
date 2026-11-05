@@ -26,6 +26,7 @@ export interface PullRequestDiff {
   body: string
   baseBranch: string
   headBranch: string
+  headSha: string
   changedFiles: number
   files: PullRequestFile[]
 }
@@ -133,7 +134,7 @@ interface RawPullDetail {
   title: string
   body: string | null
   base: { ref: string }
-  head: { ref: string }
+  head: { ref: string, sha: string }
   changed_files: number
 }
 
@@ -254,6 +255,7 @@ export class RunnerGitHub implements GitHubClient {
       body: raw.body ?? '',
       baseBranch: raw.base.ref,
       headBranch: raw.head.ref,
+      headSha: raw.head.sha,
       changedFiles: raw.changed_files,
       files: (files.body as RawPullFile[]).map(file => ({
         path: file.filename,

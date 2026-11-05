@@ -2,17 +2,27 @@
 import type { PullRequestDetail } from '@corral/contracts'
 import { PULL_REQUEST_LINE_LIMIT } from '@corral/contracts/client'
 import { plural } from '~/utils/labels'
+import { scrollInPanel } from '~/features/inbox/utils/guide'
 
 // A PR's diff in the Inbox (design/inbox.md, the Code diff tab): the changed
 // files with their line counts, each opening to its unified diff. The first
 // file starts open; a diff over the server's cap says so and links to the rest.
-// `githubUrl` replaces the PR's files page, for a diff that isn't the whole PR
-const props = defineProps<{ pr: PullRequestDetail, githubUrl?: string }>()
+// `githubUrl` replaces the PR's files page, for a diff that isn't the whole PR.
+// `focus` opens a file, scrolls it into view and marks it, for a guide step's
+// "In Files" (COR-525).
+const props = defineProps<{ pr: PullRequestDetail, githubUrl?: string, focus?: string | null }>()
 const github = computed(() => props.githubUrl ?? `${props.pr.url}/files`)
 const open = ref<string[]>([])
 watch(() => props.pr.number, () => {
   open.value = props.pr.files.slice(0, 1).map(f => f.path)
 }, { immediate: true })
+const root = ref<HTMLElement | null>(null)
+watch(() => props.focus, async (path) => {
+  if (!path) return
+  if (!open.value.includes(path)) open.value = [...open.value, path]
+  await nextTick()
+  scrollInPanel(root.value?.querySelector(`[data-path="${CSS.escape(path)}"]`))
+}, { immediate: true, flush: 'post' })
 const toggle = (path: string) => {
   open.value = open.value.includes(path) ? open.value.filter(p => p !== path) : [...open.value, path]
 }
@@ -31,6 +41,7 @@ const lineClass = (line: string) => line.startsWith('@@')
 
 <template>
   <div
+    ref="root"
     class="flex flex-col gap-3"
     data-testid="inbox-diff"
   >
@@ -64,7 +75,9 @@ const lineClass = (line: string) => line.startsWith('@@')
     <div
       v-for="file in pr.files"
       :key="file.path"
-      class="overflow-hidden rounded-md border border-border"
+      :data-path="file.path"
+      :data-focused="file.path === focus || undefined"
+      :class="['overflow-hidden rounded-md border', file.path === focus ? 'border-primary ring-2 ring-primary/30' : 'border-border']"
       data-testid="inbox-diff-file"
     >
       <button

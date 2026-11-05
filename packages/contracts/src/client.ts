@@ -20,6 +20,19 @@ export const SSE_HEARTBEAT_MS = 25_000
 
 export const PULL_REQUEST_LINE_LIMIT = 1000
 
+// A file's patch split into its `@@` hunks, each a list of lines starting with
+// its `@@` header. A guide's `{ path, hunk }` refs index into this, on the
+// server and in the web app alike (COR-525).
+export function splitPatchHunks(patch: string): string[][] {
+  if (!patch) return []
+  const hunks: string[][] = []
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('@@') || hunks.length === 0) hunks.push([])
+    hunks.at(-1)!.push(line)
+  }
+  return hunks
+}
+
 // How long a runner kept from work may show no update attempt before a human
 // hears about it. The host updater's timer ticks every minute.
 export const RUNNER_UPDATE_GRACE_MS = 5 * 60_000

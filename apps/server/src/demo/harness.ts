@@ -82,6 +82,10 @@ export class Seeder {
   // What the fake runner answers for setup jobs; scenarios can override
   releaseNotes: (prompt: string) => string = () => 'Release notes'
   inboxMessage: ((prompt: string) => string) | null = null
+  // A PR guide's model answer; throwing makes the guide fail
+  prGuide: (prompt: string) => string = () => {
+    throw new Error('No guide while seeding')
+  }
 
   answerJob(job: Parameters<FakeRunner['onJob']>[0]) {
     switch (job.kind) {
@@ -94,6 +98,7 @@ export class Seeder {
         return { kind: 'inbox_message' as const, message: this.inboxMessage(job.prompt) }
       // The fallback title is the first message, which reads fine
       case 'session_title': throw new Error('No title while seeding')
+      case 'pr_guide': return { kind: 'pr_guide' as const, text: this.prGuide(job.prompt) }
       default: return null
     }
   }

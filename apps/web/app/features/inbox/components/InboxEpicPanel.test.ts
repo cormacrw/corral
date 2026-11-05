@@ -47,7 +47,7 @@ const owing = {
   ]
 } as unknown as EpicReviewItem
 
-const pr = { number: 9, url: 'https://github.com/o/r/pull/9', title: 'Feature', body: 'What it does', baseBranch: 'main', headBranch: 'epic', files: [{ path: 'whole.ts', status: 'modified', additions: 1, deletions: 0, patch: '' }], totalFiles: 1, truncated: false }
+const pr = { number: 9, url: 'https://github.com/o/r/pull/9', title: 'Feature', body: 'What it does', baseBranch: 'main', headBranch: 'epic', headSha: 'sha-epic', files: [{ path: 'whole.ts', status: 'modified', additions: 1, deletions: 0, patch: '' }], totalFiles: 1, truncated: false }
 const round = { round: 1, verdict: 'approved', reviewer: { id: 'a', name: 'Rita' }, headSha: 'head', summary: 'Good to go', at: base.at, findings: [{ level: 'non_blocking', text: 'Could share a title', taskRefs: ['T1'] }, { level: 'blocking', text: 'Fixed since', taskRefs: [] }] }
 const details: EpicReview = {
   epicId: 'e', title: 'Feature', goal: 'Goal', reviewMode: 'epic', state: 'human_review', targetBranch: 'main', headSha: 'head', pr, gateChecks: [{ name: 'lint', conclusion: 'success', url: null }],

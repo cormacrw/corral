@@ -51,6 +51,8 @@ export interface PullRequestDetail {
   body: string
   baseBranch: string
   headBranch: string
+  // The PR's current head commit, which a guide is made for
+  headSha: string
   // Capped at PULL_REQUEST_FILE_LIMIT files and PULL_REQUEST_LINE_LIMIT changed
   // lines; the rest is on GitHub at `url`
   files: PullRequestFile[]
@@ -71,6 +73,33 @@ export interface PullRequestFile {
 }
 
 export const PULL_REQUEST_FILE_LIMIT = 20
-export { PULL_REQUEST_LINE_LIMIT } from './client.ts'
+export { PULL_REQUEST_LINE_LIMIT, splitPatchHunks } from './client.ts'
 
 export type CheckConclusion = 'success' | 'failure' | 'pending' | 'neutral' | 'skipped'
+
+// A guided review of a PR (COR-525): the runner's small model orders the PR's
+// hunks into steps that tell the story of the change. It's made only when a
+// reviewer asks, for the PR's head commit at the time. Hunks the model leaves
+// out aren't listed: the client gathers them into a final "Other changes" step.
+export interface PullRequestGuideHunk {
+  path: string
+  // The hunk's position in the file's patch: the nth `@@` block, from 0
+  hunk: number
+}
+export interface PullRequestGuideStep {
+  id: string
+  title: string
+  // One or two sentences tied to the task's goal or criteria
+  why: string
+  // The acceptance criteria this step works towards, by id
+  criterionIds: string[]
+  hunks: PullRequestGuideHunk[]
+}
+export interface PullRequestGuide {
+  status: 'none' | 'generating' | 'ready' | 'failed'
+  // The head commit the guide was made for; a later push makes it stale
+  headSha: string | null
+  steps: PullRequestGuideStep[]
+  error: string | null
+  generatedAt: string | null
+}

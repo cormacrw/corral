@@ -20,7 +20,7 @@ it('seeds every board state, the Inbox items and a GitHub that reloads', async (
       expect(statuses, status).toContain(status)
     }
     const inbox = await seeder.request<Inbox>('GET', '/api/inbox')
-    expect(inbox.needsYou.map(i => i.type).sort()).toEqual(['epic_review', 'human_review', 'human_review', 'human_review', 'plan_thread', 'plan_thread', 'plan_thread', 'plan_thread'])
+    expect(inbox.needsYou.map(i => i.type).sort()).toEqual(['epic_review', 'human_review', 'human_review', 'human_review', 'human_review', 'human_review', 'human_review', 'human_review', 'human_review', 'plan_thread', 'plan_thread', 'plan_thread', 'plan_thread'])
     expect(inbox.activity.some(i => i.type === 'release_notes')).toBe(true)
     const [design] = await seeder.db.select().from(schema.designVersions).orderBy(schema.designVersions.version).limit(2).offset(1)
     expect(design).toMatchObject({ version: 2, status: 'submitted' })

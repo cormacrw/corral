@@ -150,7 +150,7 @@ describe('RunnerGitHub.behindBy', () => {
 })
 
 describe('RunnerGitHub.getPullRequestDiff', () => {
-  const pull = { number: 7, html_url: 'https://github.com/owner/repo/pull/7', title: 'Add login', body: null, base: { ref: 'main' }, head: { ref: 'feature' }, changed_files: 25 }
+  const pull = { number: 7, html_url: 'https://github.com/owner/repo/pull/7', title: 'Add login', body: null, base: { ref: 'main' }, head: { ref: 'feature', sha: 'abc123' }, changed_files: 25 }
   const files = [
     { filename: 'a.ts', status: 'added', additions: 2, deletions: 0, patch: '@@ -0,0 +1,2 @@\n+a\n+b' },
     { filename: 'b.png', status: 'modified', additions: 0, deletions: 0 },
@@ -167,6 +167,7 @@ describe('RunnerGitHub.getPullRequestDiff', () => {
       body: '',
       baseBranch: 'main',
       headBranch: 'feature',
+      headSha: 'abc123',
       changedFiles: 25,
       files: [
         { path: 'a.ts', status: 'added', additions: 2, deletions: 0, patch: '@@ -0,0 +1,2 @@\n+a\n+b' },

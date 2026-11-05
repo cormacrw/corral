@@ -270,7 +270,8 @@ describe('RunManager warm PM sessions', () => {
 
     await manager.shutdown()
 
-    expect(await processesLeft()).toEqual([])
+    // A killed process leaves the process table a moment after the signal
+    await expect.poll(processesLeft).toEqual([])
     expect(sent.find(m => m.type === 'run.ended' && m.runId === 'busy')).toMatchObject({ exit: { kind: 'runner_shutdown' } })
   })
 
