@@ -23,7 +23,7 @@ const reviewModes = Object.entries(EPIC_REVIEW_MODE).map(([value, mode]) => ({ v
         :model-value="epic.reviewMode"
         :items="reviewModes"
         :disabled="epic.reviewModeLocked"
-        aria-label="Parent review mode"
+        aria-label="Subtask review mode"
         :aria-describedby="epic.reviewModeLocked ? 'epic-review-mode-note' : undefined"
         class="w-full"
         @update:model-value="$emit('change', $event as EpicReviewMode)"
@@ -33,7 +33,7 @@ const reviewModes = Object.entries(EPIC_REVIEW_MODE).map(([value, mode]) => ({ v
         id="epic-review-mode-note"
         class="text-xs text-muted-foreground"
       >
-        Locked because a task in this parent has submitted work.
+        Locked because a subtask has submitted work.
       </p>
       <p
         v-else
@@ -45,7 +45,7 @@ const reviewModes = Object.entries(EPIC_REVIEW_MODE).map(([value, mode]) => ({ v
         v-if="epic.reviewMode !== 'direct'"
         class="text-xs text-muted-foreground"
       >
-        The parent PR opens once every task is complete. Human checks are confirmed there.
+        The task's PR opens once every subtask is complete. Human checks are confirmed there.
       </p>
     </template>
   </section>

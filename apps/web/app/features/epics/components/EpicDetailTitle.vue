@@ -8,7 +8,7 @@ defineProps<{ mode: 'flyout' | 'page' | 'mobile', epic: EpicDetail | null, proje
 <template>
   <template v-if="mode === 'flyout'">
     <AppBadge
-      label="Parent"
+      label="Task"
       color="neutral"
       variant="subtle"
       size="sm"
@@ -18,7 +18,7 @@ defineProps<{ mode: 'flyout' | 'page' | 'mobile', epic: EpicDetail | null, proje
   <template v-else-if="mode === 'mobile'">
     <div class="flex items-center gap-1.5 text-xs text-muted-foreground">
       <AppBadge
-        label="Parent"
+        label="Task"
         color="neutral"
         variant="subtle"
         size="sm"
@@ -26,7 +26,7 @@ defineProps<{ mode: 'flyout' | 'page' | 'mobile', epic: EpicDetail | null, proje
       <span class="truncate">{{ project?.name }}</span>
     </div>
     <h1 class="flex items-center gap-2 text-base font-semibold text-foreground">
-      <span class="min-w-0 truncate">{{ epic?.title ?? 'Parent' }}</span>
+      <span class="min-w-0 truncate">{{ epic?.title ?? 'Task' }}</span>
       <span
         v-if="saved"
         class="shrink-0 text-xs font-normal text-success"
@@ -35,6 +35,6 @@ defineProps<{ mode: 'flyout' | 'page' | 'mobile', epic: EpicDetail | null, proje
   </template>
   <AppBreadcrumb
     v-else
-    :items="[{ label: project?.name ?? 'Project', to: project ? `/projects/${project.slug}` : '/' }, { label: epic?.title ?? 'Parent' }]"
+    :items="[{ label: project?.name ?? 'Project', to: project ? `/projects/${project.slug}` : '/' }, { label: epic?.title ?? 'Task' }]"
   />
 </template>

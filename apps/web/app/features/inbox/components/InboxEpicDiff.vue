@@ -14,7 +14,7 @@ const diff = computed<PullRequestDetail>(() => {
   const { files, totalFiles, truncated } = feedback.value
   return { ...props.pr, files, totalFiles, truncated }
 })
-const VIEWS = [{ value: 'since', label: 'Since your last review' }, { value: 'whole', label: 'Whole parent' }] as const
+const VIEWS = [{ value: 'since', label: 'Since your last review' }, { value: 'whole', label: 'Whole task' }] as const
 </script>
 
 <template>

@@ -39,14 +39,14 @@ export function useInboxEpicReview(props: { item: EpicInboxItem }) {
   const kind = computed<InboxItemKind>(() => {
     const { item } = props
     if (item.resolution) return { label: 'Resolved', icon: 'i-hugeicons-checkmark-circle-02', color: 'text-success' }
-    if (item.type === 'epic_review') return { label: 'Parent review', icon: 'i-hugeicons-git-pull-request', color: 'text-brand' }
+    if (item.type === 'epic_review') return { label: 'Task review', icon: 'i-hugeicons-git-pull-request', color: 'text-brand' }
     if (item.type === 'epic_conflict') {
       if (item.stopped) return { label: item.stopped.fix === 'ci' || item.stopped.fix === 'review' ? 'Fix stopped' : 'Rebase stopped', icon: 'i-hugeicons-stop-circle', color: 'text-destructive' }
       return item.decision
         ? { label: 'Rebase decision', icon: 'i-hugeicons-help-circle', color: 'text-info' }
-        : { label: 'Parent conflict', icon: 'i-hugeicons-git-merge', color: 'text-destructive' }
+        : { label: 'Task conflict', icon: 'i-hugeicons-git-merge', color: 'text-destructive' }
     }
-    return { label: 'Parent PR', icon: 'i-hugeicons-pulse-01', color: 'text-muted-foreground' }
+    return { label: 'Task\'s PR', icon: 'i-hugeicons-pulse-01', color: 'text-muted-foreground' }
   })
 
   const target = computed(() => review.value?.targetBranch ?? (props.item.type === 'epic_conflict' ? props.item.targetBranch : null))
@@ -54,7 +54,7 @@ export function useInboxEpicReview(props: { item: EpicInboxItem }) {
   const approvalNote = computed(() => {
     const name = target.value ?? 'the target branch'
     const moved = review.value?.targetMovedBy ?? 0
-    if (review.value?.conflictPending) return `This parent conflicts with ${name}. Approving sends the conflict to a developer, then runs CI and squash-merges.`
+    if (review.value?.conflictPending) return `This task conflicts with ${name}. Approving sends the conflict to a developer, then runs CI and squash-merges.`
     return moved > 0
       ? `${name} has moved ${plural(moved, 'commit')}. Approving rebases onto it, runs CI and squash-merges.`
       : `Approving runs CI and squash-merges into ${name}.`

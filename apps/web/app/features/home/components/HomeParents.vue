@@ -11,7 +11,7 @@ defineProps<{ epics: { epic: Epic, project: Project }[], showProject: boolean }>
     data-testid="home-epics"
   >
     <h2 class="text-sm font-semibold text-foreground">
-      Parents
+      Tasks with subtasks
     </h2>
     <ul
       v-if="epics.length"
@@ -45,7 +45,7 @@ defineProps<{ epics: { epic: Epic, project: Project }[], showProject: boolean }>
       v-else
       class="text-sm text-muted-foreground"
     >
-      No parent tasks in progress.
+      No tasks with subtasks in progress.
     </p>
   </section>
 </template>

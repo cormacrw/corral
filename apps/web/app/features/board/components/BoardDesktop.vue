@@ -22,7 +22,7 @@ const { moving, dragged, canDrag, canDrop, startDrag, allowDrop, dropTask } = us
       />
       <AppButton
         v-if="single"
-        label="Parent details"
+        label="Task details"
         icon="i-hugeicons-hierarchy"
         size="xs"
         variant="outline"

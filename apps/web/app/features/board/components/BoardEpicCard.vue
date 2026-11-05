@@ -53,7 +53,7 @@ function openPrerequisite(id: string) {
           >
             <button
               type="button"
-              :aria-label="`Waiting on ${waitingOn.length} ${waitingOn.length === 1 ? 'parent' : 'parent tasks'}`"
+              :aria-label="`Waiting on ${waitingOn.length} ${waitingOn.length === 1 ? 'task' : 'tasks'}`"
               class="flex size-5 cursor-pointer items-center justify-center rounded text-warning hover:bg-muted focus-visible:outline-2 focus-visible:outline-primary"
             >
               <Icon

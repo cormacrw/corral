@@ -95,7 +95,7 @@ function toggleSearch() {
         />
         <AppButton
           v-if="single"
-          label="Parent details"
+          label="Task details"
           icon="i-hugeicons-hierarchy"
           size="sm"
           variant="ghost"

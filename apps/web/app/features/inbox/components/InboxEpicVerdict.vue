@@ -14,7 +14,7 @@ const verdict = computed(() => {
   const round = props.r.rounds.value.find(r => r.headSha === props.r.viewedHead.value)
   if (round?.verdict === 'changes_requested') return { text: 'requested changes', name: round.reviewer.name, ok: false }
   if (props.item.sender.role !== 'reviewer') return { text: 'No reviewer approval on this head', name: null, ok: false }
-  return { text: 'approved the parent', name: round?.reviewer.name ?? props.item.sender.name, ok: true }
+  return { text: 'approved the task', name: round?.reviewer.name ?? props.item.sender.name, ok: true }
 })
 const mark = computed(() => verdictMark(verdict.value.ok))
 const gates = computed(() => props.r.review.value?.gateChecks ?? [])

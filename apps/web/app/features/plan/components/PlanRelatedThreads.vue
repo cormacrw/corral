@@ -18,7 +18,7 @@ const children = computed(() => shell.planSessions.filter(s => s.parentSessionId
       v-if="parent"
       :to="`/plan/${parent.id}`"
       class="text-brand hover:underline"
-    >Parent: {{ parent.title }}</NuxtLink>
+    >Started from: {{ parent.title }}</NuxtLink>
     <span
       v-if="children.length"
       class="text-muted-foreground"

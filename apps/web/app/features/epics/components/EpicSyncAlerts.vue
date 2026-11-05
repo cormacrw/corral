@@ -32,7 +32,7 @@ async function retrySync() {
     color="info"
     variant="subtle"
     title="Resolving a rebase conflict"
-    :description="`${sync.taskRef ?? 'A developer'} is rebasing this parent in private${fileList(sync.files)}. The parent branch moves once a reviewer approves.`"
+    :description="`${sync.taskRef ?? 'A developer'} is rebasing this task in private${fileList(sync.files)}. The task's branch moves once a reviewer approves.`"
   />
   <AppAlert
     v-else-if="sync?.state === 'conflict_pending'"
@@ -40,7 +40,7 @@ async function retrySync() {
     color="neutral"
     variant="subtle"
     :title="EPIC_CONFLICT_PENDING"
-    :description="`Review carries on. A developer resolves it once, when the parent is approved${fileList(sync.files)}.`"
+    :description="`Review carries on. A developer resolves it once, when the task's PR is approved${fileList(sync.files)}.`"
   />
   <EpicFixAlert
     v-else-if="sync?.state === 'fixing'"

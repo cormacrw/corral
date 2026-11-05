@@ -36,7 +36,7 @@ function seeChanges() {
   tab.value = 'diff'
 }
 
-const prLabel = computed(() => review.value?.pr ? `Parent PR #${review.value.pr.number}` : 'Parent PR')
+const prLabel = computed(() => review.value?.pr ? `Task's PR #${review.value.pr.number}` : 'Task\'s PR')
 const tabs = computed(() => {
   const pr = review.value?.pr
   return [
@@ -57,7 +57,7 @@ const skeleton = computed(() => loading.value && (['pr', 'diff'].includes(openTa
 <template>
   <InboxPanelLayout
     as="section"
-    aria-label="Parent review"
+    aria-label="Task review"
     data-testid="inbox-epic-panel"
     :tabs="tabs"
     :open-tab="openTab"
@@ -137,7 +137,7 @@ const skeleton = computed(() => loading.value && (['pr', 'diff'].includes(openTa
     >
       <AppLoadError
         v-if="r.result.isError.value && !review"
-        title="Couldn't load this parent's review"
+        title="Couldn't load this task's review"
         :description="r.result.error.value?.message"
         :retry="r.refresh"
         data-testid="inbox-epic-error"
@@ -187,7 +187,7 @@ const skeleton = computed(() => loading.value && (['pr', 'diff'].includes(openTa
       <InboxPanelThumbBar
         v-if="canAct && mobile"
         :ctx="ctx"
-        approve-label="Approve parent"
+        approve-label="Approve task"
       />
       <div
         v-else-if="canAct"
