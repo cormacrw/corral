@@ -60,7 +60,7 @@ describe('PR guides', () => {
 
   it('sends the task and numbered hunks, keeps only refs that exist, and starts one generation at a time', async () => {
     let finish!: (text: string) => void
-    const { service, jobs } = guides(() => new Promise(resolve => {
+    const { service, jobs } = guides(() => new Promise((resolve) => {
       finish = text => resolve({ kind: 'pr_guide', text })
     }))
     const row = await findProjectBySlug(t.db, project.slug)

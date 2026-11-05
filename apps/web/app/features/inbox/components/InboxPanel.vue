@@ -90,6 +90,7 @@ const details = computed(() => openTab.value as Exclude<InboxPanelTab, 'overview
       :ctx="ctx"
       :p="p"
       :section="details"
+      :mobile="mobile"
     />
 
     <template #footer>

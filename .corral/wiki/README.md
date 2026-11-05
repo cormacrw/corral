@@ -39,6 +39,7 @@ Short implementation notes written while building. Not binding: `docs/README.md`
 - [PM run diagnostics](pm-run-diagnostics.md)
 - [Postgres test opt-in (D14)](postgres-tests.md)
 - [Proposed-plan boundary](proposed-plans.md)
+- [PR guides (guided code review)](pr-guides.md)
 - [Query layer](query-layer.md)
 - [Release notes in the Inbox](release-notes-inbox.md)
 - [Review round eligibility](review-round-eligibility.md)
