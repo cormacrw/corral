@@ -68,7 +68,7 @@ const title = computed(() => {
     case 'inbox': return 'Inbox'
     case 'settings': return settingsSection.value ?? 'Settings'
     case 'tasks': return id ?? 'Task'
-    case 'epics': return 'Parent'
+    case 'epics': return 'Task'
     case 'projects': return id ? 'Overview' : 'Projects'
     case 'agents': {
       if (!id) return 'Agents'

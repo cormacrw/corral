@@ -35,7 +35,7 @@ const verb = (run: Run) => run.role === 'reviewer' ? 'reviewing' : run.role === 
                 :task-ref="run.taskRef"
                 class="relative z-10"
               /><template v-else>
-                {{ run.epicId ? 'parent' : '' }}
+                {{ run.epicId ? 'task' : '' }}
               </template> {{ taskOf(run)?.title ?? run.epicTitle ?? '' }}
             </p>
             <p class="text-xs text-muted-foreground">

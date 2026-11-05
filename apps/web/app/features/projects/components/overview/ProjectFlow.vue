@@ -77,7 +77,7 @@ function category(status: string) {
             </div>
             <div>
               <dt class="text-xs text-muted-foreground">
-                Developer runs on parent tasks
+                Developer runs on tasks with subtasks
               </dt>
               <dd class="tabular-nums">
                 {{ metrics.fixes.epicDeveloperRuns }}
@@ -85,7 +85,7 @@ function category(status: string) {
             </div>
             <div>
               <dt class="text-xs text-muted-foreground">
-                Reviews per parent
+                Reviews per task with subtasks
               </dt>
               <dd class="tabular-nums">
                 {{ metrics.epicReviews.perEpic.toFixed(1) }} ({{ metrics.epicReviews.reviews }} across {{ metrics.epicReviews.epics }})

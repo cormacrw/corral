@@ -17,7 +17,7 @@ const flyout = useTaskFlyout()
 
 <template>
   <section
-    :aria-label="`Parent ${props.group.title}`"
+    :aria-label="`Task ${props.group.title}`"
     class="border-t border-border px-4 pt-3 pb-4"
   >
     <div class="flex items-start gap-2">
@@ -27,7 +27,7 @@ const flyout = useTaskFlyout()
             v-if="props.group.id"
             type="button"
             class="text-start hover:text-brand hover:underline"
-            :aria-label="`Open parent ${props.group.title}`"
+            :aria-label="`Open task ${props.group.title}`"
             @click="flyout.openEpic(props.group.id)"
           >
             {{ props.group.title }}

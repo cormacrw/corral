@@ -11,7 +11,7 @@ const device = useDevice()
 // A shared link has nothing to go back to
 const router = useRouter()
 const back = () => window.history.state?.back ? router.back() : navigateTo('/projects')
-useSeoMeta({ title: 'Parent · Corral' })
+useSeoMeta({ title: 'Task · Corral' })
 
 // Old links open the parent task, or the task itself for a collapsed epic (D31)
 const { data: epic } = useQuery(computed(() => epicQuery(id.value)))

@@ -24,7 +24,7 @@ const tab = useLocalStorage<'tasks' | 'graph' | 'activity' | 'comments'>('corral
 // A phone has room for all four labels only without their icons
 const TAB_ICONS: Record<string, string> = { tasks: 'i-hugeicons-left-to-right-list-bullet', graph: 'i-hugeicons-hierarchy', activity: 'i-hugeicons-pulse-01', comments: 'i-hugeicons-message-01' }
 const tabs = computed(() => [
-  { label: `Sub-tasks (${props.epic.tasks.length})`, value: 'tasks' },
+  { label: `Subtasks (${props.epic.tasks.length})`, value: 'tasks' },
   { label: 'Graph', value: 'graph' },
   { label: 'Activity', value: 'activity' },
   ...props.epic.taskId && props.epic.taskRef ? [{ label: 'Comments', value: 'comments' }] : []
@@ -91,7 +91,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
       v-else-if="epic.tasks.length === 0"
       class="p-6 text-center text-sm text-muted-foreground"
     >
-      No tasks in this parent yet.
+      No subtasks yet.
     </p>
     <EpicTaskList
       v-else-if="tab === 'tasks'"

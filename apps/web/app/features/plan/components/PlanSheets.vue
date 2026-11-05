@@ -58,7 +58,7 @@ const planSheet = computed({
   </AppDrawer>
   <AppDrawer
     v-model:open="detailSheet"
-    :title="flyout.ref.value ? `Task ${flyout.ref.value}` : 'Parent'"
+    :title="flyout.ref.value ? `Task ${flyout.ref.value}` : 'Task'"
     content-class="h-[94svh]"
   >
     <template #content>

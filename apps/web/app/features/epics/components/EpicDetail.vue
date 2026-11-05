@@ -62,7 +62,7 @@ const { epicResult, activityResult, epic, error, project, parent, activity, prer
         <input
           :value="epic.title"
           class="w-full rounded-md bg-transparent px-1 py-0.5 text-lg font-semibold text-foreground hover:bg-muted focus:ring-2 focus:ring-primary focus:outline-none"
-          aria-label="Parent title"
+          aria-label="Task title"
           @change="patch({ title: ($event.target as HTMLInputElement).value })"
         >
         <EpicFixRuns

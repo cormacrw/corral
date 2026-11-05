@@ -43,8 +43,8 @@ function addCustomCheck() {
       />
     </ProjectSettingsRow>
     <ProjectSettingsRow
-      label="Parent review mode"
-      :hint="`For new parents a plan doesn't set a mode for. ${EPIC_REVIEW_MODE[form.epicReviewModeDefault].description}.`"
+      label="Subtask review mode"
+      :hint="`For new tasks with subtasks a plan doesn't set a mode for. ${EPIC_REVIEW_MODE[form.epicReviewModeDefault].description}.`"
       for="epic-review-mode"
     >
       <AppSelectMenu

@@ -175,7 +175,7 @@ watch(() => `${props.direction}|${props.tasks.map(t => `${t.ref}:${t.dependsOn.j
           <span><TaskLink
             :task-ref="data.ref"
             class="font-mono after:absolute after:inset-0"
-          /> · another parent</span>
+          /> · another task</span>
         </div>
       </template>
       <Background

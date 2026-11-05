@@ -14,10 +14,10 @@ import { plural } from '~/utils/labels'
 
 type Action = InboxActionInput['action']
 
-const MOVED = 'This parent changed while you had it open. Check the refreshed review, then try again.'
+const MOVED = 'This task changed while you had it open. Check the refreshed review, then try again.'
 const REFUSED: Record<string, string> = {
   epic_review_changed: MOVED,
-  epic_pr_changed: 'The parent PR changed on GitHub or was closed. Check the refreshed review, then try again.',
+  epic_pr_changed: 'The task\'s PR changed on GitHub or was closed. Check the refreshed review, then try again.',
   human_checks_unconfirmed: 'The human checks changed. Tick them on the Tasks tab, then approve.',
   epic_decision_changed: 'This decision has already been answered, or it changed. Check the refreshed item.'
 }
@@ -89,7 +89,7 @@ export function useInboxEpicActions(
   const actions = computed(() => {
     if (props.item.type === 'epic_review') {
       return [
-        { value: 'approve', label: 'Approve parent', icon: 'i-hugeicons-tick-02' },
+        { value: 'approve', label: 'Approve task', icon: 'i-hugeicons-tick-02' },
         { value: 'request_changes', label: 'Request changes', icon: 'i-hugeicons-comment-01' }
       ]
     }
@@ -119,7 +119,7 @@ export function useInboxEpicActions(
     resolveTo: 'in_progress' as const, text, draftKey,
     busy: computed(() => reviewing.isPending.value || !!props.gone),
     actionError: computed(() => props.gone ? MOVED : refused.value),
-    placeholder: computed(() => action.value === 'clarify' ? 'Your answer' : 'What should change? It becomes a fix task in the parent'),
+    placeholder: computed(() => action.value === 'clarify' ? 'Your answer' : 'What should change? It becomes a fix subtask'),
     submitLabel: computed(() => action.value === 'clarify' ? 'Send answer' : 'Request changes'),
     needsText: true,
     composerChosen: computed(() => action.value !== null && actionOpensComposer(action.value)),

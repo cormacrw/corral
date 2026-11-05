@@ -8,7 +8,7 @@ const route = useRoute()
 const router = useRouter()
 const tabs = [
   { label: 'Needs you', value: 'needs-you', slot: 'needs-you' as const },
-  { label: 'Parents', value: 'epics', slot: 'epics' as const },
+  { label: 'With subtasks', value: 'epics', slot: 'epics' as const },
   { label: 'Flow', value: 'flow', slot: 'flow' as const },
   { label: 'Activity', value: 'activity', slot: 'activity' as const }
 ]
@@ -42,7 +42,7 @@ const matching = computed(() => epics.value.filter(group => group.epic && matche
         <div class="mb-3 flex flex-wrap items-center gap-2">
           <div
             class="flex gap-1"
-            aria-label="Filter parent tasks"
+            aria-label="Filter tasks with subtasks"
           >
             <AppButton
               v-for="item in filters"
@@ -79,7 +79,7 @@ const matching = computed(() => epics.value.filter(group => group.epic && matche
             v-else-if="matching.length === 0"
             class="py-4 text-sm text-muted-foreground"
           >
-            No parent tasks match this filter.
+            No tasks with subtasks match this filter.
           </li>
         </ul>
       </section>
