@@ -6,6 +6,7 @@ import { schema, type Executor } from '@corral/db'
 import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm'
 import { appendAudit, auditEvent, auditText, readAudit, type AuditView } from './audit.ts'
 import { readCiFailures } from './ci-output.ts'
+import { actorNames } from './actor-names.ts'
 import { actorLabel, type OrchestratorDeps } from './orchestrator.ts'
 import { answerEpicDecision, openEpicFix } from './epic-fixes.ts'
 import { ApiFailure, notFound } from './errors.ts'
@@ -329,9 +330,11 @@ export const epicEventText = (detail: AuditView) => [epicEventLabel(detail), det
 
 export async function epicHistory(db: Executor, epicId: string): Promise<EpicHistoryEntry[]> {
   const rows = await db.select().from(auditLog).where(and(eq(auditLog.action, 'epic.pr'), sql`${auditText('epic.pr', 'epicId')} = ${epicId}`)).orderBy(asc(auditLog.createdAt), asc(auditLog.id))
+  const nameOf = await actorNames(db, rows.map(r => r.actor))
   return rows.map((row) => {
     const detail = readAudit(row.detail)
-    return { id: String(row.id), at: row.createdAt.toISOString(), actor: actorLabel(row.actor), event: detail.event ?? '', text: epicEventText(detail), detail: row.detail as Record<string, unknown> }
+    const actor = (row.actor.kind === 'agent' && nameOf(row.actor)) || actorLabel(row.actor)
+    return { id: String(row.id), at: row.createdAt.toISOString(), actor, event: detail.event ?? '', text: epicEventText(detail), detail: row.detail as Record<string, unknown> }
   })
 }
 

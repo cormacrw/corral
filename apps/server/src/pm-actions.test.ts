@@ -9,6 +9,7 @@ import { FakeRunner } from './test-runner.ts'
 const { auditLog, tasks } = schema
 
 describe('confirm-required PM actions', () => {
+  const pmName = 'Planning agent'
   let t: TestApp
   let runner: FakeRunner
   let job: RunJob
@@ -17,6 +18,7 @@ describe('confirm-required PM actions', () => {
 
   beforeAll(async () => {
     t = await createTestApp('pglite', { listen: true })
+    await t.db.update(schema.agents).set({ name: pmName }).where(eq(schema.agents.role, 'pm'))
     runner = await FakeRunner.connect(t.server!.url)
     const project = await t.createProject()
     await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
@@ -75,7 +77,7 @@ describe('confirm-required PM actions', () => {
       deletedTask: { method: 'GET', path: `/api/projects/${slug}/tasks/${task.number}`, status: deletedResponse.status, response: await deletedResponse.json() },
       after: { method: 'GET', path: '/api/inbox', response: inbox }
     }, null, 2))
-    expect(inbox.activity).toContainEqual(expect.objectContaining({ sender: { name: 'PM', role: 'pm' }, body: expect.stringContaining(session.id) }))
+    expect(inbox.activity).toContainEqual(expect.objectContaining({ sender: { name: pmName, role: 'pm' }, body: expect.stringContaining(session.id) }))
   })
 
   it('keeps soft-deleted task activity without linking to the hidden task', async () => {

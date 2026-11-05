@@ -1,12 +1,24 @@
 import type { AuditEntry, Comment } from '@corral/contracts'
+import type { AgentRole } from '@corral/core'
 
 type Actor = Comment['author']
 
-// `agent` names an agent actor; what's known about it differs by screen
-export function actorLabel(actor: Actor, agent: (actor: Extract<Actor, { kind: 'agent' }>) => string): string {
-  if (actor.kind === 'human') return actor.viaPm ? 'PM · confirmed by you' : 'You'
-  if (actor.kind === 'agent') return agent(actor)
+// The name an entry is shown under, which also finds its picture. `agent`
+// names the agent that acted (runId is null for the PM an action was
+// confirmed through); what's known about it differs by screen.
+export function actorName(actor: Actor, agent: (role: AgentRole, runId: string | null) => string): string {
+  if (actor.kind === 'human') return actor.viaPm ? agent('pm', null) : 'You'
+  if (actor.kind === 'agent') return agent(actor.role, actor.runId)
   return 'Corral'
+}
+
+// The human confirmed it through the PM
+export const confirmedByYou = (actor: Actor) => actor.kind === 'human' && !!actor.viaPm
+
+// One line, e.g. "Pat · confirmed by you"
+export function actorLabel(actor: Actor, agent: (role: AgentRole, runId: string | null) => string): string {
+  const name = actorName(actor, agent)
+  return confirmedByYou(actor) ? `${name} · confirmed by you` : name
 }
 
 const words = (value: unknown) => String(value).replaceAll('_', ' ')

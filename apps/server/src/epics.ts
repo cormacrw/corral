@@ -7,7 +7,7 @@ import { epicFixRuns } from './epic-fixes.ts'
 import { deferredConflicts, openDecision, waitingOn } from './epic-rebase-approval.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { deliveredAt, syncParentContent } from './parents.ts'
-import { toAuditEntry, toTasks, type ProjectRow } from './tasks.ts'
+import { toAuditEntries, toTasks, type ProjectRow } from './tasks.ts'
 
 const { agents, auditLog, epics, epicDependencies, runs, taskDependencies, taskIntegrationOperations, projects, tasks } = schema
 
@@ -192,5 +192,5 @@ export async function listEpicHistory(db: Executor, epicId: string) {
   const rows = await db.select().from(auditLog)
     .where(sql`${auditLog.detail}->>'epicId' = ${epicId}`)
     .orderBy(asc(auditLog.createdAt), asc(auditLog.id))
-  return rows.map(toAuditEntry)
+  return toAuditEntries(db, rows)
 }

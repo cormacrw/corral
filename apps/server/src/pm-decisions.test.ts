@@ -10,6 +10,7 @@ const { acceptanceCriteria, auditLog, comments, designVersions, tasks } = schema
 const STOP = { runId: null, target: null, human: '', status: 'in_progress' as const, capped: false, sessionId: null }
 
 describe('PM tools for the Inbox, designs and agents', () => {
+  const pmName = 'Planning agent'
   let t: TestApp
   let runner: FakeRunner
   let job: RunJob
@@ -18,6 +19,7 @@ describe('PM tools for the Inbox, designs and agents', () => {
 
   beforeAll(async () => {
     t = await createTestApp('pglite', { listen: true })
+    await t.db.update(schema.agents).set({ name: pmName }).where(eq(schema.agents.role, 'pm'))
     runner = await FakeRunner.connect(t.server!.url)
     const project = await t.createProject()
     await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
@@ -95,7 +97,7 @@ describe('PM tools for the Inbox, designs and agents', () => {
     expect(audit).toMatchObject([{ actor, detail: { sessionId: session.id, runId: job.runId, tool: 'act_on_inbox' } }])
     const { activity, needsYou } = await inbox()
     expect(needsYou.some(i => i.id === blocked.id)).toBe(false)
-    expect(activity).toContainEqual(expect.objectContaining({ taskRef: blocked.ref, sender: { name: 'PM', role: 'pm' }, body: expect.stringContaining(session.id) }))
+    expect(activity).toContainEqual(expect.objectContaining({ taskRef: blocked.ref, sender: { name: pmName, role: 'pm' }, body: expect.stringContaining(session.id) }))
   })
 
   it.each(['review_cap', 'blocked', 'block'])('leaves a %s block to the human, so an answer can\'t lift a cap', async (event) => {
@@ -281,7 +283,7 @@ describe('PM tools for the Inbox, designs and agents', () => {
     expect(details.filter(d => d.tool === 'create_task' && d.ok)).not.toHaveLength(0)
     expect(details.filter(d => d.tool === 'update_task' && d.ok)).not.toHaveLength(0)
     expect(details.filter(d => d.tool === 'update_task' && !d.ok)).not.toHaveLength(0)
-    expect((await inbox()).activity).toContainEqual(expect.objectContaining({ taskRef: created.result.ref, sender: { name: 'PM', role: 'pm' } }))
+    expect((await inbox()).activity).toContainEqual(expect.objectContaining({ taskRef: created.result.ref, sender: { name: pmName, role: 'pm' } }))
   })
 
   describe('plans', () => {
@@ -543,7 +545,7 @@ describe('PM tools for the Inbox, designs and agents', () => {
       expect(await call('update_agent', { agentId: developer.id, name: 'Quinn', concurrency: 3, runtime: 'codex' })).toMatchObject({ ok: true, result: { name: 'Quinn', concurrency: 3, runtime: 'codex' } })
       expect((await agents()).find(a => a.id === developer.id)).toMatchObject({ name: 'Quinn', concurrency: 3, runtime: 'codex' })
       const { activity } = await inbox()
-      expect(activity).toContainEqual(expect.objectContaining({ taskRef: null, sender: { name: 'PM', role: 'pm' }, preview: expect.stringContaining('Updated Quinn') }))
+      expect(activity).toContainEqual(expect.objectContaining({ taskRef: null, sender: { name: pmName, role: 'pm' }, preview: expect.stringContaining('Updated Quinn') }))
       const pm = (await agents()).find(a => a.role === 'pm')!
       expect(await call('update_agent', { agentId: pm.id, concurrency: 2 })).toMatchObject({ ok: false, error: expect.stringContaining('concurrency_not_applicable') })
     })
