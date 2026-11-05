@@ -37,6 +37,7 @@ describe('transcriptExcerpt', () => {
 })
 
 describe('PM tools for projects, runs and the factory', () => {
+  const pmName = 'Planning agent'
   let t: TestApp
   let runner: FakeRunner
   let job: RunJob
@@ -53,6 +54,7 @@ describe('PM tools for projects, runs and the factory', () => {
 
   beforeAll(async () => {
     t = await createTestApp('pglite', { listen: true })
+    await t.db.update(schema.agents).set({ name: pmName }).where(eq(schema.agents.role, 'pm'))
     t.request = async (method, path, body) => {
       const response = await fetch(`${t.server!.url}${path}`, { method, ...(body !== undefined && { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) })
       transcript.push({ request: { method, path, body }, response: { status: response.status, body: await response.clone().text() } })
@@ -107,7 +109,7 @@ describe('PM tools for projects, runs and the factory', () => {
     const [updated] = await t.db.select().from(auditLog).where(eq(auditLog.action, 'project.updated'))
     expect(updated).toMatchObject({ actor: { kind: 'agent', role: 'pm', runId: job.runId, sessionId: session.id } })
     const item = (await inbox()).activity.find(a => a.preview.includes('reviewRoundCap'))
-    expect(item).toMatchObject({ type: 'activity', taskRef: null, sender: { name: 'PM', role: 'pm' }, project: { id: project.id } })
+    expect(item).toMatchObject({ type: 'activity', taskRef: null, sender: { name: pmName, role: 'pm' }, project: { id: project.id } })
     expect(item).toMatchObject({ body: expect.stringContaining(`/plan/${session.id}`) })
   })
 
@@ -199,7 +201,7 @@ describe('PM tools for projects, runs and the factory', () => {
     expect(rows.find(r => (r.detail as { tool: string, runId: string }).tool === 'get_status' && (r.detail as { runId: string }).runId === job.runId)).toMatchObject({ actor: { sessionId: session.id }, detail: { sessionId: session.id, runId: job.runId, ok: true } })
     const activity = (await inbox()).activity
     const read = activity.find(a => a.preview === 'Checked Corral\'s status')
-    expect(read).toMatchObject({ taskRef: null, sender: { name: 'PM', role: 'pm' } })
+    expect(read).toMatchObject({ taskRef: null, sender: { name: pmName, role: 'pm' } })
     expect(read).toMatchObject({ body: expect.stringContaining(`/plan/${session.id}`) })
     const failed = activity.find(a => a.preview.startsWith('Could not read a project'))
     expect(failed!.preview).toBe('Could not read a project: not found')
