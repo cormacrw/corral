@@ -95,3 +95,10 @@ it('closes a parent task with the sheet', async () => {
   await flushPromises()
   expect(router.currentRoute.value.fullPath).toBe('/plan')
 })
+
+it('puts the prompt straight above Open threads and Drafts on phones, with no pills or composer toolbar', async () => {
+  const { wrapper } = await render('/plan')
+  expect(wrapper.find('[data-testid="plan-start-options"]').exists()).toBe(false)
+  expect(wrapper.find('[aria-label="Project"]').exists()).toBe(false)
+  expect(wrapper.get('prompt-composer-stub').attributes('bare')).toBe('true')
+})

@@ -58,6 +58,7 @@ const placeholder = computed(() => {
           :busy="busy"
           :allow-empty="taskRef !== null"
           :rows="3"
+          :bare="device.isMobile.value"
           :project="project?.slug"
           draft-key="plan:new"
           @submit="start"
@@ -69,7 +70,10 @@ const placeholder = computed(() => {
               @remove="taskRef = null"
             />
           </template>
-          <template #send-tools>
+          <template
+            v-if="!device.isMobile.value"
+            #send-tools
+          >
             <AppSelectMenu
               :model-value="runtime"
               :items="runtimeItems"
@@ -87,8 +91,11 @@ const placeholder = computed(() => {
           </template>
         </PromptComposer>
 
-        <!-- Where it runs, as pills under the prompt rather than in its toolbar -->
+        <!-- Where it runs, as pills under the prompt rather than in its toolbar.
+             Phones have neither, so Open threads and Drafts sit right under
+             the prompt; the scope is the last one picked. -->
         <div
+          v-if="!device.isMobile.value"
           class="-mt-3 flex flex-wrap items-center gap-2"
           data-testid="plan-start-options"
         >
