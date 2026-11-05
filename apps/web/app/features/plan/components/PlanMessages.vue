@@ -13,8 +13,10 @@ const props = defineProps<{
   // The plan start in flight, for its first message
   refining?: string | null
   failed?: boolean
+  // The plan floats beside the thread, so its link points there, not the flyout
+  planBeside?: boolean
 }>()
-const emit = defineEmits<{ retry: [], answer: [text: string], other: [], stop: [], resolved: [] }>()
+const emit = defineEmits<{ retry: [], answer: [text: string], other: [], stop: [], resolved: [], showPlan: [] }>()
 const flyout = useTaskFlyout()
 const device = useDevice()
 
@@ -127,8 +129,8 @@ const rows = computed(() => {
         <button
           v-if="plan"
           type="button"
-          :class="['flex max-w-full items-center gap-2 self-start rounded-md border border-border px-3 py-2 text-start text-sm hover:bg-muted', flyout.plan.value && 'bg-muted']"
-          @click="flyout.plan.value ? flyout.close() : flyout.openPlan()"
+          :class="['flex max-w-full items-center gap-2 self-start rounded-md border border-border px-3 py-2 text-start text-sm hover:bg-muted', !props.planBeside && flyout.plan.value && 'bg-muted']"
+          @click="props.planBeside ? emit('showPlan') : flyout.plan.value ? flyout.close() : flyout.openPlan()"
         >
           <Icon
             name="i-hugeicons-task-done-01"

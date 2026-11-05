@@ -10,6 +10,7 @@ import * as vue from 'vue'
 import { agents, planMessages, plans, planSessions, projects } from '~/prototype/fixtures'
 import { api } from '~/composables/useApi'
 import PlanConversation from '~/features/plan/components/PlanConversation.vue'
+import PlanDetail from '~/features/plan/components/PlanDetail.vue'
 import PlanLiveTurn from '~/features/plan/components/PlanLiveTurn.vue'
 import PlanMessages from '~/features/plan/components/PlanMessages.vue'
 import PlanPill from '~/features/plan/components/PlanPill.vue'
@@ -24,6 +25,13 @@ vi.mock('~/composables/useApi', () => ({
     plan: { session: vi.fn(), read: vi.fn(), message: vi.fn(), approve: vi.fn() },
     runs: { transcript: vi.fn() }
   }
+}))
+
+// The conversation column's measured width: narrow unless a test widens it
+const columnWidth = vue.ref(800)
+vi.mock('@vueuse/core', async original => ({
+  ...await original<typeof import('@vueuse/core')>(),
+  useElementSize: () => ({ width: columnWidth, height: vue.ref(0) })
 }))
 
 let client = testQueryClient()
@@ -74,7 +82,7 @@ async function open(id = 's-1', mobile = false) {
         PlanGrillButton: true
       },
       components: {
-        PlanLiveTurn, PlanMessages, PlanPill, PlanRefineMenu, PlanRelatedThreads, PlanReplyComposer, PlanRunnerOffline, PlanSessionHeader,
+        PlanDetail, PlanLiveTurn, PlanMessages, PlanPill, PlanRefineMenu, PlanRelatedThreads, PlanReplyComposer, PlanRunnerOffline, PlanSessionHeader,
         NuxtLink: vue.defineComponent({ name: 'NuxtLink', props: ['to'], setup: (props, { slots }) => () => vue.h('a', { href: props.to }, slots.default?.()) }),
         AppAlert: alertComponent,
         AppButton: button,
@@ -118,6 +126,7 @@ beforeEach(() => {
   flyout.ref.value = null
   flyout.epic.value = null
   flyout.plan.value = false
+  columnWidth.value = 800
   vi.mocked(api.plan.session).mockImplementation(async id => detail(id))
   vi.mocked(api.plan.read).mockResolvedValue({ ...planSessions[0]!, unread: false })
   vi.mocked(api.runs.transcript).mockResolvedValue([])
@@ -310,5 +319,68 @@ describe('Plan conversation', () => {
     composer.vm.$emit('submit', 'Half a thought')
     await flushPromises()
     expect(sessionStorage.length).toBe(0)
+  })
+
+  describe('with room beside the thread', () => {
+    beforeEach(() => {
+      columnWidth.value = 1300
+    })
+
+    it('floats the latest plan beside the thread instead of opening the flyout', async () => {
+      const wrapper = await open()
+      const card = wrapper.get('[data-testid="plan-beside"]')
+      const plan = card.findComponent({ name: 'PlanDetail' })
+      expect(plan.props('plan')).toMatchObject({ id: detail().plans[0]!.id })
+      expect(plan.props('card')).toBe(true)
+      expect(flyout.openPlan).not.toHaveBeenCalled()
+      expect(wrapper.findComponent({ name: 'TaskFlyout' }).findComponent({ name: 'PlanDetail' }).exists()).toBe(false)
+    })
+
+    it('approves from the floating card', async () => {
+      const wrapper = await open()
+      vi.mocked(api.plan.approve).mockResolvedValue({ ...detail().plans[0]!, status: 'approved' as const })
+      wrapper.get('[data-testid="plan-beside"]').findComponent({ name: 'PlanDetail' }).vm.$emit('approve', 'backlog')
+      await flushPromises()
+      expect(api.plan.approve).toHaveBeenCalledWith(detail().plans[0]!.id, 'backlog')
+    })
+
+    it('marks the card busy while approving and disabled while the PM works', async () => {
+      vi.mocked(api.plan.session).mockResolvedValue({ ...detail(), activeRunId: 'r-1' })
+      const wrapper = await open()
+      expect(wrapper.get('[data-testid="plan-beside"]').findComponent({ name: 'PlanDetail' }).props('disabled')).toBe(true)
+    })
+
+    it('drops a ?plan flyout once the card is showing', async () => {
+      flyout.plan.value = true
+      await open()
+      expect(flyout.close).toHaveBeenCalled()
+    })
+
+    it('updates the card in place when a new version arrives', async () => {
+      const wrapper = await open()
+      const first = detail().plans[0]!
+      const next = { ...first, id: 'plan-v2', version: first.version + 1, title: 'Revised plan' }
+      listener({ type: 'plan.session', session: { ...planSessions.find(s => s.id === 's-1')!, updatedAt: new Date().toISOString() } })
+      client.setQueryData<PlanSessionDetail>(keys.plan.session('s-1'), old => old && { ...old, plans: [...old.plans, next] })
+      await flushPromises()
+      const cards = wrapper.findAll('[data-testid="plan-beside"]')
+      expect(cards).toHaveLength(1)
+      const plan = cards[0]!.findComponent({ name: 'PlanDetail' })
+      expect(plan.props('plan')).toMatchObject({ id: 'plan-v2' })
+      expect(plan.props('previous')).toMatchObject({ id: first.id })
+    })
+
+    it('falls back to the flyout when the column is too narrow for both', async () => {
+      const wrapper = await open()
+      columnWidth.value = 860
+      await flushPromises()
+      expect(wrapper.find('[data-testid="plan-beside"]').exists()).toBe(false)
+    })
+
+    it('keeps the pill and sheets on phones', async () => {
+      const wrapper = await open('s-1', true)
+      expect(wrapper.find('[data-testid="plan-beside"]').exists()).toBe(false)
+      expect(wrapper.find('[data-testid="plan-pill"]').exists()).toBe(true)
+    })
   })
 })

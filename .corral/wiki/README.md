@@ -33,6 +33,7 @@ Short implementation notes written while building. Not binding: `docs/README.md`
 - [Outcome retries](outcome-retries.md)
 - [Parent tasks (D31)](parent-tasks.md)
 - [Plan thread scrolling](plan-thread-scroll.md)
+- [The plan beside the thread](plan-beside-thread.md)
 - [Plan validation and revision equality](plan-validation.md)
 - [PM evidence attachments](pm-evidence.md)
 - [PM run diagnostics](pm-run-diagnostics.md)

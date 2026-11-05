@@ -5,11 +5,12 @@ import { PLAN_STATUS } from '~/utils/labels'
 import { currentTasks } from '~/features/plan/utils/plan-versions'
 import PlanDetailBody from '~/features/plan/components/PlanDetailBody.vue'
 
-// The session's latest plan, docked in the flyout (design/plan.md). Each
+// The session's latest plan, beside the thread or in the flyout (design/plan.md). Each
 // revision replaces it here rather than adding another card to the chat.
 // `sheet`: in the mobile bottom sheet, where the approve buttons share the width.
 // `disabled`: nothing can be approved for now, as while Juno is working.
-const props = defineProps<{ plan: Plan, previous: Plan | null, busy: boolean, disabled?: boolean, sheet?: boolean }>()
+// `card`: floating beside the desktop thread, which has no close or back.
+const props = defineProps<{ plan: Plan, previous: Plan | null, busy: boolean, disabled?: boolean, sheet?: boolean, card?: boolean }>()
 const emit = defineEmits<{ approve: [to: 'ready' | 'backlog'], close: [] }>()
 const flyout = useTaskFlyout()
 
@@ -25,7 +26,7 @@ const revisesReady = computed(() => tasks.value.some(t => t.revises && t.status 
   >
     <header class="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
       <AppButton
-        v-if="flyout.canGoBack.value"
+        v-if="!props.card && flyout.canGoBack.value"
         icon="i-hugeicons-arrow-left-02"
         variant="ghost"
         color="neutral"
@@ -47,6 +48,7 @@ const revisesReady = computed(() => tasks.value.some(t => t.revises && t.status 
         size="sm"
       />
       <AppButton
+        v-if="!props.card"
         icon="i-hugeicons-cancel-01"
         variant="ghost"
         color="neutral"
