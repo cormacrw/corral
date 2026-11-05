@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AuditEntry } from '@corral/contracts'
-import { actorLabel } from '~/features/activity/utils/auditText'
+import { actorName, confirmedByYou } from '~/features/activity/utils/auditText'
 import { ROLE, timeAgo } from '~/utils/labels'
 
 const props = defineProps<{ entry: AuditEntry, text: string }>()
@@ -10,7 +10,8 @@ const sessionId = computed(() => {
   const actor = props.entry.actor
   return actor.kind === 'agent' ? actor.sessionId : actor.kind === 'human' ? actor.viaPm?.sessionId : undefined
 })
-const author = computed(() => actorLabel(props.entry.actor, agent => ROLE[agent.role]))
+// The server names the agent; its role label when the agent is gone
+const author = computed(() => actorName(props.entry.actor, role => props.entry.agentName ?? ROLE[role]))
 </script>
 
 <template>
@@ -23,7 +24,9 @@ const author = computed(() => actorLabel(props.entry.actor, agent => ROLE[agent.
       size="xs"
     />
     <p class="min-w-0 flex-1 text-muted-foreground">
-      <span class="font-medium text-foreground">{{ author }}</span>
+      <span class="font-medium text-foreground">{{ author }}</span><template v-if="confirmedByYou(entry.actor)">
+        · confirmed by you
+      </template>
       {{ ' ' }}{{ displayText }}
       <NuxtLink
         v-if="sessionId"

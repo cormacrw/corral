@@ -2,10 +2,10 @@
 import { computed } from 'vue'
 import type { AuditEntry, Comment, Run } from '@corral/contracts'
 import TimeAgo from '~/components/shared/TimeAgo.vue'
-import { historyText } from '~/features/activity/utils/auditText'
+import { confirmedByYou, historyText } from '~/features/activity/utils/auditText'
 import { runBadge } from '~/utils/labels'
 
-const props = defineProps<{ comments: Comment[], runs: Run[], history: AuditEntry[], authorLabel: (actor: Comment['author']) => string }>()
+const props = defineProps<{ comments: Comment[], runs: Run[], history: AuditEntry[], authorName: (actor: Comment['author']) => string }>()
 
 const FEED_ACTIONS = ['task.created', 'task.updated', 'task.transition', 'task.paused', 'task.resumed', 'task.deleted']
 // Task mutations, comments and runs that ended with an error, oldest first
@@ -31,12 +31,12 @@ const items = computed(() => [
       class="flex gap-2"
     >
       <AgentAvatar
-        :name="authorLabel(item.comment.author)"
+        :name="authorName(item.comment.author)"
         size="xs"
       />
       <div class="min-w-0 flex-1 rounded-lg bg-muted px-3 py-2 text-sm">
         <div class="mb-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-          <span class="font-medium text-foreground">{{ authorLabel(item.comment.author) }}</span>
+          <span class="font-medium text-foreground">{{ authorName(item.comment.author) }}<template v-if="confirmedByYou(item.comment.author)"> · confirmed by you</template></span>
           <span><TimeAgo :at="item.comment.createdAt" /></span>
           <AppBadge
             v-if="item.comment.pinned"

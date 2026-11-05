@@ -58,6 +58,9 @@ export interface AuditEntry {
   projectId: string | null
   taskId: string | null
   actor: Actor
+  // The acting agent's name, or the PM's for an action the human confirmed
+  // through it; null for the human and Corral, or when the agent is gone
+  agentName: string | null
   action: string
   detail: Record<string, unknown>
   createdAt: string

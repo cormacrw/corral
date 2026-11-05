@@ -9,6 +9,7 @@ import { arrivalKey, storedMessages, withMessages, type PreparedItem } from './i
 import { ACTIVE_RUN_STATES, designPreviewUrl, humanCheckTally, richTextToPlainText, taskRef, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm'
+import { actorNames } from './actor-names.ts'
 import { actorLabel } from './orchestrator.ts'
 import { thumbnailUrl } from './projects.ts'
 import { sessionStates, type SessionAttention } from './plan.ts'
@@ -60,6 +61,16 @@ export async function loadInbox(db: Executor, runners: RunnerInfo[] = [], limit 
     .orderBy(desc(auditLog.createdAt), desc(auditLog.id))
     .limit(limit * 3)
 
+  const epicEvents = await db.select({
+    entry: { id: auditLog.id, actor: auditLog.actor, detail: auditLog.detail, createdAt: auditLog.createdAt },
+    epic: { id: epics.id, title: epics.title, prNumber: epics.prNumber },
+    project: { ...projectColumns, repository: projects.repository }
+  }).from(auditLog)
+    .innerJoin(epics, sql`${auditText('epic.pr', 'epicId')} = ${epics.id}::text`)
+    .innerJoin(projects, eq(projects.id, epics.projectId))
+    .where(eq(auditLog.action, 'epic.pr')).orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit)
+  const senderOf = await actorSenders(db, [...entries, ...epicEvents].map(r => r.entry.actor))
+
   // Undismissed release notes are informational: Activity, until dismissed
   const activity: Inbox['activity'] = releases.filter(d => !d.resolution)
   const resolved: Inbox['resolved'] = []
@@ -77,14 +88,6 @@ export async function loadInbox(db: Executor, runners: RunnerInfo[] = [], limit 
     }
     if (activity.length >= limit + releases.length && resolved.length >= limit) break
   }
-  const epicEvents = await db.select({
-    entry: { id: auditLog.id, actor: auditLog.actor, detail: auditLog.detail, createdAt: auditLog.createdAt },
-    epic: { id: epics.id, title: epics.title, prNumber: epics.prNumber },
-    project: { ...projectColumns, repository: projects.repository }
-  }).from(auditLog)
-    .innerJoin(epics, sql`${auditText('epic.pr', 'epicId')} = ${epics.id}::text`)
-    .innerJoin(projects, eq(projects.id, epics.projectId))
-    .where(eq(auditLog.action, 'epic.pr')).orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(limit)
   for (const { entry, epic, project } of epicEvents) {
     const detail = readAudit(entry.detail)
     const body = epicEventText(detail)
@@ -104,7 +107,7 @@ export async function loadInbox(db: Executor, runners: RunnerInfo[] = [], limit 
   for (const { entry, project, session, task } of pmCalls) {
     const detail = entry.detail as { targetId?: string | null, summary?: string, sessionId: string, input?: { taskRef?: string } }
     const text = pmActivityText(entry.action, detail.summary ?? 'A PM action')
-    const base = { id: `pm-${entry.id}`, type: 'activity' as const, subject: text, preview: text, body: session ? `${text}. [PM conversation](/plan/${session.id})` : `${text}.`, sender: { name: 'PM', role: 'pm' as const }, at: entry.createdAt.toISOString(), prUrl: null, resolution: null, unread: true }
+    const base = { id: `pm-${entry.id}`, type: 'activity' as const, subject: text, preview: text, body: session ? `${text}. [PM conversation](/plan/${session.id})` : `${text}.`, sender: { name: pm?.name ?? 'PM', role: 'pm' as const }, at: entry.createdAt.toISOString(), prUrl: null, resolution: null, unread: true }
     const tag = project ? projectTag(project) : { id: '', slug: '', name: session && session.projectId === null ? 'Global' : 'Removed project', thumbnailColor: null, thumbnailUrl: null }
     if (project && task && detail.input?.taskRef) activity.push({ ...base, project: tag, taskId: task.id, taskRef: taskRef(project.prefix, task.number) })
     else activity.push({ ...base, project: tag, taskId: null, taskRef: null })
@@ -438,10 +441,14 @@ function projectTag(project: Pick<typeof projects.$inferSelect, 'id' | 'slug' | 
   return { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: thumbnailUrl(project) }
 }
 
-function senderOf(actor: Actor): TaskInboxItem['sender'] {
-  if (actor.kind === 'human' && actor.viaPm) return { name: 'PM', role: 'pm' }
-  if (actor.kind === 'agent') return { name: actorLabel(actor), role: actor.role }
-  return { name: actorLabel(actor), role: 'system' }
+// The agent that acted, or its role label when it can't be found
+async function actorSenders(db: Executor, actors: Actor[]): Promise<(actor: Actor) => TaskInboxItem['sender']> {
+  const nameOf = await actorNames(db, actors)
+  return (actor) => {
+    if (actor.kind === 'human' && actor.viaPm) return { name: nameOf(actor) ?? 'PM', role: 'pm' }
+    if (actor.kind === 'agent') return { name: nameOf(actor) ?? actorLabel(actor), role: actor.role }
+    return { name: actorLabel(actor), role: 'system' }
+  }
 }
 
 function activityText(action: string, event: string | null, detail: AuditView, prNumber: number | null, type: string): string {

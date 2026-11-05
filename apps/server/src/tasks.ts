@@ -1,3 +1,4 @@
+import { actorNames } from './actor-names.ts'
 import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
 import { holdsAcrossEpics, holdsEpicOpen, invalidateEpicReview, type InvalidatedEpics } from './epic-review-state.ts'
 import type { AuditEntry, Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task, TaskAgent, TaskDesignPin, TaskSubmissionSummary } from '@corral/contracts'
@@ -759,14 +760,15 @@ export async function listCommentsFor(db: Executor, taskIds: string[]): Promise<
   return Map.groupBy(rows.map(toComment), c => c.taskId)
 }
 
-export function toAuditEntry(row: typeof auditLog.$inferSelect): AuditEntry {
-  return { id: row.id, projectId: row.projectId, taskId: row.taskId, actor: row.actor, action: row.action, detail: row.detail as Record<string, unknown>, createdAt: row.createdAt.toISOString() }
+export async function toAuditEntries(db: Executor, rows: (typeof auditLog.$inferSelect)[]): Promise<AuditEntry[]> {
+  const nameOf = await actorNames(db, rows.map(r => r.actor))
+  return rows.map(row => ({ id: row.id, projectId: row.projectId, taskId: row.taskId, actor: row.actor, agentName: nameOf(row.actor), action: row.action, detail: row.detail as Record<string, unknown>, createdAt: row.createdAt.toISOString() }))
 }
 
 // PRD §14: every claim, transition, review and merge decision, readable per task
 export async function listHistory(db: Executor, taskId: string): Promise<AuditEntry[]> {
   const rows = await db.select().from(auditLog).where(eq(auditLog.taskId, taskId)).orderBy(asc(auditLog.createdAt), asc(auditLog.id))
-  return rows.map(toAuditEntry)
+  return toAuditEntries(db, rows)
 }
 
 // D10 "Deleting": Backlog tasks go outright; the rest are hidden but kept
