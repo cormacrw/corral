@@ -95,7 +95,7 @@ Agent detail and run screens follow [agent.md](agent.md); the web and mobile pag
 
 ## Plan
 
-The mobile `/plan` tab starts directly with the planning prompt, with no title row. Phones have no session switcher for now, including in focused conversations; desktop keeps its session controls. Focused conversations retain their compact header, back button, project eyebrow, title and New session action.
+The mobile `/plan` tab starts directly with the planning prompt, with no title row, and Open threads and Drafts follow right under it: the prompt has no toolbar or pill row on phones (see [plan.md](plan.md#mobile)). Phones have no session switcher for now, including in focused conversations; desktop keeps its session controls. Focused conversations retain their compact header, back button, project eyebrow, title and New session action.
 
 ## Projects
 

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { DraftSession } from '@corral/contracts'
 import { PRIORITY, TASK_TYPE, taskTypeIcon, priorityText } from '~/utils/labels'
-import TimeAgo from '~/components/shared/TimeAgo.vue'
+import { PLAN_STATUS_BADGE } from '~/features/plan/utils/plan-attention'
+import PlanSessionRow from '~/features/plan/components/PlanSessionRow.vue'
 
 // The project's Drafts on the Plan tab, under the session they belong to
 // (design/plan.md). A session or draft opens that session; a draft also
@@ -29,27 +30,15 @@ defineProps<{ sessions: DraftSession[], mobile?: boolean }>()
           class="gap-0 py-0"
           content-class="px-0"
         >
-          <NuxtLink
+          <PlanSessionRow
             :to="`/plan/${session.sessionId}`"
-            :class="['flex w-full items-center gap-3 border-b border-border px-4 text-sm hover:bg-muted', mobile ? 'min-h-12 py-3' : 'py-2.5']"
+            :title="session.title"
+            :updated-at="session.updatedAt"
+            :badge="session.planStatus === 'proposed' ? PLAN_STATUS_BADGE.needs_approval : null"
+            :mobile="mobile"
+            class="border-b border-border"
             data-testid="plan-drafts-header"
-          >
-            <Icon
-              name="i-hugeicons-bubble-chat"
-              class="size-4 shrink-0 text-muted-foreground"
-            />
-            <span class="flex min-w-0 flex-1 items-center gap-2">
-              <span class="truncate font-medium">{{ session.title }}</span>
-              <AppBadge
-                v-if="session.planStatus === 'proposed'"
-                label="Needs approval"
-                color="primary"
-                variant="subtle"
-                size="xs"
-              />
-            </span>
-            <span class="shrink-0 text-xs text-muted-foreground/70"><TimeAgo :at="session.updatedAt" /></span>
-          </NuxtLink>
+          />
           <ul class="divide-y divide-border">
             <li
               v-for="draft in session.drafts"

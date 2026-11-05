@@ -33,10 +33,13 @@ const props = withDefaults(defineProps<{
   initialImages?: { id: string, name: string }[]
   // Keeps uploaded images with the text's draft (useDraft)
   draftKey?: string
+  // No toolbar: only Send, at the end of the input. Images can still be
+  // pasted or dropped. Plan's new session uses it on phones.
+  bare?: boolean
   // Bound with @submit. Resolving to false means it wasn't sent, so the
   // images stay for another try.
   onSubmit?: (text: string) => unknown
-}>(), { placeholder: 'Write a message…', hint: '', disabled: false, busy: false, submitLabel: '', submitIconOnly: false, submitColor: 'primary', allowEmpty: false, rows: 2, project: null, draftKey: '', onSubmit: undefined })
+}>(), { placeholder: 'Write a message…', hint: '', disabled: false, busy: false, submitLabel: '', submitIconOnly: false, submitColor: 'primary', allowEmpty: false, rows: 2, project: null, draftKey: '', bare: false, onSubmit: undefined })
 
 const text = defineModel<string>({ default: '' })
 const toast = useToast()
@@ -242,10 +245,27 @@ function onPick(event: Event) {
       :placeholder="props.placeholder"
       :disabled="props.disabled"
       :rows="props.rows"
-      class="max-h-64 min-h-0 px-3"
+      :class="['max-h-64 px-3', props.bare ? 'min-h-36 pr-16 pb-14' : 'min-h-0']"
       @keydown.enter="onEnter"
     />
     <InputGroupAddon
+      v-if="props.bare"
+      align="inline-end"
+      class="absolute right-2 bottom-2 cursor-default p-0 has-[>button]:mr-0"
+    >
+      <AppButton
+        v-bind="submitAppearance"
+        :color="props.submitColor"
+        :disabled="!canSend"
+        :loading="props.busy || uploading"
+        size="sm"
+        class="relative size-8 rounded-full after:absolute after:-inset-1.5"
+        data-testid="composer-send"
+        @click="send()"
+      />
+    </InputGroupAddon>
+    <InputGroupAddon
+      v-else
       align="block-end"
       class="cursor-default gap-1"
     >
