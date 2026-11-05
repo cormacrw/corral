@@ -5,7 +5,7 @@ import { agentStatus, isLiveRun, ROLE, runtimeLabel } from '~/utils/labels'
 
 // The agents with live runs, and what each run is on. Agents that are paused
 // or waiting out a usage limit are listed too, since they hold work back.
-const props = defineProps<{ agents: Agent[], runs: Run[], projects: (Project & { color: string })[], now: number }>()
+const props = defineProps<{ agents: Agent[], runs: Run[], projects: (Project & { color: string })[], now: number, mobile?: boolean }>()
 
 const rows = computed(() => props.agents
   .map(agent => ({
@@ -25,7 +25,7 @@ const projectOf = (id: string | null) => props.projects.find(p => p.id === id)
     <li
       v-for="{ agent, status, runs: live } in rows"
       :key="agent.id"
-      class="relative flex items-start gap-3 rounded-lg px-2 py-2 hover:bg-muted"
+      :class="['relative flex items-start gap-3 rounded-lg px-2 py-2 hover:bg-muted', mobile && 'min-h-11 active:bg-muted']"
     >
       <AgentAvatar
         :name="agent.name"
@@ -34,7 +34,7 @@ const projectOf = (id: string | null) => props.projects.find(p => p.id === id)
       <div class="min-w-0 flex-1">
         <div class="flex items-baseline gap-2 text-sm">
           <span class="font-medium">{{ agent.name }}</span>
-          <span class="text-xs text-muted-foreground">{{ ROLE[agent.role] }} · {{ runtimeLabel(agent.runtime) }}</span>
+          <span class="truncate text-xs text-muted-foreground">{{ ROLE[agent.role] }} · {{ runtimeLabel(agent.runtime) }}</span>
           <AppBadge
             v-if="status"
             :label="status.label"
@@ -55,8 +55,12 @@ const projectOf = (id: string | null) => props.projects.find(p => p.id === id)
             :style="{ background: projectOf(run.projectId)!.color }"
             aria-hidden="true"
           />
+          <span
+            v-if="run.taskRef && mobile"
+            class="shrink-0 font-mono"
+          >{{ run.taskRef }}</span>
           <TaskLink
-            v-if="run.taskRef"
+            v-else-if="run.taskRef"
             :task-ref="run.taskRef"
             class="relative z-10 shrink-0 font-mono"
           />

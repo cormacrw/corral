@@ -534,8 +534,38 @@ route('POST', '/plan/sessions/:id/messages', ([id], body) => {
   return message
 })
 
+// Design states for the prototype only (COR-522): `#/home?state=loading`
+// holds the lists and runs open, `?state=empty` answers as a quiet workspace
+// (no runs, nothing merged, no agent working, no parents), and `?state=error`
+// fails the runs history so the retry alert shows.
+function scenario(): string | null {
+  if (typeof location === 'undefined') return null
+  return new URLSearchParams(location.hash.split('?')[1] ?? '').get('state')
+}
+const QUIET = new Set(['backlog', 'ready'])
+function scenarioCall(method: string, pathname: string, result: () => Promise<unknown>): Promise<unknown> {
+  const state = scenario()
+  if (method !== 'GET' || !state) return result()
+  if (state === 'loading' && (/^\/projects\/[^/]+\/(tasks|epics)$/.test(pathname) || pathname === '/runs' || pathname === '/metrics/flow')) return new Promise(() => {})
+  if (state === 'error' && pathname === '/runs') return Promise.reject(new ApiError(500, null, 'The server didn\'t answer (500).'))
+  if (state !== 'empty') return result()
+  if (pathname === '/runs' || /^\/projects\/[^/]+\/epics$/.test(pathname)) return Promise.resolve([])
+  if (pathname === '/inbox') return result().then(r => ({ ...(r as object), needsYou: [] }))
+  if (pathname === '/agents') return result().then(r => (r as { activeRuns: number, paused: boolean, pausedUntil: string | null }[]).map(a => ({ ...a, activeRuns: 0, paused: false, pausedUntil: null })))
+  if (/^\/projects\/[^/]+\/tasks$/.test(pathname)) return result().then(r => (r as Task[]).filter(t => QUIET.has(t.status)))
+  if (pathname === '/metrics/flow') return result().then((r) => {
+    const m = r as { current: { mergedTaskCount: number }, previous: { mergedTaskCount: number } }
+    return { ...m, current: { ...m.current, mergedTaskCount: 0 }, previous: { ...m.previous, mergedTaskCount: 0 } }
+  })
+  return result()
+}
+
 export async function mockCall<T>(method: string, path: string, body?: unknown): Promise<T> {
   const [pathname = '', search] = path.split('?')
+  return await scenarioCall(method, pathname, () => routeCall(method, pathname, search, body)) as T
+}
+
+async function routeCall(method: string, pathname: string, search: string | undefined, body?: unknown): Promise<unknown> {
   for (const [m, pattern, handler] of routes) {
     const match = m === method ? pattern.exec(pathname) : null
     if (!match) continue
@@ -543,7 +573,7 @@ export async function mockCall<T>(method: string, path: string, body?: unknown):
     // Copies both ways, as if over the wire, so pages and fixtures stay apart
     const input: unknown = body === undefined || body instanceof Blob || body instanceof FormData ? body : JSON.parse(JSON.stringify(body))
     const result = await handler(params, input, new URLSearchParams(search))
-    return (result === undefined ? undefined : JSON.parse(JSON.stringify(result))) as T
+    return result === undefined ? undefined : JSON.parse(JSON.stringify(result))
   }
   notFound()
 }

@@ -68,6 +68,7 @@ export function useHomeOverview() {
     epics: computed(() => recentEpics(projects.value, lists.epics.value, lists.tasks.value, 6)),
     runs: history.runs,
     now: history.now,
+    runsLoading: history.loading,
     runsFailed: history.failed,
     runsError: history.error,
     retryRuns: history.retry
