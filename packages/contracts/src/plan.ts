@@ -12,7 +12,7 @@ const proposedTask = z.object({
   implementationPlan: z.string().trim().optional().describe('Markdown for the agent that builds it: approach, file pointers, edge cases and test notes. On a task with a ref, include its current plan (from get_task) to keep it: a revision without one clears it'),
   type: z.enum(TASK_TYPES),
   priority: z.enum(TASK_PRIORITIES).default('medium'),
-  humanReview: z.boolean().optional().describe('Leave out on a task with a ref to keep its current setting'),
+  humanReview: z.boolean().optional().describe('Leave it out to use the default: a new top-level task takes the project\'s human review default, a new sub-task starts without one, and a task with a ref keeps its current setting. Where the project reviews by default, a new task can\'t set it to false'),
   acceptanceCriteria: z.array(z.union([z.string().trim(), z.object({ text: z.string().trim(), checkedByHuman: z.boolean().optional() })])).default([]),
   dependsOn: z.array(z.string().trim()).default([]).describe('Keys of tasks in this plan, or refs of existing tasks'),
   // The approved design version a build task builds (D20)
