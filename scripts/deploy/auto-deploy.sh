@@ -4,11 +4,12 @@
 # from. It pulls rather than being pushed to, so nothing new is exposed through
 # the tunnel and GitHub holds no credentials for the server.
 #
-# Each tick: if origin/main differs from what was last deployed and the `ci`
-# check on that commit passed, check it out and build the images while the
-# old containers keep serving. If anything besides web would restart, put the
-# server on its update hold (nothing new starts) and wait for running work to
-# finish, so no agent run is cut off. Then `docker compose up -d --wait`; the
+# Each tick: if origin/main differs from what was last deployed, check it out
+# and build the images while the old containers keep serving. It doesn't wait
+# for CI: PR branches run it before they merge, and main doesn't run it. If
+# anything besides web would restart, put the server on its update hold
+# (nothing new starts) and wait for running work to finish, so no agent run is
+# cut off. Then `docker compose up -d --wait`; the
 # commit only counts as deployed once the new containers are healthy.
 set -euo pipefail
 
@@ -145,27 +146,11 @@ remote_sha=$(git ls-remote origin "refs/heads/$branch" | cut -f1)
 [ -n "$remote_sha" ] || { log "could not read origin/$branch"; exit 1; }
 
 deployed_sha=$(cat "$state_dir/deployed" 2>/dev/null || true)
-skipped_sha=$(cat "$state_dir/skipped" 2>/dev/null || true)
 [ "$remote_sha" = "$deployed_sha" ] && exit 0
 
-# Only deploy commits whose CI passed. The repo is public, so no token is needed.
-# The configured URL, as written: get-url would apply any insteadOf rewrite.
+# The repository the deployment is reported for. The configured URL, as
+# written: get-url would apply any insteadOf rewrite.
 repo=$(git config --get remote.origin.url | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##')
-checks=$(curl -fsS "https://api.github.com/repos/$repo/commits/$remote_sha/check-runs?check_name=ci")
-conclusions=$(grep -o '"conclusion": *"[a-z_]*"' <<<"$checks" | sed -E 's/.*"([a-z_]*)"$/\1/' || true)
-statuses=$(grep -o '"status": *"[a-z_]*"' <<<"$checks" | sed -E 's/.*"([a-z_]*)"$/\1/' || true)
-
-if ! grep -qx success <<<"$conclusions"; then
-  if [ -z "$statuses" ] || grep -qvx completed <<<"$statuses"; then
-    exit 0 # CI hasn't finished yet; try again next tick
-  fi
-  # Checked again every tick, so a re-run that passes still deploys. Logged once.
-  if [ "$remote_sha" != "$skipped_sha" ]; then
-    log "CI failed for $remote_sha; not deploying"
-    echo "$remote_sha" >"$state_dir/skipped"
-  fi
-  exit 0
-fi
 
 # A build can fail for a passing reason (apt, npm), so retry the same commit,
 # but a commit that can't build shouldn't rebuild every tick forever

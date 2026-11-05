@@ -1,7 +1,9 @@
 # Auto-deploy on the home server (D16)
 
-`auto-deploy.sh` redeploys Corral whenever `main` moves and CI on the new
-commit has passed, without interrupting agent runs. A systemd timer runs it every 20 minutes on the server, so several merges usually go out in one deploy (and one hold). It pulls
+`auto-deploy.sh` redeploys Corral whenever `main` moves, without interrupting
+agent runs. It doesn't wait for CI: every PR branch runs CI and Corral checks it
+on the PR head before merging, so CI doesn't run on `main` at all. A commit
+pushed straight to `main` deploys untested. A systemd timer runs it every 20 minutes on the server, so several merges usually go out in one deploy (and one hold). It pulls
 from GitHub, so nothing extra goes through the Cloudflare Tunnel and GitHub
 holds no credentials for the server.
 
@@ -40,12 +42,10 @@ Without systemd, a cron line does the same:
 - Deploy now: `sudo systemctl start corral-deploy`
 - Pause: `sudo systemctl stop corral-deploy.timer`
 - State lives in `.corral/deploy/`: `deployed` is the last deployed commit,
-  `skipped` the last commit whose CI failed, `build-failures` the commit whose
-  build is failing and how many times it has, and `backed-up` the last commit
-  backed up before its migrations. Delete `deployed` to force a rebuild.
-- A failed CI is checked again every tick, so re-running it is enough. A failed
-  build is retried up to `CORRAL_DEPLOY_BUILD_TRIES` times (3 by default), then
-  waits for a new commit; delete `build-failures` to try again sooner.
+  `build-failures` the commit whose build is failing and how many times it
+  has, and `backed-up` the last commit backed up before its migrations. Delete `deployed` to force a rebuild.
+- A failed build is retried up to `CORRAL_DEPLOY_BUILD_TRIES` times (3 by
+  default), then waits for a new commit; delete `build-failures` to try again sooner.
 - A commit counts as deployed only when `docker compose up -d --wait` succeeds,
   within `CORRAL_DEPLOY_WAIT_TIMEOUT` seconds (180 by default; needs Compose
   2.17 or later). If not, the error goes to the journal and the next tick tries
@@ -115,7 +115,7 @@ These copies are on the same disk as the volumes, so they cover a bad
 migration but not a dead disk. Point `CORRAL_BACKUP_DIR` at another disk or
 sync the folder somewhere else (set it in the units with `Environment=`).
 
-CI also fails any change to a migration that's already on main, so the
+CI on PR branches also fails any change to a migration that's already on main, so the
 deployed database never misses one. Schema changes always go in a new migration.
 
 Each file name holds the time and the commit that was running when it was
