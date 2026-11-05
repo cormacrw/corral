@@ -10,13 +10,13 @@ in `#authorJob` (`apps/server/src/run-jobs.ts`):
   the branch diff from `cappedBranchDiff` (30,000 characters of whole files, then
   file names). If GitHub can't give the diff, the prompt says to compare the
   branches. The run stays on its runner, because the worktree there is still useful.
-- Rebase-only rounds, parent rebase rounds and designer revisions keep their session
+- Rebase-only rounds, task rebase rounds and designer revisions keep their session
   at any age. So does any run after one that didn't report an outcome, such as a
   usage limit or an interruption: only that session knows its uncommitted work.
 - The first transcript line says which happened and why.
 
 `runs.session_start` records `fresh`, `resumed_warm` or `resumed_cold`, set on
-author runs and parent fix runs. A resume that fails falls back to the full prompt,
+author runs and task fix runs. A resume that fails falls back to the full prompt,
 and the runner sends `resumeFailed` on `run.started`, which turns the row into
 `fresh`. PM and reviewer runs and older runs leave it null. A runner from before
 `resumeFailed` can't send it, so during a rollout a few failed resumes stay
@@ -39,4 +39,4 @@ wouldn't compare. Codex runs get a cost from reads and output.
 
 The run page shows all of this per run. The project Flow page compares developer
 runs in the window by session start, with revisions apart from first builds and
-parent fixes, and the average weighted cost over the runs that have one.
+task fixes, and the average weighted cost over the runs that have one.

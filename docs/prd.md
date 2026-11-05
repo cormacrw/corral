@@ -1,6 +1,6 @@
 # Corral — MVP Product Requirements Document
 
-> **D31:** where this document says epic, read parent task. A task is the only work item a human sees, and `epics` is a parent's delivery record.
+> **D31:** where this document says task, read task with subtasks. A task is the only work item a human sees, and `epics` is a task's delivery record.
 
 > **For agents:** This is the PRD as written. Decisions made afterwards are in [decisions.md](decisions.md) and **override this document** where they conflict. Most importantly, the POC is local-only (D1) and uses the user's own locally authenticated agent CLI (D2). Known inconsistencies in this document are listed in [open-recommendations.md](open-recommendations.md#inconsistencies-in-the-prd).
 
@@ -123,9 +123,9 @@ Fields:
 - Pause state
 - Created and updated timestamps
 
-### 4.2 Parent
+### 4.2 Task
 
-A parent groups related tasks around a feature or product outcome.
+A task groups related subtasks around a feature or product outcome.
 
 Fields:
 
@@ -150,7 +150,7 @@ Fields:
 - Acceptance criteria
 - Status
 - Priority
-- Parent ID
+- Task ID
 - Dependencies
 - Task type: Task, Bug, Spike or Design (D19, D20)
 - Human review flag
@@ -350,7 +350,7 @@ Requirements:
 - Persistent PM conversation per project.
 - PM reads project metadata, task state, relevant wiki pages, repository instructions, and recent execution outcomes.
 - PM asks questions when requirements are ambiguous.
-- PM creates structured draft parents and tasks.
+- PM creates structured draft tasks with subtasks and tasks.
 - PM identifies dependencies and oversized tasks.
 - PM proposes priorities and implementation order.
 - Users can edit individual tasks and acceptance criteria.
@@ -382,7 +382,7 @@ Requirements:
 
 - Kanban board grouped by status.
   > **D10:** Backlog tasks are not on the board; they have their own Backlog view in the main navigation.
-- Filtering by parent, status, priority, and agent.
+- Filtering by task, status, priority, and agent.
 - Task cards display priority, dependency state, lock status, active agent identity, and PR status.
 - Task detail shows description, acceptance criteria, comments, dependencies, evidence, PR, reviews, and run history.
 - Humans can edit a locked task.
@@ -637,7 +637,7 @@ Required views:
 
 **Board**
 - Tasks grouped by status.
-- Filters and parent grouping.
+- Filters and task grouping.
 - Agent identity, lock, dependency, and PR indicators.
 
 **Task detail**
@@ -945,7 +945,7 @@ The PM conversation is the home screen. The board and operational views are seco
 **Board**
 - Kanban by status.
   > **D10:** approved work only. Backlog tasks live in a separate Backlog view.
-- Parent and priority filters.
+- Task and priority filters.
 - Lock and agent indicators.
 - Dependency and PR status.
 

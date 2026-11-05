@@ -1,25 +1,31 @@
-# Parent tasks (D31)
+# Tasks with subtasks (D31)
 
-A parent is a `tasks` row with status `parent`; `epics.task_id` points at it and
-`tasks.epicId` points its sub-tasks at the same epic. Code keeps saying epic:
-only people see the word parent. `apps/server/src/parents.ts` has the rollup,
-`parentHolds` and the title and description sync between the two rows.
+People see tasks and subtasks. `epic`, `epics`, the `parent` status and names
+such as `parentHolds`, `parentId` and `update_parent` are internal identifiers
+or compatibility contracts, not names for another kind of work item.
+“Parent” is appropriate only when a subtask refers to the task it belongs to.
+Prompts and delivery messages say “the task's PR” and “the task's branch”.
 
-- `ensureParent` runs whenever a task joins an epic. A second task creates the
-  parent, so a Corral fix task on a one-task epic creates one too.
-- `listTasks` hides a parent whose sub-tasks are all Drafts, and shows it in
+A task with subtasks is a `tasks` row with status `parent`;
+`epics.task_id` points at it and each subtask's `tasks.epicId` points at that
+delivery record. `apps/server/src/parents.ts` owns the rollup and synchronises
+the title and description between the two rows.
+
+- `ensureParent` runs whenever a task joins a delivery record. Its second
+  subtask creates the task row, including when Corral adds an internal fix.
+- `listTasks` hides a task whose subtasks are all Drafts, and shows it in
   Backlog until one leaves Backlog. Rollups are on the API; the Board recomputes
-  a parent's stage from live tasks, as it did for epics.
-- `useProjectLists().tasks` leaves parents out, so every list of work stays as
-  it was. Use `parents`, or `searchable` from `useAllProjectLists`, to see them.
-- A plan's promotion sets `epics.task_id` on a task that isn't a parent yet. Only
-  approval changes its status, so deleting that epic must not delete the task:
+  the task's stage from live subtasks.
+- `useProjectLists().tasks` leaves tasks with subtasks out. Use `parents`, or
+  `searchable` from `useAllProjectLists`, to include them.
+- A plan's promotion sets `epics.task_id` before approval changes the task's
+  status. Deleting that delivery record must not delete an ordinary task:
   every delete checks `status = 'parent'`.
-- The migration rebuilds the `task_status` type, because a value added with
-  `ALTER TYPE` can't be used in the transaction that adds it.
+- The migration rebuilds `task_status`: a value added with `ALTER TYPE`
+  cannot be used in the transaction that adds it.
 - `COMPATIBLE_TOOL_CONTRACTS` keeps runners on the previous build taking runs.
-- The PM's names are `update_parent`, `parentId`, `parents` and
-  `defaultReviewMode`. `neutralPmCall` turns an older runner's call, and a saved
-  confirm card, into them.
-- Stored operation errors are compared by text, and rows from before D31 say
-  epic, so `epic-sync.ts` and `task-integration.ts` list both wordings.
+  PM arguments keep `update_parent`, `parentId`, `parents` and
+  `defaultReviewMode`; `neutralPmCall` translates older calls and saved cards.
+- Stored operation errors are compared by text. `epic-sync.ts` and
+  `task-integration.ts` accept legacy errors using both older vocabularies,
+  while newly generated messages use task/subtask wording (COR-520).

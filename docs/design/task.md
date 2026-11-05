@@ -7,9 +7,9 @@
 |---|---|---|
 | `flyout` | Docked on the right of Inbox, Plan, Board, Backlog and Agent pages | Stacked, one column, resizable 360–960px (default 420px) |
 | `page` | `/tasks/:ref`, e.g. `/tasks/COR-29` | Split: content on the left, a 260px properties rail on the right, centred up to 1200px |
-| `mobile` | `/tasks/:ref` under the mobile layout | A full page with Details and Criteria and activity tabs, see [mobile.md](mobile.md#task-and-epic) |
+| `mobile` | `/tasks/:ref` under the mobile layout | A full page with Details and Criteria and activity tabs, see [mobile.md](mobile.md#task-and-subtask) |
 
-The flyout opens with `?task=COR-29` on the current page's URL, so it survives reloads and links can be shared. One host in the default layout serves pages that set the `taskFlyout` page meta: every project tab, the parent page and Agent pages. It sits beside the page at full height. Inbox and Plan host their own, because they fill its plan slot from page state and the Inbox swaps it with the selected item. Phones have no flyout. Pages decide what opens it (a row click, a card click, a chip link). Clicking the same row again closes it. Opening a task or parent adds a browser history entry, so Back returns to whatever the flyout showed before (a parent, after opening one of its tasks). The Inbox, which opens the selected item's task by itself, replaces the entry instead. Closing the flyout doesn't add one.
+The flyout opens with `?task=COR-29` on the current page's URL, so it survives reloads and links can be shared. One host in the default layout serves pages that set the `taskFlyout` page meta: every project tab, the task page and Agent pages. It sits beside the page at full height. Inbox and Plan host their own, because they fill its plan slot from page state and the Inbox swaps it with the selected item. Phones have no flyout. Pages decide what opens it (a row click, a card click, a chip link). Clicking the same row again closes it. Opening a task or task adds a browser history entry, so Back returns to whatever the flyout showed before (a task, after opening one of its tasks). The Inbox, which opens the selected item's task by itself, replaces the entry instead. Closing the flyout doesn't add one.
 
 ## Purpose
 
@@ -19,11 +19,11 @@ Read and edit any task from wherever you are, without losing your place. It's th
 
 ### Header (56px, bottom border)
 
-- **Flyout:** a back arrow when this task was opened from another flyout item (a parent's task list or graph, or another task), then a breadcrumb (`text-muted`) on the left: the task's parent, which opens the parent in the flyout, › the task ref, then a "✓ Saved" note for 1.8s after any edit. On the right: copy link, open full page, close.
-- **Page:** a breadcrumb (`Board › {parent} › COR-29`, the parent linking to its page) with no close or open-full-page buttons.
+- **Flyout:** a back arrow when this task was opened from another flyout item (a subtask's task list or graph, or another task), then a breadcrumb (`text-muted`) on the left: the subtask's task, which opens the task in the flyout, › the task ref, then a "✓ Saved" note for 1.8s after any edit. On the right: copy link, open full page, close.
+- **Page:** a breadcrumb (`Board › {parent} › COR-29`, the task linking to its page) with no close or open-full-page buttons.
 - **No status badge in the header.** Status lives in the properties.
 
-Ready tasks whose parent has unfinished prerequisites, or with a Merged dependency in another parent that isn't done, show **Waiting on parent: <title>** in their properties, linking to each of those parents. The API supplies `waitingOnEpics` (IDs and titles); live task updates remove the row when those parents finish.
+Ready tasks whose task has unfinished prerequisites, or with a Merged dependency in another task that isn't done, show **Waiting on task: <title>** in their properties, linking to each of those tasks with subtasks. The API supplies `waitingOnEpics` (IDs and titles); live task updates remove the row when those tasks with subtasks finish.
 
 ### Body, in order (stacked; split mode moves the properties to the rail)
 
@@ -37,7 +37,7 @@ Ready tasks whose parent has unfinished prerequisites, or with a Merged dependen
    | Status | `AppSelectMenu` with a colour dot | Only the moves a human may make under D10 (e.g. Blocked → Backlog / Ready / In progress). Otherwise read-only, with the tooltip "Set by agents while they work" |
    | Reason | why a Blocked or Failed task stopped (`task.statusReason`), in `error`. Only shown when there is one | No |
    | Priority | `AppSelectMenu`: Urgent, High, Medium, Low | Yes |
-   | Parent | `AppSelectMenu` | Yes |
+   | Task | `AppSelectMenu` | Yes |
    | Developer | avatar and name of the agent of the task's latest developer run (`task.developer`), or "Any available developer" with no avatar until one claims it | No (D15: no manual assignment yet) |
    | Reviewer | avatar and name of the agent of the task's latest reviewer run (`task.reviewer`), or "Any available reviewer" until one exists | No (D15) |
    | Human review | `USwitch` | Yes (D5) |
@@ -62,7 +62,7 @@ Ready tasks whose parent has unfinished prerequisites, or with a Merged dependen
    - Editing shows a toolbar: bold, italic, inline code | heading, bulleted list, numbered list, code block, link.
    - It also shows a `primary` focus ring, **Cancel** and **Save**.
    - Supported content: paragraphs, headings, lists, inline code, code blocks, links, bold and italic.
-5. **Acceptance criteria:** a count ("2 of 3 met") and one row per criterion, each with a met or open icon, an expanding, inline-editable text area and a remove button. The **Checked by a human** toggle sits below the text so complete criteria remain readable on mobile. There's an **Add criterion** button and the note "The reviewer marks criteria met from evidence." Each row has a **Checked by a human** toggle. Those criteria are reserved for the human, excluded from agent evidence and verdict requirements, and show **Needs human check** alongside the evidence. The Inbox provides their checkboxes before approval, on the task or, for a PR-free sub-task, on the parent review.
+5. **Acceptance criteria:** a count ("2 of 3 met") and one row per criterion, each with a met or open icon, an expanding, inline-editable text area and a remove button. The **Checked by a human** toggle sits below the text so complete criteria remain readable on mobile. There's an **Add criterion** button and the note "The reviewer marks criteria met from evidence." Each row has a **Checked by a human** toggle. Those criteria are reserved for the human, excluded from agent evidence and verdict requirements, and show **Needs human check** alongside the evidence. The Inbox provides their checkboxes before approval, on the task or, for a PR-free subtask, on the task review.
 6. **Activity:**
    - **Events:** a dot, the actor, the text and the time. A run that ended with an error shows here with that error.
    - **Comments:** an avatar and a bubble.
@@ -79,7 +79,7 @@ Ready tasks whose parent has unfinished prerequisites, or with a Merged dependen
 
 ## Data
 
-- **Task:** ref, project, title, status, priority, type (Task / Bug / Spike / Design, D19, D20), parent, developer, reviewer, human review flag, branch, PR (or, with no task PR, integrated and approved commit links), review round, description (rich text JSON), criteria (text, met), dependencies, activity.
+- **Task:** ref, project, title, status, priority, type (Task / Bug / Spike / Design, D19, D20), task, developer, reviewer, human review flag, branch, PR (or, with no task PR, integrated and approved commit links), review round, description (rich text JSON), criteria (text, met), dependencies, activity.
   Once a task has left Draft or Backlog, the Type menu offers only changes the server allows: a spike or design stays as it is, and a task or bug can't become one. The menu is disabled when nothing is left to choose, and from Ready to merge the type is fixed (`409 task_type_locked`, D30).
 - **Writes:** a `PATCH` per field, saved as you go. Description saves on Save. Comments are a `POST`.
 

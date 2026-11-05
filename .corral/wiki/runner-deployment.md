@@ -68,7 +68,7 @@ turn with the signal name, rather than an unexplained null or 128+n exit code.
 
 Leave `CORRAL_RUNNER_SLOTS` unset (or empty) to derive slots at startup from
 available CPU affinity, host memory and visible Linux cgroup v1/v2 quotas,
-including parent limits. Defaults are 2 CPUs and 2.5 GiB per slot, configurable
+including task limits. Defaults are 2 CPUs and 2.5 GiB per slot, configurable
 with `CORRAL_SLOT_CPUS` and `CORRAL_SLOT_MEMORY`. Both Compose files pass these
 budgets without forcing a slot override. An existing explicit slot setting
 continues to win. Settings shows the source, detected resources and budgets;

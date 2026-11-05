@@ -17,7 +17,7 @@ These specs describe the UI only. Behaviour rules come from [decisions.md](../de
 | Plan | [plan.md](plan.md) | `/plan`, `/plan/:sessionId` | Global, picks a project |
 | Inbox | [inbox.md](inbox.md) | `/inbox`, `/inbox/:itemId` | Global, items tagged by project |
 | Task flyout and task page | [task.md](task.md) | `?task=COR-29`, `/tasks/COR-29` | Shared everywhere |
-| Parent flyout and parent page | [parent-task.md](parent-task.md) | `?parent=<id>`, `/epics/<id>` | Shared everywhere |
+| Task flyout and task page | [Tasks with subtasks](parent-task.md) | `?parent=<id>`, `/epics/<id>` | Shared everywhere |
 | Project overview | [project-overview.md](project-overview.md) | `/projects/:slug` | Per project |
 | Board | [board.md](board.md) | `/projects/:slug/board` | Per project |
 | Backlog | [backlog.md](backlog.md) | `/projects/:slug/backlog` | Per project |

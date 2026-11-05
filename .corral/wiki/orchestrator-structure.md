@@ -15,7 +15,7 @@ call each other through it: `this.#c.ending.endRun(...)`.
 | `agent-tools.ts` | Tool dispatch, evidence, attachments |
 | `human-actions.ts` | Stop, resume, message, edit notice, delete, Inbox actions, design approval |
 | `pm-dispatch.ts` | The PM queue and the update hold's final phase |
-| `pm-calls.ts` | What confirm cards propose and do, and the PM's direct task and parent edits |
+| `pm-calls.ts` | What confirm cards propose and do, and the PM's direct task and task edits |
 | `lease-reconcile.ts` | Lease sweep, connect, heartbeat, spool sweep |
 | `scheduler.ts` | Passes, placement, `dispatch` |
 

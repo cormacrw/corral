@@ -1,5 +1,10 @@
 # Corral wiki
 
+The feature is tasks and subtasks. Names such as `epic`, `epics`, the `parent`
+status and `update_parent` are internal identifiers or compatibility contracts;
+see [Tasks with subtasks](parent-tasks.md) for the vocabulary and mapping.
+
+
 Short implementation notes written while building. Not binding: `docs/README.md` sets what is.
 
 - [Actionable Inbox policy](actionable-inbox-policy.md)
@@ -14,9 +19,9 @@ Short implementation notes written while building. Not binding: `docs/README.md`
 - [Design bundle archives (D20)](design-bundles.md)
 - [Designer task claims (COR-157)](designer-claims.md)
 - [Designer role and bootstrap (COR-156)](designer-role.md)
-- [Parent fixes and fix tasks](epic-fix-tasks.md)
-- [Parent rebases](epic-rebases.md)
-- [Parent review in the Inbox](epic-inbox-panel.md)
+- [Task fixes and fix tasks](epic-fix-tasks.md)
+- [Task rebases](epic-rebases.md)
+- [Task review in the Inbox](epic-inbox-panel.md)
 - [Evidence rounds: latest by default, earlier behind a toggle](evidence-rounds.md)
 - [Evidence videos](evidence-videos.md)
 - [Flow metrics](flow-metrics.md)
@@ -31,7 +36,7 @@ Short implementation notes written while building. Not binding: `docs/README.md`
 - [Starting a Plan thread](optimistic-plan-starts.md)
 - [No-progress stops and PM recovery](retry-recovery.md)
 - [Outcome retries](outcome-retries.md)
-- [Parent tasks (D31)](parent-tasks.md)
+- [Tasks with subtasks (D31)](parent-tasks.md)
 - [Plan thread scrolling](plan-thread-scroll.md)
 - [The plan beside the thread](plan-beside-thread.md)
 - [Plan validation and revision equality](plan-validation.md)
