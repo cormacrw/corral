@@ -23,7 +23,7 @@ packages it never touched. The runner instead gives every agent process
 
 Turbo never evicts local entries. Every `sweep_worktrees` job also runs
 `pruneTurboCaches` (`workspace.ts`). An entry is a task hash's files
-(`<hash>.tar.zst` and `<hash>-meta.json`); its last use is the newest atime or
+(`<hash>.tar.zst`, `<hash>-meta.json`, `<hash>-manifest.json`); its last use is the newest atime or
 mtime of those files. Per project folder:
 
 1. Entries unused for more than 7 days (`TURBO_CACHE_MAX_AGE_MS`) are deleted.

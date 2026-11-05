@@ -383,7 +383,7 @@ export const TURBO_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60_000
 export const TURBO_CACHE_MAX_BYTES = 5 * 1024 ** 3
 
 // Turbo never evicts local entries. An entry is a task hash's files
-// (<hash>.tar.zst and <hash>-meta.json); its last use is the newest atime or
+// (<hash>.tar.zst, <hash>-meta.json, <hash>-manifest.json); its last use is the newest atime or
 // mtime of them. Entries unused for the age limit go, then the oldest until
 // the project is under the size cap. A project with a run on this runner is
 // left alone: its agent may be reading or writing entries right now.
@@ -402,7 +402,7 @@ export async function pruneTurboCaches(
       if (!file.isFile()) continue
       const info = await stat(join(folder, file.name)).catch(() => null)
       if (!info) continue
-      const hash = file.name.replace(/(-meta\.json|\..*)$/, '')
+      const hash = /^[^-.]+/.exec(file.name)?.[0] ?? file.name
       const entry = entries.get(hash) ?? { files: [], used: 0, bytes: 0 }
       entry.files.push(file.name)
       entry.used = Math.max(entry.used, info.atimeMs, info.mtimeMs)

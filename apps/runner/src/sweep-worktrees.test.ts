@@ -259,25 +259,25 @@ describe('sweep_worktrees', () => {
     const DAY = 24 * 60 * 60_000
     const cache = (project: string) => join(dataDir, 'turbo-cache', project)
 
-    // A Turbo entry: an archive and its meta file, last used daysAgo
+    // A Turbo entry: an archive, its meta and manifest files, last used daysAgo
     async function entry(project: string, hash: string, daysAgo: number, bytes = 10): Promise<void> {
       await mkdir(cache(project), { recursive: true })
       const when = new Date(Date.now() - daysAgo * DAY)
-      for (const [name, size] of [[`${hash}.tar.zst`, bytes], [`${hash}-meta.json`, 2]] as const) {
+      for (const [name, size] of [[`${hash}.tar.zst`, bytes], [`${hash}-meta.json`, 2], [`${hash}-manifest.json`, 2]] as const) {
         await writeFile(join(cache(project), name), 'x'.repeat(size))
         await utimes(join(cache(project), name), when, when)
       }
     }
 
     async function hashes(project: string): Promise<string[]> {
-      return [...new Set((await readdir(cache(project))).map(name => name.replace(/(-meta\.json|\..*)$/, '')))].sort()
+      return [...new Set((await readdir(cache(project))).map(name => name.split(/[-.]/)[0]!))].sort()
     }
 
-    it('deletes entries unused for longer than the age limit, archive and meta together', async () => {
+    it('deletes entries unused for longer than the age limit, all of their files together', async () => {
       await Promise.all([entry('p1', 'old', 8), entry('p1', 'recent', 6)])
       await pruneTurboCaches(dataDir, () => false)
       expect(await hashes('p1')).toEqual(['recent'])
-      expect(await readdir(cache('p1'))).toHaveLength(2)
+      expect((await readdir(cache('p1'))).sort()).toEqual(['recent-manifest.json', 'recent-meta.json', 'recent.tar.zst'])
     })
 
     it('deletes the oldest entries until the project is under the size cap', async () => {
