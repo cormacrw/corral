@@ -42,14 +42,14 @@ status duration; ties use first visited status. Refs use the current project
 prefix, as the rest of the API does.
 
 `fixes`, `epicReviews` and `tokens` (D29) are about runs that ended in the window,
-not the merged cohort, because a fix or a review on an open parent is rework worth
+not the merged cohort, because a fix or a review on an open task is rework worth
 seeing before anything merges. A fix counts when its round set `reReviewed`: true
-or false. A developer run on a parent with no approval at stake stays null and
+or false. A developer run on a task with no approval at stake stays null and
 counts in neither, though it still counts in `epicDeveloperRuns`. `perEpic` is the
-window's integration reviews with a verdict, over the parents they covered. Tokens
+window's integration reviews with a verdict, over the tasks with subtasks they covered. Tokens
 add input, cache reads and output. A task's first build runs to its first
 submission, even if that was before the window; every later developer run on it,
-and every run on a parent, is follow-up.
+and every run on a task, is follow-up.
 
 ## Project overview
 

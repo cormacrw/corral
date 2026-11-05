@@ -81,7 +81,7 @@ export function fallbackMessage(item: MessageItem, facts: Facts): string {
     parts.push(`${short(facts.reasonOrFindings, 16)}.`)
   }
   const asks: Record<string, string> = {
-    epic_conflict: 'Please choose how to resolve the parent’s conflict.',
+    epic_conflict: 'Please choose how to resolve the task’s conflict.',
     question: 'Please answer so work can continue.',
     blocked: 'Please help resolve the blocker so work can continue.',
     failed: 'Please review the failure and decide whether to retry.',

@@ -117,7 +117,7 @@ describe('InboxEpicPanel', () => {
     }))
     const wrapper = render(waiting)
     expect(wrapper.get('h1').text()).toBe('Feature')
-    expect(button(wrapper, 'Approve parent')).toBeTruthy()
+    expect(button(wrapper, 'Approve task')).toBeTruthy()
     expect(wrapper.find('[data-testid="inbox-epic-loading"]').exists()).toBe(true)
     arrive(details)
     await flushPromises()
@@ -148,7 +148,7 @@ describe('InboxEpicPanel', () => {
     await flushPromises()
     expect(wrapper.get('[data-testid="inbox-epic-notes"]').text()).toContain('Could share a title')
     expect(wrapper.get('[data-testid="inbox-epic-notes"]').text()).not.toContain('Fixed since')
-    await button(wrapper, 'Approve parent').trigger('click')
+    await button(wrapper, 'Approve task').trigger('click')
     await flushPromises()
     expect(review).toHaveBeenCalledWith('e', { action: 'approve', headSha: 'head', confirmedCriteria: [], confirmedTasks: [] })
     expect(wrapper.emitted('resolved')).toHaveLength(1)
@@ -158,7 +158,7 @@ describe('InboxEpicPanel', () => {
     getReview.mockResolvedValue({ ...details, tasks: [row('t1', { humanReview: true }), row('t2', { humanChecks: ['c'], criteria: [{ id: 'c', position: 0, text: 'On a real iPhone', checkedByHuman: true, met: null }] })] })
     const wrapper = render(owing)
     await flushPromises()
-    await button(wrapper, 'Approve parent').trigger('click')
+    await button(wrapper, 'Approve task').trigger('click')
     await flushPromises()
     expect(review).not.toHaveBeenCalled()
     expect(wrapper.get('[data-tab="tasks"]').attributes('aria-current')).toBe('true')
@@ -167,7 +167,7 @@ describe('InboxEpicPanel', () => {
     for (const box of wrapper.findAll('input[type="checkbox"]')) await box.setValue(true)
     await flushPromises()
     expect(wrapper.text()).not.toContain('checks left')
-    await button(wrapper, 'Approve parent').trigger('click')
+    await button(wrapper, 'Approve task').trigger('click')
     await flushPromises()
     expect(review).toHaveBeenCalledWith('e', { action: 'approve', headSha: 'head', confirmedCriteria: ['c'], confirmedTasks: ['t1'] })
   })
@@ -191,10 +191,10 @@ describe('InboxEpicPanel', () => {
     await flushPromises()
     // Approval was kept across a rebase: the item has the new head, the review hasn't caught up
     await wrapper.setProps({ item: { ...waiting, headSha: 'rebased' } })
-    await button(wrapper, 'Approve parent').trigger('click')
+    await button(wrapper, 'Approve task').trigger('click')
     await flushPromises()
     expect(review).toHaveBeenCalledWith('e', expect.objectContaining({ action: 'approve', headSha: 'head' }))
-    expect(wrapper.text()).toContain('This parent changed while you had it open')
+    expect(wrapper.text()).toContain('This task changed while you had it open')
     expect(wrapper.emitted('resolved')).toBeUndefined()
   })
 
@@ -205,9 +205,9 @@ describe('InboxEpicPanel', () => {
     await flushPromises()
     await wrapper.get('textarea').setValue('Rename it')
     await wrapper.setProps({ gone: true })
-    expect(wrapper.text()).toContain('This parent changed while you had it open')
+    expect(wrapper.text()).toContain('This task changed while you had it open')
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('Rename it')
-    expect(button(wrapper, 'Approve parent').attributes('disabled')).toBeDefined()
+    expect(button(wrapper, 'Approve task').attributes('disabled')).toBeDefined()
     // Remounting reads the same draft
     unmount(wrapper)
     const again = render(waiting)
@@ -218,14 +218,14 @@ describe('InboxEpicPanel', () => {
   })
 
   it.each([
-    ['epic_pr_changed', 'The parent PR changed on GitHub'],
+    ['epic_pr_changed', 'The task\'s PR changed on GitHub'],
     ['human_checks_unconfirmed', 'The human checks changed'],
     ['epic_decision_changed', 'already been answered']
   ])('says what a %s refusal means', async (constraint, message) => {
     review.mockRejectedValueOnce(new ApiError(409, { code: 'conflict', constraint } as never, constraint))
     const wrapper = render(waiting)
     await flushPromises()
-    await button(wrapper, 'Approve parent').trigger('click')
+    await button(wrapper, 'Approve task').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain(message)
     expect(wrapper.text()).not.toContain('changed while you had it open')
@@ -243,7 +243,7 @@ describe('InboxEpicPanel', () => {
     getReview.mockResolvedValue({ ...details, headSha: 'rebased', rounds: [{ ...round, headSha: 'old' }] })
     const wrapper = render({ ...waiting, headSha: 'rebased' } as EpicReviewItem)
     await flushPromises()
-    expect(wrapper.get('[data-testid="inbox-epic-reviewer"]').text()).toBe('Rita approved the parent')
+    expect(wrapper.get('[data-testid="inbox-epic-reviewer"]').text()).toBe('Rita approved the task')
   })
 
   it('shows Review from the item when the review can\'t load, and its body with no rounds', async () => {
@@ -322,7 +322,7 @@ describe('InboxEpicPanel', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     // Said once, in the composer
-    expect(wrapper.text().match(/This parent changed while you had it open/g)).toHaveLength(1)
+    expect(wrapper.text().match(/This task changed while you had it open/g)).toHaveLength(1)
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('Rename it')
     expect(wrapper.emitted('resolved')).toBeUndefined()
     expect(getReview.mock.calls.length).toBeGreaterThan(1)
@@ -361,7 +361,7 @@ describe('InboxEpicPanel', () => {
     expect(wrapper.get('[data-tab="diff"]').attributes('aria-current')).toBe('true')
     expect(wrapper.get('[data-diff]').text()).toBe('since.ts')
     expect(wrapper.get('[data-diff]').attributes('data-url')).toBe('https://github.com/o/r/compare/old...head')
-    await button(wrapper, 'Whole parent').trigger('click')
+    await button(wrapper, 'Whole task').trigger('click')
     expect(wrapper.get('[data-diff]').text()).toBe('whole.ts')
   })
 

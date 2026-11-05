@@ -57,7 +57,7 @@ async function agentApprove(project: { slug: string, repository: string }, task:
   for (const c of agentCriteria) await runner.call(dev.runId, dev.leaseEpoch, 'attach_evidence', { criterionId: c.id, kind: 'note', note: 'Evidence' })
   expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'commit_submitted', note: 'Done', summary: 'The change', headSha: `head-${task.id}`, baseSha: 'epic-tip' })).toMatchObject({ ok: true })
   const review = await assigned(task, 'reviewer')
-  if (agentCriteria.length < task.acceptanceCriteria.length) expect(review.prompt).toContain('who confirms them at the parent review')
+  if (agentCriteria.length < task.acceptanceCriteria.length) expect(review.prompt).toContain('who confirms them at the task review')
   expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Checked', headSha: `head-${task.id}`, criteria: agentCriteria.map(c => ({ criterionId: c.id, met: true, note: 'Checked' })) })).toMatchObject({ ok: true })
 }
 
@@ -78,7 +78,7 @@ async function toHumanReview(project: { repository: string }, epic: { id: string
   return (await inbox()).needsYou.find(i => i.id === epic.id) as EpicReviewItem
 }
 
-it('integrates sensitive and human-check work on agent approval, leaving both to the parent approval', async () => {
+it('integrates sensitive and human-check work on agent approval, leaving both to the task approval', async () => {
   const { project, epic } = await createEpic()
   const flagged = await t.createTask(project.slug, { epicId: epic.id, humanReview: true, acceptanceCriteria: ['Rotates the key'] })
   const checked = await t.createTask(project.slug, { epicId: epic.id, humanReview: false, acceptanceCriteria: ['API works', humanCheck] })
@@ -129,7 +129,7 @@ it('integrates sensitive and human-check work on agent approval, leaving both to
   expect(audit.map(a => a.detail)).toContainEqual(expect.objectContaining({ epicId: epic.id, event: 'human_approved', confirmedCriteria: [human.id], confirmedTasks: [flagged.id] }))
 })
 
-it('sends a new human check on a Ready to merge PR-free task to the parent, not to task review', async () => {
+it('sends a new human check on a Ready to merge PR-free task to the task, not to task review', async () => {
   const { project, epic } = await createEpic()
   const task = await t.createTask(project.slug, { epicId: epic.id, acceptanceCriteria: ['API works'] })
   await agentApprove(project, task)
@@ -166,7 +166,7 @@ it('keeps a prior approval for Backlog-only work, and invalidates it for board w
   await capture('invalidation-new-head.json', { afterApproval: 'ready_to_merge', afterNewEpicHead: await epicRow(epic.id) })
 })
 
-it('keeps task-level human review for standalone work and each_task parent tasks, each with its own PR', async () => {
+it('keeps task-level human review for standalone work and each_task tasks with subtasks, each with its own PR', async () => {
   const project = await t.createProject()
   const standalone = await t.createTask(project.slug, { humanReview: true, acceptanceCriteria: ['Bug is fixed'] })
   const { project: legacy, epic } = await createEpic('each_task')

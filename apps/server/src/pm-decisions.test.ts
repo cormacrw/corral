@@ -170,14 +170,14 @@ describe('PM tools for the Inbox, designs and agents', () => {
     it('confirms a card saved before D31, with its old tool, fields and wording', async () => {
       const { id: projectId } = await (await t.request('GET', `/api/projects/${slug}`)).json() as { id: string }
       const [epic] = await t.db.insert(schema.epics).values({ projectId, title: 'Saved', reviewMode: 'epic', createdBy: t.actor }).returning()
-      const card = await lowered('update_parent', { parentId: epic!.id, reviewMode: 'direct' }, 'from parent to direct')
+      const card = await lowered('update_parent', { parentId: epic!.id, reviewMode: 'direct' }, 'from task to direct')
       const [row] = await t.db.select().from(schema.planMessages).where(eq(schema.planMessages.id, card.actionId))
       const action = row!.pendingAction!
       await t.db.update(schema.planMessages).set({ pendingAction: {
         ...action,
         tool: 'update_epic',
         input: { epicId: epic!.id, reviewMode: 'direct' },
-        summary: action.summary.replaceAll('from parent to direct', 'from epic to direct')
+        summary: action.summary.replaceAll('from task to direct', 'from epic to direct')
       } }).where(eq(schema.planMessages.id, card.actionId))
       expect((await resolve(card.actionId, 'confirm')).status).toBe(200)
       expect((await t.db.select().from(schema.epics).where(eq(schema.epics.id, epic!.id)))[0]).toMatchObject({ reviewMode: 'direct' })
@@ -186,9 +186,9 @@ describe('PM tools for the Inbox, designs and agents', () => {
     it('takes a card for less review on an epic, not more', async () => {
       const { id: projectId } = await (await t.request('GET', `/api/projects/${slug}`)).json() as { id: string }
       const [epic] = await t.db.insert(schema.epics).values({ projectId, title: 'Gated', reviewMode: 'epic', createdBy: t.actor }).returning()
-      await lowered('update_epic', { epicId: epic!.id, reviewMode: 'direct' }, 'from parent to direct')
+      await lowered('update_epic', { epicId: epic!.id, reviewMode: 'direct' }, 'from task to direct')
       expect(await call('update_epic', { epicId: epic!.id, reviewMode: 'each_task' })).toMatchObject({ ok: true, result: { reviewMode: 'each_task' } })
-      await lowered('update_epic', { epicId: epic!.id, reviewMode: 'epic' }, 'from each_task to parent')
+      await lowered('update_epic', { epicId: epic!.id, reviewMode: 'epic' }, 'from each_task to task')
     })
 
     it('takes a card to lower a project\'s gates, and applies them on Confirm', async () => {

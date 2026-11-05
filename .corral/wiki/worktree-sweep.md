@@ -5,7 +5,7 @@ The `sweep_worktrees` setup job (`sweepWorktrees` in
 outside the job's keep list. Only `<uuid>`, `<uuid>-review`,
 `epic-<uuid>-review` and `pm-<uuid>-<uuid>` names are candidates; a looser
 pattern can't tell a task folder from anything else. `keepEpicIds` is optional
-for older servers, and without it parent checkouts are left alone.
+for older servers, and without it task checkouts are left alone.
 
 The job also clears `scratch/` and `spool/`, which it doesn't report: a Plan
 session's scratch folder goes with its session, and a `<uuid>` run's files go

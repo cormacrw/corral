@@ -4,9 +4,9 @@ import { z } from 'zod'
 const proposedTask = z.object({
   key: z.string().trim().min(1).describe('A short handle used by dependsOn, e.g. t1'),
   ref: z.string().trim().toUpperCase().optional().transform(ref => ref || undefined).describe('The ref of an existing Backlog or unclaimed Ready task this revises, e.g. COR-4; leave out for a new task'),
-  parent: z.string().trim().optional().describe('The key of its parent in parents, or the ref of an existing parent task; leave it out for a task on its own'),
+  parent: z.string().trim().optional().describe('The key of its parent in `parents`, or the ref of the task it belongs to; leave it out for a task on its own'),
   // Runners from before parent tasks (D31) send `epic`, with keys from `epics`
-  epic: z.string().trim().optional().describe('Older name for parent'),
+  epic: z.string().trim().optional().describe('Older name for the subtask’s parent'),
   title: z.string().trim().min(1),
   description: z.string().trim().describe('Markdown: one to three plain sentences a person reads to know what the task is and why. Put the approach, files and edge cases in implementationPlan'),
   implementationPlan: z.string().trim().optional().describe('Markdown for the agent that builds it: approach, file pointers, edge cases and test notes. On a task with a ref, include its current plan (from get_task) to keep it: a revision without one clears it'),
@@ -27,13 +27,13 @@ const proposedTask = z.object({
 const reviewMode = z.enum([...EPIC_REVIEW_MODES, 'parent'], { error: 'reviewMode must be one of parent, each_task, direct' }).optional()
   .transform(mode => mode === 'parent' ? 'epic' as const : mode)
 
-const REVIEW_MODE_HELP = 'How its sub-tasks reach the target branch: parent = human reviews the parent\'s PR; each_task = human also reviews every sub-task; direct = sub-tasks merge straight into the target branch. Leave it out for the project\'s default.'
+const REVIEW_MODE_HELP = 'How its subtasks reach the target branch: parent = human reviews the task\'s PR; each_task = human also reviews every subtask; direct = subtasks merge straight into the target branch. Leave it out for the project\'s default.'
 const parentFields = {
-  key: z.string().trim().min(1).describe('A short handle used by a task\'s parent, e.g. p1'),
-  ref: z.string().trim().toUpperCase().optional().transform(ref => ref || undefined).describe('An existing parent to add to, or a Draft, Backlog or unclaimed Ready task with no runs to turn into one, e.g. COR-4. It keeps its ref and comments, and its criteria move to its first sub-task. Leave out for a new parent'),
-  title: z.string().trim().default('').describe('Required for a new parent'),
+  key: z.string().trim().min(1).describe('A short handle referenced by each subtask’s `parent`, e.g. p1'),
+  ref: z.string().trim().toUpperCase().optional().transform(ref => ref || undefined).describe('An existing task to add to, or a Draft, Backlog or unclaimed Ready task with no runs to turn into one, e.g. COR-4. It keeps its ref and comments, and its criteria move to its first subtask. Leave out for a new task'),
+  title: z.string().trim().default('').describe('Required for a new task'),
   summary: z.string().trim().default(''),
-  dependsOn: z.array(z.string().trim()).optional().describe('Parent keys in this plan or refs of existing parents. Omit to keep dependencies in a revision; [] clears them. Sub-tasks wait until these parents are done.')
+  dependsOn: z.array(z.string().trim()).optional().describe('Task keys in this plan or refs of existing tasks with subtasks. Omit to keep dependencies in a revision; [] clears them. Subtasks wait until these tasks with subtasks are done.')
 }
 
 export const proposedPlanInput = z.object({

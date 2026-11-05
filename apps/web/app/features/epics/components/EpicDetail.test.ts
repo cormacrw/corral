@@ -194,6 +194,6 @@ it('keeps the description editor open when saving fails', async () => {
 
 it('keeps the epic page when only its activity can\'t load', async () => {
   const { wrapper, own } = await mountEpic({ tab: 'activity', activity: () => Promise.reject(new Error('Down')) })
-  expect((wrapper.get('[aria-label="Parent title"]').element as HTMLInputElement).value).toBe(own.title)
+  expect((wrapper.get('[aria-label="Task title"]').element as HTMLInputElement).value).toBe(own.title)
   expect(wrapper.findAll('[role="alert"]').map(a => a.text())).toEqual(['Couldn\'t load the activity.'])
 })

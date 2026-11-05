@@ -67,8 +67,8 @@ async function setDependencies(ids: string[]) {
       <AppSelect
         v-model="selected"
         :items="choices"
-        placeholder="Choose a parent task"
-        aria-label="Dependency parent"
+        placeholder="Choose a task"
+        aria-label="Dependency task"
         class="min-w-0 flex-1"
         :disabled="saving"
       />

@@ -12,7 +12,7 @@ const metCount = computed(() => props.task.acceptanceCriteria.filter(c => c.met)
 const note = computed(() => {
   if (!props.task.acceptanceCriteria.some(c => c.checkedByHuman)) return 'The reviewer marks criteria met from evidence.'
   return props.epic?.reviewMode === 'epic' && !props.task.pr && ['task', 'bug'].includes(props.task.type)
-    ? 'The reviewer checks other criteria from evidence. Human checks are completed on the parent review, once the parent is ready.'
+    ? 'The reviewer checks other criteria from evidence. Human checks are completed on the task\'s review, once every subtask is ready.'
     : 'The reviewer checks other criteria from evidence. Human checks are completed in the Inbox.'
 })
 

@@ -57,7 +57,7 @@ const list = computed((): Comment[] => comments.data.value ?? [])
       :key="props.taskRef"
       :draft="composerDraft"
       placeholder="Comment…"
-      hint="Saved as a note on this parent."
+      hint="Saved as a note on this task."
       :project="props.slug"
       :draft-key="`task:${props.taskRef}`"
       @submit="submit"

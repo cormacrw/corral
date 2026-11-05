@@ -70,7 +70,7 @@ These apply to **both** adapters, and to any later one. They keep the POC simple
 
 ## What a check script can read
 
-The runner strips every `CORRAL_*` setting from an agent's environment, with one exception: `CORRAL_CHECK_SCOPE`, which tells any project's check script what a developer run should check. `targeted` means required CI covers the full gates, so only fast, relevant checks are expected. `none` means an epic rebase run, where no checks are expected. Unset means the full check. It follows the project's required CI checks (see `.corral/wiki/bounded-checks.md`).
+The runner strips every `CORRAL_*` setting from an agent's environment, with one exception: `CORRAL_CHECK_SCOPE`, which tells any project's check script what a developer run should check. `targeted` means required CI covers the full gates, so only fast, relevant checks are expected. `none` means a task rebase run, where no checks are expected. Unset means the full check. It follows the project's required CI checks (see `.corral/wiki/bounded-checks.md`).
 
 ## What changes later (not now)
 

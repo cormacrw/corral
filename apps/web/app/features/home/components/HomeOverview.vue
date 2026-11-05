@@ -77,7 +77,7 @@ const shell = useShell()
         </DashboardCard>
 
         <DashboardCard
-          title="Parents"
+          title="Tasks with subtasks"
           subtitle="Touched most recently"
           class="lg:row-span-2"
         >

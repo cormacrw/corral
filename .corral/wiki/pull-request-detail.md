@@ -1,6 +1,6 @@
 # Pull request detail
 
-`GET /projects/:slug/tasks/:number/pull-request` returns a task's PR, and `GET /projects/:slug/pull-requests/:number` returns any PR on the project's repository, so the task and parent panels share one fetch (`readPullRequest` in `apps/server/src/pull-requests.ts`). Both read live from GitHub through the runner's `gh`; nothing is stored.
+`GET /projects/:slug/tasks/:number/pull-request` returns a task's PR, and `GET /projects/:slug/pull-requests/:number` returns any PR on the project's repository, so the task and task panels share one fetch (`readPullRequest` in `apps/server/src/pull-requests.ts`). Both read live from GitHub through the runner's `gh`; nothing is stored.
 
 The response is `PullRequestDetail`: title, description, base and head branches, and changed files with their additions, deletions and patch. A file's `patch` is empty when GitHub has no text diff for it, such as a binary or very large file.
 
@@ -10,7 +10,7 @@ Errors: a task with no PR is 404 `no_pull_request`. GitHub answering 404 is 404 
 
 ## In the Inbox
 
-`InboxPanel` shows the PR description and Code diff tabs from `useInboxPanel`, which fetches the PR by the number in the item's `prUrl`, through `taskPullRequestQuery`. That's the by-number route because a parent's Activity item carries the parent PR, not the task's. The key sits under `keys.tasks.detail(ref)`, not `keys.projects.pullRequests`, so the Pull requests page's polling and events don't cause a GitHub read for it. See [query-layer.md](query-layer.md#inbox) for what refreshes it.
+`InboxPanel` shows the PR description and Code diff tabs from `useInboxPanel`, which fetches the PR by the number in the item's `prUrl`, through `taskPullRequestQuery`. That's the by-number route because a task's Activity item carries the task's PR, not the task's. The key sits under `keys.tasks.detail(ref)`, not `keys.projects.pullRequests`, so the Pull requests page's polling and events don't cause a GitHub read for it. See [query-layer.md](query-layer.md#inbox) for what refreshes it.
 
 The query waits for the task, because only the task says whether the item is a design or spike. A task that failed to load therefore hides the tabs until its Retry works. Each open item fetches its PR straight away, for the N in Code diff N, even if neither tab is opened. N is `totalFiles`, not `files.length`.
 

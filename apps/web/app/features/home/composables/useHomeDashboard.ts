@@ -72,7 +72,7 @@ export function useHomeDashboard() {
       const project = projectOf(run.projectId)
       return {
         id: run.id,
-        ref: run.taskRef ?? (run.epicId ? 'Parent' : null),
+        ref: run.taskRef ?? (run.epicId ? 'Task' : null),
         taskRef: run.taskRef,
         title: liveRunTitle(run, session?.title ?? null),
         project,

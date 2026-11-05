@@ -56,7 +56,7 @@ describe('PM task and epic tools', () => {
     projectId = project.id
     slug = project.slug
     await request('PATCH', `/api/projects/${slug}`, { paused: true })
-    session = (await request('POST', '/api/plan/sessions', { projectId, text: 'Manage the test app tasks and parent tasks' })).body as PlanSessionDetail
+    session = (await request('POST', '/api/plan/sessions', { projectId, text: 'Manage the test app tasks and tasks with subtasks' })).body as PlanSessionDetail
     job = (await runner.next('run.assign', m => m.job.planSessionId === session.id)).job
     runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'pm-task-tools' })
   })
@@ -106,10 +106,10 @@ describe('PM task and epic tools', () => {
     }
   })
 
-  it('keeps parent review mode locked after PM attempts to detach PR or merged work', async () => {
+  it('keeps task review mode locked after PM attempts to detach PR or merged work', async () => {
     const [epic] = await t.db.insert(schema.epics).values({ projectId, title: 'Locked review', reviewMode: 'epic', createdBy: t.actor }).returning()
-    const [other] = await t.db.insert(schema.epics).values({ projectId, title: 'Other parent', createdBy: t.actor }).returning()
-    const task = (await call('create_task', { title: 'Keep on parent branch', type: 'task', epicId: epic!.id }) as { result: Task }).result
+    const [other] = await t.db.insert(schema.epics).values({ projectId, title: 'Other task', createdBy: t.actor }).returning()
+    const task = (await call('create_task', { title: 'Keep on task\'s branch', type: 'task', epicId: epic!.id }) as { result: Task }).result
     for (const state of [{ status: 'in_progress' as const, prNumber: 77, prUrl: 'https://github.com/cormacrw/test-app/pull/77' }, { status: 'merged' as const, prNumber: 77, prUrl: 'https://github.com/cormacrw/test-app/pull/77' }, { status: 'merged' as const, prNumber: null, prUrl: null }]) {
       await t.db.update(schema.tasks).set(state).where(eq(schema.tasks.id, task.id))
       expect(await call('update_epic', { epicId: epic!.id, reviewMode: 'direct' })).toMatchObject({ ok: false })
@@ -145,7 +145,7 @@ describe('PM task and epic tools', () => {
     expect(await call('update_task', { taskRef: task.ref, status: 'ready' })).toMatchObject({ ok: false })
   })
 
-  it('updates description, type, review, parent and dependencies with the shared validations', async () => {
+  it('updates description, type, review, task and dependencies with the shared validations', async () => {
     const prerequisite = await t.createTask(slug)
     const task = await t.createTask(slug)
     const [epic] = await t.db.insert(schema.epics).values({ projectId, title: 'Editable group', createdBy: t.actor }).returning()
@@ -273,7 +273,7 @@ describe('PM task and epic tools', () => {
       return e.type === 'run.updated' ? [{ type: e.type, id: e.run.id, state: e.run.state }] : []
     })
 
-    it('publishes the reset and interrupted run when a confirmed move_task puts parent work on the board', async () => {
+    it('publishes the reset and interrupted run when a confirmed move_task puts task work on the board', async () => {
       const { epic, run } = await reviewedEpic()
       const task = await t.createTask(slug, { epicId: epic.id })
       const id = await action('move_task', { taskRef: task.ref, transition: { type: 'approve' } })
@@ -286,7 +286,7 @@ describe('PM task and epic tools', () => {
       ]))
     })
 
-    it('publishes both resets and interrupted runs when update_task moves a board task between parent tasks', async () => {
+    it('publishes both resets and interrupted runs when update_task moves a board task between tasks with subtasks', async () => {
       const [first, second] = [await reviewedEpic(), await reviewedEpic()]
       const task = await t.createTask(slug, { epicId: first.epic.id })
       await t.db.update(schema.tasks).set({ status: 'ready' }).where(eq(schema.tasks.id, task.id))
@@ -388,11 +388,11 @@ describe('PM task and epic tools', () => {
     await action('delete_task', { taskRef: pendingDelete.ref })
   })
 
-  it('locks parent review mode for both PM tools and human PATCH once PR work exists', async () => {
-    for (const state of ['open task PR', 'merged task', 'deleted task PR', 'parent PR'] as const) {
+  it('locks task review mode for both PM tools and human PATCH once PR work exists', async () => {
+    for (const state of ['open task PR', 'merged task', 'deleted task PR', 'task\'s PR'] as const) {
       const [epic] = await t.db.insert(schema.epics).values({ projectId, title: state, reviewMode: 'epic', createdBy: t.actor }).returning()
       const task = await t.createTask(slug, { title: state, description: null, epicId: epic!.id })
-      if (state === 'parent PR') {
+      if (state === 'task\'s PR') {
         await t.db.update(schema.epics).set({ prNumber: 301 }).where(eq(schema.epics.id, epic!.id))
       } else {
         await t.db.update(schema.tasks).set({
@@ -406,7 +406,7 @@ describe('PM task and epic tools', () => {
       expect(await call('update_epic', { epicId: epic!.id, title: 'Rejected PM edit', reviewMode: 'each_task' })).toMatchObject({ ok: false })
       expect(await request('PATCH', `/api/epics/${epic!.id}`, { title: 'Rejected human edit', reviewMode: 'direct' })).toMatchObject({
         status: 409,
-        body: { error: { code: 'invalid_input', issues: [{ message: 'The review mode can\'t change once a task in the parent has submitted work or opened a PR' }] } }
+        body: { error: { code: 'invalid_input', issues: [{ message: 'The review mode can\'t change once a subtask in the task has submitted work or opened a PR' }] } }
       })
       expect((await request('GET', `/api/epics/${epic!.id}`)).body).toMatchObject({ title: state, reviewMode: 'epic' })
       expect((await request('GET', `/api/epics/${epic!.id}/activity`)).body).toEqual(activity)
@@ -418,7 +418,7 @@ describe('PM task and epic tools', () => {
     expect(await call('update_epic', { epicId: editable!.id, reviewMode: 'each_task' })).toMatchObject({ ok: true, result: { reviewMode: 'each_task' } })
   })
 
-  it('edits parent metadata and dependencies atomically, audits them and refuses foreign parent tasks', async () => {
+  it('edits task metadata and dependencies atomically, audits them and refuses foreign tasks with subtasks', async () => {
     const [first, second] = await t.db.insert(schema.epics).values(['Foundation', 'Application'].map(title => ({ projectId, title, createdBy: t.actor }))).returning()
     expect(await call('update_epic', { epicId: second!.id, title: 'Application delivery', summary: 'Build on the foundation', reviewMode: 'each_task', dependsOn: [first!.id] })).toMatchObject({ ok: true, result: { title: 'Application delivery', reviewMode: 'each_task', dependsOn: [first!.id] } })
     const activity = (await request('GET', `/api/epics/${second!.id}/activity`)).body as AuditEntry[]

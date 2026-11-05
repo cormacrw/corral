@@ -52,7 +52,7 @@ const expanded = ref(false)
         v-if="tasks.length === 0"
         class="text-sm text-muted-foreground"
       >
-        No tasks in this parent yet.
+        No subtasks yet.
       </p>
     </div>
   </article>

@@ -27,7 +27,7 @@ async function submit() {
         autoresize
         autofocus
         :rows="5"
-        placeholder="What this parent is for, in markdown"
+        placeholder="What this task is for, in markdown"
         class="w-full"
         @keydown.esc="editing = false"
       />

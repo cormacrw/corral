@@ -24,7 +24,7 @@ const item = computed(() => inbox.data.value?.needsYou.find(i => i.id === props.
         target="_blank"
         rel="noopener"
         class="font-medium text-brand hover:underline"
-      >Parent PR #{{ epic.prNumber }}</a>
+      >Task's PR #{{ epic.prNumber }}</a>
       <AppBadge
         v-if="epic.reviewState"
         :label="EPIC_REVIEW_STATE[epic.reviewState].label"

@@ -228,7 +228,7 @@ route('GET', '/projects/:slug/epics', ([slug]) => f.epics.filter(e => e.projectI
 route('GET', '/epics/:id/review', ([id]) => {
   const review = f.epicReview(id!) ?? notFound()
   if (review.reviewMode === 'direct') {
-    const message = 'This parent merges its tasks straight to the target branch, so it has no parent review'
+    const message = 'This task merges its subtasks straight to the target branch, so it has no task review'
     throw new ApiError(409, { code: 'invalid_input', issues: [{ message }] }, message)
   }
   return review
@@ -251,7 +251,7 @@ route('PATCH', '/epics/:id', ([id], body) => {
   const epic = f.epics.find(e => e.id === id) ?? notFound()
   const input = body as PatchEpicInput
   if (input.reviewMode && input.reviewMode !== epic.reviewMode && epic.reviewModeLocked) {
-    const message = 'The review mode can\'t change once a task in the parent has opened a PR'
+    const message = 'The review mode can\'t change once a subtask has opened a PR'
     throw new ApiError(409, { code: 'invalid_input', issues: [{ message }] }, message)
   }
   Object.assign(epic, input, { updatedAt: new Date().toISOString() })

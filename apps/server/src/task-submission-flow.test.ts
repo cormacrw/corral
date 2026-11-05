@@ -49,7 +49,7 @@ async function row(task: Created) {
   return (await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id)))[0]!
 }
 
-it('submits an sub-task as a commit, without a PR, and starts agent review of it', async () => {
+it('submits an subtask as a commit, without a PR, and starts agent review of it', async () => {
   const { project, task } = await epicTask()
   const dev = await assigned(task, 'developer')
   expect(dev.integrationProtocol).toBe(1)
@@ -71,7 +71,7 @@ it('rejects a PR outcome on this path, and a submission with no commits of its o
   expect(await row(task)).toMatchObject({ status: 'in_progress', headSha: null })
 })
 
-it('gives the reviewer the commit, parent base, criteria and evidence, and binds the verdict to that commit', async () => {
+it('gives the reviewer the commit, task base, criteria and evidence, and binds the verdict to that commit', async () => {
   const { project, task } = await epicTask()
   await t.db.update(schema.projects).set({ requiredChecks: ['ci'] }).where(eq(schema.projects.id, project.id))
   const dev = await assigned(task, 'developer')
@@ -91,7 +91,7 @@ it('gives the reviewer the commit, parent base, criteria and evidence, and binds
   expect(await t.db.select().from(schema.reviews).where(eq(schema.reviews.taskId, task.id))).toEqual([])
 
   t.github.setBranch(project.repository, dev.branch, 'head-1')
-  expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', verdict(task, 'approved', 'head-1'))).toMatchObject({ ok: true, result: { message: expect.stringContaining('integrates it into the parent branch') } })
+  expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', verdict(task, 'approved', 'head-1'))).toMatchObject({ ok: true, result: { message: expect.stringContaining('integrates it into the task\'s branch') } })
   expect(await t.db.select().from(schema.taskSubmissions).where(eq(schema.taskSubmissions.taskId, task.id))).toMatchObject([{ agentApprovedHeadSha: 'head-1', integratedCommitSha: null }])
   // Approval isn't completion: the task waits and no GitHub merge is attempted
   await t.orchestrator.merges.tick()
@@ -122,7 +122,7 @@ it('binds an approved rebase review to the new commit and carries the approval t
   expect(await t.db.select().from(schema.taskSubmissions).where(eq(schema.taskSubmissions.taskId, task.id)).orderBy(schema.taskSubmissions.sequence)).toMatchObject([{ agentApprovedHeadSha: 'head-1' }, { agentApprovedHeadSha: 'head-2' }])
 })
 
-it('leaves a human check open through a rebase review, for the parent approval', async () => {
+it('leaves a human check open through a rebase review, for the task approval', async () => {
   const { project, task } = await epicTask('epic', { acceptanceCriteria: ['It works', { text: 'On a real iPhone', checkedByHuman: true }] })
   const dev = await assigned(task, 'developer')
   await submit(dev, project.repository, task, 'head-1')
@@ -176,7 +176,7 @@ it('continues a stopped run on the same branch and still submits a commit', asyn
   expect(await row(task)).toMatchObject({ status: 'agent_review', prNumber: null })
 })
 
-it('keeps a selected task on its parent', async () => {
+it('keeps a selected task on its task', async () => {
   const { project, task } = await epicTask()
   await assigned(task, 'developer')
   const patched = await t.request('PATCH', `/api/projects/${project.slug}/tasks/${task.number}`, { epicId: null })
@@ -219,7 +219,7 @@ it.each(['spike', 'design'] as const)('leaves a %s with its own deliverable', as
   expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'commit_submitted', note: 'Wrong', summary: 'Wrong', headSha: 'h', baseSha: 'b' })).toMatchObject({ ok: false, error: expect.stringContaining(type === 'design' ? 'design_submitted' : 'findings_reported') })
 })
 
-it('keeps an sub-task on a legacy runner, or with a PR already on its branch, on the PR path', async () => {
+it('keeps an subtask on a legacy runner, or with a PR already on its branch, on the PR path', async () => {
   const legacy = await FakeRunner.connect(t.server!.url, [], 'legacy', {})
   try {
     const fresh = await epicTask()

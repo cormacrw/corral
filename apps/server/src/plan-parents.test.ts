@@ -9,7 +9,7 @@ import { FakeRunner } from './test-runner.ts'
 const { agents, epics, tasks } = schema
 
 // Parents in plans (D31), over the runner protocol with a fake runner as the PM
-describe('plans with parent tasks', () => {
+describe('plans with tasks with subtasks', () => {
   let t: TestApp
   let runner: FakeRunner
   beforeAll(async () => {
@@ -39,7 +39,7 @@ describe('plans with parent tasks', () => {
   const listed = (slug: string) => t.request('GET', `/api/projects/${slug}/tasks`).then(r => r.json()) as Promise<Task[]>
   const approve = async (plans: () => Promise<{ id: string }[]>, to = 'backlog') => t.request('POST', `/api/plan/plans/${(await plans()).at(-1)!.id}/approve`, { to })
 
-  it('makes a parent of two or more sub-tasks, and takes no parent for a single unit of work', async () => {
+  it('makes a task of two or more subtasks, and takes no task for a single unit of work', async () => {
     const { project, propose, plans } = await start()
     expect(await propose({ parents: [{ key: 'p', title: 'Search', summary: 'Find things', reviewMode: 'each_task' }], tasks: [item('a', { parent: 'p' }), item('b', { parent: 'p' }), item('c', { dependsOn: ['p'] })] })).toMatchObject({ ok: true })
     expect((await approve(plans)).status).toBe(200)
@@ -53,14 +53,14 @@ describe('plans with parent tasks', () => {
     expect(all.find(task => task.title === 'Task c')!.dependsOn).toEqual([a.ref, b.ref])
   })
 
-  it('refuses a parent with one sub-task', async () => {
+  it('refuses a task with one subtask', async () => {
     const { project, propose } = await start()
     const result = await propose({ parents: [{ key: 'p', title: 'Search' }], tasks: [item('a', { parent: 'p' })] })
-    expect(JSON.stringify(result)).toContain('at least two sub-tasks')
+    expect(JSON.stringify(result)).toContain('at least two subtasks')
     expect(await listed(project.slug)).toEqual([])
   })
 
-  it('adds to an existing parent by its ref', async () => {
+  it('adds to an existing task by its ref', async () => {
     const { project, propose, plans, job } = await start()
     await propose({ parents: [{ key: 'p', title: 'Search' }], tasks: [item('a', { parent: 'p' }), item('b', { parent: 'p' })] })
     await approve(plans)
@@ -73,7 +73,7 @@ describe('plans with parent tasks', () => {
     expect(read).toMatchObject({ title: 'Search', rollup: { total: 3 } })
   })
 
-  it('promotes a task on approval, keeping its ref and moving its criteria to the first sub-task', async () => {
+  it('promotes a task on approval, keeping its ref and moving its criteria to the first subtask', async () => {
     const { project, propose, plans } = await start()
     const big = await t.createTask(project.slug, { title: 'Big one', acceptanceCriteria: [{ text: 'A human looks', checkedByHuman: true }], humanReview: true })
     expect(await propose({ parents: [{ key: 'p', ref: big.ref }], tasks: [item('a', { parent: 'p' }), item('b', { parent: 'p' })] })).toMatchObject({ ok: true })
@@ -103,7 +103,7 @@ describe('plans with parent tasks', () => {
     expect(JSON.stringify(await propose({ parents: [{ key: 'p', ref: big.ref }], tasks: [item('a', { parent: 'p' }), item('b', { parent: 'p' })] }))).toContain('follow-up')
   })
 
-  it('can\'t lower an existing parent\'s review mode by a plan', async () => {
+  it('can\'t lower an existing task\'s review mode by a plan', async () => {
     const { project, propose, plans, job } = await start()
     await propose({ parents: [{ key: 'p', title: 'Search', reviewMode: 'each_task' }], tasks: [item('a', { parent: 'p' }), item('b', { parent: 'p' })] })
     await approve(plans)
@@ -113,7 +113,7 @@ describe('plans with parent tasks', () => {
     expect(JSON.stringify(await next.propose({ parents: [{ key: 'p', ref: parent.ref, reviewMode: 'direct' }], tasks: [item('c', { parent: 'p' })] }))).toContain('update_parent')
   })
 
-  it('collapses an old runner\'s one-task epic, and gives its two-task epic a parent, on a previous tool contract', async () => {
+  it('collapses an old runner\'s one-task epic, and gives its two-task epic a task, on a previous tool contract', async () => {
     const old = await FakeRunner.connect(t.server!.url, [], 'old-runner', { toolContract: COMPATIBLE_TOOL_CONTRACTS[0]! })
     await t.db.update(agents).set({ paused: false })
     const { runners: status } = await t.request('GET', '/api/runner').then(r => r.json()) as { runners: { id: string, toolContractReason?: string | null, draining: boolean }[] }
