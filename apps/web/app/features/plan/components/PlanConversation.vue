@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, provide, ref, watch } from 'vue'
+import { useElementSize } from '@vueuse/core'
 import { FLYOUT_SHEETS } from '~/features/tasks/composables/useTaskFlyout'
 import { STOP_ASKING } from '~/features/plan/utils/plan-questions'
 import { usePlanActions } from '~/features/plan/composables/usePlanActions'
@@ -33,9 +34,27 @@ async function backToPrompt() {
   await router.push('/plan')
 }
 
-// Desktop opens a waiting plan on arrival; phones keep the conversation visible.
-watch(() => latest.value?.id, (planId) => {
-  if (!device.isMobile.value && planId && latest.value?.status === 'proposed' && !flyout.ref.value && !flyout.epic.value && !flyout.plan.value) flyout.openPlan({ replace: true })
+// Desktop floats the latest plan beside the thread when the column has room
+// for both (.corral/wiki/plan-beside-thread.md): the card's 340px and its
+// margins, next to a thread of at least 480px. Narrower, the plan opens in
+// the flyout as before. Phones keep the pill and sheets.
+const column = ref<HTMLElement | null>(null)
+const { width: columnWidth } = useElementSize(column)
+const BESIDE = 364 // the card, its 24px gap and 16px right margin, less the log's 16px padding
+const beside = computed(() => !device.isMobile.value && Boolean(latest.value) && columnWidth.value >= 32 + 480 + BESIDE)
+// The thread stays centred while the card fits to its right, then moves left
+const threadStyle = computed(() => beside.value ? { marginInline: `auto max(${BESIDE}px, calc((100% - 768px) / 2))` } : undefined)
+const card = ref<HTMLElement | null>(null)
+
+// Narrow desktop opens a waiting plan in the flyout on arrival, once the
+// column is measured; phones keep the conversation visible.
+watch([() => latest.value?.id, () => columnWidth.value > 0], ([planId, measured]) => {
+  if (device.isMobile.value || !measured || beside.value) return
+  if (planId && latest.value?.status === 'proposed' && !flyout.ref.value && !flyout.epic.value && !flyout.plan.value) flyout.openPlan({ replace: true })
+}, { immediate: true })
+// A ?plan link opens the page with the card showing instead of the flyout
+watch([beside, flyout.plan], ([shown, inFlyout]) => {
+  if (shown && inFlyout) void flyout.close()
 }, { immediate: true })
 
 const { log, content, onLogScroll } = usePlanThreadScroll(() => {
@@ -73,7 +92,10 @@ const { log, content, onLogScroll } = usePlanThreadScroll(() => {
       </template>
     </MobilePageHeader>
     <div class="flex min-h-0 flex-1 max-[1100px]:flex-col">
-      <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div
+        ref="column"
+        class="flex min-h-0 min-w-0 flex-1 flex-col"
+      >
         <PlanSessionHeader
           v-if="!device.isMobile.value"
           :session="session"
@@ -99,42 +121,66 @@ const { log, content, onLogScroll } = usePlanThreadScroll(() => {
         </div>
         <div
           v-else-if="session"
-          ref="log"
-          role="log"
-          aria-live="polite"
-          class="relative min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
-          @scroll.passive="onLogScroll"
+          class="relative flex min-h-0 flex-1 flex-col"
         >
           <div
-            ref="content"
-            class="mx-auto flex w-full max-w-[768px] flex-col gap-4"
+            ref="log"
+            role="log"
+            aria-live="polite"
+            class="relative min-h-0 flex-1 overflow-y-auto overscroll-contain p-4"
+            @scroll.passive="onLogScroll"
           >
-            <PlanMessages
-              :session="session"
-              :pm-name="pmName"
-              :active-run-id="activeRunId"
-              :latest="latest"
-              :cant-send="cantSend"
-              :refining="starting?.taskRef"
-              :failed="starting?.state === 'failed'"
-              @retry="send('Please continue.')"
-              @resolved="load"
-              @answer="quick"
-              @other="composer?.focus()"
-              @stop="quick(STOP_ASKING)"
-            />
-            <AppAlert
-              v-if="starting?.state === 'failed'"
-              color="error"
-              title="Message not sent"
-              :description="starting.error ?? undefined"
-              :actions="[{ label: 'Retry', onClick: () => pending.start(props.sessionId) }, { label: 'Back to prompt', onClick: backToPrompt }]"
-            />
-            <PlanLiveTurn
-              v-if="activeRunId || waitingForStart"
-              :events="liveEvents"
-              :pm-name="pmName"
-              :working="project ? 'Reading the code, wiki and board…' : 'Checking the board…'"
+            <div
+              ref="content"
+              :class="['flex max-w-[768px] flex-col gap-4', !beside && 'mx-auto w-full']"
+              :style="threadStyle"
+            >
+              <PlanMessages
+                :session="session"
+                :pm-name="pmName"
+                :active-run-id="activeRunId"
+                :latest="latest"
+                :cant-send="cantSend"
+                :refining="starting?.taskRef"
+                :failed="starting?.state === 'failed'"
+                :plan-beside="beside"
+                @show-plan="card?.focus()"
+                @retry="send('Please continue.')"
+                @resolved="load"
+                @answer="quick"
+                @other="composer?.focus()"
+                @stop="quick(STOP_ASKING)"
+              />
+              <AppAlert
+                v-if="starting?.state === 'failed'"
+                color="error"
+                title="Message not sent"
+                :description="starting.error ?? undefined"
+                :actions="[{ label: 'Retry', onClick: () => pending.start(props.sessionId) }, { label: 'Back to prompt', onClick: backToPrompt }]"
+              />
+              <PlanLiveTurn
+                v-if="activeRunId || waitingForStart"
+                :events="liveEvents"
+                :pm-name="pmName"
+                :working="project ? 'Reading the code, wiki and board…' : 'Checking the board…'"
+              />
+            </div>
+          </div>
+          <!-- Over the log rather than in it, so it stays put and doesn't change what the scroll measures -->
+          <div
+            v-if="beside && latest"
+            ref="card"
+            tabindex="-1"
+            data-testid="plan-beside"
+            class="absolute top-4 right-4 flex max-h-[calc(100%-2rem)] w-85 flex-col overflow-hidden rounded-lg border border-border bg-background shadow-sm focus-visible:outline-2 focus-visible:outline-primary"
+          >
+            <PlanDetail
+              :plan="latest"
+              :previous="previous"
+              :busy="approving === latest.id"
+              :disabled="cantApprove"
+              card
+              @approve="approve(latest, $event)"
             />
           </div>
         </div>
@@ -167,7 +213,7 @@ const { log, content, onLogScroll } = usePlanThreadScroll(() => {
       />
       <TaskFlyout v-else>
         <template
-          v-if="latest"
+          v-if="latest && !beside"
           #plan
         >
           <PlanDetail
