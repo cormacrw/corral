@@ -21,6 +21,6 @@ a role and a run. `actorNames` (`apps/server/src/actor-names.ts`) resolves
 them the way the project overview does: the PM by its role (also for an
 action the human confirmed through the PM), other agents by their run's
 agent. Task and epic history return it as `AuditEntry.agentName`, and the
-Inbox uses it for task and epic event senders. When the agent can't be found
+Inbox uses it for task and epic event senders, as the parent History panel does for agents. When the agent can't be found
 the entry shows the role label ("Developer") with initials; a PM-confirmed
 action reads "Juno · confirmed by you", with only the name on the avatar.
