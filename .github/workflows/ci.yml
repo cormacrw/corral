@@ -1,14 +1,18 @@
 name: ci
 
-on: push
+# Not on main: every change reaches main through a PR branch that already ran
+# this, and auto-deploy.sh deploys main without waiting for CI (D16)
+on:
+  push:
+    branches-ignore:
+      - main
 
 permissions:
   contents: read
 
-# Never cancelled on main: auto-deploy.sh reads this check for each commit there
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 jobs:
   ci:
@@ -68,7 +72,8 @@ jobs:
 
       # The deployed database has already run every migration on main, so
       # changing one would leave it out of step with the schema. Add a new
-      # migration instead. On main itself, compare with the previous push.
+      # migration instead. A branch with nothing beyond main compares with
+      # its previous push.
       - name: Existing migrations are unchanged
         run: |
           base=$(git merge-base origin/main HEAD)
