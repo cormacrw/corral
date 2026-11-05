@@ -38,7 +38,7 @@ async function shimFlock(bin: string): Promise<void> {
 
 // Runs the real scripts/deploy/auto-deploy.sh in a scratch checkout. docker
 // runs `compose exec` commands locally, so the script's api helper talks to
-// this test server; curl answers that CI passed; origin is a local bare repo
+// this test server; origin is a local bare repo
 // standing in for github.com/<repository>.
 describe('auto-deploy.sh reporting the deployment', () => {
   let t: TestApp
@@ -86,7 +86,7 @@ describe('auto-deploy.sh reporting the deployment', () => {
       'if [ "$1 $2" = "compose exec" ]; then shift 4; exec "$@"; fi',
       'exit 0'
     ].join('\n'))
-    await writeFile(join(bin, 'curl'), `#!/usr/bin/env bash\necho '{"check_runs":[{"status": "completed", "conclusion": "success"}]}'\n`)
+    await writeFile(join(bin, 'curl'), '#!/usr/bin/env bash\nexit 1\n')
     await chmod(join(bin, 'docker'), 0o755)
     await chmod(join(bin, 'curl'), 0o755)
     await shimFlock(bin)
@@ -200,7 +200,14 @@ describe('auto-deploy.sh deciding what to do', { timeout: 30_000 }, () => {
     main = []
     await mkdir(join(dir, 'bin'))
     await writeFile(join(dir, 'bin/docker'), fakeDocker)
-    await writeFile(join(dir, 'bin/curl'), `#!/usr/bin/env bash\necho "{\\"check_runs\\":[{\\"status\\": \\"completed\\", \\"conclusion\\": \\"\${FAKE_CI:-success}\\"}]}"\n`)
+    await writeFile(join(dir, 'bin/curl'), `#!/usr/bin/env bash
+ echo "curl $*" >>"$FAKE/log"
+ if [ "$FAKE_CI" = missing ]; then
+   echo '{"check_runs":[]}'
+ else
+   echo '{"check_runs":[{"name":"ci","status":"completed","conclusion":"failure"}]}'
+ fi
+`)
     await Promise.all(['docker', 'curl'].map(name => chmod(join(dir, 'bin', name), 0o755)))
     await shimFlock(join(dir, 'bin'))
     execFileSync('git', ['init', '--quiet', '--bare', '--initial-branch=main', join(dir, 'origin.git')])
@@ -293,15 +300,18 @@ describe('auto-deploy.sh deciding what to do', { timeout: 30_000 }, () => {
     expect(await state('deployed')).toBe(sha)
   })
 
-  it('deploys a commit whose CI failed once a re-run passes, and logs the failure once', async () => {
+  it.for(['missing', 'failure'])('deploys without consulting GitHub when CI is %s', async (ci) => {
     const sha = await commit('apps/server/src/m.ts')
 
-    expect((await deploy({ FAKE_CI: 'failure' })).output).toContain('CI failed')
-    expect((await deploy({ FAKE_CI: 'failure' })).output).toBe('')
-    expect(await state('skipped')).toBe(sha)
+    const result = await deploy({ FAKE_CI: ci })
 
-    await deploy()
+    expect(result.code).toBe(0)
+    const lines = await log()
+    expect(lines).toContain(`docker compose build SHA=${sha}`)
+    expect(lines.some(line => line.startsWith('docker compose up'))).toBe(true)
+    expect(lines.filter(line => line.startsWith('curl '))).toEqual([])
     expect(await state('deployed')).toBe(sha)
+    expect(await state('skipped')).toBeNull()
   })
 
   it('retries a failed build a few times, then waits for a new commit', async () => {
