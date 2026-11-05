@@ -114,9 +114,13 @@ const flyout = useTaskFlyout()
           />
           <details
             v-if="task.implementationPlan"
-            class="mt-1"
+            class="group mt-1"
           >
-            <summary class="tap-target flex cursor-pointer items-center rounded-md focus-visible:outline-2 focus-visible:outline-primary">
+            <summary class="tap-target flex cursor-pointer list-none items-center gap-1 rounded-md focus-visible:outline-2 focus-visible:outline-primary [&::-webkit-details-marker]:hidden">
+              <Icon
+                name="i-hugeicons-arrow-right-01"
+                class="size-3.5 transition-transform group-open:rotate-90"
+              />
               Implementation plan
             </summary>
             <MarkdownText

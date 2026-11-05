@@ -16,3 +16,6 @@ Both are rich text on `tasks`; the plan is nullable and existing tasks have none
 - Web: task detail shows it collapsed under the description and hides it when
   empty (editors get "Add implementation plan"); the plan panel shows each
   proposed task's description with its plan in a closed `<details>`.
+  "Changes from vN" labels a revised task "implementation plan changed" or
+  "description changed". Only revisions keep text per version: a Draft shows
+  its current text in every version, so a changed Draft gets only its badge.

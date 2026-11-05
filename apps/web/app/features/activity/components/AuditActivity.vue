@@ -4,8 +4,8 @@ import { actorLabel } from '~/features/activity/utils/auditText'
 import { ROLE, timeAgo } from '~/utils/labels'
 
 const props = defineProps<{ entry: AuditEntry, text: string }>()
-const fieldLabels: Record<string, string> = { acceptanceCriteria: 'acceptance criteria', humanReview: 'human review', epicId: 'epic', dependsOn: 'dependencies', reviewMode: 'review mode' }
-const displayText = computed(() => props.text.replace(/\b(acceptanceCriteria|humanReview|epicId|dependsOn|reviewMode)\b/g, field => fieldLabels[field]!))
+const fieldLabels: Record<string, string> = { acceptanceCriteria: 'acceptance criteria', implementationPlan: 'implementation plan', humanReview: 'human review', epicId: 'epic', dependsOn: 'dependencies', reviewMode: 'review mode' }
+const displayText = computed(() => props.text.replace(/\b(acceptanceCriteria|implementationPlan|humanReview|epicId|dependsOn|reviewMode)\b/g, field => fieldLabels[field]!))
 const sessionId = computed(() => {
   const actor = props.entry.actor
   return actor.kind === 'agent' ? actor.sessionId : actor.kind === 'human' ? actor.viaPm?.sessionId : undefined

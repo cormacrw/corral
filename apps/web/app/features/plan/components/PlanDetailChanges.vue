@@ -15,7 +15,9 @@ const changeColor = { added: 'success', changed: 'warning', unchanged: 'neutral'
 // Removed Drafts are deleted (D10), so only their count is left to show
 const changed = computed(() => currentTasks(props.plan).filter(t => t.change !== 'unchanged'))
 const removed = computed(() => props.plan.tasks.length - currentTasks(props.plan).length)
-// Which of a changed task's texts differ from the previous version's
+// Which of a changed task's texts differ from the previous version's. Only
+// revisions keep their text per version; a Draft shows its current text in
+// every version, so a changed Draft gets its badge without this label.
 function textChanges(task: Plan['tasks'][number]): string[] {
   const before = props.previous.tasks.find(t => t.key === task.key)
   if (!before || task.change !== 'changed') return []
