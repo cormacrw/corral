@@ -61,15 +61,19 @@ On the web, `/projects` renders in the normal shell as a plain project list.
 
 ## Home
 
-`/home` is the global dashboard, counted from the live task lists so it matches each project's Board and updates without a reload:
+`/home` on a phone is the same `HomeOverview` as the web Home ([home.md](home.md)) with `mobile` set: the same data (`useHomeOverview`), sections and order, stacked in one column (`p-4`, `gap-4`, at most 640 px wide). Every change is behind `mobile`, so desktop Home is unaffected. The page never scrolls sideways.
 
-- **Runner status** ("Runner online", or "{online} of {total} runners online" with several) and a project filter (**All projects** or one project) · **Today**. Runner status is shown only here.
-- **Tiles:** **To do** (Ready), **In progress** (In progress, Agent review, Human review and Ready to merge) and **Completed today** (tasks merged and designs approved since local midnight) with how many merged tasks were first-pass (no changes requested).
-- **Today totals**, immediately after the count tiles: **Runs** and **Usage**, from `todayStats` (`features/agents/utils/agents.ts`), counting today’s queued runs and their input plus output tokens. Both respect the project filter. The note reads "Usage is in tokens from your own subscription." Completed today already covers PRs merged.
-- **In progress by stage:** a bar and counts per stage, and a link to the Inbox with the blocked (Blocked and Failed) and waiting-for-your-review (Human review) counts.
-- **Agents:** each agent with small muted text only for Paused or Waiting on usage limit; working agents first, indicated by their border, ring and animated avatar, with each active run's task, project, status, run number (PR number for reviews) and elapsed time. Runs come from `GET /api/runs`, refetched on `run.updated`; the cards show only active runs. Tapping an agent opens its agent page.
+1. **Runner line** (no title row): a green or red dot, "Runner online" (or "{online} of {total} runners online" with several) · All projects. Runner status is shown only here on phones. There is no project filter: Throughput and Open work already split by project, and each project has its own overview and Board.
+2. **Needs you** spans both columns and opens the Inbox.
+3. **In flight** and **Merged this week** side by side, then **Median cycle time** and **Runs today** side by side. Runs today's hint is "{tokens} tokens · {n} failed" (the failed part only when some failed).
+4. **Throughput**, 150 px tall with 4 date labels.
+5. **Tasks with subtasks**, the 4 touched most recently; each whole row opens the task.
+6. **Open work by project**, 44 px rows, each opening the project's Board.
+7. **Agents · Running now**: each 44 px row opens the agent page, with the task ref as plain text rather than a link. **All agents** is a 44 px button.
 
-- **Tasks with subtasks**, below Agents: live tasks with subtasks with at least one non-Draft task and fewer merged tasks than total tasks, newest updated first. Rows link to the task and show “N of M merged” with an accessible two-segment meter. All projects shows the project name and colour dot; selecting one project hides those labels. When none qualify, show “No tasks with subtasks in progress.”
+Every tap target is at least 44 px tall.
+
+**States.** While the task lists load, the tiles show `–` and Throughput, Tasks with subtasks and Open work show skeleton blocks under their card headers; Agents and Runs today wait the same way for runs. When runs fail to load, "Couldn't load recent runs" with a 44 px **Retry** sits above Needs you, Runs today reads `–` "couldn't load runs", Agents falls back to its empty copy, and the task-based sections still render. Empty sections use their own copy: "Nothing merged in the last 30 days.", "No tasks with subtasks yet.", "No agent is working right now."
 
 ## Board
 

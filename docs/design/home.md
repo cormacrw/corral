@@ -1,6 +1,6 @@
 # Home
 
-**Route:** `/home`, from the sidebar's **Home** item. Phones show the single-column dashboard in [mobile.md](mobile.md#home) instead.
+**Route:** `/home`, from the sidebar's **Home** item. Phones show the same Home in its mobile layout ([mobile.md](mobile.md#home)): same sections, same order, one column.
 
 A snapshot of the whole workspace: what's moving, what's merged and who's working, across every project. Project colours are each project's own (`projectColor`), as in the sidebar.
 

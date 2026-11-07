@@ -5,8 +5,9 @@ import { OPEN_STAGES } from '~/features/home/utils/overview'
 import { STATUS } from '~/utils/labels'
 
 // Each project's open work as one bar split by stage, Backlog excluded. One
-// hue, light to dark, because the stages are in order.
-const props = defineProps<{ rows: { project: Project & { color: string }, total: number, stages: Record<OpenStage, number> }[] }>()
+// hue, light to dark, because the stages are in order. On a phone (`mobile`)
+// each row is a 44 px tap target.
+const props = defineProps<{ rows: { project: Project & { color: string }, total: number, stages: Record<OpenStage, number> }[], mobile?: boolean }>()
 
 const COLORS: Record<OpenStage, string> = {
   ready: 'var(--chart-1)',
@@ -29,7 +30,7 @@ const legend = OPEN_STAGES.map(s => ({ label: STATUS[s].label, color: COLORS[s] 
       v-for="r in bars"
       :key="r.project.id"
       :to="`/projects/${r.project.slug}/board`"
-      class="-mx-2 grid grid-cols-[minmax(0,7rem)_1fr_2rem] items-center gap-3 rounded-md px-2 py-1 text-sm hover:bg-muted"
+      :class="['-mx-2 grid grid-cols-[minmax(0,7rem)_1fr_2rem] items-center gap-3 rounded-md px-2 py-1 text-sm hover:bg-muted', mobile && 'min-h-11 active:bg-muted']"
     >
       <span class="flex items-center gap-1.5 truncate">
         <span
