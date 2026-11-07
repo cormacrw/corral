@@ -67,6 +67,7 @@ export function useHomeOverview() {
     openWork: computed(() => openWork(projects.value, lists.tasks.value)),
     epics: computed(() => recentEpics(projects.value, lists.epics.value, lists.tasks.value, 6)),
     runs: history.runs,
+    runsLoading: history.loading,
     now: history.now,
     runsFailed: history.failed,
     runsError: history.error,

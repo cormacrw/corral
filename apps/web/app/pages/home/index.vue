@@ -1,10 +1,9 @@
 <script setup lang="ts">
 useSeoMeta({ title: 'Home · Corral' })
-// A phone keeps its own single-column dashboard (design/mobile.md)
+// One Home on every device; a phone gets its mobile layout (design/mobile.md#home)
 const device = useDevice()
 </script>
 
 <template>
-  <HomeDashboard v-if="device.isMobile.value" />
-  <HomeOverview v-else />
+  <HomeOverview :mobile="device.isMobile.value" />
 </template>

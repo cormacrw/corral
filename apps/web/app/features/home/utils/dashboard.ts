@@ -1,55 +1,7 @@
-import type { Run, Task } from '@corral/contracts'
-import { isTaskDone, type TaskStatus } from '@corral/core'
-import { completedAt } from '~/features/runs/utils/completion.ts'
+import type { Run } from '@corral/contracts'
 import { runTitle } from '~/utils/labels.ts'
 
-// The Home dashboard's numbers (design/mobile.md), all counted from the live
-// task lists so they match the Board's columns for the same project.
-
-// In progress is every approved, unmerged status an agent or the human is
-// moving (D10). Blocked and failed are counted separately.
-export const IN_PROGRESS_STAGES = ['in_progress', 'agent_review', 'human_review', 'ready_to_merge'] as const satisfies readonly TaskStatus[]
-export type InProgressStage = typeof IN_PROGRESS_STAGES[number]
-
-export interface DashboardCounts {
-  // Ready, not started: the Board's Ready column
-  todo: number
-  inProgress: number
-  stages: Record<InProgressStage, number>
-  // The Board's Blocked & failed column
-  blocked: number
-  // Human review
-  waitingForReview: number
-  mergedToday: number
-  // Merged tasks among those, without the reviewer asking for changes. Approved
-  // designs have no PR review to pass, matching the project overview's rate.
-  firstPassToday: number
-}
-
-// Whether an ISO time falls on the same local calendar day as `now`
-export function isToday(iso: string | null, now = new Date()): boolean {
-  if (!iso) return false
-  const at = new Date(iso)
-  return at.getFullYear() === now.getFullYear() && at.getMonth() === now.getMonth() && at.getDate() === now.getDate()
-}
-
-export function dashboardCounts(tasks: Pick<Task, 'type' | 'status' | 'mergedAt' | 'updatedAt' | 'reviewRounds'>[], now = new Date()): DashboardCounts {
-  const stages = Object.fromEntries(IN_PROGRESS_STAGES.map(s => [s, 0])) as Record<InProgressStage, number>
-  const counts: DashboardCounts = { todo: 0, inProgress: 0, stages, blocked: 0, waitingForReview: 0, mergedToday: 0, firstPassToday: 0 }
-  for (const task of tasks) {
-    if (task.status === 'ready') counts.todo++
-    else if ((IN_PROGRESS_STAGES as readonly TaskStatus[]).includes(task.status)) {
-      counts.inProgress++
-      stages[task.status as InProgressStage]++
-    } else if (task.status === 'blocked' || task.status === 'failed') counts.blocked++
-    else if (isTaskDone(task) && isToday(completedAt(task), now)) {
-      counts.mergedToday++
-      if (task.status === 'merged' && task.reviewRounds === 0) counts.firstPassToday++
-    }
-  }
-  counts.waitingForReview = stages.human_review
-  return counts
-}
+// Small helpers for Home's live agents list
 
 // How long a run has been going, short: "45s", "18m", "2h 5m"
 export function elapsed(startIso: string | null, now = Date.now()): string {
