@@ -10,10 +10,9 @@ import { agentFacts, designerStats, sameDay, usedTokens } from '~/features/agent
 
 // An agent's page (design/agent.md): the agent from the route, its runs,
 // the selected run's transcript (streamed while live) and its stats. The
-// web page and the mobile screens share it. `autoSelect` picks the current
-// or latest run when the URL names none, as the web page's transcript pane
-// does; mobile only shows a transcript for a run in the URL.
-export function useAgentRuns(options: { autoSelect: () => boolean }) {
+// web page and the mobile screens share it. Only a run named in the URL is
+// selected: with none, the web page shows the agent's dashboard.
+export function useAgentRuns() {
   const route = useRoute()
   const toast = useToast()
   const name = computed(() => String(route.params.name))
@@ -34,11 +33,7 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
 
   const selectedId = computed(() => typeof route.params.runId === 'string' ? route.params.runId : null)
   const current = computed(() => runs.value.find(isLiveRun) ?? null)
-  const selected = computed(() => {
-    const named = runs.value.find(r => r.id === selectedId.value)
-    if (named || !options.autoSelect()) return named ?? null
-    return current.value ?? runs.value[0] ?? null
-  })
+  const selected = computed(() => runs.value.find(r => r.id === selectedId.value) ?? null)
   // Live events append to this same query
   const transcript = useQuery(computed(() => ({ ...runTranscriptQuery(selected.value?.id ?? ''), enabled: !!selected.value })))
   const events = computed(() => transcript.data.value ?? [])
@@ -95,30 +90,30 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
     const count = (outcome: string) => thisWeek.value.filter(r => r.outcome === outcome).length
     switch (agent.value.role) {
       case 'developer': return [
-        { label: 'Runs this week', value: String(thisWeek.value.length), sub: `${today.value.length} today` },
-        { label: 'PRs opened', value: String(count('pr_opened') + count('pr_updated') + count('commit_submitted')), sub: 'incl. revisions and commits' },
-        { label: 'Stuck', value: String(count('stuck')), sub: 'asked you' },
-        { label: 'Avg run', value: avgRun.value, sub: 'this week' },
-        { label: 'Usage today', value: usageToday.value, sub: 'tokens' }
+        { label: 'Runs this week', value: String(thisWeek.value.length), sub: `${today.value.length} today`, icon: 'i-hugeicons-play' },
+        { label: 'PRs opened', value: String(count('pr_opened') + count('pr_updated') + count('commit_submitted')), sub: 'incl. revisions and commits', icon: 'i-hugeicons-git-pull-request' },
+        { label: 'Stuck', value: String(count('stuck')), sub: 'asked you', icon: 'i-hugeicons-alert-02' },
+        { label: 'Avg run', value: avgRun.value, sub: 'this week', icon: 'i-hugeicons-clock-01', avg: true },
+        { label: 'Usage today', value: usageToday.value, sub: 'tokens', icon: 'i-hugeicons-coins-01' }
       ]
       case 'designer': return [
-        { label: 'Runs this week', value: String(thisWeek.value.filter(r => r.role === 'designer').length), sub: `${today.value.length} today` },
-        { label: 'Design versions submitted', value: error.value ? '—' : String(designerStats(runs.value, designs.value).submitted), sub: 'recent authoring runs' },
-        { label: 'Designs approved', value: error.value ? '—' : String(designerStats(runs.value, designs.value).approved), sub: 'tasks · recent runs' },
-        { label: 'Avg run', value: avgRun.value, sub: 'this week' },
-        { label: 'Usage today', value: usageToday.value, sub: 'tokens' }
+        { label: 'Runs this week', value: String(thisWeek.value.filter(r => r.role === 'designer').length), sub: `${today.value.length} today`, icon: 'i-hugeicons-play' },
+        { label: 'Design versions submitted', value: error.value ? '—' : String(designerStats(runs.value, designs.value).submitted), sub: 'recent authoring runs', icon: 'i-hugeicons-task-01' },
+        { label: 'Designs approved', value: error.value ? '—' : String(designerStats(runs.value, designs.value).approved), sub: 'tasks · recent runs', icon: 'i-hugeicons-checkmark-circle-02' },
+        { label: 'Avg run', value: avgRun.value, sub: 'this week', icon: 'i-hugeicons-clock-01', avg: true },
+        { label: 'Usage today', value: usageToday.value, sub: 'tokens', icon: 'i-hugeicons-coins-01' }
       ]
       case 'reviewer': return [
-        { label: 'Reviews this week', value: String(thisWeek.value.length), sub: `${today.value.length} today` },
-        { label: 'Approved', value: String(count('approved')), sub: '' },
-        { label: 'Changes requested', value: String(count('changes_requested')), sub: '' },
-        { label: 'Avg review', value: avgRun.value, sub: 'this week' },
-        { label: 'Usage today', value: usageToday.value, sub: 'tokens' }
+        { label: 'Reviews this week', value: String(thisWeek.value.length), sub: `${today.value.length} today`, icon: 'i-hugeicons-play' },
+        { label: 'Approved', value: String(count('approved')), sub: '', icon: 'i-hugeicons-checkmark-circle-02' },
+        { label: 'Changes requested', value: String(count('changes_requested')), sub: '', icon: 'i-hugeicons-pencil-edit-02' },
+        { label: 'Avg review', value: avgRun.value, sub: 'this week', icon: 'i-hugeicons-clock-01', avg: true },
+        { label: 'Usage today', value: usageToday.value, sub: 'tokens', icon: 'i-hugeicons-coins-01' }
       ]
       default: return [
-        { label: 'Turns this week', value: String(thisWeek.value.length), sub: `${today.value.length} today` },
-        { label: 'Avg turn', value: avgRun.value, sub: 'this week' },
-        { label: 'Usage today', value: usageToday.value, sub: 'tokens' }
+        { label: 'Turns this week', value: String(thisWeek.value.length), sub: `${today.value.length} today`, icon: 'i-hugeicons-play' },
+        { label: 'Avg turn', value: avgRun.value, sub: 'this week', icon: 'i-hugeicons-clock-01', avg: true },
+        { label: 'Usage today', value: usageToday.value, sub: 'tokens', icon: 'i-hugeicons-coins-01' }
       ]
     }
   })
