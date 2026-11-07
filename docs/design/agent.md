@@ -24,11 +24,12 @@ See what an agent is doing right now, attach to its live run, and look back at p
 
   | Role | Tiles |
   |---|---|
-  | Developer | Runs this week · PRs merged · First-pass approval · Avg run · Usage today |
-  | Designer | Runs this week · Design versions submitted · Designs approved · Avg run · Usage today |
-  | Reviewer | Reviews this week · Approved · Changes requested (avg rounds per task) · Avg review · Usage today |
-  | PM | Turns this week · Plans approved · Tasks proposed · Avg turn · Usage today |
+  | Developer | Runs this week · PRs opened (incl. revisions and commits) · Stuck · Avg run · Usage today |
+  | Reviewer | Reviews this week · Approved · Changes requested · Avg review · Usage today |
+  | Designer | Runs this week · Design versions submitted · Designs approved · Avg run · Usage today (version counts are "—" if the design data fails) |
+  | PM | Turns this week · Avg turn · Usage today |
 
+- Avg run / review / turn has a sparkline of the median run length per day over 14 days, shown only when 2 or more days have finished runs. Its data, and the page's charts, come from `GET /api/runs?agentId=&since=<local midnight 13 days ago>` (`useAgentActivity`), so other agents' run volume can't push this agent's oldest days past the history cap. The tiles keep the latest 50 runs (`GET /api/runs?agentId=`).
 - Designer tiles count authoring runs, submitted versions and design tasks whose version the human approved; they do not count PRs. The facts line shows a task worktree on `design/<ref>` and `.corral/agents/designer.md` (built-in defaults when absent; D23).
 - **Facts line:** group and concurrency (for the PM, "One turn per session" instead: it has no concurrency limit beyond one turn per Plan session; D13), where it runs (one worktree per task, a read-only task worktree, or a read-only checkout of main), its instructions file (mono, e.g. `.corral/agents/developer.md`), and its caps or limits.
 - Usage is in tokens, with no dollar cost on a subscription. Show it where available (agent-runtime-and-auth.md, rule 6).

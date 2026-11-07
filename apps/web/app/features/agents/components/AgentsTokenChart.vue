@@ -5,13 +5,15 @@ import type { ChartConfig } from '~/components/ui/chart'
 import { ChartContainer, ChartCrosshair, ChartTooltip, ChartTooltipContent, componentToString } from '~/components/ui/chart'
 import type { TokenDay } from '~/features/agents/utils/fleet'
 import { formatTokens, TOKEN_ROLES } from '~/features/agents/utils/fleet'
+import type { AgentRole } from '@corral/core'
 import { ROLE } from '~/utils/labels'
 
-// Tokens per day (input, cache writes and output), stacked by role
-const props = withDefaults(defineProps<{ days: TokenDay[], height?: number }>(), { height: 220 })
+// Tokens per day (input, cache writes and output), stacked by role. An
+// agent's page passes `only` its own role, which keeps that role's colour.
+const props = withDefaults(defineProps<{ days: TokenDay[], height?: number, only?: AgentRole }>(), { height: 220, only: undefined })
 
 const COLORS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)']
-const roles = TOKEN_ROLES.map((role, i) => ({ role, label: ROLE[role], color: COLORS[i]! }))
+const roles = TOKEN_ROLES.map((role, i) => ({ role, label: ROLE[role], color: COLORS[i]! })).filter(r => !props.only || r.role === props.only)
 const config = Object.fromEntries(roles.map(r => [r.role, { label: r.label, color: r.color }])) satisfies ChartConfig
 const data = computed(() => props.days.map(d => ({ index: d.index, ...d.byRole })))
 type Row = typeof data.value[number]
@@ -72,6 +74,9 @@ const empty = computed(() => props.days.every(d => Object.values(d.byRole).every
         />
       </VisXYContainer>
     </ChartContainer>
-    <ChartLegend :items="roles.map(r => ({ label: r.label, color: r.color }))" />
+    <ChartLegend
+      v-if="!only"
+      :items="roles.map(r => ({ label: r.label, color: r.color }))"
+    />
   </div>
 </template>

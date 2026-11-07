@@ -1,6 +1,6 @@
 import type { Run } from '@corral/contracts'
 import { describe, expect, it } from 'vitest'
-import { busyShare, runBars, runTone, tokensByDay } from './fleet'
+import { busyShare, dayBars, dayLane, medianMinutesByDay, outcomesByDay, runBars, runTone, tokensByDay } from './fleet'
 
 const HOUR = 3_600_000
 const now = new Date(2026, 10, 4, 15, 0).getTime()
@@ -24,6 +24,8 @@ describe('runTone', () => {
     expect(runTone(run({ outcome: 'rate_limited' }))).toBe('quiet')
     expect(runTone(run({ state: 'interrupted', outcome: null }))).toBe('quiet')
     expect(runTone(run({}))).toBe('done')
+    // A PM turn completes with nothing to report
+    expect(runTone(run({ role: 'pm', state: 'completed', outcome: null }))).toBe('done')
   })
 })
 
@@ -60,5 +62,57 @@ describe('busyShare', () => {
     expect(busyShare(runs, { id: 'a1', role: 'developer', concurrency: 1 }, 12, now)).toBeCloseTo(5 / 12)
     expect(busyShare(runs, { id: 'a1', role: 'developer', concurrency: 2 }, 12, now)).toBeCloseTo(5 / 24)
     expect(busyShare(runs, { id: 'other', role: 'developer', concurrency: 1 }, 12, now)).toBe(0)
+  })
+})
+
+describe('dayBars', () => {
+  it('gives each day with runs a lane, today first, with x the hour of day', () => {
+    const at = (daysAgo: number, hour: number) => new Date(2026, 10, 4 - daysAgo, hour).toISOString()
+    const bars = dayBars([
+      run({ id: 'today', startedAt: at(0, 9), endedAt: at(0, 10) }),
+      run({ id: 'late', startedAt: at(2, 23), endedAt: at(1, 1) }),
+      run({ id: 'yesterday', startedAt: at(1, 6), endedAt: at(1, 7) }),
+      run({ id: 'live', state: 'running', outcome: null, startedAt: at(0, 14), endedAt: null }),
+      run({ id: 'old', startedAt: at(7, 9), endedAt: at(7, 10) }),
+      run({ id: 'queued', state: 'queued', outcome: null, startedAt: null, endedAt: null })
+    ], 7, now)
+    expect(bars.map(b => [b.run.id, b.lane, b.x, b.hours])).toEqual([
+      ['today', 'Today', 9, 1],
+      ['live', 'Today', 14, 1],
+      ['yesterday', 'Yesterday', 6, 1],
+      // Clipped at the end of the day it started; days 3–6 had no runs, so no lanes
+      ['late', dayLane(2, new Date(2026, 10, 2)), 23, 1]
+    ])
+    expect(dayLane(2, new Date(2026, 10, 2))).toMatch(/^2 \S+$/)
+  })
+})
+
+describe('outcomesByDay', () => {
+  it('counts ended runs per day by how they ended, leaving out live ones', () => {
+    const days = outcomesByDay([
+      run({ queuedAt: ago(1) }),
+      run({ role: 'pm', outcome: null, queuedAt: ago(1) }),
+      run({ outcome: 'changes_requested', queuedAt: ago(1) }),
+      run({ outcome: 'stuck', queuedAt: ago(1) }),
+      run({ state: 'interrupted', outcome: null, queuedAt: ago(1) }),
+      run({ state: 'running', outcome: null, endedAt: null, queuedAt: ago(1) }),
+      run({ outcome: 'rate_limited', queuedAt: ago(24) })
+    ], 14, now)
+    expect(days).toHaveLength(14)
+    expect(days[13]).toMatchObject({ byTone: { done: 2, changes: 1, failed: 1, quiet: 1 }, total: 5 })
+    expect(days[12]).toMatchObject({ byTone: { done: 0, changes: 0, failed: 0, quiet: 1 }, total: 1 })
+    expect(days[0]!.total).toBe(0)
+  })
+})
+
+describe('medianMinutesByDay', () => {
+  it('is the median length of each day’s ended runs, and null for a day with none', () => {
+    const lengths = medianMinutesByDay([
+      run({ queuedAt: ago(5), startedAt: ago(5), endedAt: new Date(now - 5 * HOUR + 10 * 60_000).toISOString() }),
+      run({ queuedAt: ago(5), startedAt: ago(5), endedAt: new Date(now - 5 * HOUR + 30 * 60_000).toISOString() }),
+      run({ queuedAt: ago(48), startedAt: ago(48), endedAt: ago(47) }),
+      run({ queuedAt: ago(24), startedAt: ago(24), endedAt: null, state: 'running', outcome: null })
+    ], 3, now)
+    expect(lengths).toEqual([60, null, 20])
   })
 })
