@@ -29,6 +29,8 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
   const list = useQuery(computed(() => ({ ...runsQuery({ agentId: agent.value?.id }), enabled: !!agent.value })))
   const runs = computed(() => list.data.value ?? [])
   const pending = list.isPending
+  // The runs themselves failed, as opposed to a designer's design data
+  const runsFailed = computed(() => !!list.error.value)
 
   const selectedId = computed(() => typeof route.params.runId === 'string' ? route.params.runId : null)
   const current = computed(() => runs.value.find(isLiveRun) ?? null)
@@ -84,7 +86,11 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
   })
   const today = computed(() => runs.value.filter(r => sameDay(r.queuedAt, minute.value)))
   const usageToday = computed(() => tokens(today.value.reduce((n, r) => n + usedTokens(r), 0)))
-  const tiles = computed(() => {
+  // Without the runs every count is unknown: a dash and the reason, never a zero
+  const tiles = computed(() => list.error.value
+    ? roleTiles.value.map(tile => ({ ...tile, value: '—', sub: 'Couldn\'t load runs' }))
+    : roleTiles.value)
+  const roleTiles = computed(() => {
     if (!agent.value) return []
     const count = (outcome: string) => thisWeek.value.filter(r => r.outcome === outcome).length
     switch (agent.value.role) {
@@ -158,7 +164,7 @@ export function useAgentRuns(options: { autoSelect: () => boolean }) {
     }
   }
 
-  return { name, agent, status, limited, missing, runs, pending, error, events, now, selected, current, load, today, tiles, facts, stop, stopping: stopping.isPending, resume, project, projectName, runnerOnline, sent, message }
+  return { name, agent, status, limited, missing, runs, pending, error, runsFailed, events, now, selected, current, load, today, tiles, facts, stop, stopping: stopping.isPending, resume, project, projectName, runnerOnline, sent, message }
 }
 
 export type AgentRuns = ReturnType<typeof useAgentRuns>
