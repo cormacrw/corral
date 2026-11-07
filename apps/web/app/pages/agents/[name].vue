@@ -6,7 +6,7 @@ definePageMeta({ taskFlyout: true })
 
 const route = useRoute()
 const device = useDevice()
-const view = useAgentRuns({ autoSelect: () => !device.isMobile.value })
+const view = useAgentRuns()
 const { agent } = view
 useSeoMeta({ title: () => `${agent.value?.name ?? 'Agent'} · Corral` })
 </script>

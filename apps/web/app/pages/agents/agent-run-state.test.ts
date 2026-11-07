@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { runs } from '~/prototype/fixtures'
 import AgentDetail from '~/features/agents/components/AgentDetail.vue'
+import AgentRunRow from '~/features/agents/components/AgentRunRow.vue'
 import AgentRunPanel from '~/features/agents/components/AgentRunPanel.vue'
 import MobileAgentRun from '~/features/agents/components/MobileAgentRun.vue'
 import RunTranscriptPane from '~/features/runs/components/RunTranscriptPane.vue'
@@ -27,7 +28,7 @@ function runView() {
   const selected = vue.ref(runs[0]!)
   const view = {
     name: vue.ref('Juno'), agent: vue.ref({ name: 'Juno', role: 'pm', activeRuns: 0 }), status: vue.ref(null), limited: vue.ref(false), runs: vue.ref(runs), error: vue.ref(null), events: vue.ref([]),
-    now: vue.ref(Date.parse('2026-11-04T12:00:00Z')), selected, load: vi.fn(), today: vue.ref([]), tiles: vue.ref([]), facts: vue.ref(''), stop: vi.fn(), resume: vi.fn(), projectName: () => '', sent: vue.ref({})
+    now: vue.ref(Date.parse('2026-11-04T12:00:00Z')), selected, load: vi.fn(), today: vue.ref([]), tiles: vue.ref([]), facts: vue.ref(''), stop: vi.fn(), resume: vi.fn(), pending: vue.ref(false), runsFailed: vue.ref(false), project: () => ({ name: 'Corral', thumbnailColor: null }), projectName: () => 'Corral', sent: vue.ref({})
   }
   return { view, selected }
 }
@@ -40,8 +41,8 @@ async function expectFreshStatePerRun(wrapper: VueWrapper, selected: vue.Ref<typ
   for (const name of ['RunComposer', 'RunTranscript']) expect(wrapper.get<HTMLTextAreaElement>(`[data-testid="${name}"]`).element.value).toBe('')
 }
 const global = {
-  components: { AgentDetail, AgentRunPanel, RunTranscriptPane, RunComposer: stateful('RunComposer'), RunTranscript: stateful('RunTranscript'), AppPanel: vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', slots.default?.()) }) },
-  stubs: { AppButton: true, AppBadge: true, AppAlert: true, UiSkeleton: true, AgentAvatar: true, TaskFlyout: true, RunTimingBreakdown: true, NuxtLink: true, Icon: true }
+  components: { AgentDetail, AgentRunPanel, AgentRunRow, RunTranscriptPane, RunComposer: stateful('RunComposer'), RunTranscript: stateful('RunTranscript'), AppPanel: vue.defineComponent({ setup: (_, { slots }) => () => vue.h('div', slots.default?.()) }) },
+  stubs: { AppButton: true, AppBadge: true, AppAlert: true, UiSkeleton: true, AgentAvatar: true, TaskFlyout: true, RunTimingBreakdown: true, NuxtLink: true, Icon: true, AgentDashboard: { render: () => vue.h('section', { 'data-testid': 'dashboard' }) } }
 }
 
 it('gives each run its own composer and transcript on desktop', async () => {
@@ -73,12 +74,22 @@ it('shows the agent or the run on a phone, never both', () => {
   expect(run.find('[data-testid="child"]').exists()).toBe(true)
 })
 
-it('keeps the runs list beside the transcript with no run in the URL on the web, and opens a run from it', async () => {
+it('lands on the dashboard on the web, even with a live run, and opens no run', () => {
+  const wrapper = mountAgent({ name: 'Juno' }, false)
+  expect(wrapper.find('[data-testid="dashboard"]').exists()).toBe(true)
+  expect(wrapper.find('[data-testid="child"]').exists()).toBe(false)
+  expect(wrapper.find('[data-testid="agent-activity-link"]').exists()).toBe(false)
+})
+
+it('shows the runs list beside the run on the web, with Activity back to the dashboard, and opens a run from it', async () => {
   const push = vi.fn()
-  const wrapper = mountAgent({ name: 'Juno' }, false, push)
+  const wrapper = mountAgent({ name: 'Juno', runId: runs[0]!.id }, false, push)
+  expect(wrapper.find('[data-testid="dashboard"]').exists()).toBe(false)
   expect(wrapper.find('[data-testid="child"]').exists()).toBe(true)
+  expect(wrapper.get('[data-testid="agent-activity-link"]').attributes('to')).toBe('/agents/Juno')
   const items = wrapper.findAll('li button')
   expect(items).toHaveLength(runs.length)
+  expect(items[0]!.find('[data-testid="project-dot"]').exists()).toBe(true)
   await items[1]!.trigger('click')
   expect(push).toHaveBeenCalledWith(`/agents/Juno/${runs[1]!.id}`)
 })

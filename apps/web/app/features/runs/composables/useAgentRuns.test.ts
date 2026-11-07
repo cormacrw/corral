@@ -34,7 +34,7 @@ it('keeps the runs list and ignores an old transcript after switching runs', asy
   let view!: ReturnType<typeof useAgentRuns>
   const { wrapper } = mountWithQuery(vue.defineComponent({
     setup() {
-      view = useAgentRuns({ autoSelect: () => true })
+      view = useAgentRuns()
       return () => null
     }
   }))

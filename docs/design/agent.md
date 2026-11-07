@@ -1,7 +1,7 @@
 # Agent
 
 **Canvas frames:** `App shell · Agent (Atlas)`, `Agent view (component)`
-**Route:** `/agents/:name` (current run, or the latest run) and `/agents/:name/runs/:runId`
+**Route:** `/agents/:name` (the Activity dashboard; it never opens a run on its own, even a live one) and `/agents/:name/:runId` (the run view)
 **Scope:** global. An agent works across every project. This replaces the old Runs page.
 
 ## Purpose
@@ -14,13 +14,13 @@ See what an agent is doing right now, attach to its live run, and look back at p
 
 - the avatar, with a ping dot while working
 - the name and a status badge only for **Paused** (neutral) or **Waiting on usage limit** (neutral). Idle agents have no marker. Explicit `paused` means Paused; only a future `pausedUntil` means Waiting on usage limit. Expired cooldowns are idle. All agent screens use `agentStatus` in `utils/labels.ts`
-- "{Role} · {runtime} · {summary}" (Claude Code or Codex, D18), e.g. "6 runs today"
+- "{Role} · {runtime} · {summary}" (Claude Code or Codex, D18), e.g. "6 runs today". The run count is left out while the runs load or when they fail to load
 - **Resume now** (outline), only while Waiting on usage limit: clears the wait so the agent can run again. If the limit is real, its next run pauses it again
 - **Agent settings** (outline; goes to Settings › Agents)
 
 ### Info and stats (bottom border)
 
-- **Stat tiles:** an auto-fit grid with a 150px minimum. Each tile has a label, a big tabular number and a sub-line. They depend on the role:
+- **Stat tiles:** `StatTile`s in the Agents dashboard's grid (2 / 3 / 5 columns), each with an icon, a label, a big tabular number and a sub-line. They show on the Activity dashboard only. When the runs fail to load each reads "—" with "Couldn't load runs". They depend on the role:
 
   | Role | Tiles |
   |---|---|
@@ -34,9 +34,18 @@ See what an agent is doing right now, attach to its live run, and look back at p
 - **Facts line:** group and concurrency (for the PM, "One turn per session" instead: it has no concurrency limit beyond one turn per Plan session; D13), where it runs (one worktree per task, a read-only task worktree, or a read-only checkout of main), its instructions file (mono, e.g. `.corral/agents/developer.md`), and its caps or limits.
 - Usage is in tokens, with no dollar cost on a subscription. Show it where available (agent-runtime-and-auth.md, rule 6).
 
-### Body: two panes
+### Activity (desktop, no run in the URL)
+
+Under the tiles and facts line, a `lg:grid-cols-3` grid (`AgentDashboard`):
+
+- Left, two columns: **Runs** (`AgentsRunTimeline`, last 7 days, one lane per day that has runs, x 00:00–24:00; a live run is a live bar in Today; empty: "No runs in the last 7 days."), then **Outcomes** (`AgentOutcomeChart`, 14 days) and **Tokens** (`AgentsTokenChart` with `only=<role>`, 14 days, no legend).
+- Right: **Recent runs** (`AgentRecentRuns`), up to 42rem tall and scrolling inside the card. A live run is pinned first with a primary edge, a **Live** badge and its elapsed time. Rows are the run rows below, with errors up to two lines. Selecting one opens `/agents/:name/:runId`. Empty: "No runs yet. Runs show here once {name} picks up its first task."
+- Loading: skeleton tiles, a skeleton in each chart card and skeleton rows. Load error: a "Couldn't load {name}'s activity" alert with Retry (it refetches the runs and the history), chart cards read "Unavailable", Recent runs shows `AppLoadError` with Retry, and no zero or empty-state copy shows.
+
+### Run view (desktop, a run in the URL): two panes
 
 1. **Runs list** (320px):
+   - **← Activity** at the top goes back to the dashboard.
    - **Current run:** pinned at the top, with the working pulse.
    - **Previous runs:** each row shows the task ref ("task" for a task's integration review, "Plan" for a PM turn), when it ran, the title (the task's, or the task's for an integration review), and "{project dot} {project} · Run #128 · 18m". A run that ended with an error shows it on a line below (`error` text, up to three lines).
    - Run rows have no tags. Finished runs show their outcome only in the selected run header: PR opened / PR updated / Plan proposed (`primary`), Approved / Answered (`success`), Changes requested (`warning`), Stuck / Failed (`error`), Rate limited / Stopped / Interrupted (neutral).
