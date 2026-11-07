@@ -338,6 +338,9 @@ it('keeps structured findings and separate rounds at their reviewed heads, inclu
   expect(operation!.fixBrief).toContain('UI sends query but the API expects search.')
   // A duplicate report cannot append a second round.
   expect(await runner.call(first.runId, first.leaseEpoch, 'report_outcome', input)).toMatchObject({ ok: false })
+  // The report poked a scheduling pass. Let it finish first: a pass that
+  // read the PR before the push below would start review on the old head.
+  await t.orchestrator.schedule()
   // The fix's own path is covered in epic-sync.test.ts; here it only moves the head
   await t.db.update(schema.taskIntegrationOperations).set({ state: 'failed' }).where(eq(schema.taskIntegrationOperations.epicId, epic.id))
   await t.db.update(schema.runs).set({ state: 'failed', endedAt: new Date() }).where(and(eq(schema.runs.epicId, epic.id), eq(schema.runs.role, 'developer')))

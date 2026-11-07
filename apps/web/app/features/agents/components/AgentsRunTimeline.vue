@@ -6,8 +6,9 @@ import { RUN_TONE } from '~/features/agents/utils/fleet'
 import { runRef, runTitle } from '~/utils/labels'
 
 // Every agent run over the last `hours` hours, one lane per agent (unovis
-// Timeline). Now is at the right edge.
-const props = defineProps<{ bars: RunBar[], hours: number }>()
+// Timeline). Now is at the right edge. An agent's page passes its own lanes
+// (one per day), `ticks` and `tick` for an hour-of-day axis, and `empty`.
+const props = defineProps<{ bars: RunBar[], hours: number, ticks?: number[], tick?: (v: number) => string, empty?: string }>()
 
 const escape = (text: string) => text.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`)
 const minutes = (hours: number) => {
@@ -33,8 +34,8 @@ const timeline = {
 }
 // As tall as its lanes, plus the axis
 const height = computed(() => new Set(props.bars.map(b => b.lane)).size * timeline.rowHeight + 36)
-const ticks = computed(() => Array.from({ length: props.hours / 2 + 1 }, (_, i) => i * 2))
-const tick = (v: number) => v === props.hours ? 'now' : `-${props.hours - v}h`
+const ticks = computed(() => props.ticks ?? Array.from({ length: props.hours / 2 + 1 }, (_, i) => i * 2))
+const tick = (v: number) => props.tick ? props.tick(v) : v === props.hours ? 'now' : `-${props.hours - v}h`
 const legend = Object.values(RUN_TONE).map(t => ({ label: t.label, color: t.color }))
 </script>
 
@@ -44,7 +45,7 @@ const legend = Object.values(RUN_TONE).map(t => ({ label: t.label, color: t.colo
       v-if="bars.length === 0"
       class="py-10 text-center text-sm text-muted-foreground"
     >
-      No runs in the last {{ hours }} hours.
+      {{ empty ?? `No runs in the last ${hours} hours.` }}
     </p>
     <VisXYContainer
       v-else
