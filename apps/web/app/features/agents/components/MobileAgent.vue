@@ -4,13 +4,21 @@ import { isActiveRun } from '@corral/core'
 import type { Run } from '@corral/contracts'
 import type { AgentRuns } from '~/features/agents/composables/useAgentRuns'
 import { agentIdleNote } from '~/features/agents/utils/agents'
+import { ACTIVITY_DAYS, hourTick, useAgentActivity } from '~/features/agents/composables/useAgentActivity'
 import { duration, timeAgo } from '~/utils/labels'
 
 // An agent's page on mobile (design/agent.md, design/mobile.md): the
-// header and stat tiles, then the current run and previous runs. Each run
-// opens its transcript, or its linked Plan conversation for a PM turn.
+// header and stat tiles, the current run, its Activity charts, then previous
+// runs. Each run opens its transcript, or its linked Plan conversation for a
+// PM turn. Without the runs nothing is guessed: the run sections read
+// "Unavailable", never idle or empty.
 const props = defineProps<{ view: AgentRuns }>()
-const { name, agent, missing, runs, pending, error, now, current, load, project } = props.view
+const { name, agent, missing, runs, pending, error, runsFailed, now, current, tiles, facts, load, project } = props.view
+
+const activity = useAgentActivity(() => agent.value?.id, load)
+const { bars, outcomes, tokens, lengths, loading: chartsLoading, failed: chartsFailed } = activity
+// Loading tiles are skeletons; on an error they show their dashes
+const tilesLoading = computed(() => pending.value && !runsFailed.value)
 
 const previous = computed(() => runs.value.filter(r => !isActiveRun(r.state)))
 const to = (run: Run) => run.role === 'pm' && run.planSessionId
@@ -37,10 +45,39 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isActiveRu
       :view="view"
     />
 
+    <div class="flex flex-col gap-3">
+      <!-- The tiles scroll sideways rather than wrap -->
+      <div class="flex snap-x gap-2 overflow-x-auto overscroll-x-contain px-4 pb-1">
+        <template v-if="tilesLoading">
+          <UiSkeleton
+            v-for="i in 3"
+            :key="i"
+            class="h-[94px] w-44 shrink-0 rounded-xl"
+            data-testid="tile-skeleton"
+          />
+        </template>
+        <template v-else>
+          <StatTile
+            v-for="tile in tiles"
+            :key="tile.label"
+            :label="tile.label"
+            :value="tile.value"
+            :hint="tile.sub || undefined"
+            :icon="tile.icon"
+            :spark="tile.avg && !runsFailed ? lengths ?? undefined : undefined"
+            class="w-44 shrink-0 snap-start"
+          />
+        </template>
+      </div>
+      <p class="px-4 text-xs text-muted-foreground">
+        {{ facts }}
+      </p>
+    </div>
+
     <AppLoadError
       v-if="error"
       :title="error"
-      :retry="load"
+      :retry="activity.retry"
       class="mx-4 w-auto"
     />
 
@@ -69,15 +106,93 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isActiveRu
         />
       </NuxtLink>
       <UiSkeleton
-        v-else-if="pending"
+        v-else-if="pending && !runsFailed"
         class="h-16 w-full"
       />
+      <!-- Without the runs nobody knows if it's idle -->
+      <p
+        v-else-if="runsFailed"
+        class="text-sm text-muted-foreground"
+        data-testid="current-run-unavailable"
+      >
+        Unavailable
+      </p>
       <p
         v-else
         class="text-sm text-muted-foreground"
       >
         {{ agentIdleNote(agent) }}
       </p>
+    </section>
+
+    <section
+      aria-labelledby="agent-activity"
+      class="flex flex-col gap-3 px-4"
+      data-testid="agent-activity"
+    >
+      <h3
+        id="agent-activity"
+        class="text-sm font-semibold text-foreground"
+      >
+        Activity
+      </h3>
+      <AppLoadError
+        v-if="chartsFailed"
+        :title="`Couldn't load ${agent.name}'s activity`"
+        :description="activity.error.value ?? undefined"
+        :retry="activity.retry"
+      />
+      <template v-else>
+        <DashboardCard
+          title="Runs"
+          :subtitle="`Last ${ACTIVITY_DAYS} days, by time of day`"
+        >
+          <UiSkeleton
+            v-if="chartsLoading"
+            class="h-[246px] w-full"
+            data-testid="chart-skeleton"
+          />
+          <AgentsRunTimeline
+            v-else
+            :bars="bars"
+            :hours="24"
+            :ticks="[0, 6, 12, 18, 24]"
+            :tick="hourTick"
+            :empty="`No runs in the last ${ACTIVITY_DAYS} days.`"
+          />
+        </DashboardCard>
+        <DashboardCard
+          title="Outcomes"
+          :subtitle="`Finished runs per day, last ${outcomes.length} days`"
+        >
+          <UiSkeleton
+            v-if="chartsLoading"
+            class="h-[180px] w-full"
+            data-testid="chart-skeleton"
+          />
+          <AgentOutcomeChart
+            v-else
+            :days="outcomes"
+            :height="180"
+          />
+        </DashboardCard>
+        <DashboardCard
+          title="Tokens"
+          :subtitle="`Per day, last ${tokens.length} days`"
+        >
+          <UiSkeleton
+            v-if="chartsLoading"
+            class="h-[180px] w-full"
+            data-testid="chart-skeleton"
+          />
+          <AgentsTokenChart
+            v-else
+            :days="tokens"
+            :only="agent.role"
+            :height="180"
+          />
+        </DashboardCard>
+      </template>
     </section>
 
     <section
@@ -115,15 +230,35 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isActiveRu
           </NuxtLink>
         </li>
       </ul>
-      <UiSkeleton
-        v-else-if="pending"
-        class="mx-4 h-16"
-      />
+      <div
+        v-else-if="pending && !runsFailed"
+        class="flex flex-col gap-2 px-4"
+      >
+        <UiSkeleton
+          v-for="i in 3"
+          :key="i"
+          class="h-16"
+          data-testid="run-skeleton"
+        />
+      </div>
+      <p
+        v-else-if="runsFailed"
+        class="px-4 text-sm text-muted-foreground"
+        data-testid="previous-runs-unavailable"
+      >
+        Unavailable
+      </p>
+      <p
+        v-else-if="!current"
+        class="px-4 text-sm text-muted-foreground"
+      >
+        No runs yet. Runs show here once {{ agent.name }} picks up its first task.
+      </p>
       <p
         v-else
         class="px-4 text-sm text-muted-foreground"
       >
-        No runs yet.
+        No earlier runs.
       </p>
     </section>
   </div>

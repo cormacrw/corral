@@ -1,7 +1,7 @@
 import type { Epic, Project, Run, Task } from '@corral/contracts'
-import { completedAt, isTaskDone, type TaskStatus } from '@corral/core'
+import { completedAt, type TaskStatus } from '@corral/core'
 import { columnKey } from '~/features/board/utils/board.ts'
-import { dayRows, sameDay } from '~/utils/days'
+import { dayRows } from '~/utils/days'
 import { epicWithLiveCounts, runTitle } from '~/utils/labels.ts'
 
 // Home's figures (design/home.md on the web, design/mobile.md on a phone),
@@ -17,53 +17,11 @@ export function homeColumn(status: TaskStatus): 'ready' | 'in_progress' | 'block
 }
 export const isInProgress = (status: TaskStatus): boolean => homeColumn(status) === 'in_progress'
 
-// The stages in progress, each shown apart
+// The stages in progress, each shown apart in open work
 export const IN_PROGRESS_STAGES = ['in_progress', 'agent_review', 'human_review', 'ready_to_merge'] as const satisfies readonly TaskStatus[]
 export type InProgressStage = typeof IN_PROGRESS_STAGES[number]
 export const OPEN_STAGES = ['ready', ...IN_PROGRESS_STAGES] as const satisfies readonly TaskStatus[]
 export type OpenStage = typeof OPEN_STAGES[number]
-const isStage = (status: TaskStatus): status is InProgressStage => (IN_PROGRESS_STAGES as readonly TaskStatus[]).includes(status)
-
-// The phone dashboard's stage bar
-export const STAGE_COLOR: Record<InProgressStage, string> = {
-  in_progress: 'var(--brand)',
-  agent_review: 'color-mix(in oklab, var(--brand) 55%, var(--background))',
-  human_review: 'var(--warning)',
-  ready_to_merge: 'var(--success)'
-}
-export interface DashboardCounts {
-  // Ready, not started: the Board's Ready column
-  todo: number
-  inProgress: number
-  stages: Record<InProgressStage, number>
-  // The Board's Blocked & failed column
-  blocked: number
-  // Human review
-  waitingForReview: number
-  mergedToday: number
-  // Merged tasks among those, without the reviewer asking for changes. Approved
-  // designs have no PR review to pass, matching the project overview's rate.
-  firstPassToday: number
-}
-
-export function dashboardCounts(tasks: Pick<Task, 'type' | 'status' | 'mergedAt' | 'updatedAt' | 'reviewRounds'>[], now = new Date()): DashboardCounts {
-  const stages = Object.fromEntries(IN_PROGRESS_STAGES.map(s => [s, 0])) as Record<InProgressStage, number>
-  const counts: DashboardCounts = { todo: 0, inProgress: 0, stages, blocked: 0, waitingForReview: 0, mergedToday: 0, firstPassToday: 0 }
-  for (const task of tasks) {
-    const column = homeColumn(task.status)
-    if (column === 'ready') counts.todo++
-    else if (column === 'in_progress') {
-      counts.inProgress++
-      if (isStage(task.status)) stages[task.status]++
-    } else if (column === 'blocked') counts.blocked++
-    else if (isTaskDone(task) && sameDay(completedAt(task), now)) {
-      counts.mergedToday++
-      if (task.status === 'merged' && task.reviewRounds === 0) counts.firstPassToday++
-    }
-  }
-  counts.waitingForReview = stages.human_review
-  return counts
-}
 
 // How long a run has been going, short: "45s", "18m", "2h 5m"
 export function elapsed(startIso: string | null, now = Date.now()): string {

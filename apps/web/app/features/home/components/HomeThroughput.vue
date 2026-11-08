@@ -6,7 +6,10 @@ import { ChartContainer, ChartCrosshair, ChartTooltip, ChartTooltipContent, comp
 import type { MergedDay } from '~/features/home/utils/figures'
 
 // Tasks merged per day, stacked by project, in each project's own colour
-const props = withDefaults(defineProps<{ rows: MergedDay[], projects: (Project & { color: string })[], height?: number }>(), { height: 220 })
+const props = withDefaults(defineProps<{ rows: MergedDay[], projects: (Project & { color: string })[], height?: number, ticks?: number }>(), { height: 220, ticks: 6 })
+// num-ticks is only a hint to unovis, so fewer ticks than the default are
+// placed exactly: evenly spaced, inset from the edges so labels don't clip
+const tickValues = computed(() => props.ticks < 6 ? Array.from({ length: props.ticks }, (_, i) => Math.round((i + 0.5) * props.rows.length / props.ticks)) : undefined)
 
 // Keys are positional: a project ID isn't a safe CSS variable name
 const config = computed(() => Object.fromEntries(props.projects.map((p, i) => [`p${i}`, { label: p.name, color: p.color }])) satisfies ChartConfig)
@@ -53,7 +56,8 @@ const empty = computed(() => props.rows.every(r => r.total === 0))
         <VisAxis
           type="x"
           :tick-format="label"
-          :num-ticks="6"
+          :num-ticks="ticks"
+          :tick-values="tickValues"
           :grid-line="false"
           :domain-line="false"
           :tick-line="false"

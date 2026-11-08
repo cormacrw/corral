@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ROLE_LABELS } from '@corral/core'
+import { ROLE_LABELS, type AgentRole } from '@corral/core'
 import { CurveType } from '@unovis/ts'
 import { VisArea, VisAxis, VisXYContainer } from '@unovis/vue'
 import type { ChartConfig } from '~/components/ui/chart'
@@ -8,12 +8,12 @@ import type { TokenDay } from '~/features/agents/utils/fleet'
 import { TOKEN_ROLES } from '~/features/agents/utils/fleet'
 import { tokens } from '~/utils/labels'
 
-// Tokens per day (input, cache writes and output), stacked by role
-const props = defineProps<{ days: TokenDay[] }>()
-const HEIGHT = 220
+// Tokens per day (input, cache writes and output), stacked by role. An
+// agent's page passes `only` its own role, which keeps that role's colour.
+const props = withDefaults(defineProps<{ days: TokenDay[], height?: number, only?: AgentRole }>(), { height: 220, only: undefined })
 
 const COLORS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)']
-const roles = TOKEN_ROLES.map((role, i) => ({ role, label: ROLE_LABELS[role], color: COLORS[i]! }))
+const roles = TOKEN_ROLES.map((role, i) => ({ role, label: ROLE_LABELS[role], color: COLORS[i]! })).filter(r => !props.only || r.role === props.only)
 const config = Object.fromEntries(roles.map(r => [r.role, { label: r.label, color: r.color }])) satisfies ChartConfig
 const data = computed(() => props.days.map(d => ({ index: d.index, ...d.byRole })))
 type Row = typeof data.value[number]
@@ -29,7 +29,7 @@ const empty = computed(() => props.days.every(d => Object.values(d.byRole).every
     <p
       v-if="empty"
       class="flex items-center justify-center text-sm text-muted-foreground"
-      :style="{ height: `${HEIGHT}px` }"
+      :style="{ height: `${height}px` }"
     >
       No tokens used in the last {{ days.length }} days.
     </p>
@@ -38,7 +38,7 @@ const empty = computed(() => props.days.every(d => Object.values(d.byRole).every
       :config="config"
       class="aspect-auto"
       cursor
-      :style="{ height: `${HEIGHT}px` }"
+      :style="{ height: `${height}px` }"
     >
       <VisXYContainer
         :data="data"
@@ -74,6 +74,9 @@ const empty = computed(() => props.days.every(d => Object.values(d.byRole).every
         />
       </VisXYContainer>
     </ChartContainer>
-    <ChartLegend :items="roles.map(r => ({ label: r.label, color: r.color }))" />
+    <ChartLegend
+      v-if="!only"
+      :items="roles.map(r => ({ label: r.label, color: r.color }))"
+    />
   </div>
 </template>

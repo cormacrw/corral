@@ -5,11 +5,11 @@ import type { AgentRuns } from '~/features/agents/composables/useAgentRuns'
 import { plural, runtimeLabel } from '~/utils/labels'
 import { settingsPath } from '~/utils/routes'
 
-// An agent's header and stat tiles (design/agent.md), on either layout. A
-// phone puts the usage-limit note under the name and scrolls the tiles
-// sideways; its header has the settings action already.
+// An agent's header (design/agent.md), on either layout. A phone puts the
+// usage-limit note under the name; its header has the settings action
+// already. Today's run count waits for the runs, and is left out if they fail.
 const props = defineProps<{ agent: Agent, view: AgentRuns }>()
-const { status, limited, today, tiles, facts, resume } = props.view
+const { status, limited, today, pending, runsFailed, resume } = props.view
 const mobile = useDevice().isMobile
 const until = computed(() => new Date(props.agent.pausedUntil!).toLocaleTimeString())
 </script>
@@ -36,7 +36,9 @@ const until = computed(() => new Date(props.agent.pausedUntil!).toLocaleTimeStri
         />
       </div>
       <p class="text-sm text-muted-foreground">
-        {{ ROLE_LABELS[agent.role] }} · <span data-testid="agent-runtime-label">{{ runtimeLabel(agent.runtime) }}</span> · {{ plural(today.length, 'run') }} today
+        {{ ROLE_LABELS[agent.role] }} · <span data-testid="agent-runtime-label">{{ runtimeLabel(agent.runtime) }}</span><template v-if="!pending && !runsFailed">
+          · {{ plural(today.length, 'run') }} today
+        </template>
         <span v-if="limited && !mobile"> · Waiting on usage limit until {{ until }}</span>
       </p>
       <template v-if="limited && mobile">
@@ -71,27 +73,4 @@ const until = computed(() => new Date(props.agent.pausedUntil!).toLocaleTimeStri
       />
     </template>
   </header>
-
-  <div :class="mobile ? 'flex flex-col gap-3' : 'border-b border-border px-4 py-3'">
-    <div :class="mobile ? 'flex snap-x gap-2 overflow-x-auto overscroll-x-contain px-4 pb-1' : 'grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3'">
-      <dl
-        v-for="tile in tiles"
-        :key="tile.label"
-        :class="mobile && 'w-48 shrink-0 snap-start rounded-lg border border-border p-3'"
-      >
-        <dt :class="['text-xs text-muted-foreground', mobile && 'truncate']">
-          {{ tile.label }}
-        </dt>
-        <dd :class="mobile ? 'text-2xl font-semibold text-foreground tabular-nums' : 'text-xl font-semibold tabular-nums'">
-          {{ tile.value }}
-        </dd>
-        <dd :class="['text-xs text-muted-foreground', mobile && 'truncate']">
-          {{ mobile ? tile.sub || '\u00A0' : tile.sub }}
-        </dd>
-      </dl>
-    </div>
-    <p :class="mobile ? 'px-4 text-xs text-muted-foreground' : 'mt-2 text-xs text-muted-foreground'">
-      {{ facts }}
-    </p>
-  </div>
 </template>
