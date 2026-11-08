@@ -1,4 +1,4 @@
-import type { Actor } from '@corral/core'
+import { AGENT_ROLES, DEFAULT_AGENT_RUNTIME, type Actor, type AgentRole } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { asc } from 'drizzle-orm'
 
@@ -12,19 +12,21 @@ export async function ensureOwner(db: Database): Promise<Actor> {
   return { kind: 'human', userId: user.id }
 }
 
-// The four global agents (D13, D23). Onboarding names them; until then these
-// defaults let the scheduler and PM run.
+// The global agents, one per role (D13, D23). Onboarding names them; until
+// then these defaults let the scheduler and PM run.
+const DEFAULT_NAMES: Record<AgentRole, string> = { pm: 'Juno', developer: 'Atlas', designer: 'Iris', reviewer: 'Vera' }
+
 export async function ensureAgents(db: Database): Promise<void> {
   const existing = await db.select({ role: schema.agents.role, name: schema.agents.name }).from(schema.agents)
-  const missing = ([['Juno', 'pm'], ['Atlas', 'developer'], ['Iris', 'designer'], ['Vera', 'reviewer']] as const)
-    .filter(([, role]) => !existing.some(a => a.role === role))
+  const missing = AGENT_ROLES.filter(role => !existing.some(a => a.role === role))
   const names = new Set(existing.map(a => a.name))
   if (missing.length > 0) {
-    await db.insert(schema.agents).values(missing.map(([preferred, role]) => {
-      let name: string = preferred
+    await db.insert(schema.agents).values(missing.map((role) => {
+      const preferred = DEFAULT_NAMES[role]
+      let name = preferred
       for (let suffix = 2; names.has(name); suffix++) name = `${preferred} ${suffix}`
       names.add(name)
-      return { name, role, runtime: 'claude-code' }
+      return { name, role, runtime: DEFAULT_AGENT_RUNTIME }
     })).onConflictDoNothing()
   }
 }

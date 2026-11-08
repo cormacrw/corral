@@ -17,12 +17,10 @@ const props = defineProps<{
   disabled?: boolean
   // One answer per row, for thumbs (design/mobile.md)
   stacked?: boolean
-  // Other… is being written in the card itself (the Inbox): each question
-  // holds its own answer, and the page's Submit sends it
+  // Other… is being written in the card itself, in its `other` slot
   writing?: boolean
 }>()
-const emit = defineEmits<{ answer: [text: string], other: [], stop: [], submit: [] }>()
-const draft = defineModel<string>('draft', { default: '' })
+const emit = defineEmits<{ answer: [text: string], other: [], stop: [] }>()
 
 const options = computed(() => props.message.options ?? [])
 const interactive = computed(() => Boolean(props.message.recommendation) || options.value.length > 0)
@@ -102,19 +100,9 @@ const tap = computed(() => stack.value ? 'min-h-11 w-full justify-center whitesp
           @click="emit('stop')"
         />
       </div>
-      <AppTextarea
+      <slot
         v-if="props.writing && props.active"
-        v-model="draft"
-        placeholder="Your answer…"
-        aria-label="Your answer"
-        autoresize
-        autofocus
-        :rows="2"
-        :disabled="props.disabled"
-        class="min-h-16 bg-background text-sm"
-        data-testid="plan-question-other"
-        @keydown.enter.meta.prevent="emit('submit')"
-        @keydown.enter.ctrl.prevent="emit('submit')"
+        name="other"
       />
     </div>
   </div>

@@ -1,45 +1,55 @@
-import { readFile } from 'node:fs/promises'
+import { SETUP_STEP_TIMEOUTS } from '@corral/contracts'
 import { join } from 'node:path'
-import { agentProcess, startProcess } from './agent.ts'
+import { agentProcess, askOnce, startProcess } from './agent-process.ts'
 import type { AgentProcess, AgentRuntime, RuntimeOptions } from './agent-runtime.ts'
+import { MCP_TOOL_TIMEOUT_SECONDS } from './budgets.ts'
 import { CodexJsonParser } from './codex-json.ts'
-import { exists } from './repos.ts'
-import { MAX_BRIEF_CHARS } from './workspace.ts'
+import { exec } from './exec.ts'
+import { exists, readIfExists } from './layout.ts'
+import { MAX_BRIEF_CHARS, PROJECT_DOC_FILES } from './project-docs.ts'
 
 // The Codex AgentRuntime adapter (agent-runtime-and-auth.md). Codex uses the
 // login in its own ~/.codex, which Corral never reads or sets (D2). It has no
 // streaming session, so a PM follow-up turn is a one-shot resume (D9).
 
+interface CodexConfig {
+  bin: string
+  // CODEX_HOME, or ~/.codex
+  home: string
+}
+
 // The registry's entry for runtime id 'codex'
-export function codexRuntime(codexBin: string): AgentRuntime {
+export function codexRuntime(config: CodexConfig): AgentRuntime {
   return {
     id: 'codex',
+    skillsDir: join(config.home, 'skills'),
     async prepare(options) {
-      const [systemPrompt, mcpServers] = await Promise.all([codexInstructions(options.cwd, options.systemPrompt), readMcpServers(options.mcpConfigPath)])
-      return { ...options, systemPrompt, mcpServers } as CodexOptions
+      return { ...options, systemPrompt: await codexInstructions(options.cwd, options.systemPrompt) }
     },
-    spawn: options => spawnCodex(codexBin, options as CodexOptions)
+    spawn: options => spawnCodex(config.bin, options),
+    // Never runs `codex login`: the human signs in inside the container (D2)
+    async detect() {
+      const version = await exec(config.bin, ['--version'], { timeoutMs: SETUP_STEP_TIMEOUTS.cliDetect })
+      if (version.code !== 0) return { version: null, signedIn: false }
+      const status = await exec(config.bin, ['login', 'status'], { timeoutMs: SETUP_STEP_TIMEOUTS.cliDetect })
+      return { version: version.stdout.trim(), signedIn: codexSignedIn(`${status.stdout}\n${status.stderr}`) }
+    },
+    ask: (prompt, { model, timeoutMs }) => askOnce(config.bin, [
+      'exec', '--skip-git-repo-check', '--ephemeral', '--sandbox', 'read-only', ...(model ? ['--model', model] : []), '-'
+    ], prompt, timeoutMs)
   }
 }
 
-export interface McpServerConfig {
-  type?: string
-  url?: string
-  command?: string
-  args?: string[]
+// `codex login status` prints e.g. "Logged in using ChatGPT" (on stderr) or
+// "Not logged in". Only the logged-in line counts; the rest says nothing secret.
+export function codexSignedIn(output: string): boolean {
+  return /^\s*logged in\b/im.test(output)
 }
 
-// What prepare read: systemPrompt is by then the full instructions
-type CodexOptions = RuntimeOptions & { mcpServers: Record<string, McpServerConfig> }
-
-type ArgOptions = Pick<RuntimeOptions, 'model' | 'resumeSessionId' | 'noRepository'> & {
+type ArgOptions = Pick<RuntimeOptions, 'model' | 'resumeSessionId' | 'mcpServers'> & {
+  noRepository?: boolean
   instructions: string
-  mcpServers: Record<string, McpServerConfig>
 }
-
-// Corral answers a tool call within two minutes, and report_outcome pushes
-// for up to five first; Codex's own default of 60 s would give up before then
-const MCP_TOOL_TIMEOUT_SECONDS = 450
 
 // `codex exec --json`, or `codex exec resume --json … <session>` to resume.
 // No approval prompts and no sandbox, like bypassPermissions for Claude: the
@@ -67,15 +77,13 @@ export function codexArgs(options: ArgOptions): string[] {
   return args
 }
 
-// Codex reads AGENTS.md itself but not CLAUDE.md or CORRAL.md, so a repo
+// Codex reads AGENTS.md itself but not the other project docs, so a repo
 // that only has those gets them in the instructions, as Claude would
-const REPO_DOCS = ['CLAUDE.md', 'CORRAL.md', join('.corral', 'CORRAL.md')]
-
 export async function codexInstructions(cwd: string, systemPrompt: string): Promise<string> {
   if (await exists(join(cwd, 'AGENTS.md'))) return systemPrompt
   const parts = [systemPrompt]
-  for (const name of REPO_DOCS) {
-    const text = (await readText(join(cwd, name)))?.trim()
+  for (const name of PROJECT_DOC_FILES) {
+    const text = (await readIfExists(join(cwd, name)))?.trim()
     // The PM's project brief may already carry it
     if (!text || systemPrompt.includes(text)) continue
     const body = text.length > MAX_BRIEF_CHARS ? `${text.slice(0, MAX_BRIEF_CHARS)}\n\n[Truncated: read ${name} for the rest.]` : text
@@ -84,14 +92,7 @@ export async function codexInstructions(cwd: string, systemPrompt: string): Prom
   return parts.join('\n\n')
 }
 
-// The run's MCP config file, in the shape Claude's --mcp-config takes
-export async function readMcpServers(mcpConfigPath: string): Promise<Record<string, McpServerConfig>> {
-  const text = await readText(mcpConfigPath)
-  if (!text) return {}
-  return (JSON.parse(text) as { mcpServers?: Record<string, McpServerConfig> }).mcpServers ?? {}
-}
-
-export function spawnCodex(codexBin: string, options: CodexOptions): AgentProcess {
+function spawnCodex(bin: string, options: RuntimeOptions): AgentProcess {
   const args = codexArgs({
     model: options.model,
     resumeSessionId: options.resumeSessionId,
@@ -100,12 +101,8 @@ export function spawnCodex(codexBin: string, options: CodexOptions): AgentProces
     mcpServers: options.mcpServers
   })
   const parser = new CodexJsonParser({ quietResumeOf: options.quietResume ? options.resumeSessionId : null })
-  const { child, exited } = startProcess(codexBin, args, 'pipe', options, parser, options.prompt)
+  const { child, exited } = startProcess({ bin, args, stdin: 'pipe', input: options.prompt, envToStrip: [], parser }, options)
   return agentProcess(child, exited)
-}
-
-function readText(path: string): Promise<string | null> {
-  return readFile(path, 'utf8').catch(() => null)
 }
 
 // JSON strings and arrays of strings are valid TOML

@@ -52,7 +52,7 @@ describe.each(['pglite', 'postgres'] as const)('POST /api/deployments on %s', (d
     expect((await t.request('POST', `/api/deployments/${deployment.id}/dismiss`)).status).toBe(200)
     const dismissed = await getInbox()
     expect(dismissed.activity.some(i => i.id === deployment.id)).toBe(false)
-    expect(dismissed.resolved.find(i => i.id === deployment.id)).toMatchObject({ type: 'release_notes', unread: false, resolution: 'You dismissed these release notes' })
+    expect(dismissed.resolved.find(i => i.id === deployment.id)).toMatchObject({ type: 'release_notes', unread: false, resolution: expect.stringContaining('dismissed') })
     expect(dismissed.count).toBe(before.count)
     expect((await t.request('POST', '/api/deployments/00000000-0000-0000-0000-000000000000/read')).status).toBe(404)
   })

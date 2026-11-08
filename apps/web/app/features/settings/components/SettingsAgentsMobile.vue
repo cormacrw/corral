@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { ROLE_LABELS } from '@corral/core'
 import type { AgentSettings } from '~/features/settings/composables/useAgentSettings'
-import { ROLE, runtimeLabel } from '~/utils/labels'
+import { runtimeLabel } from '~/utils/labels'
 
 const props = defineProps<{ settings: AgentSettings }>()
 const { agents, patchAgent, saveAvatar } = props.settings
@@ -33,7 +34,7 @@ watch([() => route.hash, () => agents.value?.map(agent => agent.id).join(',')], 
           </h2>
           <div class="flex flex-wrap items-center gap-2">
             <AppBadge
-              :label="ROLE[agent.role]"
+              :label="ROLE_LABELS[agent.role]"
               variant="subtle"
               size="sm"
             />

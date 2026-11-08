@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { inboxPath, SECTIONS } from '~/utils/routes'
 // The web Home (design/home.md): five headline numbers, 30 days of merges,
 // the parents touched most recently, open work by project and who's working
 const { loading, projects, kpis, throughput, openWork, epics, runs, now, runsFailed, runsError, retryRuns } = useHomeOverview()
@@ -24,7 +25,7 @@ const shell = useShell()
 
       <div class="grid gap-4 lg:grid-cols-3">
         <div class="grid grid-cols-2 gap-4 md:grid-cols-3 lg:col-span-3 xl:grid-cols-5">
-          <NuxtLink to="/inbox">
+          <NuxtLink :to="inboxPath()">
             <StatTile
               label="Needs you"
               :value="kpis.needsYou"
@@ -98,7 +99,7 @@ const shell = useShell()
           <template #actions>
             <AppButton
               label="All agents"
-              to="/agents"
+              :to="SECTIONS.agents.to"
               variant="ghost"
               size="xs"
               trailing-icon="i-hugeicons-arrow-right-01"

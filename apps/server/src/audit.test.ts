@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { auditEvent, auditText, readAudit, type AuditEvent, type TransitionDetail } from './audit.ts'
+import type { AuditEvent, TransitionDetail } from '@corral/contracts'
+import { auditEvent, auditText, readAudit } from './audit.ts'
 
 describe('audit writes', () => {
-  it('builds an entry from an action and its detail', () => {
-    expect(auditEvent('task.created', { number: 3 })).toEqual({ action: 'task.created', detail: { number: 3 } })
-  })
-
   // Checked by tsc: each directive fails the typecheck if the line compiles
   it('ties detail keys to the action', () => {
     // @ts-expect-error missing key

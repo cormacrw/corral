@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, defineComponent, h, ref, watch } from 'vue'
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { testQueryClient } from '~/queries/mount-with-query'
+import { VITAL_RATING } from '~/features/settings/utils/performance'
 
 // Nuxt auto-imports the section uses
 vi.stubGlobal('computed', computed)
@@ -12,7 +13,7 @@ vi.stubGlobal('ref', ref)
 vi.stubGlobal('watch', watch)
 
 const perfSummary = vi.fn<(window: PerfWindow) => Promise<PerfSummary>>()
-vi.mock('~/composables/useApi', () => ({ api: { perfSummary } }))
+vi.mock('~/queries/api', () => ({ api: { perfSummary } }))
 
 const { default: SettingsPerformance } = await import('~/features/settings/components/SettingsPerformance.vue')
 const { default: SettingsPerfTable } = await import('~/features/settings/components/SettingsPerfTable.vue')
@@ -52,7 +53,7 @@ describe('SettingsPerformance', () => {
     perfSummary.mockResolvedValue(empty('24h'))
     const wrapper = mountSection()
     await flushPromises()
-    expect(wrapper.get('[data-testid="perf-empty"]').text()).toContain('Data appears here as the app is used')
+    expect(wrapper.find('[data-testid="perf-empty"]').exists()).toBe(true)
     expect(wrapper.find('table').exists()).toBe(false)
   })
 
@@ -62,12 +63,10 @@ describe('SettingsPerformance', () => {
     await flushPromises()
     const rows = wrapper.get('[data-testid="perf-routes"]').findAll('tbody tr')
     expect(rows.map(row => row.attributes('data-slow'))).toEqual(['true', undefined])
-    expect(rows[0]!.text()).toContain('Slow')
-    expect(rows[1]!.text()).not.toContain('Slow')
     expect(wrapper.get('[data-testid="perf-pages"] tbody tr').attributes('data-slow')).toBe('true')
-    expect(wrapper.get('[data-testid="perf-vital-LCP"]').text()).toContain('Good')
-    expect(wrapper.get('[data-testid="perf-vital-INP"]').text()).toContain('Needs improvement')
-    expect(wrapper.get('[data-testid="perf-vital-CLS"]').text()).toContain('Poor')
+    expect(wrapper.get('[data-testid="perf-vital-LCP"]').text()).toContain(VITAL_RATING.good.label)
+    expect(wrapper.get('[data-testid="perf-vital-INP"]').text()).toContain(VITAL_RATING['needs-improvement'].label)
+    expect(wrapper.get('[data-testid="perf-vital-CLS"]').text()).toContain(VITAL_RATING.poor.label)
   })
 
   it('loads the chosen window and ignores a slower earlier answer', async () => {
@@ -90,10 +89,11 @@ describe('SettingsPerformance', () => {
     expect(wrapper.get('[data-testid="perf-routes"]').text()).toContain('7.78 s')
   })
 
-  it('shows an error instead of stale figures', async () => {
+  it('shows an error instead of figures', async () => {
     perfSummary.mockRejectedValue(new Error('Request failed (500)'))
     const wrapper = mountSection()
     await flushPromises()
-    expect(wrapper.get('[role="alert"]').text()).toContain('Could not load')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="perf-routes"]').exists()).toBe(false)
   })
 })

@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { errorMessage } from '~/lib/errors'
+import { planThreadPath } from '~/utils/routes'
 import type { PlanThreadItem } from '@corral/contracts'
-import { approvedPlanSummary } from '@corral/core'
+import type { PlanApprovalTarget } from '@corral/core'
 import { useInboxPlanThread } from '~/features/inbox/composables/useInboxPlanThread'
+import { inboxKind } from '~/utils/inbox-kinds'
 import { runtimeLabel } from '~/utils/labels'
 import { STOP_ASKING } from '~/features/plan/utils/plan-questions'
 import InboxPanelLayout from '~/features/inbox/components/InboxPanelLayout.vue'
-import InboxPanelMeta from '~/features/inbox/components/InboxPanelMeta.vue'
 import PlanDetailBody from '~/features/plan/components/PlanDetailBody.vue'
+import { provideFlyoutHost } from '~/composables/useTaskFlyout'
 
 // A Plan thread in the Inbox (design/inbox.md#detail-pane): only what needs
 // you, the question or the plan, never the conversation. The full
@@ -15,19 +16,13 @@ import PlanDetailBody from '~/features/plan/components/PlanDetailBody.vue'
 // panel's frame, so a plan to approve reads like a task to review: what it is
 // up top, the plan in the body, the actions and the reply box at the bottom.
 const props = defineProps<{ item: PlanThreadItem }>()
-const emit = defineEmits<{ approved: [], delete: [] }>()
-const flyout = useTaskFlyout()
-const toast = useToast()
-const { approval, detail, plan, previous, counts, text, busy, offline: runnerOffline, working, cantSend, send: sendMessage, log, content, onLogScroll, composer } = useInboxPlanThread(() => props.item)
+provideFlyoutHost({ docked: () => true })
+const { detail, plan, previous, counts, text, busy, offline: runnerOffline, working, cantSend, cantApprove, approving, send, quick, approve, writing, answer, submitAnswer, remove, log, content, onLogScroll, composer } = useInboxPlanThread(() => props.item)
 const layout = ref<{ scroller: HTMLElement | null } | null>(null)
 watchEffect(() => {
   log.value = layout.value?.scroller ?? null
 })
-const kind = computed(() => props.item.status === 'needs_approval'
-  ? { label: 'Plan review', icon: 'i-hugeicons-task-done-01', color: 'text-primary' }
-  : props.item.status === 'question'
-    ? { label: 'Question', icon: 'i-hugeicons-help-circle', color: 'text-info' }
-    : { label: 'Failed', icon: 'i-hugeicons-cancel-circle', color: 'text-destructive' })
+const kind = computed(() => inboxKind(props.item))
 const tabs = [{ label: 'Overview', value: 'overview' }]
 // A plan's composer is for its Request changes action, so it stays hidden
 // until that's chosen. A question or a failed turn needs the reply box.
@@ -35,21 +30,7 @@ const requesting = ref(false)
 watch(() => props.item.id, () => {
   requesting.value = false
 })
-// A question is answered in its card: an option, or Other… written there and
-// sent with Submit, so it has no reply box
-const writing = ref(false)
-const answer = ref('')
-watch(() => props.item.id, () => {
-  writing.value = false
-  answer.value = ''
-})
 const showComposer = computed(() => !props.item.question && (!props.item.plan || requesting.value))
-async function submitAnswer() {
-  const message = answer.value.trim()
-  if (!message || !await send(message)) return
-  answer.value = ''
-  writing.value = false
-}
 function requestChanges() {
   requesting.value = !requesting.value
   if (requesting.value) void nextTick(() => composer.value?.focus())
@@ -59,31 +40,8 @@ async function sendChanges(message: string): Promise<boolean> {
   if (sent && props.item.plan) requesting.value = false
   return sent
 }
-async function send(message: string): Promise<boolean> {
-  if (cantSend.value) return false
-  try {
-    await sendMessage(message)
-    return true
-  } catch (e) {
-    toast.add({ title: 'Could not send', description: errorMessage(e), color: 'error' })
-    return false
-  }
-}
-
-const approving = ref<'ready' | 'backlog' | null>(null)
-async function approve(to: 'ready' | 'backlog') {
-  if (!props.item.plan || approving.value || working.value) return
-  approving.value = to
-  try {
-    const approved = await approval.mutateAsync({ planId: props.item.plan.id, to })
-    toast.add({ title: 'Resolved', description: approvedPlanSummary(approved.tasks), color: 'success' })
-    await flyout.close()
-    emit('approved')
-  } catch (e) {
-    toast.add({ title: 'Could not approve', description: errorMessage(e), color: 'error' })
-  } finally {
-    approving.value = null
-  }
+function approveTo(to: PlanApprovalTarget) {
+  if (props.item.plan) void approve(props.item.plan, to)
 }
 </script>
 
@@ -92,27 +50,19 @@ async function approve(to: 'ready' | 'backlog') {
     <InboxPanelLayout
       ref="layout"
       data-testid="inbox-plan-thread"
+      :item="item"
+      :kind="kind"
       :tabs="tabs"
       open-tab="overview"
       @scroll="onLogScroll"
     >
       <template #header>
-        <div class="min-w-0">
-          <h1 class="text-lg leading-tight font-semibold text-foreground">
-            {{ item.subject }}
-          </h1>
-          <InboxPanelMeta
-            class="mt-1"
-            :kind="kind"
-            :item="item"
-          />
-        </div>
         <p class="text-xs text-muted-foreground">
           Runs on {{ runtimeLabel(item.runtime) }}
         </p>
         <div class="flex flex-wrap items-center gap-2">
           <AppButton
-            :to="`/plan/${item.sessionId}`"
+            :to="planThreadPath(item.sessionId)"
             label="Open in Plan"
             icon="i-hugeicons-bubble-chat"
             variant="outline"
@@ -128,17 +78,23 @@ async function approve(to: 'ready' | 'backlog') {
       >
         <template v-if="item.question">
           <PlanQuestion
-            v-model:draft="answer"
             :message="item.question"
             data-message-id="inbox-question"
             :active="!working"
             :disabled="cantSend"
             :writing="writing"
-            @answer="send"
+            @answer="quick"
             @other="writing = !writing"
-            @stop="send(STOP_ASKING)"
-            @submit="submitAnswer"
-          />
+            @stop="quick(STOP_ASKING)"
+          >
+            <template #other>
+              <InboxQuestionAnswer
+                v-model="answer"
+                :disabled="cantSend"
+                @submit="submitAnswer"
+              />
+            </template>
+          </PlanQuestion>
         </template>
 
         <!-- The whole plan, in place of a card that opens it -->
@@ -151,9 +107,12 @@ async function approve(to: 'ready' | 'backlog') {
             v-if="plan"
             :plan="plan"
             :previous="previous"
-            wide
-            :hide-title="plan.title === item.subject"
+            class="[&>*]:px-5"
           >
+            <template
+              v-if="plan.title === item.subject"
+              #title
+            />
             <MarkdownText
               :text="plan.summary"
               class="mt-1 text-sm"
@@ -214,13 +173,7 @@ async function approve(to: 'ready' | 'backlog') {
 
       <template #footer>
         <div class="flex shrink-0 flex-col gap-2 border-t border-border p-3">
-          <AppAlert
-            v-if="runnerOffline"
-            color="warning"
-            variant="subtle"
-            icon="i-hugeicons-server-stack-01"
-            title="Plan needs the runner. It's offline."
-          />
+          <PlanRunnerOffline />
           <div
             class="flex flex-wrap items-center gap-2"
             data-testid="inbox-actions"
@@ -230,10 +183,10 @@ async function approve(to: 'ready' | 'backlog') {
                 label="Approve to board"
                 icon="i-hugeicons-tick-02"
                 size="sm"
-                :loading="approving === 'ready'"
-                :disabled="approving !== null || working"
+                :loading="approving?.to === 'ready'"
+                :disabled="cantApprove"
                 data-testid="inbox-primary"
-                @click="approve('ready')"
+                @click="approveTo('ready')"
               />
               <AppButton
                 label="Approve to Backlog"
@@ -241,9 +194,9 @@ async function approve(to: 'ready' | 'backlog') {
                 color="neutral"
                 variant="outline"
                 size="sm"
-                :loading="approving === 'backlog'"
-                :disabled="approving !== null || working"
-                @click="approve('backlog')"
+                :loading="approving?.to === 'backlog'"
+                :disabled="cantApprove"
+                @click="approveTo('backlog')"
               />
               <AppButton
                 label="Request changes"
@@ -274,7 +227,7 @@ async function approve(to: 'ready' | 'backlog') {
               variant="outline"
               size="sm"
               :disabled="approving !== null"
-              @click="emit('delete')"
+              @click="remove"
             />
           </div>
           <PromptComposer

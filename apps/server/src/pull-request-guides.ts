@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto'
-import { splitPatchHunks, type PullRequestFile, type PullRequestGuide, type PullRequestGuideStep } from '@corral/contracts'
-import { richTextToMarkdown } from '@corral/core'
-import { schema, type Database } from '@corral/db'
-import { and, asc, eq, lt, ne, or } from 'drizzle-orm'
+import { splitPatchHunks, type PullRequestFile, type PullRequestGuide } from '@corral/contracts'
+import { errorText, richTextToMarkdown, taskRef, type PullRequestGuideStep } from '@corral/core'
+import { schema, type Database, type ProjectRow } from '@corral/db'
+import { and, eq, lt, ne, or } from 'drizzle-orm'
 import { ApiFailure } from './errors.ts'
-import { GitHubError, type GitHubClient } from './github.ts'
+import type { GitHubClient } from './github.ts'
+import { pullRequestUnavailable } from './pull-requests.ts'
 import type { RunnerHub } from './runner-hub.ts'
-import type { ProjectRow } from './tasks.ts'
+import { taskCriteria } from './criteria.ts'
 
-const { acceptanceCriteria, pullRequestGuides, tasks } = schema
+const { pullRequestGuides, tasks } = schema
 
 // Guided code review (COR-525, .corral/wiki/pr-guides.md). A guide is made
 // only when a reviewer asks: the server reads the PR's diff, the runner's small
@@ -19,7 +20,6 @@ const { acceptanceCriteria, pullRequestGuides, tasks } = schema
 const GUIDE_FILE_LIMIT = 100
 // Patch text the prompt carries in all; files past it go in by name only
 const GUIDE_PATCH_CHARS = 80_000
-export const PR_GUIDE_JOB_TIMEOUT_MS = 170_000
 // A guide still generating after this was lost with a restart or a runner
 const GENERATING_STALE_MS = 5 * 60_000
 
@@ -53,12 +53,10 @@ export class PullRequestGuides {
     try {
       diff = await github.getPullRequestDiff(project.repository, number, GUIDE_FILE_LIMIT)
     } catch (error) {
-      if (error instanceof ApiFailure) throw error
-      const message = error instanceof Error ? error.message : String(error)
-      throw new ApiFailure(error instanceof GitHubError && error.status === 404 ? 404 : 502, { code: 'pull_request_unavailable', number, message })
+      throw pullRequestUnavailable(error, number)
     }
     const now = new Date()
-    const values = { status: 'generating', headSha: diff.headSha, steps: [], error: null, generatedAt: null, updatedAt: now }
+    const values = { status: 'generating' as const, headSha: diff.headSha, steps: [], error: null, generatedAt: null, updatedAt: now }
     const [claimed] = await db.insert(pullRequestGuides).values({ projectId: project.id, prNumber: number, ...values })
       .onConflictDoUpdate({
         target: [pullRequestGuides.projectId, pullRequestGuides.prNumber],
@@ -83,21 +81,20 @@ export class PullRequestGuides {
     const [task] = await db.select({ id: tasks.id, number: tasks.number, title: tasks.title, description: tasks.description }).from(tasks)
       .where(and(eq(tasks.projectId, project.id), eq(tasks.prNumber, number)))
     if (!task) return null
-    const criteria = await db.select({ id: acceptanceCriteria.id, text: acceptanceCriteria.text }).from(acceptanceCriteria)
-      .where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
-    return { ref: `${project.prefix}-${task.number}`, title: task.title, goal: richTextToMarkdown(task.description), criteria }
+    const criteria = (await taskCriteria(db, task.id)).map(({ id, text }) => ({ id, text }))
+    return { ref: taskRef(project.prefix, task.number), title: task.title, goal: richTextToMarkdown(task.description), criteria }
   }
 
   async #run(projectId: string, number: number, startedAt: Date, input: GuideInput): Promise<void> {
     let update: Partial<GuideRow>
     try {
-      const result = await this.#d.runner.request({ kind: 'pr_guide', prompt: guidePrompt(input) }, PR_GUIDE_JOB_TIMEOUT_MS)
+      const result = await this.#d.runner.request({ kind: 'pr_guide', prompt: guidePrompt(input) })
       const steps = parseGuide(result.text, input)
       update = { status: 'ready', steps, error: null, generatedAt: new Date() }
     } catch (error) {
       const message = error instanceof ApiFailure && error.body.code === 'runner_offline'
         ? 'No runner is online to generate it.'
-        : error instanceof Error ? error.message : String(error)
+        : errorText(error)
       update = { status: 'failed', steps: [], error: message.slice(0, 500) }
     }
     // Only the generation that claimed the row may finish it
@@ -106,7 +103,7 @@ export class PullRequestGuides {
   }
 }
 
-export function toGuide(row: GuideRow | undefined, now = Date.now()): PullRequestGuide {
+function toGuide(row: GuideRow | undefined, now = Date.now()): PullRequestGuide {
   if (!row) return { status: 'none', headSha: null, steps: [], error: null, generatedAt: null }
   const lost = row.status === 'generating' && row.updatedAt.getTime() < now - GENERATING_STALE_MS
   return {

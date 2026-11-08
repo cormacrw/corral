@@ -1,5 +1,6 @@
 import { RUNNER_HEARTBEAT_MS } from '@corral/contracts'
-import { FakeRunner } from '../test-runner.ts'
+import { AGENT_RUNTIME_IDS } from '@corral/core'
+import { answerSetupJob, FakeRunner } from '../fake-runner.ts'
 import { demoGuideAnswer } from './demo-guide.ts'
 
 const PM_REPLY = 'This is a demo instance (`pnpm dev:demo`), so I don\'t run here and nothing you send reaches an agent. Run `pnpm dev` with a runner to plan for real.'
@@ -9,14 +10,11 @@ const PM_REPLY = 'This is a demo instance (`pnpm dev:demo`), so I don\'t run her
 // this is a demo, and answers setup jobs from canned data. Developers,
 // designers and reviewers are never offered to it, so no agent ever starts.
 export async function startDemoRunner(serverUrl: string, repositories: () => Promise<string[]>): Promise<() => void> {
-  const runner = await FakeRunner.connect(serverUrl, [], 'demo-runner', { slots: 4, roles: ['pm'], runtimes: ['claude-code', 'codex'] })
+  const runner = await FakeRunner.connect(serverUrl, [], 'demo-runner', { slots: 4, roles: ['pm'], runtimes: [...AGENT_RUNTIME_IDS] })
   const active = new Map<string, number>()
   runner.onJob = async (job) => {
     switch (job.kind) {
-      case 'detect_clis': return { kind: 'detect_clis', clis: [{ id: 'claude', version: '2.1.0', signedIn: true }, { id: 'codex', version: '0.52.0', signedIn: true }] }
       case 'list_repos': return { kind: 'list_repos', signedIn: true, repos: (await repositories()).map(nameWithOwner => ({ nameWithOwner, description: null, isPrivate: true, defaultBranch: 'main', canPush: true, updatedAt: new Date().toISOString() })) }
-      case 'cleanup_worktrees': return { kind: 'cleanup_worktrees', removed: [], kept: [] }
-      case 'sweep_worktrees': return { kind: 'sweep_worktrees', removed: [], kept: [] }
       // The server keeps its fallback for these
       case 'session_title': throw new Error('No titles in the demo')
       case 'inbox_message': throw new Error('No Inbox messages in the demo')
@@ -25,7 +23,11 @@ export async function startDemoRunner(serverUrl: string, repositories: () => Pro
       case 'pr_guide':
         await new Promise(resolve => setTimeout(resolve, 3000))
         return { kind: 'pr_guide', text: demoGuideAnswer(job.prompt) }
-      default: throw new Error(`The demo runner can't do ${job.kind}`)
+      default: {
+        const answer = answerSetupJob(job)
+        if (!answer) throw new Error(`The demo runner can't do ${job.kind}`)
+        return answer
+      }
     }
   }
   runner.socket.on('message', (data) => {

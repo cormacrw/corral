@@ -32,7 +32,7 @@ describe('agent names on activity', () => {
     const reviewerRun = await run('Vera', 'reviewer')
     const transition = (actor: Actor, event: string, minutes: number) =>
       ({ projectId: project.id, taskId: task.id, actor, action: 'task.transition', detail: { event, from: 'in_progress', to: 'agent_review' }, createdAt: new Date(Date.now() - minutes * 60_000) })
-    await t.db.insert(auditLog).values([
+    const entries = await t.db.insert(auditLog).values([
       transition({ kind: 'agent', role: 'developer', runId: developerRun }, 'pr_opened', 5),
       transition({ kind: 'agent', role: 'reviewer', runId: reviewerRun }, 'merged', 4),
       // A run that's gone, and one whose id isn't a run's at all
@@ -41,21 +41,25 @@ describe('agent names on activity', () => {
       transition({ kind: 'human', userId: 'user-1', viaPm: { sessionId: 's1', runId: 'r-pm' } }, 'pr_rebased', 1),
       transition({ kind: 'agent', role: 'pm', runId: 'r-pm' }, 'commit_submitted', 0),
       { projectId: project.id, actor: { kind: 'human', userId: 'user-1', viaPm: { sessionId: 's1', runId: 'r-pm' } }, action: 'pm.action_confirmed', detail: { summary: 'Paused NAM-1', sessionId: 's1' } }
-    ])
-    return { project, task }
+    ]).returning()
+    // The audit entry's ID, by transition event or action
+    const entry = (key: string) => String(entries.find(e => (e.detail as { event?: string }).event === key || e.action === key)!.id)
+    return { project, task, entry }
   }
 
   it('sends Inbox events as the agent that ran them, the PM for confirmed actions, or the role label', async () => {
-    const { task } = await setup()
+    const { entry } = await setup()
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
-    const sender = (text: string) => inbox.activity.find(i => i.taskId === task.id && i.preview.startsWith(text))?.sender
-    expect(sender('Opened PR #7')).toEqual({ name: 'Atlas', role: 'developer' })
-    expect(sender('Merged PR #7')).toEqual({ name: 'Vera', role: 'reviewer' })
-    expect(sender('Pushed a revision')).toEqual({ name: 'Developer', role: 'developer' })
-    expect(sender('Submitted design')).toEqual({ name: 'Designer', role: 'designer' })
-    expect(sender('Rebased PR #7')).toEqual({ name: 'Juno', role: 'pm' })
-    expect(sender('Submitted a commit')).toEqual({ name: 'Juno', role: 'pm' })
-    expect(inbox.activity.find(i => i.subject === 'Paused NAM-1, confirmed by you')?.sender).toEqual({ name: 'Juno', role: 'pm' })
+    const sender = (id: string) => inbox.activity.find(i => i.id === id)?.sender
+    expect(sender(entry('pr_opened'))).toEqual({ name: 'Atlas', role: 'developer' })
+    expect(sender(entry('merged'))).toEqual({ name: 'Vera', role: 'reviewer' })
+    // A run that's gone or unknown falls back to the role
+    expect(sender(entry('pr_updated'))).toEqual({ name: expect.any(String), role: 'developer' })
+    expect(sender(entry('pr_updated'))?.name).not.toBe('Atlas')
+    expect(sender(entry('design_submitted'))).toEqual({ name: expect.any(String), role: 'designer' })
+    expect(sender(entry('pr_rebased'))).toEqual({ name: 'Juno', role: 'pm' })
+    expect(sender(entry('commit_submitted'))).toEqual({ name: 'Juno', role: 'pm' })
+    expect(sender(`pm-${entry('pm.action_confirmed')}`)).toEqual({ name: 'Juno', role: 'pm' })
   })
 
   it('names the agent on each task history entry, or null when it is gone', async () => {
@@ -67,9 +71,11 @@ describe('agent names on activity', () => {
   })
 
   it('falls back to the PM role label when there is no PM agent', async () => {
-    const { task } = await setup()
+    const { entry } = await setup()
     await t.db.update(agents).set({ role: 'developer' }).where(eq(agents.role, 'pm'))
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
-    expect(inbox.activity.find(i => i.taskId === task.id && i.preview.startsWith('Rebased'))?.sender).toEqual({ name: 'PM', role: 'pm' })
+    const sender = inbox.activity.find(i => i.id === entry('pr_rebased'))?.sender
+    expect(sender).toEqual({ name: expect.any(String), role: 'pm' })
+    expect(sender?.name).not.toBe('Juno')
   })
 })

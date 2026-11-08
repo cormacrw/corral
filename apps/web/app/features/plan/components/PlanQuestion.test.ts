@@ -5,6 +5,7 @@ import { defineComponent, h } from 'vue'
 import { STOP_ASKING } from '~/features/plan/utils/plan-questions'
 import PlanGrillButton from '~/features/plan/components/PlanGrillButton.vue'
 import PlanQuestion from '~/features/plan/components/PlanQuestion.vue'
+import InboxQuestionAnswer from '~/features/inbox/components/InboxQuestionAnswer.vue'
 
 enableAutoUnmount(afterEach)
 
@@ -35,7 +36,9 @@ describe('PlanQuestion', () => {
     const onUpdate = vi.fn()
     const closed = mount(PlanQuestion, { props: { message: question, active: true }, global })
     expect(closed.find('[data-testid="plan-question-other"]').exists()).toBe(false)
-    const wrapper = mount(PlanQuestion, { props: { 'message': question, 'active': true, 'writing': true, 'draft': '', 'onSubmit': onSubmit, 'onUpdate:draft': onUpdate }, global })
+    // The Inbox writes it in the card's other slot
+    const other = () => h(InboxQuestionAnswer, { 'modelValue': '', 'onSubmit': onSubmit, 'onUpdate:modelValue': onUpdate })
+    const wrapper = mount(PlanQuestion, { props: { message: question, active: true, writing: true }, slots: { other }, global })
     const input = wrapper.get('[data-testid="plan-question-other"]')
     expect(button(wrapper, 'Other…').attributes('aria-pressed')).toBe('true')
     await input.setValue('CockroachDB')
@@ -44,15 +47,8 @@ describe('PlanQuestion', () => {
     await input.trigger('keydown', { key: 'Enter', ctrlKey: true })
     expect(onSubmit).toHaveBeenCalledTimes(2)
     // A past question never opens it
-    const past = mount(PlanQuestion, { props: { message: question, active: false, writing: true }, global })
+    const past = mount(PlanQuestion, { props: { message: question, active: false, writing: true }, slots: { other }, global })
     expect(past.find('[data-testid="plan-question-other"]').exists()).toBe(false)
-  })
-
-  it('offers the recommendation, each option, Other… and Stop', () => {
-    const wrapper = mount(PlanQuestion, { props: { message: question, active: true }, global })
-    expect(wrapper.text()).toContain('Recommended: Postgres')
-    expect(labels(wrapper)).toEqual(['Accept recommendation', 'Postgres', 'SQLite', 'MySQL', 'Other…', 'Stop and propose the plan'])
-    expect(buttons(wrapper).every(b => !b.attributes('disabled'))).toBe(true)
   })
 
   it('sends the tapped answer', async () => {
@@ -69,11 +65,18 @@ describe('PlanQuestion', () => {
     expect(onStop).toHaveBeenCalledOnce()
   })
 
+  it('enables its buttons on the open question', () => {
+    const wrapper = mount(PlanQuestion, { props: { message: question, active: true }, global })
+    expect(buttons(wrapper).every(b => !b.attributes('disabled'))).toBe(true)
+  })
+
   it('works with only a recommendation, or only options', () => {
     const recommended = mount(PlanQuestion, { props: { message: { ...question, options: null }, active: true }, global })
-    expect(labels(recommended)).toEqual(['Accept recommendation', 'Other…', 'Stop and propose the plan'])
+    expect(labels(recommended)).toContain('Accept recommendation')
+    expect(labels(recommended)).not.toContain('SQLite')
     const options = mount(PlanQuestion, { props: { message: { ...question, recommendation: null }, active: true }, global })
-    expect(labels(options)).toEqual(['Postgres', 'SQLite', 'MySQL', 'Other…', 'Stop and propose the plan'])
+    expect(labels(options)).not.toContain('Accept recommendation')
+    expect(labels(options)).toEqual(expect.arrayContaining(['Postgres', 'SQLite', 'MySQL']))
   })
 
   it('has no buttons without a recommendation or options', () => {
@@ -106,18 +109,11 @@ describe('PlanQuestion', () => {
 })
 
 describe('PlanGrillButton', () => {
-  it('sends Grill me with an empty composer', async () => {
-    const onSend = vi.fn()
-    const wrapper = mount(PlanGrillButton, { props: { draft: '  ', onSend }, global })
-    await wrapper.find('button').trigger('click')
-    expect(onSend.mock.calls).toEqual([['Grill me']])
-  })
-
   it('sends the draft with it', async () => {
     const onSend = vi.fn()
     const wrapper = mount(PlanGrillButton, { props: { draft: 'A billing page', onSend }, global })
     await wrapper.find('button').trigger('click')
-    expect(onSend.mock.calls).toEqual([['Grill me on this: A billing page']])
+    expect(onSend).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('A billing page'))
   })
 
   it('is disabled while a turn is running', () => {

@@ -78,7 +78,7 @@ The run stores both fields; the reviewer assignment includes them and the task
 History entry shows the choice and complete file list. Historical runs remain
 readable without these fields. The additive migration leaves existing data intact.
 
-`trivial` runs `checkTrivialRebase` (`rebase-review.ts`) before the submission's
+`trivial` runs `checkTrivialRebase` (`github-diff.ts`) before the submission's
 transaction, using GitHub's three-dot compare. Old and new base are the merge
 bases of the approved and new heads with the base branch's current head; nothing
 stores them. File changes are compared without hunk headers, so a change that

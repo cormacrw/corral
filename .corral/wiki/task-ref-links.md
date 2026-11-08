@@ -12,13 +12,14 @@ editor keeps for typing, and a missing or empty description shows the dimmed
 placeholder. Acceptance criteria show linked markdown until selected for editing. None of these renderers uses `v-html`.
 
 All generated links use `TaskLink`, with a real `/tasks/<ref>` href. Plain clicks
-open the current page's mounted `TaskFlyout` on desktop. Without a host they go
-to the task page. Mobile clicks use the thread's detail sheets when
-`FLYOUT_SHEETS` is provided, otherwise the task page. `PlanConversation` provides
-that capability for its own sheets, as does the Inbox mobile Plan thread. The new
+open the flyout on desktop when the component rendering `TaskFlyout` around
+them provides a docked host (`provideFlyoutHost` in `composables/useTaskFlyout.ts`).
+Without a host they go to the task page. Mobile clicks use the thread's detail
+sheets when the host provides `sheets`, otherwise the task page. `PlanConversation`
+provides that for its own sheets, as do `PlanSheets` and the Inbox mobile Plan thread. The new
 Plan page hosts a flyout and a sheet too, so opening an attached task, or its
-task from that sheet, keeps the composer's draft. A page that provides
-`FLYOUT_SHEETS` must show both `?task` and `?epic`: task controls in a task sheet
+task from that sheet, keeps the composer's draft. A page whose host provides
+`sheets` must show both `?task` and `?epic`: task controls in a task sheet
 swap one for the other, and `plan/index.test.ts` covers this.
 Modified clicks and middle clicks retain native browser navigation. Missing
 refs reach the existing TaskDetail error state. An Inbox item opens with the

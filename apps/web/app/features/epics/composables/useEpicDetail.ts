@@ -1,11 +1,10 @@
 import { taskNumber, epicWithLiveCounts } from '~/utils/labels'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import type { PatchEpicInput } from '@corral/contracts'
-import { ApiError } from '~/queries/client'
+import { useSavedNote } from '~/composables/useSavedNote'
+import { errorMessage } from '~/lib/errors'
 import { epicActivityQuery, epicQuery, patchEpic } from '~/queries/epics'
 import { taskHistoryQuery } from '~/queries/tasks'
-
-const SAVED_MS = 1800
 
 // An epic and what its screen needs around it: its project and parent task, the
 // epics it relates to, the activity feed, and saving an edit.
@@ -39,21 +38,16 @@ export function useEpicDetail(epicId: () => string) {
   const waiting = computed(() => prerequisites.value.filter(e => e.mergedCount < e.taskCount))
   const choices = computed(() => related.value.filter(e => e.id !== epic.value?.id && !epic.value?.dependsOn.includes(e.id)).map(e => ({ label: e.title, value: e.id })))
 
-  const saved = ref(false)
-  let savedTimer: ReturnType<typeof setTimeout> | null = null
+  const { saved, flash: flashSaved } = useSavedNote()
   // Resolves false when not saved, so an edit in progress stays open
   async function patch(input: PatchEpicInput): Promise<boolean> {
     if (!epic.value) return false
     try {
       await patchMutation.mutateAsync({ id: epic.value.id, input })
-      saved.value = true
-      if (savedTimer) clearTimeout(savedTimer)
-      savedTimer = setTimeout(() => {
-        saved.value = false
-      }, SAVED_MS)
+      flashSaved()
       return true
     } catch (e) {
-      toast.add({ title: 'Not saved', description: e instanceof ApiError ? e.message : String(e), color: 'error' })
+      toast.add({ title: 'Not saved', description: errorMessage(e), color: 'error' })
       return false
     }
   }

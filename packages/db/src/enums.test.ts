@@ -1,23 +1,29 @@
-import { DEFAULT_LIMITS, DESIGN_VERSION_STATUSES, EVIDENCE_KINDS, PLAN_CHANGES, PLAN_STATUSES, REVIEW_VERDICTS, TASK_KINDS, TASK_PRIORITIES } from '@corral/core'
-import { describe, expect, it } from 'vitest'
-import { designVersionStatus, evidenceKind, planChange, planStatus, projects, reviewVerdict, taskKind, taskPriority } from './schema.ts'
+import { sql } from 'drizzle-orm'
+import { afterAll, beforeAll, expect, it } from 'vitest'
+import type { DatabaseHandle } from './client.ts'
+import * as enums from './schema/enums.ts'
+import { createTestDatabase } from './testing.ts'
 
-describe('database vocabularies', () => {
-  it.each([
-    ['plan_status', planStatus, PLAN_STATUSES],
-    ['plan_change', planChange, PLAN_CHANGES],
-    ['review_verdict', reviewVerdict, REVIEW_VERDICTS],
-    ['evidence_kind', evidenceKind, EVIDENCE_KINDS],
-    ['design_version_status', designVersionStatus, DESIGN_VERSION_STATUSES],
-    ['task_kind', taskKind, TASK_KINDS],
-    ['task_priority', taskPriority, TASK_PRIORITIES]
-  ])('%s takes its values from core', (name, pgEnum, values) => {
-    expect(pgEnum.enumName).toBe(name)
-    expect(pgEnum.enumValues).toEqual([...values])
-  })
+// The enums take their values from core, so a value added there needs a
+// migration too; without one, writing it fails at runtime
+let handle: DatabaseHandle
+beforeAll(async () => {
+  handle = await createTestDatabase('pglite')
+})
+afterAll(async () => {
+  await handle?.close()
+})
 
-  it('defaults project limits to DEFAULT_LIMITS', () => {
-    expect(projects.reviewRoundCap.default).toBe(DEFAULT_LIMITS.reviewRoundCap)
-    expect(projects.failedRunCap.default).toBe(DEFAULT_LIMITS.failedRunCap)
-  })
+it('migrates every enum value the schema can write', async () => {
+  const result = await handle.db.execute(sql`
+    select t.typname as name, e.enumlabel as value
+    from pg_type t join pg_enum e on e.enumtypid = t.oid`) as unknown as { rows: { name: string, value: string }[] }
+  const migrated = new Map<string, string[]>()
+  for (const { name, value } of result.rows) migrated.set(name, [...migrated.get(name) ?? [], value])
+
+  const declared = Object.values(enums).filter(value => typeof value === 'function' && 'enumName' in value)
+  expect(declared.length).toBeGreaterThan(0)
+  for (const pgEnum of declared) {
+    expect(migrated.get(pgEnum.enumName)?.sort(), pgEnum.enumName).toEqual([...pgEnum.enumValues].sort())
+  }
 })

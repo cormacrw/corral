@@ -21,7 +21,7 @@ const props = withDefaults(defineProps<{
   listClass?: HTMLAttributes['class']
   triggerClass?: HTMLAttributes['class']
   class?: HTMLAttributes['class']
-}>(), { content: true, variant: 'pill', size: undefined, listClass: undefined, triggerClass: undefined, class: undefined })
+}>(), { content: true, variant: 'pill', listClass: undefined, triggerClass: undefined, class: undefined })
 const model = defineModel<string | number>()
 
 const tabs = computed(() => props.items.map((item, index) => ({ ...item, key: String(item.value ?? index) })))

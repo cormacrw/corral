@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
 import { computed, defineComponent, h, reactive, ref, watch } from 'vue'
 import { beforeEach, expect, it, vi } from 'vitest'
-import { ApiError, api } from '~/composables/useApi'
+import { api } from '~/queries/api'
+import { ApiError } from '~/queries/client'
 import { useSetup } from '~/features/setup/composables/useSetup'
 import { mountWithQuery } from '~/queries/mount-with-query'
 import { suggestPrefix } from '~/utils/prefix'
 
-vi.mock('~/composables/useApi', async original => ({ ...await original<typeof import('~/composables/useApi')>(), api: {
+vi.mock('~/queries/api', async original => ({ ...await original<typeof import('~/queries/api')>(), api: {
   setup: { repos: vi.fn(), checkRepo: vi.fn(), clis: vi.fn() },
   projects: { list: vi.fn(), create: vi.fn() }
 } }))

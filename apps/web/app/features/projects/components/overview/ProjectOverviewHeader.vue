@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { planPath, projectPath } from '~/utils/routes'
 import type { Project } from '@corral/contracts'
 
 defineProps<{ project: Project, pmName: string, mobile?: boolean }>()
@@ -42,7 +43,7 @@ defineProps<{ project: Project, pmName: string, mobile?: boolean }>()
     </div>
     <div :class="mobile ? 'grid grid-cols-2 gap-2' : 'flex gap-2'">
       <AppButton
-        :to="`/plan?project=${project.id}`"
+        :to="planPath(project.id)"
         :label="`Plan with ${pmName}`"
         variant="outline"
         color="neutral"
@@ -51,7 +52,7 @@ defineProps<{ project: Project, pmName: string, mobile?: boolean }>()
         :block="mobile"
       />
       <AppButton
-        :to="`/projects/${project.slug}/board`"
+        :to="projectPath(project.slug, 'board')"
         label="Open board"
         :icon="mobile ? 'i-hugeicons-layout-03' : undefined"
         :size="mobile ? 'lg' : 'md'"

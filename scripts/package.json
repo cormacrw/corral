@@ -1,0 +1,20 @@
+{
+  "name": "@corral/scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint . && node check-cycles.ts",
+    "typecheck": "tsc",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@corral/tsconfig": "workspace:*",
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "dependencies": {
+    "@corral/contracts": "workspace:*"
+  }
+}

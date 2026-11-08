@@ -3,7 +3,7 @@ import { failedMergeGates, type MergeGate, type MergeGateFacts } from './merge-g
 import { checkDefinitionOfReady, type ReadyProblem, type TaskContent } from './ready.ts'
 import { isRepeatedFeedback, REPEATED_FEEDBACK_REASON } from './review-feedback.ts'
 import { isTaskDone, type CompletionState } from './completion.ts'
-import type { TaskStatus } from './status.ts'
+import { needsStatusReason, type ReasonStatus, type TaskStatus } from './status.ts'
 import { requiresHumanReview, type TaskType } from './task.ts'
 
 // The task state machine (D10). Every status change in Corral goes through
@@ -29,12 +29,12 @@ interface TaskStateFields {
 // Reasons exist only while human intervention is needed. The normalizer is
 // the boundary for flat database rows and checks the invariant at runtime.
 export type TaskState = TaskStateFields & (
-  | { status: 'blocked' | 'failed', reason: string }
-  | { status: Exclude<TaskStatus, 'blocked' | 'failed'>, reason: null }
+  | { status: ReasonStatus, reason: string }
+  | { status: Exclude<TaskStatus, ReasonStatus>, reason: null }
 )
 
 export function normalizeTaskState(task: TaskStateFields & { status: TaskStatus, reason: string | null }): TaskState {
-  if (task.status === 'blocked' || task.status === 'failed') {
+  if (needsStatusReason(task.status)) {
     const reason = task.reason?.trim()
     if (!reason) throw new Error('Blocked and failed tasks require a reason')
     return { ...task, status: task.status, reason }
@@ -103,12 +103,16 @@ export type TaskEvent =
   // counters, so an answer can't lift the review-round cap the way resolve does.
   | { type: 'answer' }
   // Blocked or Failed → Backlog, Ready or In progress (In progress keeps the branch and PR)
-  | { type: 'resolve', to: 'backlog' | 'ready' | 'in_progress' }
+  | { type: 'resolve', to: ResolveTarget }
   // A no-progress stop is not a status: the task keeps it, or goes to Backlog.
   // The server only applies this to an idle stopped task (never a human API input).
   | { type: 'release_stop', to: 'backlog' | null }
 
 export type TaskEventType = TaskEvent['type']
+
+// Where the human can send a Blocked or Failed task
+export const RESOLVE_TARGETS = ['backlog', 'ready', 'in_progress'] as const satisfies readonly TaskStatus[]
+export type ResolveTarget = typeof RESOLVE_TARGETS[number]
 
 interface Rule {
   from: readonly TaskStatus[]
@@ -164,6 +168,11 @@ export function createTask(actor: Actor, humanReview: boolean, draft = false, ta
     return fail({ code: 'actor_not_allowed', actor: type, event: 'approve' })
   }
   return ok({ type: taskType, status: draft && type === 'pm' ? 'draft' : 'backlog', humanReview, reviewRounds: 0, failedRuns: 0, reason: null })
+}
+
+// D27/D29 integration feedback: Ready work that needs no plan approval
+export function createFixTask(humanReview: boolean, taskType: TaskType = 'task'): TransitionResult {
+  return ok({ type: taskType, status: 'ready', humanReview: requiresHumanReview(taskType, humanReview), reviewRounds: 0, failedRuns: 0, reason: null })
 }
 
 export function transition(

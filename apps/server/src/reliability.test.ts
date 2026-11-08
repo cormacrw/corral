@@ -5,11 +5,10 @@ import { and, eq, ne } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner, sleep } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 const { agents, projects, runs, tasks } = schema
 
-// What keeps the server up and its passes moving when one piece fails
 describe('server reliability', () => {
   let t: TestApp
   let runner: FakeRunner
@@ -37,9 +36,9 @@ describe('server reliability', () => {
   }
 
   it('survives a failed lease sweep and still runs the merge and scheduling passes', async () => {
-    vi.spyOn(t.orchestrator, 'sweepLeases').mockRejectedValueOnce(new Error('connection terminated'))
-    const merges = vi.spyOn(t.orchestrator.merges, 'tick')
-    const scheduling = vi.spyOn(t.orchestrator, 'schedule')
+    vi.spyOn(t.orchestrator.leases, 'sweepLeases').mockRejectedValueOnce(new Error('connection terminated'))
+    const merges = vi.spyOn(t.orchestrator, 'mergePass')
+    const scheduling = vi.spyOn(t.orchestrator.scheduler, 'schedule')
     await expect(t.orchestrator.tick()).resolves.toBeUndefined()
     expect(merges).toHaveBeenCalledOnce()
     expect(scheduling).toHaveBeenCalledOnce()
@@ -47,7 +46,7 @@ describe('server reliability', () => {
 
   it('runs one tick at a time', async () => {
     let finish = () => {}
-    const sweep = vi.spyOn(t.orchestrator, 'sweepLeases').mockImplementation(() => new Promise<void>((resolve) => {
+    const sweep = vi.spyOn(t.orchestrator.leases, 'sweepLeases').mockImplementation(() => new Promise<void>((resolve) => {
       finish = resolve
     }))
     const first = t.orchestrator.tick()
@@ -59,7 +58,7 @@ describe('server reliability', () => {
 
   it('drops silent runners even while a slow tick is running', async () => {
     let finish = () => {}
-    vi.spyOn(t.orchestrator, 'sweepLeases').mockImplementation(() => new Promise<void>((resolve) => {
+    vi.spyOn(t.orchestrator.leases, 'sweepLeases').mockImplementation(() => new Promise<void>((resolve) => {
       finish = resolve
     }))
     const dropped = vi.spyOn(t.runner, 'dropSilent')
@@ -72,7 +71,7 @@ describe('server reliability', () => {
 
   async function assigned() {
     const { project, task } = await approved()
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const { job } = await runner.next('run.assign', m => m.job.taskId === task.id)
     return { project, task, job }
   }
@@ -125,7 +124,7 @@ describe('server reliability', () => {
       const { project, task: created, job } = await assigned()
       await t.orchestrator.onConnected([], 'r1')
       await lost(job)
-      await t.orchestrator.schedule()
+      await t.orchestrator.scheduler.schedule()
       const retry = (await runner.next('run.assign', m => m.job.taskId === created.id && m.job.runId !== job.runId)).job
       ended(job, { kind: 'exited', code: 1 })
       await expect.poll(async () => (await run(job.runId)).state).toBe('failed')
@@ -144,10 +143,10 @@ describe('server reliability', () => {
       ended(job, { kind: 'exited', code: 0 })
       await expect.poll(async () => (await run(job.runId)).state).toBe('completed')
       expect(await run(job.runId)).toMatchObject({ summary: 'Here is the plan', error: null, agentSessionId: 'pm-session' })
+      const replayed = t.runner.handled(job.runId, 'run.ended')
       runner.send({ type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [{ type: 'message', text: 'Here is the plan' }] })
       ended(job, { kind: 'exited', code: 0 })
-      await expect.poll(async () => (await run(job.runId)).transcriptBlob).not.toBeNull()
-      await sleep(100)
+      await replayed
       const said = await t.db.select().from(schema.planMessages).where(and(eq(schema.planMessages.runId, job.runId), eq(schema.planMessages.kind, 'message')))
       expect(said.map(m => m.text)).toEqual(['Here is the plan'])
       expect(await t.transcripts.spooled()).not.toContain(job.runId)
@@ -175,8 +174,9 @@ describe('server reliability', () => {
       const { startedAt } = await run(job.runId)
       later(60_000)
       await t.db.update(runs).set({ state: 'stopping' }).where(eq(runs.id, job.runId))
+      const replayed = t.runner.handled(job.runId, 'run.started')
       started()
-      await sleep(100)
+      await replayed
       expect(await run(job.runId)).toMatchObject({ state: 'stopping', startedAt })
       await t.db.update(projects).set({ paused: true }).where(eq(projects.id, project.id))
     })
@@ -188,12 +188,13 @@ describe('server reliability', () => {
       later(LEASE_DURATION_MS + 60_000)
       const active = [{ runId: job.runId, leaseEpoch: job.leaseEpoch }]
       await t.orchestrator.onConnected(active, 'r1')
-      await t.orchestrator.sweepLeases()
+      await t.orchestrator.leases.sweepLeases()
       expect((await run(job.runId)).state).toBe('queued')
       expect((await task(created.id)).leaseExpiresAt!.getTime()).toBeGreaterThan(t.clock.now.getTime())
       expect(runner.received.filter(m => m.type === 'run.stop' && m.runId === job.runId)).toEqual([])
       await t.orchestrator.onHeartbeat(active, 'r1')
-      await sleep(50)
+      // A job's answer comes back on the same socket, after anything sent before it
+      await t.runner.requestOn('r1', { kind: 'detect_clis' })
       expect(runner.received.filter(m => m.type === 'run.stop' && m.runId === job.runId)).toEqual([])
       await t.db.update(projects).set({ paused: true }).where(eq(projects.id, project.id))
     })
@@ -212,10 +213,10 @@ describe('server reliability', () => {
       later(LEASE_DURATION_MS + 60_000)
       t.orchestrator.start(3_600_000)
       t.orchestrator.stop()
-      await t.orchestrator.sweepLeases()
+      await t.orchestrator.leases.sweepLeases()
       expect((await run(job.runId)).state).toBe('queued')
       later(3 * RUNNER_HEARTBEAT_MS)
-      await t.orchestrator.sweepLeases()
+      await t.orchestrator.leases.sweepLeases()
       expect((await run(job.runId)).state).toBe('interrupted')
       await t.db.update(projects).set({ paused: true }).where(eq(projects.id, project.id))
     })
@@ -225,10 +226,10 @@ describe('server reliability', () => {
     const { project, job } = await assigned()
     await t.transcripts.append(job.runId, [{ type: 'system', text: 'Started' }])
     await t.orchestrator.onConnected([], 'r1')
-    await t.orchestrator.sweepSpools()
+    await t.orchestrator.leases.sweepSpools()
     expect(await t.transcripts.spooled()).toContain(job.runId)
     later(61 * 60_000)
-    await t.orchestrator.sweepSpools()
+    await t.orchestrator.leases.sweepSpools()
     expect(await t.transcripts.spooled()).not.toContain(job.runId)
     expect((await run(job.runId)).transcriptBlob).not.toBeNull()
     await t.db.update(projects).set({ paused: true }).where(eq(projects.id, project.id))
@@ -237,7 +238,7 @@ describe('server reliability', () => {
   it('discards a spool whose run went with its project', async () => {
     const orphan = randomUUID()
     await t.transcripts.append(orphan, [{ type: 'system', text: 'Started' }])
-    await t.orchestrator.sweepSpools()
+    await t.orchestrator.leases.sweepSpools()
     expect(await t.transcripts.spooled()).not.toContain(orphan)
   })
 
@@ -253,7 +254,7 @@ describe('server reliability', () => {
       }
       return live(message, id)
     })
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const { job } = await runner.next('run.assign', m => m.job.taskId === first.task.id || m.job.taskId === second.task.id)
     const lost = job.taskId === first.task.id ? second.task : first.task
     expect((await t.db.select().from(tasks).where(eq(tasks.id, lost.id)))[0]).toMatchObject({ failedRuns: 1 })

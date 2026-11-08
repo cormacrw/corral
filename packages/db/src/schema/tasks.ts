@@ -14,8 +14,8 @@ import {
   uuid,
   type AnyPgColumn
 } from 'drizzle-orm/pg-core'
-import type { EpicFixCheck } from '@corral/core'
-import { actor, createdAt, updatedAt } from './columns.ts'
+import { CODE_TASK_TYPES, REASON_STATUSES, type GateCheck, type RetryStop } from '@corral/core'
+import { actor, createdAt, sqlList, updatedAt } from './columns.ts'
 import { agentRole, taskKind, taskPriority, taskStatus, taskType } from './enums.ts'
 import { epics } from './epics.ts'
 import { projects } from './projects.ts'
@@ -45,11 +45,11 @@ export const tasks = pgTable('tasks', {
   rebaseOnly: boolean().notNull().default(false),
   approvedHeadSha: text(),
   // The failed checks that started this developer round, until it submits (D29)
-  ciFix: jsonb().$type<EpicFixCheck[]>(),
+  ciFix: jsonb().$type<GateCheck[]>(),
   reviewRounds: integer().notNull().default(0),
   failedRuns: integer().notNull().default(0),
   // Durable stop episode, its one PM triage session, and explicit retry choices.
-  retryStop: jsonb().$type<{ runId: string | null, target: string | null, human: string, status: 'in_progress' | 'agent_review', capped: boolean, sessionId: string | null, retryQuestion?: { id: string, options: string[] } }>(),
+  retryStop: jsonb().$type<RetryStop>(),
   // Why the task is Blocked or Failed (D10, D11)
   statusReason: text(),
   // Set when the human stops a run, so the scheduler doesn't restart it (flows.md §3)
@@ -66,7 +66,7 @@ export const tasks = pgTable('tasks', {
   // keeps its approval (R7: a clean mechanical update keeps approval)
   branchUpdateRequested: boolean().notNull().default(false),
   // Required checks seen passing when the task reached Human review (design/inbox.md)
-  gateChecks: jsonb().$type<{ name: string, url: string | null }[]>(),
+  gateChecks: jsonb().$type<GateCheck[]>(),
   // Recorded when GitHub confirmed the merge (PRD §7.9)
   mergeCommitSha: text(),
   mergedAt: timestamp({ withTimezone: true }),
@@ -92,11 +92,11 @@ export const tasks = pgTable('tasks', {
   foreignKey({ name: 'tasks_epic_same_project_fk', columns: [t.projectId, t.epicId], foreignColumns: [epics.projectId, epics.id] }).onDelete('set null'),
   index().on(t.projectId, t.status),
   // Match JavaScript trim's whitespace, including Unicode, on both drivers.
-  check('tasks_status_reason', sql`case when ${t.status} in ('blocked', 'failed')
+  check('tasks_status_reason', sql`case when ${t.status} in ${sqlList(REASON_STATUSES)}
     then ${t.statusReason} is not null and btrim(${t.statusReason}, U&'\\0009\\000A\\000B\\000C\\000D\\0020\\00A0\\1680\\2000\\2001\\2002\\2003\\2004\\2005\\2006\\2007\\2008\\2009\\200A\\2028\\2029\\202F\\205F\\3000\\FEFF') <> ''
     else ${t.statusReason} is null end`),
   check('tasks_pr_complete', sql`(${t.prNumber} is null) = (${t.prUrl} is null)`),
-  check('tasks_integration_protocol', sql`${t.integrationProtocol} >= 0 and (${t.integrationProtocol} = 0 or (${t.prNumber} is null and ${t.epicId} is not null and ${t.type}::text in ('task', 'bug')))`),
+  check('tasks_integration_protocol', sql`${t.integrationProtocol} >= 0 and (${t.integrationProtocol} = 0 or (${t.prNumber} is null and ${t.epicId} is not null and ${t.type}::text in ${sqlList(CODE_TASK_TYPES)}))`),
   // A parent has sub-tasks, not work of its own (D31)
   check('tasks_parent_shape', sql`${t.status} <> 'parent' or (${t.epicId} is null and ${t.prNumber} is null and ${t.leaseRunId} is null)`),
   index().on(t.epicId),

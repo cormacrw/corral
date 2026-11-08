@@ -1,10 +1,10 @@
-import type { RunEvent } from '@corral/contracts'
+import { RUNNER_MAX_MESSAGE_BYTES, type RunEvent } from '@corral/contracts'
 
 // Sizes are in characters, which is close enough. These sit far above normal
 // agent output: they only stop a huge line from reaching the server whole,
 // where one message past the socket's limit would cut off every run here.
-export const MAX_EVENT_CHARS = 256 * 1024
-export const MAX_BATCH_CHARS = 1024 * 1024
+export const MAX_BATCH_CHARS = RUNNER_MAX_MESSAGE_BYTES / 100
+export const MAX_EVENT_CHARS = MAX_BATCH_CHARS / 4
 
 function cut(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit)}\n[Cut by Corral: ${(text.length - limit).toLocaleString('en')} more characters]`

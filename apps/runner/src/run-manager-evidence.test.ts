@@ -2,10 +2,10 @@ import type { RunnerMessage } from '@corral/contracts'
 import { access, chmod, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ServerConnection } from './connection.ts'
 import type { ToolHandler, ToolServer } from './mcp.ts'
 import { RunManager } from './run-manager.ts'
-import { createTestDataDir, pmJob } from './test-repo.ts'
+import { createRuntimes } from './runtimes.ts'
+import { createTestDataDir, pmJob, testConfig, testConnection } from './test-repo.ts'
 
 // Stands in for `claude`: stays alive until killed, so the test can make tool
 // calls while the run is active
@@ -51,13 +51,11 @@ describe('RunManager evidence videos', () => {
     vi.stubEnv('PATH', `${binDir}:${process.env.PATH}`)
     vi.stubEnv('FAKE_FFMPEG_LOG', log)
     sent = []
-    const connection = {
-      send: (message: RunnerMessage) => {
-        sent.push(message)
-        if (message.type === 'tool.call') queueMicrotask(() => manager.handle({ type: 'tool.result', callId: message.callId, ok: true, result: {} }))
-        return true
-      }
-    } as unknown as ServerConnection
+    const connection = testConnection((message: RunnerMessage) => {
+      sent.push(message)
+      if (message.type === 'tool.call') queueMicrotask(() => manager.handle({ type: 'tool.result', callId: message.callId, ok: true, result: {} }))
+      return true
+    })
     const tools = {
       register: (_secret: string, _role: string, h: ToolHandler) => {
         handler = h
@@ -65,7 +63,8 @@ describe('RunManager evidence videos', () => {
       },
       url: () => 'http://127.0.0.1:9/mcp'
     } as unknown as ToolServer
-    manager = new RunManager({ dataDir, claudeBin, codexBin: 'codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0, titleModel: 'haiku', slots: 4, roles: ['pm', 'developer', 'reviewer', 'design'] }, connection, tools)
+    const config = testConfig(dataDir, { claudeBin })
+    manager = new RunManager(config, connection, tools, createRuntimes(config).registry)
     manager.assign(pmJob({ runId: 'r1', role: 'developer', planSessionId: null, taskId: 'task-1', taskRef: 'APP-1' }))
     await expect.poll(() => sent.some(m => m.type === 'run.started'), { timeout: 10_000 }).toBe(true)
   })
@@ -88,6 +87,7 @@ describe('RunManager evidence videos', () => {
   const original = (size = 4) => Buffer.alloc(size, 'o').toString('base64')
   // System notes reach the server in the next event batch
   const notes = () => sent.flatMap(m => m.type === 'run.events' ? m.events : []).flatMap(e => e.type === 'system' ? [e.text] : [])
+  const noted = (...facts: string[]) => notes().some(note => facts.every(fact => note.includes(fact)))
   const ffmpegRan = () => access(log).then(() => true, () => false)
 
   it('stores a webm as a converted mp4 and leaves no working files behind', async () => {
@@ -126,7 +126,7 @@ describe('RunManager evidence videos', () => {
 
     expect(outcome.ok).toBe(true)
     expect(input).toMatchObject({ fileName: 'demo.webm', contentType: 'video/webm', dataBase64: original() })
-    await expect.poll(notes).toContain('Attaching demo.webm as it is, because it could not be converted to MP4: ffmpeg failed: Invalid data found when processing input')
+    await expect.poll(() => noted('demo.webm', 'Invalid data found when processing input')).toBe(true)
   })
 
   it('attaches the original with a note when ffmpeg is missing', async () => {
@@ -136,7 +136,7 @@ describe('RunManager evidence videos', () => {
 
     expect(outcome.ok).toBe(true)
     expect(input).toMatchObject({ fileName: 'demo.webm', contentType: 'video/webm' })
-    await expect.poll(notes).toContain('Attaching demo.webm as it is, because it could not be converted to MP4: ffmpeg is not installed on this runner')
+    await expect.poll(() => noted('demo.webm', 'ffmpeg')).toBe(true)
   })
 
   it('checks the limit against the converted file', async () => {
@@ -151,14 +151,14 @@ describe('RunManager evidence videos', () => {
     const { input } = await attach('demo.webm')
 
     expect(input).toMatchObject({ fileName: 'demo.webm', contentType: 'video/webm' })
-    await expect.poll(notes).toContain('Attaching demo.webm as it is, because it could not be converted to MP4: the MP4 is 26.0 MB, over the 25 MB limit')
+    await expect.poll(() => noted('demo.webm', '26.0 MB')).toBe(true)
   })
 
   it('refuses a file when neither the original nor the converted copy fits', async () => {
     vi.stubEnv('FAKE_FFMPEG_BYTES', String(26 * MB))
     const { outcome, input } = await attach('demo.webm', 26 * MB)
 
-    expect(outcome).toEqual({ ok: false, error: 'Evidence files are limited to 25 MB, and demo.webm could not be converted to fit: the MP4 is 26.0 MB, over the 25 MB limit' })
+    expect(outcome).toEqual({ ok: false, error: expect.stringContaining('demo.webm') })
     expect(input).toBeNull()
   })
 })

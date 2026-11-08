@@ -2,12 +2,12 @@ import type { AgentTool, RunnerMessage } from '@corral/contracts'
 import { rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { STOP_GRACE_MS, type AgentExit, type AgentRuntime } from './agent-runtime.ts'
+import type { AgentExit, AgentLauncher } from './agent-runtime.ts'
+import { STOP_GRACE_MS } from './exec.ts'
 import type { RunnerConfig } from './config.ts'
-import type { ServerConnection } from './connection.ts'
 import type { ToolHandler, ToolServer } from './mcp.ts'
 import { exitSignal, RunManager } from './run-manager.ts'
-import { createTestDataDir, pmJob } from './test-repo.ts'
+import { createTestDataDir, pmJob, testConfig, testConnection } from './test-repo.ts'
 
 const OUTCOME_EXIT_GRACE_MS = 20_000
 
@@ -16,9 +16,8 @@ describe('RunManager stopping a run', () => {
   let config: RunnerConfig
   let sent: RunnerMessage[]
   let handlers: ToolHandler[]
-  // The signals the agent process got, in order
   let signals: NodeJS.Signals[]
-  const connection = { send: (message: RunnerMessage) => sent.push(message) > 0 } as unknown as ServerConnection
+  const connection = testConnection((message: RunnerMessage) => sent.push(message) > 0)
   const tools = {
     register: (_secret: string, _role: string, handler: ToolHandler) => {
       handlers.push(handler)
@@ -28,7 +27,7 @@ describe('RunManager stopping a run', () => {
   } as unknown as ToolServer
 
   // An agent that runs until it is signalled
-  const runtime: AgentRuntime = {
+  const runtime: AgentLauncher = {
     id: 'fake',
     spawn: (options) => {
       let exit!: (value: AgentExit) => void
@@ -52,7 +51,7 @@ describe('RunManager stopping a run', () => {
 
   beforeEach(async () => {
     dataDir = await createTestDataDir()
-    config = { dataDir, claudeBin: '/nonexistent/claude', codexBin: '/nonexistent/codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0, titleModel: 'haiku', slots: 4, roles: ['pm', 'developer', 'reviewer', 'design'] }
+    config = testConfig(dataDir, { claudeBin: '/nonexistent/claude' })
     sent = []
     handlers = []
     signals = []
@@ -166,7 +165,7 @@ describe('RunManager stopping a run', () => {
 
   it('names a signal Corral did not send, from an exit by signal or by code', async () => {
     let kill!: (exit: AgentExit) => void
-    const killed: AgentRuntime = {
+    const killed: AgentLauncher = {
       id: 'fake',
       spawn: (options) => {
         options.onLine('', { events: [], sessionId: null, rateLimit: null, result: null })

@@ -2,7 +2,8 @@ import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { git } from './exec.ts'
-import { barePath, syncRepository } from './repos.ts'
+import { barePath } from './layout.ts'
+import { openRepo } from './repos.ts'
 import { createTestDataDir, TEST_REPOSITORY } from './test-repo.ts'
 
 describe('the first clone of a repository', () => {
@@ -29,7 +30,7 @@ describe('the first clone of a repository', () => {
   const originBranches = async () => (await git(['for-each-ref', '--format=%(refname)', 'refs/remotes/origin'], { cwd: bare })).stdout
 
   it('clones, tracks origin and leaves no temporary folder', async () => {
-    expect(await syncRepository(dataDir, TEST_REPOSITORY)).toBeNull()
+    expect(await openRepo(dataDir, TEST_REPOSITORY).sync()).toBeNull()
     expect(await originBranches()).toContain('refs/remotes/origin/main')
     expect(await readdir(dirname(bare))).toEqual([`${TEST_REPOSITORY.replace('/', '__')}.git`])
   })
@@ -40,7 +41,7 @@ describe('the first clone of a repository', () => {
     await git(['init', '--quiet', '--bare', bare])
     await writeFile(join(bare, 'objects', 'partial'), '')
 
-    expect(await syncRepository(dataDir, TEST_REPOSITORY)).toBeNull()
+    expect(await openRepo(dataDir, TEST_REPOSITORY).sync()).toBeNull()
     expect(await originBranches()).toContain('refs/remotes/origin/main')
     expect(await stat(join(bare, 'objects', 'partial')).catch(() => null)).toBeNull()
   })
@@ -49,21 +50,21 @@ describe('the first clone of a repository', () => {
     const stale = `${bare}.tmp-dead`
     await mkdir(stale, { recursive: true })
 
-    expect(await syncRepository(dataDir, TEST_REPOSITORY)).toBeNull()
+    expect(await openRepo(dataDir, TEST_REPOSITORY).sync()).toBeNull()
     expect(await stat(stale).catch(() => null)).toBeNull()
   })
 
   it('leaves nothing behind when the clone fails', async () => {
     await rm(origin, { recursive: true, force: true })
 
-    expect(await syncRepository(dataDir, TEST_REPOSITORY)).toEqual(expect.any(String))
+    expect(await openRepo(dataDir, TEST_REPOSITORY).sync()).toEqual(expect.any(String))
     expect(await readdir(dirname(bare))).toEqual([])
   })
 
   it('keeps a finished clone and its worktrees', async () => {
-    expect(await syncRepository(dataDir, TEST_REPOSITORY)).toBeNull()
+    expect(await openRepo(dataDir, TEST_REPOSITORY).sync()).toBeNull()
     await writeFile(join(bare, 'marker'), '')
-    expect(await syncRepository(dataDir, TEST_REPOSITORY)).toBeNull()
+    expect(await openRepo(dataDir, TEST_REPOSITORY).sync()).toBeNull()
     expect(await stat(join(bare, 'marker')).catch(() => null)).not.toBeNull()
   })
 })

@@ -4,7 +4,7 @@ import { and, desc, eq, ne } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from './app.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 const { agents, auditLog, runs, tasks } = schema
 
@@ -77,7 +77,7 @@ describe('resuming a paused task', () => {
     const { project, task } = await stopped()
     await t.db.update(agents).set({ wakeIntervalSeconds: 3600 })
     // The stopped run has only just started, so nothing else would claim yet
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     expect(await runsOf(task.id)).toHaveLength(1)
     expect((await resume(project.slug, task.number)).status).toBe(200)
     const { job } = await runner.next('run.assign', m => m.job.taskId === task.id)

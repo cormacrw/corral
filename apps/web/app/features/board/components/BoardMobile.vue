@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { taskPath } from '~/utils/routes'
 import type { Board } from '~/features/board/composables/useBoard'
 import { activeFilterCount, BOARD_VIEW_ITEMS, hasFilters, NO_FILTERS } from '~/features/board/utils/board'
 import { plural } from '~/utils/labels'
@@ -182,7 +183,7 @@ function toggleSearch() {
             :task="entry.task"
             :tasks="all"
             :epic="entry.task.parentTask ? epicLabel(entry.task.epicId!) : null"
-            :to="`/tasks/${entry.task.ref}`"
+            :to="taskPath(entry.task.ref)"
           />
         </template>
       </div>

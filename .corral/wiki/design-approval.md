@@ -1,6 +1,6 @@
 # Design completion (D20)
 
-Design tasks finish at `approved`, after human approval of a submitted version. Other types finish at `merged`; spikes have no PR. `packages/core/src/completion.ts` defines the type-aware completion and immutability rules, and `apps/server/src/completion.ts` derives the database completion predicate from that mapping. Task and task dependencies use these rules. An Approved design remains soft-deletable, retaining its versions and blobs.
+Design tasks finish at `approved`, after human approval of a submitted version. Other types finish at `merged`; spikes have no PR. `packages/core/src/completion.ts` defines the type-aware completion and immutability rules, and `apps/server/src/delivery-sql.ts` derives the database completion predicate from that mapping (`delivery-sql.test.ts` keeps the two in step). Task and task dependencies use these rules. An Approved design remains soft-deletable, retaining its versions and blobs.
 
 Approval updates the version and task together through core. Reopening uses `human_request_changes` with required feedback, keeps a pinned task comment and audit detail, and preserves the approved version until another is approved. The Board combines stored approved and merged statuses in one Complete column after Blocked & failed, showing the last three days by mergedAt (or updatedAt for approved designs), newest first; the design panel offers Reopen design.
 

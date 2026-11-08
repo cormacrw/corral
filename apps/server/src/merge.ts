@@ -1,39 +1,38 @@
-import { failedMergeGates, TRANSITION_RULES, type Actor, type MergeGateFacts, type TaskStatus } from '@corral/core'
-import { schema, type Database, type Executor } from '@corral/db'
-import { and, asc, desc, eq, exists, isNull, sql } from 'drizzle-orm'
-import { EpicMerger } from './epic-merge.ts'
-import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
-import { verdictForSubmission } from './claim.ts'
-import { activeRebase } from './epic-sync.ts'
-import { ciFixesInARow, evidenceState, isEpicResolution, taskBase } from './task-base.ts'
-import { ApiFailure } from './errors.ts'
+import { errorText, failedMergeGates, SERVER_ACTOR, shortSha, TRANSITION_RULES, type Actor, type GateCheck, type MergeGateFacts, type TaskStatus } from '@corral/core'
+import { schema, type Database, type Executor, type ProjectRow, type TaskRow } from '@corral/db'
+import { and, asc, eq, exists, isNull, sql } from 'drizzle-orm'
+import { appendAudit, auditEvent } from './audit.ts'
+import { requiredChecks } from './checks.ts'
 import { publishDependents } from './dependent-tasks.ts'
-import { TaskIntegrator } from './task-integration.ts'
+import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
-import { MAX_CI_FIXES } from './ci-output.ts'
+import { isTransient, SharedReads, type CheckResult, type GateReads, type GitHubClient, type PullRequest } from './github.ts'
+import { activeRebase } from './operations.ts'
+import { carryApproval, latestApproval } from './rebase-review.ts'
+import { Backoff, HeadAttempts, LONGEST_POLL_MS, MAX_MERGE_ATTEMPTS, RETRY_MAX_MS } from './retries.ts'
 import { triageCap } from './retry-recovery.ts'
-import { isTransient, requiredChecks, type CheckResult, type GitHubClient, type PullRequest } from './github.ts'
-import { SharedReads } from './pull-requests.ts'
-import { Backoff, HeadAttempts, MAX_MERGE_ATTEMPTS } from './retries.ts'
 import type { RunnerHub } from './runner-hub.ts'
-import { applyTransition, loadTask, lockTask, type ProjectRow, type TaskRow } from './tasks.ts'
+import { evidenceState, isEpicResolution, taskBase } from './task-base.ts'
+import { lockLiveTask, lockTask } from './task-rows.ts'
+import { ciFailed, settleTask, type ServerChange } from './task-settle.ts'
+import { verdictForSubmission } from './task-submissions.ts'
+import { loadTasks } from './task-views.ts'
+import { applyTransition, recordTaskMerged } from './tasks.ts'
+import { addCommentWithTransition } from './comments.ts'
 
-const { comments, epics, reviews, tasks } = schema
-
-const server: Actor = { kind: 'system', component: 'server' }
+const { epics, reviews, tasks } = schema
 
 const MERGED_OUTSIDE_FROM: readonly TaskStatus[] = TRANSITION_RULES.merged_outside.from
 
 // How long a requested base update may take to show on the PR. Past this the
 // request is taken as lost and made again.
-export const REBASE_WAIT_MS = 5 * 60_000
+const REBASE_WAIT_MS = 5 * 60_000
 // How often a task waiting on CI is looked at, at first and at most: each
 // look is three GitHub calls, and merges landing a minute later cost nothing
 const CI_POLL_MS = 30_000
-const CI_POLL_MAX_MS = 120_000
+const CI_POLL_MAX_MS = LONGEST_POLL_MS
 // After GitHub or the runner failed to answer
 const RETRY_MS = 30_000
-const RETRY_MAX_MS = 5 * 60_000
 
 // Developers always rebase; a merge of the base would put merge commits on
 // the branch (and Corral pushes with --force-with-lease, so rebases push)
@@ -46,21 +45,18 @@ export interface MergeDeps {
   events: EventBus
   github: GitHubClient
   runner: RunnerHub
-  now?: () => Date
-  wake?: (taskIds: string[]) => void
-  // An epic PR's head moved while it wasn't waiting on Corral's own rebase
-  epicHeadMoved?: (epicId: string) => Promise<void>
+  // The kill switch or the update hold: nothing merges
+  gate: { readonly halted: boolean }
+  now: () => Date
+  wake: (taskIds: string[]) => void
 }
-
-// What the gate check reads from GitHub
-export type GateReads = Pick<GitHubClient, 'getPullRequest' | 'checks'>
 
 // Whether a task may be merged right now, from live GitHub data
 export interface GateReport {
   pr: PullRequest
   facts: MergeGateFacts
   checks: CheckResult[]
-  requiredPassing: { name: string, url: string | null }[]
+  requiredPassing: GateCheck[]
   // The approval for the current commit, if any
   approvalRunId: string | null
 }
@@ -79,19 +75,9 @@ export class MergeOrchestrator {
   #display: SharedReads | null = null
   // Tasks being advanced right now: a tick and a human approval can overlap
   #busy = new Set<string>()
-  #epics: EpicMerger
-  #integrations: TaskIntegrator
-  // Set by the Orchestrator while the kill switch or the update hold is on
-  stopped = false
 
   constructor(deps: MergeDeps) {
     this.#d = deps
-    this.#epics = new EpicMerger(deps)
-    this.#integrations = new TaskIntegrator(deps, async (taskId) => {
-      await this.#publish(taskId)
-      const task = await loadTask(deps.db, taskId).catch(() => null)
-      if (task?.status === 'merged') await this.cleanup(taskId)
-    })
     this.#ciPoll = new Backoff(CI_POLL_MS, CI_POLL_MAX_MS, () => this.#now())
     this.#retry = new Backoff(RETRY_MS, RETRY_MAX_MS, () => this.#now())
   }
@@ -103,17 +89,22 @@ export class MergeOrchestrator {
   }
 
   #now(): Date {
-    return this.#d.now?.() ?? new Date()
+    return this.#d.now()
   }
 
   // Merges being advanced right now; a redeploy waits for these
   get inFlight(): number {
-    return this.#busy.size + this.#epics.inFlight + this.#integrations.inFlight
+    return this.#busy.size
   }
 
-  // One pass over every task in Ready to merge
+  // A task's status changed outside this pass, by the integration or rebase
+  // pass: published, and its worktrees cleaned up once Merged
+  async settled(taskId: string): Promise<void> {
+    if ((await this.#publish(taskId))?.status === 'merged') await this.cleanup(taskId)
+  }
+
   async tick(): Promise<void> {
-    if (this.stopped || !this.#d.runner.online) return
+    if (this.#d.gate.halted || !this.#d.runner.online) return
     await this.#promoteApproved()
     const waiting = await this.#d.db.select({ task: tasks, project: schema.projects, epicBranch: epics.branch }).from(tasks)
       .innerJoin(schema.projects, eq(schema.projects.id, tasks.projectId))
@@ -121,7 +112,7 @@ export class MergeOrchestrator {
       .where(and(eq(tasks.status, 'ready_to_merge'), isNull(tasks.leaseRunId), isNull(tasks.deletedAt), eq(tasks.paused, false), eq(schema.projects.paused, false)))
       .orderBy(asc(tasks.updatedAt))
     for (const { task, project, epicBranch } of waiting) {
-      if (this.stopped) return
+      if (this.#d.gate.halted) return
       if (task.type === 'design') continue
       // The synchronizer publishes a resolution and settles its task
       if (isEpicResolution(task)) continue
@@ -129,8 +120,6 @@ export class MergeOrchestrator {
       if (task.branch && task.branch === epicBranch) await this.#once(task.id, () => this.#settleEpicRebase(task))
       else if (task.prNumber && task.headSha && this.#retry.due(task.id) && this.#ciPoll.due(task.id)) await this.#advanceOnce(task, project)
     }
-    await this.#integrations.tick(() => this.stopped)
-    await this.#epics.tick(() => this.stopped)
   }
 
   // A handed-off rebase task's work reached the epic branch when the runner pushed it;
@@ -139,8 +128,7 @@ export class MergeOrchestrator {
     await this.#d.db.transaction(async (tx) => {
       const locked = await lockTask(tx, task.id)
       if (locked.task.status !== 'ready_to_merge') return
-      await applyTransition(tx, locked.task, locked.project, { type: 'merged_outside' }, server, { event: 'merged', headSha: task.headSha })
-      await tx.update(tasks).set({ mergedAt: this.#now(), updatedAt: this.#now() }).where(eq(tasks.id, task.id))
+      await recordTaskMerged(tx, locked, { type: 'merged_outside' }, { event: 'merged', headSha: task.headSha }, { at: this.#now() })
     })
     await this.#publish(task.id)
     await this.cleanup(task.id)
@@ -160,7 +148,7 @@ export class MergeOrchestrator {
       const approval = await this.#approvalFor(task)
       if (!approval) continue
       const type = task.rebaseOnly ? 'approval_carried' : 'review_approved'
-      await this.#once(task.id, () => this.#transition(task.id, { type, humanCheckOpen: approval.criteria.some(v => v.met === null) }, { event: type, headSha: task.headSha }, undefined, 'agent_review'))
+      await this.#once(task.id, () => this.#settle(task.id, { event: { type, humanCheckOpen: approval.criteria.some(v => v.met === null) }, detail: { event: type, headSha: task.headSha } }, 'agent_review'))
     }
   }
 
@@ -182,11 +170,8 @@ export class MergeOrchestrator {
     return this.#once(task.id, () => this.#advance(task, project))
   }
 
-  async #approvalFor(task: { id: string, headSha: string | null }) {
-    const [row] = await this.#d.db.select().from(reviews)
-      .where(and(eq(reviews.taskId, task.id), eq(reviews.headSha, task.headSha!), eq(reviews.verdict, 'approved')))
-      .orderBy(desc(reviews.createdAt)).limit(1)
-    return row ?? null
+  #approvalFor(task: { id: string, headSha: string | null }) {
+    return latestApproval(this.#d.db, task.id, task.headSha!)
   }
 
   // Gathers the facts for core's gate check from GitHub and the database. A
@@ -224,7 +209,7 @@ export class MergeOrchestrator {
       return
     }
     if (pr.state === 'closed') {
-      await this.#transition(task.id, { type: 'fail', reason: `PR #${pr.number} was closed on GitHub without merging` }, { event: 'pr_closed' })
+      await this.#settle(task.id, { event: { type: 'fail', reason: `PR #${pr.number} was closed on GitHub without merging` }, detail: { event: 'pr_closed' } })
       return
     }
 
@@ -241,13 +226,7 @@ export class MergeOrchestrator {
     const checks = await github.checks(project.repository, pr.headSha)
     const { failed, pending } = requiredChecks(project.requiredChecks, checks)
     if (failed.length > 0) {
-      if (await ciFixesInARow(db, task.id) >= MAX_CI_FIXES) {
-        await this.#transition(task.id, { type: 'fail', reason: `CI still fails after ${MAX_CI_FIXES} fixes in a row: ${failed.map(c => c.name).join(', ')}` }, { event: 'ci_failed', checks: failed.map(c => c.name) })
-        return
-      }
-      // flows.md 7b: CI fails → In progress with the failure attached
-      const body = ['CI failed on this commit; please fix and report pr_updated.', '', ...failed.map(c => `- ${c.name}: failed${c.url ? ` (${c.url})` : ''}`)].join('\n')
-      await this.#transition(task.id, { type: 'ci_failed' }, { event: 'ci_failed', checks: failed.map(c => c.name) }, body, 'ready_to_merge', { ciFix: failed.map(c => ({ name: c.name, url: c.url })), approvedHeadSha: pr.headSha })
+      await this.#settle(task.id, await ciFailed(db, task.id, failed, pr.headSha, 'CI failed on this commit; please fix and report pr_updated.'))
       return
     }
     if (pending.length > 0) {
@@ -262,8 +241,8 @@ export class MergeOrchestrator {
       return
     }
     if (pr.mergeable === false) {
-      await this.#transition(task.id, { type: 'base_conflict', approvedHeadSha: pr.headSha }, { event: 'base_conflict', mergeableState: pr.mergeableState },
-        `GitHub reports this branch can’t be merged (${pr.mergeableState ?? 'conflict'}). ${rebaseInstruction(baseBranch)}`)
+      await this.#settle(task.id, { event: { type: 'base_conflict', approvedHeadSha: pr.headSha }, detail: { event: 'base_conflict', mergeableState: pr.mergeableState },
+        comment: `GitHub reports this branch can’t be merged (${pr.mergeableState ?? 'conflict'}). ${rebaseInstruction(baseBranch)}` })
       return
     }
 
@@ -273,7 +252,7 @@ export class MergeOrchestrator {
       // Not yet; the next tick looks again. The audit says why, once per commit
       if (this.#gatesNoted.get(task.id) !== pr.headSha) {
         this.#gatesNoted.set(task.id, pr.headSha)
-        await appendAudit(db, { projectId: project.id, taskId: task.id, actor: server }, auditEvent('merge.gates_failed', { pr: pr.number, headSha: pr.headSha, gates: failedGates }))
+        await appendAudit(db, { projectId: project.id, taskId: task.id, actor: SERVER_ACTOR }, auditEvent('merge.gates_failed', { pr: pr.number, headSha: pr.headSha, gates: failedGates }))
       }
       return
     }
@@ -300,10 +279,10 @@ export class MergeOrchestrator {
       throw error
     }
     if (updated) {
-      await appendAudit(db, { projectId: project.id, taskId: task.id, actor: server }, auditEvent('branch.update_requested', { pr: pr.number, headSha: pr.headSha }))
+      await appendAudit(db, { projectId: project.id, taskId: task.id, actor: SERVER_ACTOR }, auditEvent('branch.update_requested', { pr: pr.number, headSha: pr.headSha }))
     } else {
-      await this.#transition(task.id, { type: 'base_conflict', approvedHeadSha: pr.headSha }, { event: 'base_conflict' },
-        `The base branch \`${baseBranch}\` has moved and the update conflicts with this branch. ${rebaseInstruction(baseBranch)}`)
+      await this.#settle(task.id, { event: { type: 'base_conflict', approvedHeadSha: pr.headSha }, detail: { event: 'base_conflict' },
+        comment: `The base branch \`${baseBranch}\` has moved and the update conflicts with this branch. ${rebaseInstruction(baseBranch)}` })
     }
   }
 
@@ -320,25 +299,14 @@ export class MergeOrchestrator {
       const locked = await lockTask(tx, task.id)
       if (locked.task.status !== 'ready_to_merge' || locked.task.headSha === pr.headSha) return
       const from = locked.task.headSha!
-      const [approval] = await tx.select().from(reviews)
-        .where(and(eq(reviews.taskId, task.id), eq(reviews.headSha, from), eq(reviews.verdict, 'approved')))
-        .orderBy(desc(reviews.createdAt)).limit(1)
-      const kept = Boolean(locked.task.branchUpdateRequested && approval)
-      if (kept && approval) {
-        await tx.insert(reviews).values({
-          taskId: task.id,
-          runId: approval.runId,
-          round: approval.round,
-          headSha: pr.headSha,
-          verdict: 'approved',
-          summary: `${approval.summary}\n\n(Approval carried over a base-branch update from ${from.slice(0, 10)} to ${pr.headSha.slice(0, 10)}; CI runs again.)`,
-          criteria: approval.criteria,
-          author: server
-        })
+      const approval = locked.task.branchUpdateRequested ? await latestApproval(tx, task.id, from) : null
+      const kept = Boolean(approval)
+      if (approval) {
+        await carryApproval(tx, task, approval, { headSha: pr.headSha, summary: `${approval.summary}\n\n(Approval carried over a base-branch update from ${shortSha(from)} to ${shortSha(pr.headSha)}; CI runs again.)`, author: SERVER_ACTOR })
       }
       await tx.update(tasks).set({ headSha: pr.headSha, branchUpdateRequested: false, updatedAt: this.#now() }).where(eq(tasks.id, task.id))
-      await appendAudit(tx, { projectId: task.projectId, taskId: task.id, actor: server }, auditEvent('branch.head_moved', { from, to: pr.headSha, approvalKept: kept }))
-      if (!kept) await applyTransition(tx, locked.task, locked.project, { type: 'head_moved' }, server, { event: 'head_moved', headSha: pr.headSha })
+      await appendAudit(tx, { projectId: task.projectId, taskId: task.id, actor: SERVER_ACTOR }, auditEvent('branch.head_moved', { from, to: pr.headSha, approvalKept: kept }))
+      if (!kept) await applyTransition(tx, locked.task, locked.project, { type: 'head_moved' }, SERVER_ACTOR, { event: 'head_moved', headSha: pr.headSha })
     })
     await this.#publish(task.id)
   }
@@ -352,7 +320,7 @@ export class MergeOrchestrator {
     const { db, github } = this.#d
     const { pr } = report
     const merged = await db.transaction(async (tx) => {
-      const locked = await lockTask(tx, taskId).catch(() => null)
+      const locked = await lockLiveTask(tx, taskId)
       if (!locked || !this.#mayMerge(locked.task, locked.project, pr)) return false
       // A task PR can be based on an epic branch, so it takes that epic's writer
       // lock like any other write there: a rebase can't start during the merge.
@@ -377,7 +345,7 @@ export class MergeOrchestrator {
         }
         const attempt = this.#attempts.next(taskId, pr.headSha)
         if (attempt >= MAX_MERGE_ATTEMPTS) {
-          await applyTransition(tx, locked.task, locked.project, { type: 'fail', reason: `GitHub merge failed ${attempt} times and retrying isn't safe: ${error instanceof Error ? error.message : String(error)}` }, server, { event: 'merge_failed' })
+          await applyTransition(tx, locked.task, locked.project, { type: 'fail', reason: `GitHub merge failed ${attempt} times and retrying isn't safe: ${errorText(error)}` }, SERVER_ACTOR, { event: 'merge_failed' })
           await triageCap(tx, taskId, true)
           this.#attempts.clear(taskId)
         }
@@ -391,9 +359,9 @@ export class MergeOrchestrator {
       // A plain refusal (405/409): the head moved or a check turned red. The
       // next tick re-evaluates from live state.
       const attempt = this.#attempts.next(taskId, pr.headSha)
-      await appendAudit(tx, { projectId: project.id, taskId, actor: server }, auditEvent('merge.refused', { pr: pr.number, message: result.message, attempt }))
+      await appendAudit(tx, { projectId: project.id, taskId, actor: SERVER_ACTOR }, auditEvent('merge.refused', { pr: pr.number, message: result.message, attempt }))
       if (attempt >= MAX_MERGE_ATTEMPTS) {
-        await applyTransition(tx, locked.task, locked.project, { type: 'fail', reason: `GitHub refused the merge ${attempt} times: ${result.message}` }, server, { event: 'merge_failed' })
+        await applyTransition(tx, locked.task, locked.project, { type: 'fail', reason: `GitHub refused the merge ${attempt} times: ${result.message}` }, SERVER_ACTOR, { event: 'merge_failed' })
         await triageCap(tx, taskId, true)
         this.#attempts.clear(taskId)
       }
@@ -406,7 +374,7 @@ export class MergeOrchestrator {
   // The last check before GitHub is asked to merge, on the locked rows: the
   // pass read the task a while ago, and anything may have vetoed it since
   #mayMerge(task: TaskRow, project: ProjectRow, pr: PullRequest): boolean {
-    return !this.stopped && task.status === 'ready_to_merge' && !task.leaseRunId && !task.paused && !task.deletedAt && !project.paused && task.headSha === pr.headSha
+    return !this.#d.gate.halted && task.status === 'ready_to_merge' && !task.leaseRunId && !task.paused && !task.deletedAt && !project.paused && task.headSha === pr.headSha
   }
 
   // GitHub shows a PR merged that Corral didn't merge just now
@@ -418,7 +386,7 @@ export class MergeOrchestrator {
       // A human sent it back in the meantime. The work has landed all the same,
       // so a developer must not start on it: the human decides what's next.
       if (!locked.task.leaseRunId) {
-        await applyTransition(tx, locked.task, locked.project, { type: 'block', reason: `PR #${pr.number} merged on GitHub after this task left Ready to merge` }, server, { event: 'merged_after_veto' })
+        await applyTransition(tx, locked.task, locked.project, { type: 'block', reason: `PR #${pr.number} merged on GitHub after this task left Ready to merge` }, SERVER_ACTOR, { event: 'merged_after_veto' })
       }
       return false
     })
@@ -435,17 +403,14 @@ export class MergeOrchestrator {
   }
 
   // `gates` are the facts Corral merged on; null means it may not have merged it
-  async #recordMergedIn(tx: Executor, { task, project }: { task: TaskRow, project: ProjectRow }, pr: PullRequest, gates: MergeGateFacts | null): Promise<true> {
+  async #recordMergedIn(tx: Executor, locked: { task: TaskRow, project: ProjectRow }, pr: PullRequest, gates: MergeGateFacts | null): Promise<true> {
     const detail = { pr: pr.number, mergeCommitSha: pr.mergeCommitSha }
-    if (gates) {
-      // Core re-checks the gates; GitHub has already confirmed the merge, so
-      // the facts describe the merged commit
-      await applyTransition(tx, task, project, { type: 'merged', gates: { ...gates, mergeable: true } }, server, { event: 'merged', ...detail })
-    } else {
-      await applyTransition(tx, task, project, { type: 'merged_outside' }, server, { event: 'merged', ...detail, outside: true })
-    }
-    await tx.update(tasks).set({ mergeCommitSha: pr.mergeCommitSha, mergedAt: this.#now(), updatedAt: this.#now() }).where(eq(tasks.id, task.id))
-    this.#forget(task.id)
+    const merge = { commitSha: pr.mergeCommitSha, at: this.#now() }
+    // Core re-checks the gates; GitHub has already confirmed the merge, so
+    // the facts describe the merged commit
+    if (gates) await recordTaskMerged(tx, locked, { type: 'merged', gates: { ...gates, mergeable: true } }, { event: 'merged', ...detail }, merge)
+    else await recordTaskMerged(tx, locked, { type: 'merged_outside' }, { event: 'merged', ...detail, outside: true }, merge)
+    this.#forget(locked.task.id)
     return true
   }
 
@@ -457,10 +422,10 @@ export class MergeOrchestrator {
       const [row] = await db.select({ task: tasks, project: schema.projects }).from(tasks)
         .innerJoin(schema.projects, eq(schema.projects.id, tasks.projectId)).where(eq(tasks.id, taskId))
       if (!row) return
-      const result = await runner.request({ kind: 'cleanup_worktrees', repository: row.project.repository, taskId })
-      await appendAudit(db, { projectId: row.project.id, taskId, actor: server }, auditEvent('worktrees.cleaned', result))
+      const result = await runner.cleanupWorktrees({ kind: 'cleanup_worktrees', repository: row.project.repository, taskId })
+      await appendAudit(db, { projectId: row.project.id, taskId, actor: SERVER_ACTOR }, auditEvent('worktrees.cleaned', result))
       if (result.kept.length > 0) {
-        await db.insert(comments).values({ taskId, author: server, body: `The runner kept a worktree with uncommitted changes: ${result.kept.join(', ')}. Remove it by hand when you're done with it.` })
+        await addCommentWithTransition(db, taskId, { body: `The runner kept a worktree with uncommitted changes: ${result.kept.join(', ')}. Remove it by hand when you're done with it.` }, SERVER_ACTOR)
       }
     } catch (error) {
       console.error(`Worktree cleanup for task ${taskId} failed`, error)
@@ -476,36 +441,28 @@ export class MergeOrchestrator {
       const { task, project } = await lockTask(tx, taskId)
       if (task.type === 'design') throw new ApiFailure(409, { code: 'conflict', constraint: 'approve_design_version' })
       await applyTransition(tx, task, project, { type: 'human_approve' }, actor, { event: 'human_approve', headSha: task.headSha })
-      if (note?.trim()) await tx.insert(comments).values({ taskId, author: actor, body: note.trim(), pinned: false })
+      if (note?.trim()) await addCommentWithTransition(tx, taskId, { body: note.trim() }, actor)
     })
     await this.#publish(taskId)
     const [row] = await db.select({ task: tasks, project: schema.projects }).from(tasks)
       .innerJoin(schema.projects, eq(schema.projects.id, tasks.projectId)).where(eq(tasks.id, taskId))
     // A spike is finished once approved (D19): there's no PR to merge
     if (row?.task.status === 'merged') void this.cleanup(taskId)
-    else if (row && !this.stopped && row.task.prNumber && row.task.headSha) void this.#advanceOnce(row.task, row.project)
+    else if (row && !this.#d.gate.halted && row.task.prNumber && row.task.headSha) void this.#advanceOnce(row.task, row.project)
   }
 
-  // Only from the status the pass read: a human may have moved the task since
-  async #transition(taskId: string, event: Parameters<typeof applyTransition>[3], detail: TransitionDetail, comment?: string, from: TaskStatus = 'ready_to_merge', values?: Partial<typeof tasks.$inferInsert>): Promise<void> {
-    await this.#d.db.transaction(async (tx) => {
-      const { task, project } = await lockTask(tx, taskId)
-      if (task.leaseRunId || task.status !== from) return
-      await applyTransition(tx, task, project, event, server, detail)
-      // A failed CI check only fails the task at the CI-fix cap
-      if (event.type === 'fail' && detail.event === 'ci_failed') await triageCap(tx, taskId, true)
-      if (values) await tx.update(tasks).set(values).where(eq(tasks.id, taskId))
-      if (comment) await tx.insert(comments).values({ taskId, author: server, body: comment })
-    })
+  async #settle(taskId: string, change: ServerChange, from?: TaskStatus): Promise<void> {
+    await settleTask(this.#d.db, taskId, change, from)
     await this.#publish(taskId)
   }
 
-  async #publish(taskId: string): Promise<void> {
-    const task = await loadTask(this.#d.db, taskId).catch(() => null)
+  async #publish(taskId: string) {
+    const [task] = await loadTasks(this.#d.db, [taskId])
     if (task) this.#d.events.publish({ type: 'task.updated', task })
     if (task?.status === 'merged') {
       const dependents = await publishDependents(this.#d.db, this.#d.events, taskId)
-      this.#d.wake?.(dependents)
+      this.#d.wake(dependents)
     }
+    return task
   }
 }

@@ -60,5 +60,4 @@ export function evidenceRounds(evidence: Evidence[]): EvidenceRounds {
   }
 }
 
-// The evidence a task shows by default, in the order given
 export const currentEvidence = (evidence: Evidence[]) => evidenceRounds(evidence).current

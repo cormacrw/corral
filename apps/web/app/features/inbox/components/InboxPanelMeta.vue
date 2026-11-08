@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import type { InboxItemKind, InboxPanelContext } from '~/features/inbox/composables/useInboxPanel'
+import type { InboxPanelContext } from '~/features/inbox/composables/useInboxPanel'
+import type { InboxItemKind } from '~/utils/inbox-kinds'
 import { timeAgo } from '~/utils/labels'
 
 // What the item is, as one quiet line: kind, project · ref, who and when
 // A Plan thread can have no project, so it reads Global
-type Item = Pick<InboxPanelContext['item'], 'sender' | 'at'> & { project: InboxPanelContext['item']['project'] | null, taskRef: string | null }
-defineProps<{ kind: InboxItemKind, item: Item }>()
+export type InboxMetaItem = Pick<InboxPanelContext['item'], 'sender' | 'at'> & { project: InboxPanelContext['item']['project'] | null, taskRef: string | null }
+defineProps<{ kind: InboxItemKind, item: InboxMetaItem }>()
 </script>
 
 <template>

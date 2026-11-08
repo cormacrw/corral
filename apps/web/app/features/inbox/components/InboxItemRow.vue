@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import type { InboxItem } from '@corral/contracts'
+import { computed } from 'vue'
 import { markdownToPlainText } from '~/utils/markdown'
+import { inboxPrefix } from '~/utils/inbox-kinds'
 import TimeAgo from '~/components/shared/TimeAgo.vue'
-import { inboxTitlePrefix } from '~/features/inbox/utils/inbox-title'
 
-// One Inbox row's content, on either layout. A Plan thread has PlanThreadRow.
-const props = defineProps<{ item: Exclude<InboxItem, { type: 'plan_thread' }>, mobile?: boolean }>()
-const prefix = computed(() => inboxTitlePrefix(props.item))
+// One Inbox row's content, on either layout
+const props = defineProps<{ item: InboxItem, mobile?: boolean }>()
+const prefix = computed(() => inboxPrefix(props.item))
 // Unread is bold, full-strength text, the way a mail client shows it
 const tone = computed(() => props.item.unread ? 'text-foreground' : 'text-muted-foreground')
+const thread = computed(() => props.item.type === 'plan_thread' ? props.item : null)
 </script>
 
 <template>
@@ -24,7 +26,15 @@ const tone = computed(() => props.item.unread ? 'text-foreground' : 'text-muted-
     >Unread</span>
     <span :class="['flex items-center gap-2', !mobile && 'text-xs', tone]">
       <span :class="['min-w-0 truncate', tone, item.unread ? 'font-bold' : mobile ? 'font-semibold' : 'font-medium']">{{ item.sender.name }}</span>
-      <span :class="['ms-auto shrink-0 text-xs', tone]"><TimeAgo :at="item.at" /></span>
+      <span :class="['ms-auto flex shrink-0 items-center gap-2 text-xs', tone]">
+        <Icon
+          v-if="thread?.activeRunId"
+          name="i-hugeicons-loading-03"
+          class="size-3 animate-spin"
+          aria-label="PM working"
+        />
+        <TimeAgo :at="item.at" />
+      </span>
     </span>
     <span :class="[tone, !mobile && 'block truncate text-sm', item.unread ? 'font-bold' : mobile ? 'font-semibold' : 'font-medium']"><span
       v-if="prefix"
@@ -35,15 +45,17 @@ const tone = computed(() => props.item.unread ? 'text-foreground' : 'text-muted-
       v-if="item.type === 'release_notes'"
       :class="['font-mono text-xs', tone, !mobile && 'block']"
     >{{ item.fromSha ? `${item.fromSha}…` : '' }}{{ item.toSha }}</span>
+    <!-- A Plan thread can have no project, so it reads Global -->
     <span
-      v-if="item.project"
+      v-if="item.project || thread"
       :class="['flex min-w-0 items-center gap-1 text-xs', tone, mobile ? 'mt-0.5' : 'mt-1']"
     >
       <ProjectThumbnail
+        v-if="item.project"
         :project="item.project"
         :size="18"
       />
-      <span class="truncate">{{ item.project.name }}<template v-if="mobile && item.taskRef"> · {{ item.taskRef }}</template></span>
+      <span class="truncate">{{ item.project?.name ?? 'Global' }}<template v-if="mobile && item.taskRef"> · {{ item.taskRef }}</template></span>
     </span>
   </span>
 </template>

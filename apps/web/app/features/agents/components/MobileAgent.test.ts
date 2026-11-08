@@ -1,10 +1,9 @@
 // @vitest-environment happy-dom
 import type { Run } from '@corral/contracts'
-import type { AgentRuns } from '~/features/runs/composables/useAgentRuns'
+import type { AgentRuns } from '~/features/agents/composables/useAgentRuns'
 import { mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { computed, defineComponent, h, ref } from 'vue'
-import { runs as fixtures } from '~/prototype/fixtures'
 import MobileAgent from '~/features/agents/components/MobileAgent.vue'
 
 const NuxtLink = defineComponent({
@@ -29,7 +28,12 @@ function links(runs: Run[]) {
     } }
   }).findAll('a').map(a => a.attributes('href'))
 }
-const pm = fixtures.find(r => r.role === 'pm')!
+const run = (role: Run['role'], id = `r-${role}`) => ({
+  id, role, agentId: 'juno', agentName: 'Juno', state: 'completed', outcome: null, projectId: 'p1', planSessionId: null,
+  taskId: null, taskRef: null, taskTitle: null, epicId: null, epicTitle: null, summary: null,
+  queuedAt: '2026-10-29T10:00:00Z', startedAt: '2026-10-29T10:00:00Z', endedAt: '2026-10-29T10:05:00Z'
+}) as unknown as Run
+const pm = run('pm')
 
 describe('mobile agent navigation', () => {
   it('opens current and previous PM turns in their exact sessions and projects', () => {
@@ -41,10 +45,10 @@ describe('mobile agent navigation', () => {
   })
 
   it('keeps transcripts for unlinked PM turns and other roles even with a session ID', () => {
-    expect(links([{ ...pm, planSessionId: null }])).toEqual([`/agents/Juno/${pm.id}`])
+    expect(links([{ ...pm, planSessionId: null }])).toEqual([`/agents/juno/${pm.id}`])
     for (const role of ['developer', 'designer', 'reviewer'] as const) {
-      const run = fixtures.find(r => r.role === role)!
-      expect(links([{ ...run, planSessionId: 'session' }])).toEqual([`/agents/Juno/${run.id}`])
+      const other = run(role)
+      expect(links([{ ...other, planSessionId: 'session' }])).toEqual([`/agents/juno/${other.id}`])
     }
   })
 })

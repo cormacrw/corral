@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { h, type VNodeChild } from 'vue'
-import { useTaskRefText } from '~/features/tasks/composables/useTaskRefText'
-import { shownImageSrc } from '~/features/tasks/utils/editor-image'
+import { useTaskRefText } from '~/composables/useTaskRefText'
+import { shownImageSrc } from '~/utils/attachments'
 
 // Read-only task descriptions retain their rich-text structure. Render nodes
 // directly, so literal markdown characters in the editor remain literal.

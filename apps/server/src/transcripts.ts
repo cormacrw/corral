@@ -1,7 +1,7 @@
 import type { RunEvent } from '@corral/contracts'
 import { appendFile, mkdir, readdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { BlobStore } from './blob-store.ts'
+import { unlessMissing, type BlobStore } from './blob-store.ts'
 
 const SPOOL_SUFFIX = '.jsonl'
 
@@ -26,7 +26,7 @@ export class Transcripts {
 
   // After a restart the spool is the only record of how long it is
   async #spooledLines(runId: string): Promise<number> {
-    const data = await readFile(this.#path(runId), 'utf8').catch(() => '')
+    const data = await unlessMissing(readFile(this.#path(runId), 'utf8'), '')
     return data.split('\n').length - 1
   }
 
@@ -47,16 +47,15 @@ export class Transcripts {
   // the run produced no events
   async finish(runId: string): Promise<string | null> {
     this.#lengths.delete(runId)
-    const data = await readFile(this.#path(runId)).catch(() => null)
+    const data = await unlessMissing(readFile(this.#path(runId)), null)
     if (!data) return null
     const hash = await this.#blobs.put(data)
     await rm(this.#path(runId), { force: true })
     return hash
   }
 
-  // The runs with a spool file
   async spooled(): Promise<string[]> {
-    const files = await readdir(this.#dir).catch(() => [])
+    const files = await unlessMissing(readdir(this.#dir), [])
     return files.filter(f => f.endsWith(SPOOL_SUFFIX)).map(f => f.slice(0, -SPOOL_SUFFIX.length))
   }
 
@@ -68,7 +67,7 @@ export class Transcripts {
 
   // The live spool, or the stored blob once the run has finished
   async read(runId: string, blob: string | null): Promise<RunEvent[]> {
-    const data = blob ? await this.#blobs.get(blob) : await readFile(this.#path(runId)).catch(() => null)
+    const data = blob ? await this.#blobs.get(blob) : await unlessMissing(readFile(this.#path(runId)), null)
     if (!data) return []
     return new TextDecoder().decode(data).split('\n').filter(Boolean).map(line => JSON.parse(line) as RunEvent)
   }

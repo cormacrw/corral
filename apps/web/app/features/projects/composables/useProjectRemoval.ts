@@ -2,6 +2,7 @@ import { errorMessage } from '~/lib/errors'
 import { useMutation } from '@tanstack/vue-query'
 import type { Project } from '@corral/contracts'
 import { removeProject } from '~/queries/projects'
+import { projectPath, SETUP_PATH } from '~/utils/routes'
 
 // Remove: the server wants the exact name echoed back, so the confirm button waits for it
 export function useProjectRemoval(project: () => Project) {
@@ -27,7 +28,7 @@ export function useProjectRemoval(project: () => Project) {
       open.value = false
       toast.add({ title: `Removed ${p.name}`, color: 'success' })
       const next = projects.value?.find(x => x.id !== p.id)
-      await router.push(next ? `/projects/${next.slug}` : '/setup')
+      await router.push(next ? projectPath(next.slug) : SETUP_PATH)
     } catch (e) {
       toast.add({ title: 'Not removed', description: errorMessage(e), color: 'error' })
     } finally {

@@ -99,6 +99,12 @@ export function markdownToRichText(markdown: string): RichTextDocument {
   return { type: 'doc', content: blocks(marked.lexer(markdown.trim())) }
 }
 
+// Optional markdown, such as an implementation plan: none when it's left out
+// or blank, so an empty string clears it
+export function optionalMarkdownToRichText(markdown: string | null | undefined): RichTextDocument | null {
+  return markdown?.trim() ? markdownToRichText(markdown) : null
+}
+
 function blocks(tokens: Token[]): RichNode[] {
   const nodes: RichNode[] = []
   for (const token of tokens) {

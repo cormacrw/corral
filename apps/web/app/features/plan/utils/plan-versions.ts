@@ -4,7 +4,6 @@ import type { Plan } from '@corral/contracts'
 export const latestPlan = (plans: Plan[]): Plan | null =>
   plans.reduce<Plan | null>((a, p) => !a || p.version > a.version ? p : a, null)
 
-// What a version is compared against in its diff
 export const previousPlan = (plans: Plan[], plan: Plan | null): Plan | null =>
   plan ? plans.find(p => p.version === plan.version - 1) ?? null : null
 

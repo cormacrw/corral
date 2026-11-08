@@ -1,9 +1,12 @@
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { RunJob } from '@corral/contracts'
+import type { RunJob, RunnerMessage } from '@corral/contracts'
+import { DEFAULT_AGENT_RUNTIME } from '@corral/core'
+import type { RunnerConfig } from './config.ts'
 import { exec } from './exec.ts'
-import { barePath } from './repos.ts'
+import { barePath } from './layout.ts'
+import type { RunConnection } from './run-outbox.ts'
 
 export const TEST_REPOSITORY = 'acme/app'
 
@@ -38,7 +41,7 @@ export function pmJob(overrides: Partial<{ [K in keyof RunJob]: RunJob[K] }> = {
     runNumber: 1,
     leaseEpoch: 1,
     role: 'pm',
-    runtime: 'claude-code',
+    runtime: DEFAULT_AGENT_RUNTIME,
     projectId: 'project-1',
     repository: TEST_REPOSITORY,
     defaultBranch: 'main',
@@ -54,4 +57,33 @@ export function pmJob(overrides: Partial<{ [K in keyof RunJob]: RunJob[K] }> = {
     timeoutSeconds: 60,
     ...overrides
   } as RunJob
+}
+
+// A runner config for tests. The binaries don't exist, so nothing here starts a real CLI.
+export function testConfig(dataDir: string, overrides: Partial<RunnerConfig> = {}): RunnerConfig {
+  return {
+    runnerToken: undefined,
+    dataDir,
+    serverUrl: new URL('http://127.0.0.1:9'),
+    name: 'test',
+    claudeBin: '/nonexistent/claude',
+    claudeConfigDir: '/nonexistent/.claude',
+    codexBin: '/nonexistent/codex',
+    codexHome: '/nonexistent/.codex',
+    gitAuthor: null,
+    pmWarmSeconds: 0,
+    smallModel: 'haiku',
+    slots: 4,
+    slotSource: { kind: 'explicit' },
+    roles: ['pm', 'developer', 'reviewer', 'design'],
+    buildSha: 'development',
+    autoUpdate: false,
+    ...overrides
+  }
+}
+
+// A connection that hands each message to `send`; not connected unless asked,
+// so a stopped run's WIP commit stays local
+export function testConnection(send: (message: RunnerMessage) => boolean, connected = false): RunConnection {
+  return { connected, send, refreshUpdateStatus: async () => {} }
 }

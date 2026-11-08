@@ -4,7 +4,12 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { loadConfig, type RunnerConfig } from './config.ts'
 import { MAX_OUTPUT_CHARS } from './exec.ts'
-import { codexSignedIn, githubLog, githubRequest, parseIncludedResponse, runSetupJob, signedInRuntimes, toRepoSummary } from './jobs.ts'
+import { codexSignedIn } from './codex.ts'
+import { githubLog, githubRequest, parseIncludedResponse, runSetupJob, toRepoSummary, type SetupContext } from './jobs.ts'
+import { createRuntimes, type Runtimes } from './runtimes.ts'
+
+const noRuns = { pmTurnRunning: () => false, hasRun: () => false, projectRunning: () => false }
+const setup = (config: RunnerConfig, runtimes: Runtimes = createRuntimes(config)): SetupContext => ({ config, runtimes, runs: noRuns })
 
 describe('detect_clis', () => {
   let root: string
@@ -30,10 +35,11 @@ describe('detect_clis', () => {
   const runs = async () => (await readFile(join(root, 'runs'), 'utf8')).split('\n').filter(Boolean).length
 
   it('runs one detection for a hello and the server\'s check right after it', async () => {
-    const config = { claudeBin: await countedCli('claude', true), codexBin: await fakeCli('codex', `echo run >> '${join(root, 'runs')}'; echo 'Logged in'`) } as RunnerConfig
-    const [first, second] = await Promise.all([signedInRuntimes(config), runSetupJob(config, { kind: 'detect_clis' })])
+    const config = { ...loadConfig({}), claudeBin: await countedCli('claude', true), codexBin: await fakeCli('codex', `echo run >> '${join(root, 'runs')}'; echo 'Logged in'`) }
+    const runtimes = createRuntimes(config)
+    const [first, second] = await Promise.all([runtimes.signedIn(), runSetupJob(setup(config, runtimes), { kind: 'detect_clis' })])
     const counted = await runs()
-    await signedInRuntimes(config)
+    await runtimes.signedIn()
 
     expect(first).toEqual(['claude-code', 'codex'])
     expect(second.kind).toBe('detect_clis')
@@ -42,17 +48,17 @@ describe('detect_clis', () => {
   })
 
   it('checks again each time while a CLI is signed out, so a new login shows up', async () => {
-    const config = { claudeBin: await countedCli('claude', false), codexBin: join(root, 'missing') } as RunnerConfig
-    await signedInRuntimes(config)
+    const runtimes = createRuntimes({ ...loadConfig({}), claudeBin: await countedCli('claude', false), codexBin: join(root, 'missing') })
+    await runtimes.signedIn()
     const counted = await runs()
-    await signedInRuntimes(config)
+    await runtimes.signedIn()
     expect(await runs()).toBeGreaterThan(counted)
   })
 
   it('reports claude and codex, and a missing codex as not found without failing', async () => {
     const claudeBin = await fakeCli('claude', 'if [ "$1" = "--version" ]; then echo "2.1.312 (Claude Code)"; fi; exit 0')
     const config = { ...loadConfig({}), claudeBin, codexBin: join(root, 'no-such-codex') }
-    expect(await runSetupJob(config, { kind: 'detect_clis' })).toEqual({
+    expect(await runSetupJob(setup(config), { kind: 'detect_clis' })).toEqual({
       kind: 'detect_clis',
       clis: [
         { id: 'claude', version: '2.1.312 (Claude Code)', signedIn: true },
@@ -64,7 +70,7 @@ describe('detect_clis', () => {
   it('reads the codex version and its login from stderr', async () => {
     const codexBin = await fakeCli('codex', 'if [ "$1" = "--version" ]; then echo "codex-cli 0.165.0"; else echo "Logged in using ChatGPT" >&2; fi')
     const config = { ...loadConfig({}), claudeBin: join(root, 'no-such-claude'), codexBin }
-    const result = await runSetupJob(config, { kind: 'detect_clis' })
+    const result = await runSetupJob(setup(config), { kind: 'detect_clis' })
     expect(result).toEqual({
       kind: 'detect_clis',
       clis: [
@@ -77,8 +83,28 @@ describe('detect_clis', () => {
   it('reports an installed codex that is not signed in', async () => {
     const codexBin = await fakeCli('codex', 'if [ "$1" = "--version" ]; then echo "codex-cli 0.165.0"; else echo "Not logged in" >&2; exit 1; fi')
     const config = { ...loadConfig({}), claudeBin: join(root, 'no-such-claude'), codexBin }
-    const result = await runSetupJob(config, { kind: 'detect_clis' })
+    const result = await runSetupJob(setup(config), { kind: 'detect_clis' })
     expect(result.kind === 'detect_clis' && result.clis[1]).toEqual({ id: 'codex', version: 'codex-cli 0.165.0', signedIn: false })
+  })
+})
+
+describe('cleanup_worktrees', () => {
+  let root: string
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'corral-cleanup-'))
+  })
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+
+  it('cleans an epic\'s checkouts by epicId, and by the taskId an older server sends', async () => {
+    const config = { ...loadConfig({}), dataDir: root }
+    const folders = [join(root, 'worktrees', 'epic-e1'), join(root, 'worktrees', 'epic-e1-review')]
+    for (const ids of [{ epicId: 'e1' }, { taskId: 'epic-e1' }]) {
+      expect(await runSetupJob(setup(config), { kind: 'cleanup_worktrees', repository: 'a/b', ...ids })).toEqual({ kind: 'cleanup_worktrees', removed: folders, kept: [] })
+    }
   })
 })
 
@@ -139,13 +165,13 @@ cat '\${LOG}'`
   it('keeps the end of a log past the limit on held output, and failures from its start', async () => {
     await fakeGh(`printf 'HTTP/2.0 200 OK\\n\\n'
 echo 'FAIL early.test.ts'
-head -c ${MAX_OUTPUT_CHARS + 1_000_000} /dev/zero | tr '\\0' 'x'
+yes "$(printf '%01023d' 0 | tr 0 x)" | head -c ${MAX_OUTPUT_CHARS + 1_000_000}
 printf '\\nthe very end\\n'`)
     const result = await githubLog('/repos/a/b/actions/jobs/1/logs', 100)
     expect(result.status).toBe(200)
     expect(result.body).toMatch(/x+\nthe very end$/)
     expect(result.failureLines![0]).toBe('FAIL early.test.ts')
-  }, 60_000)
+  }, 30_000)
 
   it('asks again without the flag when an older gh doesn\'t know it', async () => {
     await fakeGh(`case "$*" in *--allow-escape-sequences*) echo 'unknown flag: --allow-escape-sequences' >&2; exit 1 ;; esac
@@ -213,7 +239,7 @@ describe('session_title', () => {
   it('asks claude with the configured small model and no tools', async () => {
     const claudeBin = await fakeClaude('echo "Login page plan"')
     const config = { ...loadConfig({ CORRAL_TITLE_MODEL: 'tiny' }), claudeBin }
-    expect(await runSetupJob(config, { kind: 'session_title', prompt: 'Title this: plan a login page' })).toEqual({ kind: 'session_title', title: 'Login page plan' })
+    expect(await runSetupJob(setup(config), { kind: 'session_title', prompt: 'Title this: plan a login page' })).toEqual({ kind: 'session_title', title: 'Login page plan' })
     const args = (await readFile(join(root, 'args'), 'utf8')).split('\n')
     expect(args.slice(0, 5)).toEqual(['-p', '--model', 'tiny', '--tools', ''])
     expect(args).toContain('--strict-mcp-config')
@@ -223,7 +249,7 @@ describe('session_title', () => {
   it('writes Inbox messages with the same configured small model', async () => {
     const claudeBin = await fakeClaude('echo "Please review the login fix."')
     const config = { ...loadConfig({ CORRAL_TITLE_MODEL: 'tiny' }), claudeBin }
-    expect(await runSetupJob(config, { kind: 'inbox_message', prompt: 'Facts only' })).toEqual({ kind: 'inbox_message', message: 'Please review the login fix.' })
+    expect(await runSetupJob(setup(config), { kind: 'inbox_message', prompt: 'Facts only' })).toEqual({ kind: 'inbox_message', message: 'Please review the login fix.' })
     const args = (await readFile(join(root, 'args'), 'utf8')).split('\n')
     expect(args.slice(0, 5)).toEqual(['-p', '--model', 'tiny', '--tools', ''])
     expect(args).toContain('--strict-mcp-config')
@@ -231,15 +257,11 @@ describe('session_title', () => {
     expect(await readFile(join(root, 'stdin'), 'utf8')).toBe('Facts only')
   })
 
-  it('defaults to haiku', () => {
-    expect(loadConfig({}).titleModel).toBe('haiku')
-  })
-
   it('fails when claude fails or prints nothing', async () => {
     const config = { ...loadConfig({}), claudeBin: await fakeClaude('echo "Not logged in" >&2; exit 1') }
-    await expect(runSetupJob(config, { kind: 'session_title', prompt: 'x' })).rejects.toThrow('Not logged in')
+    await expect(runSetupJob(setup(config), { kind: 'session_title', prompt: 'x' })).rejects.toThrow('Not logged in')
     config.claudeBin = await fakeClaude('exit 0')
-    await expect(runSetupJob(config, { kind: 'session_title', prompt: 'x' })).rejects.toThrow(/code 0/)
+    await expect(runSetupJob(setup(config), { kind: 'session_title', prompt: 'x' })).rejects.toThrow(/code 0/)
   })
 })
 
@@ -263,14 +285,14 @@ describe('release_notes', () => {
 
   it('asks claude with no tools and the prompt on stdin', async () => {
     const config = { ...loadConfig({}), claudeBin: await fakeCli('claude', 'echo "## Features"') }
-    expect(await runSetupJob(config, { kind: 'release_notes', runtime: 'claude-code', prompt: 'Write notes' })).toEqual({ kind: 'release_notes', notes: '## Features' })
+    expect(await runSetupJob(setup(config), { kind: 'release_notes', runtime: 'claude-code', prompt: 'Write notes' })).toEqual({ kind: 'release_notes', notes: '## Features' })
     expect((await readFile(join(root, 'args'), 'utf8')).split('\n').slice(0, 3)).toEqual(['-p', '--tools', ''])
     expect(await readFile(join(root, 'stdin'), 'utf8')).toBe('Write notes')
   })
 
   it('asks codex when that is the runtime', async () => {
     const config = { ...loadConfig({}), codexBin: await fakeCli('codex', 'echo "## Fixes"') }
-    expect(await runSetupJob(config, { kind: 'release_notes', runtime: 'codex', prompt: 'Write notes' })).toEqual({ kind: 'release_notes', notes: '## Fixes' })
+    expect(await runSetupJob(setup(config), { kind: 'release_notes', runtime: 'codex', prompt: 'Write notes' })).toEqual({ kind: 'release_notes', notes: '## Fixes' })
     const args = (await readFile(join(root, 'args'), 'utf8')).trim().split('\n')
     expect(args[0]).toBe('exec')
     expect(args.at(-1)).toBe('-')
@@ -279,8 +301,8 @@ describe('release_notes', () => {
 
   it('fails when the CLI fails or prints nothing', async () => {
     const config = { ...loadConfig({}), claudeBin: await fakeCli('claude', 'echo "Not logged in" >&2; exit 1') }
-    await expect(runSetupJob(config, { kind: 'release_notes', runtime: 'claude-code', prompt: 'x' })).rejects.toThrow('Not logged in')
+    await expect(runSetupJob(setup(config), { kind: 'release_notes', runtime: 'claude-code', prompt: 'x' })).rejects.toThrow('Not logged in')
     config.claudeBin = await fakeCli('claude', 'exit 0')
-    await expect(runSetupJob(config, { kind: 'release_notes', runtime: 'claude-code', prompt: 'x' })).rejects.toThrow(/code 0/)
+    await expect(runSetupJob(setup(config), { kind: 'release_notes', runtime: 'claude-code', prompt: 'x' })).rejects.toThrow(/code 0/)
   })
 })

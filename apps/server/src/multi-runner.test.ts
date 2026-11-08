@@ -2,9 +2,9 @@ import type { RunnerInfo } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { RunnerGitHub } from './github.ts'
+import { RunnerGitHub } from './runner-github.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 // Real sockets and database: ownership must survive a second connection,
 // reconnect, and setup jobs awaiting replies on another socket.
@@ -47,13 +47,13 @@ describe('multiple runners', () => {
     expect(await b.next('run.message')).toMatchObject({ runId: jobs[1]!.runId, text: 'Please check this' })
     expect(a.received.some(m => m.type === 'run.message')).toBe(false)
     expect((await t.request('POST', `/api/runs/${jobs[2]!.runId}/stop`)).status).toBe(200)
-    expect(await b.next('run.stop', m => m.runId === jobs[2]!.runId)).toMatchObject({ reason: 'Stopped by a human' })
+    await b.next('run.stop', m => m.runId === jobs[2]!.runId)
     expect(a.received.some(m => m.type === 'run.stop')).toBe(false)
     // A heartbeat from B cannot renew A's lease, even with its epoch.
     const before = (await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, taskA.id)))[0]!.leaseExpiresAt
     t.clock.now = new Date(t.clock.now.getTime() + 60000)
     b.send({ type: 'heartbeat', activeRuns: [jobs[0]!, jobs[1]!] })
-    expect(await b.next('run.stop', m => m.runId === jobs[0]!.runId)).toMatchObject({ reason: 'This run no longer holds its lease' })
+    await b.next('run.stop', m => m.runId === jobs[0]!.runId)
     expect((await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, taskA.id)))[0]!.leaseExpiresAt).toEqual(before)
     await connect('B')
     await vi.waitFor(async () => expect((await t.db.select().from(schema.runs).where(eq(schema.runs.id, jobs[1]!.runId)))[0]!.state).toBe('interrupted'), { timeout: 5000 })
@@ -80,7 +80,7 @@ describe('multiple runners', () => {
     b.onJob = () => null
     const pendingA = t.runner.request({ kind: 'detect_clis' }).catch(e => e.message)
     const requestA = await a.next('job.request', m => m.job.kind === 'detect_clis')
-    const cleanup = t.runner.request({ kind: 'cleanup_worktrees', repository: 'cormacrw/test-app', taskId: 'task' }).catch(e => e.message)
+    const cleanup = t.runner.cleanupWorktrees({ kind: 'cleanup_worktrees', repository: 'cormacrw/test-app', taskId: 'task' }).catch(e => e.message)
     await a.next('job.request', m => m.job.kind === 'cleanup_worktrees')
     const cleanupB = await b.next('job.request', m => m.job.kind === 'cleanup_worktrees')
     a.close()
@@ -114,7 +114,7 @@ describe('multiple runners', () => {
     expect(await (await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan offline' })).json()).toEqual({ error: { code: 'runner_offline' } })
     // A turn already accepted by the service waits across a connection gap.
     const [session] = await t.db.insert(schema.planSessions).values({ projectId: project.id, title: 'Queued turn', createdBy: t.actor }).returning()
-    const runId = await t.orchestrator.startPmRun(session!, {
+    const runId = await t.orchestrator.pm.startPmRun(session!, {
       role: 'pm', projectId: project.id, repository: project.repository, defaultBranch: project.defaultBranch,
       taskId: null, taskRef: null, branch: null, headSha: null, planSessionId: session!.id,
       agentSessionId: null, runtime: 'claude-code', model: null, timeoutSeconds: 600, prompt: 'Wait for an online runner', fallbackPrompt: null

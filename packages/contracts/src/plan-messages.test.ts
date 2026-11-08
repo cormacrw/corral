@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { planMessageFields, planMessageInput, startPlanSessionInput } from './api.ts'
+import { planMessageFields, planMessageInput, startPlanSessionInput } from './plans.ts'
 
 describe('plan message fields', () => {
   it('accepts each role and kind, with the fields that kind can carry', () => {

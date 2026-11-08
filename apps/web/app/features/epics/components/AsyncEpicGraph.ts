@@ -1,4 +1,5 @@
-import { asyncChunk, loadEpicGraph } from '~/utils/chunks'
+import { asyncChunk } from '~/utils/chunks'
 import GraphLoading from '~/features/epics/components/GraphLoading.vue'
 
-export default asyncChunk(loadEpicGraph, GraphLoading)
+// Vue Flow loads with it
+export default asyncChunk(() => import('~/features/epics/components/EpicGraph.vue'), GraphLoading)

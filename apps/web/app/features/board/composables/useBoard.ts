@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/vue-query'
-import { BOARD_COLUMNS, columnEntries, epicOnBoard, epicStage, epicWorkingAgents, isTopLevel, matchesEpicFilter, matchesFilter, matchesParentFilter, onBoard, parentColumn, taskAgentIds, unfinishedPrerequisites } from '~/features/board/utils/board'
+import { parentStage } from '@corral/core'
+import { BOARD_COLUMNS, columnEntries, epicOnBoard, epicWorkingAgents, isTopLevel, matchesEpicFilter, matchesFilter, matchesParentFilter, onBoard, parentColumn, taskAgentIds, unfinishedPrerequisites } from '~/features/board/utils/board'
 import { runsQuery } from '~/queries/runs'
 import { epicTitle, epicWithLiveCounts, STATUS, STATUS_DOT } from '~/utils/labels'
 
@@ -29,11 +30,10 @@ export function useBoard() {
   const visibleEpics = computed(() => view.value === 'top' ? [...onBoardEpics.value, ...emptyParents.value.filter(e => !onBoardEpics.value.includes(e))].filter(epic => matchesEpicFilter(epic, filters.value)) : [])
   const activeRuns = useQuery(computed(() => ({ ...runsQuery({ active: true }), enabled: view.value === 'top' })))
   const parentCards = computed(() => visibleEpics.value.map((epic) => {
-    const stage = epicStage(epic, all.value.filter(t => t.epicId === epic.id && t.status !== 'backlog'))
+    const stage = parentStage(epic, all.value.filter(t => t.epicId === epic.id && t.status !== 'backlog'))
     return { epic, stage, workingAgents: epicWorkingAgents(epic.id, all.value, activeRuns.data.value ?? [], shell.agents), waitingOn: stage === 'done' ? [] : unfinishedPrerequisites(epic, liveEpics.value) }
   }).filter(card => matchesParentFilter(card, parents.value.find(p => p.id === card.epic.taskId), filters.value)))
 
-  // The Status filter hides the columns it doesn't select
   const shownColumns = computed(() => filters.value.statuses.length > 0 ? BOARD_COLUMNS.filter(c => filters.value.statuses.includes(c.key)) : BOARD_COLUMNS)
   const columns = computed(() => shownColumns.value.map((c) => {
     const entries = columnEntries(c.key, visible.value.filter(t => c.statuses.includes(t.status)), parentCards.value.filter(card => parentColumn(card.stage) === c.key))

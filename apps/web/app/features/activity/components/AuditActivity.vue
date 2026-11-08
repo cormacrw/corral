@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { planThreadPath } from '~/utils/routes'
+import { ROLE_LABELS } from '@corral/core'
 import type { AuditEntry } from '@corral/contracts'
 import { actorName, confirmedByYou } from '~/features/activity/utils/auditText'
-import { ROLE, timeAgo } from '~/utils/labels'
+import { timeAgo } from '~/utils/labels'
 
 const props = defineProps<{ entry: AuditEntry, text: string }>()
 const fieldLabels: Record<string, string> = { acceptanceCriteria: 'acceptance criteria', implementationPlan: 'implementation plan', humanReview: 'human review', epicId: 'epic', dependsOn: 'dependencies', reviewMode: 'review mode' }
@@ -10,8 +12,7 @@ const sessionId = computed(() => {
   const actor = props.entry.actor
   return actor.kind === 'agent' ? actor.sessionId : actor.kind === 'human' ? actor.viaPm?.sessionId : undefined
 })
-// The server names the agent; its role label when the agent is gone
-const author = computed(() => actorName(props.entry.actor, role => props.entry.agentName ?? ROLE[role]))
+const author = computed(() => actorName(props.entry.actor, role => props.entry.agentName ?? ROLE_LABELS[role]))
 </script>
 
 <template>
@@ -30,7 +31,7 @@ const author = computed(() => actorName(props.entry.actor, role => props.entry.a
       {{ ' ' }}{{ displayText }}
       <NuxtLink
         v-if="sessionId"
-        :to="`/plan/${sessionId}`"
+        :to="planThreadPath(sessionId)"
         class="ml-1 text-brand hover:underline"
       >conversation</NuxtLink>
       <span class="ml-1 text-xs">· {{ timeAgo(entry.createdAt) }}</span>

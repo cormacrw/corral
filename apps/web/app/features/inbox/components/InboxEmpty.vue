@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { planThreadPath } from '~/utils/routes'
 import { useQuery } from '@tanstack/vue-query'
 import { AGENTS_MAY_BE_WORKING, useInboxView } from '~/features/inbox/composables/useInboxView'
 import { planSessionsQuery } from '~/queries/plan'
@@ -12,7 +13,7 @@ const sessions = useQuery(computed(() => ({ ...planSessionsQuery(), enabled: gon
 const source = computed(() => {
   const id = selectedId.value
   if (!gone.value || !id) return null
-  if (sessions.data.value?.some(s => s.id === id)) return { to: `/plan/${id}`, label: 'Open in Plan' }
+  if (sessions.data.value?.some(s => s.id === id)) return { to: planThreadPath(id), label: 'Open in Plan' }
   const item = [...inbox.value!.activity, ...inbox.value!.resolved].find(i => i.taskId === id || ('epicId' in i && i.epicId === id))
   const link = item && inboxItemLink(item)
   return link && { to: link.to, label: `Open ${link.label.toLowerCase()}` }

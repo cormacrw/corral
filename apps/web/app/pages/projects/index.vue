@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ADD_PROJECT_PATH, projectPath } from '~/utils/routes'
 // The Projects tab: MobileProjects on mobile (design/mobile.md), a plain
 // project list on the web
 const shell = useShell()
@@ -18,7 +19,7 @@ useSeoMeta({ title: 'Projects · Corral' })
       <AppButton
         v-for="project in shell.projects"
         :key="project.id"
-        :to="`/projects/${project.slug}`"
+        :to="projectPath(project.slug)"
         variant="outline"
         color="neutral"
         class="justify-start"
@@ -34,7 +35,7 @@ useSeoMeta({ title: 'Projects · Corral' })
         >Paused</span>
       </AppButton>
       <AppButton
-        to="/setup?step=repo&add=1"
+        :to="ADD_PROJECT_PATH"
         icon="i-hugeicons-add-01"
         label="Add project"
         variant="ghost"

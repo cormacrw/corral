@@ -18,7 +18,6 @@ const tiles = computed(() => [
 </script>
 
 <template>
-  <!-- Stat tiles scroll sideways on a phone rather than wrap -->
   <div :class="mobile ? 'flex snap-x scroll-px-4 gap-2 overflow-x-auto overscroll-x-contain px-4' : 'grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-3'">
     <dl
       v-for="tile in tiles"

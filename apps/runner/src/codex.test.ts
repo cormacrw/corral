@@ -2,10 +2,15 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { ParsedLine } from './agent-runtime.ts'
-import { codexArgs, codexInstructions, codexRuntime, readMcpServers } from './codex.ts'
+import type { ParsedLine } from './parsed-line.ts'
+import type { RuntimeOptions } from './agent-runtime.ts'
+import { codexArgs, codexInstructions, codexRuntime } from './codex.ts'
 
 const corral = { corral: { type: 'http', url: 'http://127.0.0.1:4321/runs/secret' } }
+
+function baseOptions(dir: string): Omit<RuntimeOptions, 'prompt'> {
+  return { cwd: dir, scratchDir: dir, noRepository: false, systemPrompt: 'Role', mcpServers: {}, model: null, resumeSessionId: null, quietResume: false, gitAuthor: null, checkScope: null, turboCacheDir: null, onLine: () => {} }
+}
 
 describe('codexArgs', () => {
   it('runs exec headless with JSON output, the MCP server and the instructions', () => {
@@ -74,9 +79,9 @@ process.stdin.on('data', chunk => (input += chunk)).on('end', () => {
   }
 
   async function run(prompt: string) {
-    const runtime = codexRuntime(await fakeCodex())
+    const runtime = codexRuntime({ bin: await fakeCodex(), home: dir })
     const texts: string[] = []
-    const options = { cwd: dir, prompt, systemPrompt: 'Role', mcpConfigPath: join(dir, 'missing.json'), model: null, resumeSessionId: null, gitAuthor: null, onLine: (_raw: string, parsed: ParsedLine) => texts.push(...parsed.events.flatMap(e => e.type === 'message' ? [e.text] : [])) }
+    const options: RuntimeOptions = { ...baseOptions(dir), prompt, onLine: (_raw: string, parsed: ParsedLine) => texts.push(...parsed.events.flatMap(e => e.type === 'message' ? [e.text] : [])) }
     await runtime.spawn(await runtime.prepare!(options)).exited
     return texts
   }
@@ -106,7 +111,7 @@ describe('codex instructions and MCP config', () => {
     await writeFile(join(dir, 'CLAUDE.md'), '# House rules\nUse pnpm.\n')
     const instructions = await codexInstructions(dir, 'Role instructions\n\n## Corral runner notes')
     expect(instructions).toMatch(/^Role instructions\n\n## Corral runner notes/)
-    expect(instructions).toContain('## CLAUDE.md (project instructions)\n\n# House rules\nUse pnpm.')
+    expect(instructions).toContain('# House rules\nUse pnpm.')
   })
 
   it('adds CORRAL.md and .corral/CORRAL.md too', async () => {
@@ -114,8 +119,8 @@ describe('codex instructions and MCP config', () => {
     await mkdir(join(dir, '.corral'))
     await writeFile(join(dir, '.corral', 'CORRAL.md'), 'Nested brief')
     const instructions = await codexInstructions(dir, 'Role')
-    expect(instructions).toContain('## CORRAL.md (project instructions)\n\nRoot brief')
-    expect(instructions).toContain('## .corral/CORRAL.md (project instructions)\n\nNested brief')
+    expect(instructions).toContain('Root brief')
+    expect(instructions).toContain('Nested brief')
   })
 
   it('leaves them out when there is an AGENTS.md, which Codex reads itself', async () => {
@@ -129,10 +134,9 @@ describe('codex instructions and MCP config', () => {
     expect(await codexInstructions(dir, 'Role\n\n### CLAUDE.md\n\n# House rules')).toBe('Role\n\n### CLAUDE.md\n\n# House rules')
   })
 
-  it('reads the servers from the run\'s MCP config', async () => {
-    const path = join(dir, 'mcp.json')
-    await writeFile(path, JSON.stringify({ mcpServers: corral }))
-    expect(await readMcpServers(path)).toEqual(corral)
-    expect(await readMcpServers(join(dir, 'missing.json'))).toEqual({})
+  it('passes the run\'s MCP servers through as given', async () => {
+    const runtime = codexRuntime({ bin: 'codex', home: dir })
+    const prepared = await runtime.prepare!({ ...baseOptions(dir), mcpServers: corral, prompt: 'x' })
+    expect(prepared.mcpServers).toEqual(corral)
   })
 })

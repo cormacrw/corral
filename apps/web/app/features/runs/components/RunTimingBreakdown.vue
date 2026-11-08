@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { Run, RunPhase } from '@corral/contracts'
+import type { Run } from '@corral/contracts'
+import type { RunPhase } from '@corral/core'
 import { QUEUE_WAIT_LABEL, formatMs } from '~/utils/labels'
 
 const props = defineProps<{ run: Run }>()

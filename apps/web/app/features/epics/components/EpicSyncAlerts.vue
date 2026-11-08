@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { EpicSync } from '@corral/contracts'
 import { useMutation } from '@tanstack/vue-query'
+import { errorMessage } from '~/lib/errors'
 import { retryEpicSync } from '~/queries/epics'
 import { EPIC_CONFLICT_PENDING, epicStoppedLabel } from '~/utils/labels'
 
@@ -13,7 +14,7 @@ async function retrySync() {
   try {
     await retry.mutateAsync({ id: props.epicId })
   } catch (e) {
-    toast.add({ title: 'Could not retry', description: e instanceof Error ? e.message : undefined, color: 'error' })
+    toast.add({ title: 'Could not retry', description: errorMessage(e), color: 'error' })
   }
 }
 </script>

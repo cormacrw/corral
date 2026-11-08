@@ -10,7 +10,7 @@ import PlanCloseThread from '~/features/plan/components/PlanCloseThread.vue'
 enableAutoUnmount(afterEach)
 
 const close = vi.hoisted(() => vi.fn())
-vi.mock('~/composables/useApi', () => ({ api: { plan: { close } } }))
+vi.mock('~/queries/api', () => ({ api: { plan: { close } } }))
 const push = vi.fn()
 const remove = vi.fn()
 const add = vi.fn()
@@ -31,7 +31,6 @@ function setup(current = 's1') {
   const click = (label: string, inDialog = false) => (inDialog ? wrapper.get('section') : wrapper).findAll('button').find(b => b.text() === label)!.trigger('click')
   return {
     wrapper,
-    // The menu's Close thread, which asks first
     open: () => click('Close thread'),
     confirm: () => click('Close thread', true),
     cancel: () => click('Cancel', true)

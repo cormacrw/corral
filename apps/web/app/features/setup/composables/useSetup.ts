@@ -1,15 +1,17 @@
 import { errorMessage } from '~/lib/errors'
+import { prefixTaken } from '~/queries/client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { CliStatus, RepoCheck, RepoChoice } from '@corral/contracts'
+import { cliLoginCommand } from '@corral/contracts/client'
+import { PROJECT_PREFIX_HINT, PROJECT_PREFIX_PATTERN, type MergeMethod } from '@corral/core'
 import { suggestPrefix } from '~/utils/prefix'
-import { ApiError } from '~/queries/client'
 import { agentsQuery, patchAgent } from '~/queries/agents'
 import { createProject, projectsQuery } from '~/queries/projects'
 import { checkRepo, refreshRepos, reposQuery } from '~/queries/setup'
 import { patchProfile, profileQuery } from '~/queries/system'
-import { cliLoginCommand } from '~/utils/labels'
 import { repoFromUrl } from '~/features/setup/utils/onboarding'
 import { useCliScan } from '~/features/setup/composables/useCliScan'
+import { projectPath, SECTIONS } from '~/utils/routes'
 
 // Onboarding state and actions (design/onboarding.md), shared by SetupDesktop
 // and SetupMobile: You → Repository → Agents → Names. With ?add=1 it's
@@ -42,11 +44,11 @@ export function useSetup() {
     return step.value === 'agents' ? 'Confirm and continue' : 'Continue'
   })
   function back() {
-    if (adding.value) return void navigateTo('/projects')
+    if (adding.value) return void navigateTo(SECTIONS.projects.to)
     if (index.value > 0) step.value = steps[index.value - 1]!.value
   }
 
-  // Step 1: the name is kept on the server, so any browser sees it
+  // The name is kept on the server, so any browser sees it
   const userName = ref('')
   onMounted(async () => {
     try {
@@ -70,7 +72,6 @@ export function useSetup() {
     }
   }
 
-  // Step 2
   const reposList = useQuery(computed(() => ({ ...reposQuery(), enabled: step.value === 'repo' })))
   const repoRefresh = useMutation(refreshRepos)
   const repos = computed(() => reposList.data.value ?? null)
@@ -83,14 +84,14 @@ export function useSetup() {
   const checking = ref(false)
   const prefix = ref('')
   const prefixConflict = ref('')
-  const prefixValid = computed(() => /^[A-Z]{2,5}$/.test(prefix.value))
-  const prefixError = computed(() => prefixConflict.value || (!prefixValid.value ? 'Use 2–5 letters, A–Z.' : undefined))
+  const prefixValid = computed(() => PROJECT_PREFIX_PATTERN.test(prefix.value))
+  const prefixError = computed(() => prefixConflict.value || (!prefixValid.value ? PROJECT_PREFIX_HINT : undefined))
   function setPrefix(value: string) {
     prefix.value = value.toUpperCase().replace(/[^A-Z]/g, '')
     prefixConflict.value = ''
   }
   const defaultBranch = ref('main')
-  const mergeMethod = ref<'squash' | 'merge' | 'rebase'>('squash')
+  const mergeMethod = ref<MergeMethod>('squash')
   // Asks GitHub again, past the server's cached list; `error` reports a failure
   const loadRepos = () => repoRefresh.mutateAsync().catch(() => {})
   const pickPasted = () => pick(repoFromUrl(pasted.value))
@@ -118,7 +119,6 @@ export function useSetup() {
     }
   }
 
-  // Step 3
   const { clis, cliError, scan } = useCliScan(() => step.value === 'agents')
   // Claude Code runs the default agents; Codex runs only agents set to it
   const cliReady = computed(() => clis.value?.some(c => c.id === 'claude' && c.signedIn) ?? false)
@@ -128,7 +128,6 @@ export function useSetup() {
     return cli.id === 'claude' ? `${cli.version}. Signed in. Will run your PM, developer and reviewer agents.` : `${cli.version}. Signed in. Runs agents set to Codex.`
   }
 
-  // Step 4
   const nameSets = [['Juno', 'Atlas', 'Vera'], ['Iris', 'Bolt', 'Sage'], ['Nova', 'Forge', 'Echo']]
   const nameSet = ref(0)
   const agentNames = reactive({ pm: 'Juno', developer: 'Atlas', reviewer: 'Vera' })
@@ -150,10 +149,11 @@ export function useSetup() {
           if (wanted && wanted !== agent.name) await agentMutation.mutateAsync({ id: agent.id, input: { name: wanted } })
         }
       }
-      await router.push(`/projects/${project.slug}`)
+      await router.push(projectPath(project.slug))
     } catch (e) {
-      if (e instanceof ApiError && e.body?.code === 'conflict' && e.body.constraint?.includes('prefix')) {
-        prefixConflict.value = 'Another project uses this prefix.'
+      const conflict = prefixTaken(e)
+      if (conflict) {
+        prefixConflict.value = conflict
         step.value = 'repo'
         return
       }

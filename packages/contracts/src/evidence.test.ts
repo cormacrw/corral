@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { EVIDENCE_KINDS, evidenceInputSchema, type Evidence } from './api.ts'
+import { EVIDENCE_KINDS } from '@corral/core'
+import { evidenceInputSchema, type Evidence } from './tasks.ts'
 
 describe('evidence shapes', () => {
   it('accepts note-only evidence and every D21 file kind, including empty files', () => {

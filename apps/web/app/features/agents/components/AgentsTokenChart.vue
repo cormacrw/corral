@@ -1,17 +1,19 @@
 <script setup lang="ts">
+import { ROLE_LABELS } from '@corral/core'
 import { CurveType } from '@unovis/ts'
 import { VisArea, VisAxis, VisXYContainer } from '@unovis/vue'
 import type { ChartConfig } from '~/components/ui/chart'
 import { ChartContainer, ChartCrosshair, ChartTooltip, ChartTooltipContent, componentToString } from '~/components/ui/chart'
 import type { TokenDay } from '~/features/agents/utils/fleet'
-import { formatTokens, TOKEN_ROLES } from '~/features/agents/utils/fleet'
-import { ROLE } from '~/utils/labels'
+import { TOKEN_ROLES } from '~/features/agents/utils/fleet'
+import { tokens } from '~/utils/labels'
 
 // Tokens per day (input, cache writes and output), stacked by role
-const props = withDefaults(defineProps<{ days: TokenDay[], height?: number }>(), { height: 220 })
+const props = defineProps<{ days: TokenDay[] }>()
+const HEIGHT = 220
 
 const COLORS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)']
-const roles = TOKEN_ROLES.map((role, i) => ({ role, label: ROLE[role], color: COLORS[i]! }))
+const roles = TOKEN_ROLES.map((role, i) => ({ role, label: ROLE_LABELS[role], color: COLORS[i]! }))
 const config = Object.fromEntries(roles.map(r => [r.role, { label: r.label, color: r.color }])) satisfies ChartConfig
 const data = computed(() => props.days.map(d => ({ index: d.index, ...d.byRole })))
 type Row = typeof data.value[number]
@@ -27,7 +29,7 @@ const empty = computed(() => props.days.every(d => Object.values(d.byRole).every
     <p
       v-if="empty"
       class="flex items-center justify-center text-sm text-muted-foreground"
-      :style="{ height: `${height}px` }"
+      :style="{ height: `${HEIGHT}px` }"
     >
       No tokens used in the last {{ days.length }} days.
     </p>
@@ -36,7 +38,7 @@ const empty = computed(() => props.days.every(d => Object.values(d.byRole).every
       :config="config"
       class="aspect-auto"
       cursor
-      :style="{ height: `${height}px` }"
+      :style="{ height: `${HEIGHT}px` }"
     >
       <VisXYContainer
         :data="data"
@@ -61,7 +63,7 @@ const empty = computed(() => props.days.every(d => Object.values(d.byRole).every
         <VisAxis
           type="y"
           :num-ticks="3"
-          :tick-format="formatTokens"
+          :tick-format="tokens"
           :domain-line="false"
           :tick-line="false"
         />

@@ -1,5 +1,6 @@
+import type { CliId } from '@corral/core'
 import { z } from 'zod'
-import type { CliId } from './runner.ts'
+import { repositoryName } from './projects.ts'
 
 // ── Setup (onboarding step 2 and 3, add project) ────────────────────────────
 
@@ -19,7 +20,10 @@ export type RepoList =
   | { signedIn: false }
   | { signedIn: true, repos: RepoChoice[], fetchedAt: string }
 
-export const checkRepoInput = z.object({ repository: z.string().regex(/^[\w.-]+\/[\w.-]+$/) })
+// refresh=1 asks GitHub again instead of the cached list
+export const repoListQuery = z.object({ refresh: z.string().optional().transform(value => value === '1') })
+
+export const checkRepoInput = z.object({ repository: repositoryName })
 
 export interface SetupCheck {
   id: 'can_push' | 'not_used' | 'cloned'

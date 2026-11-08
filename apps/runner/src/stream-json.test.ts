@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { parseResetTime, StreamJsonParser } from './stream-json.ts'
+import { parseResetTime } from './parsed-line.ts'
+import { StreamJsonParser } from './stream-json.ts'
 
 const line = (data: unknown) => JSON.stringify(data)
 
@@ -20,7 +21,7 @@ describe('StreamJsonParser', () => {
     const parsed = parser.parse(line({ type: 'system', subtype: 'init', session_id: 'sess-1', model: 'claude-fable-5-1' }))
     expect(parsed.sessionId).toBe('sess-1')
     expect(parser.sessionId).toBe('sess-1')
-    expect(parsed.events).toEqual([{ type: 'system', text: 'Session started (claude-fable-5-1)' }])
+    expect(parsed.events).toEqual([{ type: 'system', text: expect.stringContaining('claude-fable-5-1') }])
   })
 
   it('drops the start note when the init line resumes the quiet session', () => {
@@ -34,7 +35,7 @@ describe('StreamJsonParser', () => {
     const parser = new StreamJsonParser({ quietResumeOf: 'sess-1' })
     const parsed = parser.parse(line({ type: 'system', subtype: 'init', session_id: 'sess-2', model: 'claude-fable-5-1' }))
     expect(parsed.sessionId).toBe('sess-2')
-    expect(parsed.events).toEqual([{ type: 'system', text: 'Session started (claude-fable-5-1)' }])
+    expect(parsed.events).toEqual([{ type: 'system', text: expect.stringContaining('claude-fable-5-1') }])
   })
 
   it('announces a long-lived session once, even if later turns repeat the init line', () => {

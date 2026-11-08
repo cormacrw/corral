@@ -25,8 +25,9 @@ task, since such a criterion has no verdict.
 capped like a PR's. Two heads are compared directly while the reviewed head is
 an ancestor of the current one. After a rebase, a direct compare would list
 everything back to their merge base, including the target's changes, so each
-head's own change against the target is compared with `changeOf` from
-`rebase-review.ts`. A patch in that case is the file's whole change on the task,
+head's own change against the target is compared, by the lines each adds and
+removes (`changedLines`): context moves with the target. The trivial rebase
+check's `changeOf` (`github-diff.ts`) is stricter on purpose. A patch in that case is the file's whole change on the task,
 not the change since the review. When GitHub can't give the diff, `files` is
 empty, `truncated` is true, and `diffUrl` points to the comparison.
 

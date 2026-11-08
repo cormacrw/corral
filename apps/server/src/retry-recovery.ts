@@ -1,25 +1,55 @@
-import type { PmRunJob } from '@corral/contracts'
-import { taskRef, type Actor } from '@corral/core'
-import { schema, type Database, type Executor } from '@corral/db'
-import { and, asc, desc, eq, inArray, isNull, ne, isNotNull, sql } from 'drizzle-orm'
-import { getEpic } from './epics.ts'
+import { STOPPED_TASK_STATUSES, type Actor, type RetryStop, type TaskStatus } from '@corral/core'
+import { schema, type Database, type Executor, type RunRow, type ProjectRow, type TaskRow } from '@corral/db'
+import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm'
+import { publishEpic } from './epics.ts'
 import { readAudit } from './audit.ts'
 import type { EventBus } from './events.ts'
 import { answerDecision, waitingDecision } from './epic-rebase-approval.ts'
-import type { Backoff } from './retries.ts'
-import { pmPrompt } from './prompts.ts'
-import { server, type RunContext, type RunCore } from './run-context.ts'
+import { isTransient, type GitHubClient } from './github.ts'
 import { taskBase } from './task-base.ts'
-import { addComment, applyTransition, lockTask, loadTask, type TaskRow } from './tasks.ts'
+import { applyTransition } from './tasks.ts'
+import { addComment, addCommentWithTransition } from './comments.ts'
+import { lockTask } from './task-rows.ts'
+import { loadTask } from './task-views.ts'
 
-const { agents, auditLog, comments, planSessions, projects, runs, tasks } = schema
+const { auditLog, comments, runs, tasks } = schema
 
 export const REPETITION_REASON = 'Two consecutive failures left the head unchanged without fresh human input or a target change'
+
+// Retry recovery owns a task's stop (its `retryStop`): only the functions
+// here write it, and other modules read it through them.
 
 // A no-progress stop leaves the task in its working status with nothing to
 // claim it, so it waits on the human once its triage has ended.
 export function idleStop(task: Pick<TaskRow, 'status' | 'retryStop' | 'leaseRunId'>): boolean {
-  return Boolean(task.retryStop) && !task.leaseRunId && (task.status === 'in_progress' || task.status === 'agent_review')
+  return Boolean(task.retryStop) && !task.leaseRunId && STOPPED_TASK_STATUSES.includes(task.status)
+}
+
+// The same as a query: the stopped tasks that nothing else would list
+export function idleStopFilter() {
+  return and(inArray(tasks.status, [...STOPPED_TASK_STATUSES]), isNull(tasks.leaseRunId), isNotNull(tasks.retryStop))
+}
+
+export function stopOf(task: Pick<TaskRow, 'retryStop'>): { runId: string | null, sessionId: string | null } | null {
+  return task.retryStop && { runId: task.retryStop.runId, sessionId: task.retryStop.sessionId }
+}
+
+// The stop is over: answered, released or no longer repeating
+export async function endStop(tx: Executor, taskId: string): Promise<void> {
+  await tx.update(tasks).set({ retryStop: null }).where(eq(tasks.id, taskId))
+}
+
+export async function startTriage(tx: Executor, task: TaskRow, sessionId: string): Promise<void> {
+  await tx.update(tasks).set({ retryStop: { ...task.retryStop!, sessionId } }).where(eq(tasks.id, task.id))
+}
+
+// The PM asked the human about the stops it triages here. Only these options
+// release them, through answerRecovery.
+export async function askRecoveryQuestion(db: Database, sessionId: string, questionId: string, options: string[]): Promise<void> {
+  await db.transaction(async (tx) => {
+    const stopped = await tx.select().from(tasks).where(sql`${tasks.retryStop}->>'sessionId' = ${sessionId}`).for('update')
+    for (const task of stopped) await tx.update(tasks).set({ retryStop: { ...task.retryStop!, retryQuestion: { id: questionId, options } } }).where(eq(tasks.id, task.id))
+  })
 }
 
 // Only human input resets repetition. Agent notes and triage must not do so.
@@ -31,39 +61,49 @@ export async function humanInput(db: Executor, taskId: string): Promise<string> 
   return `${comment?.id ?? ''}:${edit?.id ?? ''}`
 }
 
-export async function retryContext(c: RunCore, ctx: RunContext) {
+// What a failed run is judged against for repetition: the task's head, its
+// target and the latest human input. When GitHub or the database can't answer
+// right now, the run keeps the context it had.
+export async function retryContext(deps: { db: Executor, github: GitHubClient }, ctx: { task: TaskRow | null, project: ProjectRow | null, run: Pick<RunRow, 'retryContext'> }) {
   if (!ctx.task) return null
-  const base = await taskBase(c.d.db, ctx.task, ctx.project!)
-  const target = await c.d.github.branchHead(ctx.project!.repository, base)
-  const head = ctx.task.branch ? (await c.d.github.branchHead(ctx.project!.repository, ctx.task.branch) ?? target) : target
-  return head && target ? { head, target, human: await humanInput(c.d.db, ctx.task.id) } : null
+  try {
+    const base = await taskBase(deps.db, ctx.task, ctx.project!)
+    const target = await deps.github.branchHead(ctx.project!.repository, base)
+    const head = ctx.task.branch ? (await deps.github.branchHead(ctx.project!.repository, ctx.task.branch) ?? target) : target
+    return head && target ? { head, target, human: await humanInput(deps.db, ctx.task.id) } : null
+  } catch (error) {
+    if (isTransient(error)) return ctx.run.retryContext
+    return null
+  }
+}
+
+// A stop on a task whose triage hasn't been queued yet
+function retryStop(runId: string | null, target: string | null, human: string, from: TaskStatus, capped: boolean): RetryStop {
+  return { runId, target, human, status: from === 'agent_review' ? 'agent_review' : 'in_progress', capped, sessionId: null }
 }
 
 // Called under the task lock, after the failure counter is updated. Transport
 // exits never receive a retryContext for counting; only substantive failures do.
-export async function stopRepeated(tx: Executor, ctx: RunContext, task: TaskRow, head: string | null) {
-  const context = ctx.run.retryContext
-  const [previous] = await tx.select().from(runs).where(and(eq(runs.taskId, task.id), ne(runs.role, 'pm'), ne(runs.id, ctx.run.id)))
+export async function stopRepeated(tx: Executor, run: Pick<RunRow, 'id' | 'retryContext'>, from: TaskStatus, task: TaskRow, head: string | null) {
+  const context = run.retryContext
+  const [previous] = await tx.select().from(runs).where(and(eq(runs.taskId, task.id), ne(runs.role, 'pm'), ne(runs.id, run.id)))
     .orderBy(desc(runs.number)).limit(1)
   const repeated = context && head === context.head && previous?.state === 'failed'
     && previous.headSha === context.head && previous.retryContext?.head === context.head && previous.retryContext.target === context.target && previous.retryContext.human === context.human
   if (!repeated && task.status !== 'failed') return
-  await tx.update(tasks).set({ retryStop: {
-    runId: ctx.run.id, target: context?.target ?? null, human: context?.human ?? await humanInput(tx, task.id),
-    status: ctx.task?.status === 'agent_review' ? 'agent_review' : 'in_progress', capped: task.status === 'failed', sessionId: null
-  } }).where(and(eq(tasks.id, task.id), isNull(tasks.retryStop)))
+  await tx.update(tasks).set({ retryStop: retryStop(run.id, context?.target ?? null, context?.human ?? await humanInput(tx, task.id), from, task.status === 'failed') })
+    .where(and(eq(tasks.id, task.id), isNull(tasks.retryStop)))
 }
 
-export async function triageBlocked(tx: Executor, ctx: RunContext, task: TaskRow): Promise<void> {
-  await tx.update(tasks).set({ retryStop: { runId: ctx.run.id, target: ctx.run.retryContext?.target ?? null,
-    human: await humanInput(tx, task.id), status: task.status === 'agent_review' ? 'agent_review' : 'in_progress', capped: false, sessionId: null } }).where(eq(tasks.id, task.id))
+export async function triageBlocked(tx: Executor, run: Pick<RunRow, 'id' | 'retryContext'>, task: TaskRow): Promise<void> {
+  await tx.update(tasks).set({ retryStop: retryStop(run.id, run.retryContext?.target ?? null, await humanInput(tx, task.id), task.status, false) }).where(eq(tasks.id, task.id))
 }
 
 // A cap that isn't a failed run: the transition has just moved the task to
 // Failed or Blocked, under its lock. There may be no run to point at.
 export async function triageCap(tx: Executor, taskId: string, capped: boolean): Promise<void> {
   const [run] = await tx.select({ id: runs.id }).from(runs).where(and(eq(runs.taskId, taskId), ne(runs.role, 'pm'))).orderBy(desc(runs.number)).limit(1)
-  await tx.update(tasks).set({ retryStop: { runId: run?.id ?? null, target: null, human: await humanInput(tx, taskId), status: 'in_progress', capped, sessionId: null } })
+  await tx.update(tasks).set({ retryStop: retryStop(run?.id ?? null, null, await humanInput(tx, taskId), 'in_progress', capped) })
     .where(and(eq(tasks.id, taskId), isNull(tasks.retryStop)))
 }
 
@@ -75,72 +115,6 @@ export async function stuckQuestion(db: Executor, taskId: string): Promise<boole
     .where(and(eq(auditLog.taskId, taskId), eq(auditLog.action, 'task.transition'), sql`${auditLog.detail}->>'to' = 'blocked'`))
     .orderBy(desc(auditLog.createdAt)).limit(1)
   return readAudit(entered?.detail).event === 'stuck'
-}
-
-export function triagePrompt(ref: string, reason: string): string {
-  return `Automatic recovery for ${ref} stopped: ${reason}. This is its one PM triage turn for this stop. Read get_task, list_runs and get_run for its failures, then inspect the relevant code and project docs. Resolve implementation problems yourself: propose concrete follow-up work with propose_plan or leave actionable findings with add_comment on ${ref}. Do not ask the human to debug or decide implementation details. Do not approve a plan, reset counters, or restart unchanged work. Only ask_question if requirements, authority or a recovery decision genuinely require the human. State what is blocked, what recovery was tried and why it stopped, the decision needed, and a recommendation (or why none is safe). Keep the recommendation in ask_question's recommendation field. Leave a comment on ${ref} linking your findings or proposal. For a recovery question, set retryOptions to only the exact answer choices (or recommendation) that authorize retrying or continuing work. Never include leaving stopped, refusal, or clarification in retryOptions. Human plan approval still applies.`
-}
-
-// Durable stop episodes and queued PM jobs survive restarts. The task lock
-// makes creation exactly once even when scheduler passes race.
-export async function reconcileRecovery(c: RunCore, targetPoll: Backoff): Promise<void> {
-  const { db, events } = c.d
-  // New stop markers only: deploying must not replay historical Failed tasks.
-  const stopped = await db.select({ task: tasks, project: projects }).from(tasks).innerJoin(projects, eq(projects.id, tasks.projectId))
-    .where(and(isNull(tasks.deletedAt), isNotNull(tasks.retryStop)))
-  for (const { task, project } of stopped) {
-    const stop = task.retryStop!
-    // Whether or not triage was queued: with no PM a stop must still release.
-    const human = await humanInput(db, task.id)
-    let target: string | null = null
-    if (human === stop.human && c.d.runner.online && !stop.capped && task.status !== 'blocked' && stop.target && targetPoll.due(task.id)) {
-      targetPoll.later(task.id)
-      try {
-        target = await c.d.github.branchHead(project.repository, await taskBase(db, task, project))
-      } catch { /* An unavailable target is not evidence of change. */ }
-    }
-    if (!stop.capped && task.status !== 'blocked' && (human !== stop.human || (target && target !== stop.target))) {
-      await db.transaction(async (tx) => {
-        const { task: current } = await lockTask(tx, task.id)
-        if (current.retryStop?.runId === stop.runId && !current.leaseRunId) await tx.update(tasks).set({ retryStop: null }).where(eq(tasks.id, task.id))
-      })
-      targetPoll.clear(task.id)
-      events.publish({ type: 'task.updated', task: await loadTask(db, task.id) })
-      continue
-    }
-    // A human explicitly resolved a capped task through D10.
-    if ((stop.capped && task.status !== 'failed') || (!stop.capped && task.status !== 'blocked' && task.status !== stop.status)) {
-      await db.update(tasks).set({ retryStop: null }).where(eq(tasks.id, task.id))
-      targetPoll.clear(task.id)
-      continue
-    }
-    if (stop.sessionId) continue
-    const queued = await db.transaction(async (tx) => {
-      const { task: locked } = await lockTask(tx, task.id)
-      if (!locked.retryStop || locked.retryStop.sessionId || locked.leaseRunId) return null
-      const [pm] = await tx.select().from(agents).where(eq(agents.role, 'pm')).orderBy(asc(agents.createdAt)).limit(1)
-      if (!pm) return null
-      const ref = taskRef(project.prefix, task.number)
-      const reason = locked.statusReason ?? REPETITION_REASON
-      const [session] = await tx.insert(planSessions).values({ projectId: project.id, title: `Recovery: ${ref}`, runtime: pm.runtime, createdBy: server }).returning()
-      const job: Omit<PmRunJob, 'runId' | 'runNumber' | 'leaseEpoch'> = {
-        role: 'pm', runtime: pm.runtime, projectId: project.id, repository: project.repository, defaultBranch: project.defaultBranch,
-        taskId: null, taskRef: null, branch: null, headSha: null, planSessionId: session!.id, agentSessionId: null,
-        fallbackPrompt: null, model: null, timeoutSeconds: 20 * 60,
-        prompt: pmPrompt({ fresh: true, text: triagePrompt(ref, reason), attachedTask: ref, projectName: project.name, prefix: project.prefix })
-      }
-      const [run] = await tx.insert(runs).values({ agentId: pm.id, projectId: project.id, taskId: task.id, role: 'pm', leaseEpoch: 1, planSessionId: session!.id, pmJob: job, queuedAt: c.now() }).returning()
-      await tx.update(tasks).set({ retryStop: { ...locked.retryStop, sessionId: session!.id } }).where(eq(tasks.id, task.id))
-      const comment = await addComment(tx, task.id, { body: `${reason}. PM triage queued as run #${run!.number}. [Recovery conversation](/plan/${session!.id})`, pinned: false }, server)
-      return { run: run!, comment }
-    })
-    if (queued) {
-      events.publish({ type: 'comment.created', comment: queued.comment })
-      const ctx = await c.runs.load(queued.run.id)
-      if (ctx) await c.ending.publish(ctx)
-      if (c.plans) events.publish({ type: 'plan.session', session: await c.plans.getSession(queued.run.planSessionId!) })
-    }
-  }
 }
 
 // Only an explicitly retry-authorizing choice on a pending question resolves
@@ -157,14 +131,14 @@ export async function answerRecovery(db: Database, events: EventBus, sessionId: 
       // other written answers conservatively require a fresh human review.
       const alternative = decision.alternatives.findIndex(choice => choice.label === text.trim())
       const epicId = await answerDecision(db, task.id, { action: 'decide', text, ...(alternative >= 0 ? { alternative } : {}) }, actor)
-      events.publish({ type: 'epic.updated', epic: await getEpic(db, epicId) })
+      await publishEpic(db, events, epicId)
     }
     const comment = await db.transaction(async (tx) => {
       const { task: current, project } = await lockTask(tx, task.id)
       if (current.retryStop?.sessionId !== sessionId || current.retryStop.retryQuestion?.id !== questionId || !current.retryStop.retryQuestion.options.includes(text.trim())) return null
       if (current.status === 'blocked' || current.status === 'failed') await applyTransition(tx, current, project, { type: 'resolve', to: 'in_progress' }, actor, { event: { type: 'resolve', to: 'in_progress' } })
       const comment = await addComment(tx, task.id, { body: `Human recovery answer: ${text}`, pinned: true }, actor)
-      await tx.update(tasks).set({ retryStop: null }).where(eq(tasks.id, task.id))
+      await endStop(tx, task.id)
       return comment
     })
     if (comment) {
@@ -185,8 +159,8 @@ export async function releaseStop(db: Database, taskId: string, actor: Actor, op
     if (!idleStop(task)) return false
     const to = options.to ?? null
     await applyTransition(tx, task, project, { type: 'release_stop', to }, actor, { event: 'release_stop' })
-    if (options.comment) await tx.insert(comments).values({ taskId, author: actor, body: options.comment, pinned: true })
-    await tx.update(tasks).set({ retryStop: null }).where(eq(tasks.id, taskId))
+    if (options.comment) await addCommentWithTransition(tx, taskId, { body: options.comment, pinned: true }, actor)
+    await endStop(tx, taskId)
     return true
   })
 }

@@ -73,7 +73,6 @@ const layout = computed(() => {
   const across = down ? NODE_WIDTH + ROW_GAP : NODE_HEIGHT + ROW_GAP
   const position = (ref: string) => {
     const column = columns[depth.get(ref)!]!
-    // Shorter steps are centred against the widest
     const offset = (tallest - column.length) * across / 2 + row.get(ref)! * across
     const along = depth.get(ref)! * step
     return down ? { x: offset, y: along } : { x: along, y: offset }
@@ -108,7 +107,6 @@ const layout = computed(() => {
 // Each graph needs its own store: the page and the flyout can both show one
 const flowId = `epic-graph-${useId()}`
 const { fitView } = useVueFlow(flowId)
-// Re-fit when the tree changes shape (a task added or removed)
 watch(() => `${props.direction}|${props.tasks.map(t => `${t.ref}:${t.dependsOn.join(',')}`).join('|')}`, () => {
   void nextTick(() => fitView(FIT))
 })

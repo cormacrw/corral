@@ -1,25 +1,22 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { AGENT_RUNTIMES, errorText, type CliId } from '@corral/core'
+import type { Runtimes } from './runtimes.ts'
 
 // The skills pinned in apps/runner/skills (see UPSTREAM.md there)
 export const pinnedSkillsDir = fileURLToPath(new URL('../skills', import.meta.url))
 
-export interface SkillTarget {
-  cli: 'claude' | 'codex'
+interface SkillTarget {
+  cli: CliId
   dir: string
 }
 
 // The user-skills directory each agent CLI reads. ~/.claude and ~/.codex are
 // volumes in Docker, so the skills are written there at startup rather than
 // baked into the image.
-export function skillTargets(env: NodeJS.ProcessEnv = process.env): SkillTarget[] {
-  const home = env.HOME || homedir()
-  return [
-    { cli: 'claude', dir: join(env.CLAUDE_CONFIG_DIR || join(home, '.claude'), 'skills') },
-    { cli: 'codex', dir: join(env.CODEX_HOME || join(home, '.codex'), 'skills') }
-  ]
+export function skillTargets(runtimes: Runtimes): SkillTarget[] {
+  return [...runtimes.registry.values()].map(runtime => ({ cli: AGENT_RUNTIMES[runtime.id], dir: runtime.skillsDir }))
 }
 
 // Copies each skill directory in sourceDir into every target, writing only the
@@ -41,7 +38,7 @@ export async function installSkills(
         await writeFile(destination, contents)
       }
     } catch (error) {
-      warn(`could not install skills for ${target.cli} in ${target.dir}: ${error instanceof Error ? error.message : String(error)}`)
+      warn(`could not install skills for ${target.cli} in ${target.dir}: ${errorText(error)}`)
     }
   }
 }

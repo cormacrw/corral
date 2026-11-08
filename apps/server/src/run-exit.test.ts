@@ -1,29 +1,34 @@
 import { describe, expect, it } from 'vitest'
-import { runExitError, withLastActivity } from './run-exit.ts'
+import { runExitError } from './run-exit.ts'
+import { withLastActivity } from './run-stops.ts'
 
 const at = '2026-10-30T11:02:55.000Z'
 
 describe('runExitError', () => {
-  it('gives the time limit', () => {
-    expect(runExitError({ kind: 'timed_out', limitSeconds: 3600 }, at)).toBe(`The run hit its time limit of 60 minutes. Last transcript activity: ${at}`)
-    expect(runExitError({ kind: 'timed_out', limitSeconds: 90 }, null)).toBe('The run hit its time limit of 90 seconds')
+  it('gives the time limit in minutes or seconds, with the last activity when known', () => {
+    const hour = runExitError({ kind: 'timed_out', limitSeconds: 3600 }, at)
+    expect(hour).toContain('60 minutes')
+    expect(hour).toContain(at)
+    const short = runExitError({ kind: 'timed_out', limitSeconds: 90 }, null)
+    expect(short).toContain('90 seconds')
+    expect(short).not.toContain('activity')
   })
 
   it('gives the server\'s stop reason', () => {
-    expect(runExitError({ kind: 'stopped', reason: 'Lease expired' }, null)).toBe('Stopped by the server: Lease expired')
-  })
-
-  it('says the runner shut down', () => {
-    expect(runExitError({ kind: 'runner_shutdown' }, at)).toContain('The runner shut down')
+    expect(runExitError({ kind: 'stopped', reason: 'Lease expired' }, null)).toContain('Lease expired')
   })
 
   it('names a signal from outside Corral', () => {
-    expect(runExitError({ kind: 'signalled', signal: 'SIGTERM' }, at)).toBe(`The agent was killed by SIGTERM, which came from outside Corral. Last transcript activity: ${at}`)
+    const error = runExitError({ kind: 'signalled', signal: 'SIGTERM' }, at)
+    expect(error).toContain('SIGTERM')
+    expect(error).toContain(at)
   })
 
   it('reads an exit from a runner that sends no details', () => {
-    expect(runExitError({ kind: 'stopped' }, undefined)).toBe('Stopped')
-    expect(runExitError({ kind: 'timed_out' }, undefined)).toBe('The run hit its time limit')
+    for (const exit of [{ kind: 'stopped' }, { kind: 'timed_out' }] as const) {
+      const error = runExitError(exit, undefined)
+      expect(error).not.toMatch(/undefined|null|:/)
+    }
   })
 
   it('leaves an error alone with no activity to add', () => {

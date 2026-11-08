@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Plan } from '@corral/contracts'
-import { approvedPlanSummary } from '@corral/core'
+import { approvedPlanSummary, type PlanApprovalTarget } from '@corral/core'
 import { PLAN_STATUS } from '~/utils/labels'
 import { currentTasks } from '~/features/plan/utils/plan-versions'
 import PlanDetailBody from '~/features/plan/components/PlanDetailBody.vue'
@@ -11,7 +11,7 @@ import PlanDetailBody from '~/features/plan/components/PlanDetailBody.vue'
 // `disabled`: nothing can be approved for now, as while Juno is working.
 // `card`: floating beside the desktop thread, which has no close or back.
 const props = defineProps<{ plan: Plan, previous: Plan | null, busy: boolean, disabled?: boolean, sheet?: boolean, card?: boolean }>()
-const emit = defineEmits<{ approve: [to: 'ready' | 'backlog'], close: [] }>()
+const emit = defineEmits<{ approve: [to: PlanApprovalTarget], close: [] }>()
 const flyout = useTaskFlyout()
 
 const tasks = computed(() => currentTasks(props.plan))

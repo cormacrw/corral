@@ -3,7 +3,7 @@ import type { Token, Tokens } from 'marked'
 import { attachmentIdFromSrc, attachmentUrl } from '@corral/core'
 import { marked } from 'marked'
 import { h, ref, type VNode } from 'vue'
-import { useTaskRefText } from '~/features/tasks/composables/useTaskRefText'
+import { useTaskRefText } from '~/composables/useTaskRefText'
 
 // Agents write markdown (PM replies, transcripts, comments, summaries).
 // Rendered from marked's tokens into Vue nodes rather than v-html, so agent

@@ -1,65 +1,149 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import type { PlanThreadItem } from '@corral/contracts'
+import { errorMessage } from '~/lib/errors'
 import { computed, ref, watch } from 'vue'
-import { useDraft } from '~/composables/useDraft'
+import { useMutation, useQuery } from '@tanstack/vue-query'
+import type { Plan } from '@corral/contracts'
+import { approvedPlanSummary, type PlanApprovalTarget } from '@corral/core'
+import { useDraft, writeDraft } from '~/composables/useDraft'
 import { holdsInbox } from '~/queries/inbox'
-import { approvePlan, markPlanRead, planSessionQuery, sendPlanMessage } from '~/queries/plan'
-import { plural } from '~/utils/labels'
+import { approvePlan, sendPlanMessage, usePlanStarts, useThreadSession } from '~/queries/plan'
+import { runTranscriptQuery } from '~/queries/runs'
+import { withoutMessages } from '~/features/runs/utils/tool-steps'
+import { latestPlan, previousPlan } from '~/features/plan/utils/plan-versions'
 import { usePlanRunner } from '~/features/plan/composables/usePlanRunner'
-import { previousPlan } from '~/features/plan/utils/plan-versions'
 
-// A Plan thread in the Inbox, on either layout (design/inbox.md#plan-threads):
-// the session behind the item, and whether Juno's turn leaves it open to act on.
-export function usePlanThread(item: () => PlanThreadItem) {
-  const { offline } = usePlanRunner()
+export interface PlanThreadOptions {
+  // Where the thread's draft is kept: Plan and the Inbox keep theirs apart
+  draftKey?: (id: string) => string
+  // The PM's turn as the screen knew it before the session loaded (an Inbox item)
+  snapshotRunId?: () => string | null
+  // Approving resolves the selected Inbox item (useHeldInbox)
+  holdsInbox?: boolean
+  // Where the screen goes once a plan is approved. A screen that moves on
+  // confirms with a toast and closes the plan sheet or flyout first; without
+  // one it stays on the session, where the flyout shows the approved plan.
+  moveOn?: () => (() => unknown) | null
+}
+
+// One Plan thread, wherever it shows (design/plan.md, design/inbox.md): the
+// saved session or the start still in flight, its plans, the PM's turn as it
+// happens, and what the human can do: reply, answer with one tap, approve.
+// Reading it is useThreadSession's. Each action guards against the thread
+// changing while its request is in flight.
+export function usePlanThread(id: () => string, options: PlanThreadOptions = {}) {
+  const draftKey = options.draftKey ?? ((session: string) => `plan:${session}`)
+  const pending = usePlanStarts()
   const threads = usePlanThreads()
-  const client = useQueryClient()
-  const sending = useMutation(sendPlanMessage)
-  const approval = useMutation({ ...approvePlan, ...holdsInbox })
-  // The plan itself, for View plan and approving; the item only has its summary
-  const detail = useQuery(computed(() => planSessionQuery(item().sessionId)))
-  const plans = computed(() => detail.data.value?.plans ?? [])
-  const plan = computed(() => plans.value.find(p => p.id === (item().plan?.id ?? item().planId)) ?? null)
-  const previous = computed(() => previousPlan(plans.value, plan.value))
-  const counts = computed(() => {
-    const p = item().plan
-    return p ? `Plan v${p.version} · ${plural(p.epicCount, 'epic')} · ${plural(p.taskCount, 'task')}` : ''
-  })
-  watch([() => item().sessionId, () => detail.data.value?.unread], ([id, unread]) => {
-    if (unread) markPlanRead(client, id)
-  }, { immediate: true })
+  const flyout = useTaskFlyout()
+  const toast = useToast()
+  const { pm, offline } = usePlanRunner()
 
-  const text = useDraft(() => `inbox:${item().id}`)
+  const starting = computed(() => pending.entries.value[id()])
+  const accepted = computed(() => !starting.value || starting.value.state === 'accepted')
+  const detail = useThreadSession(id, () => accepted.value)
+  const session = computed(() => starting.value && !accepted.value ? starting.value.session : detail.data.value ?? starting.value?.session ?? null)
+  const waitingForStart = computed(() => Boolean(starting.value && starting.value.state !== 'failed' && !session.value?.activeRunId && !session.value?.messages.some(m => m.role === 'pm')))
+  const error = computed(() => detail.error.value?.message ?? null)
+  const latest = computed(() => latestPlan(session.value?.plans ?? []))
+  const previous = computed(() => previousPlan(session.value?.plans ?? [], latest.value))
+
+  // Answering starts a PM turn. What the screen was shown can be a snapshot
+  // from before it, so the session decides once it's loaded.
+  const activeRunId = computed(() => session.value?.activeRunId === undefined ? options.snapshotRunId?.() ?? null : session.value.activeRunId)
+  const transcript = useQuery(computed(() => ({ ...runTranscriptQuery(activeRunId.value ?? ''), enabled: Boolean(activeRunId.value) })))
+  // What the turn has posted to the log already (a question, a plan) isn't repeated in its transcript
+  const repliesOf = (runId: string) => session.value?.messages.filter(m => m.role === 'pm' && m.runId === runId).map(m => m.text) ?? []
+  const liveEvents = computed(() => activeRunId.value ? withoutMessages(transcript.data.value ?? [], repliesOf(activeRunId.value)) : [])
+
+  const sending = useMutation(sendPlanMessage)
+  const approval = useMutation(options.holdsInbox ? { ...approvePlan, ...holdsInbox } : approvePlan)
+  const text = useDraft(() => draftKey(id()))
+  const taskRef = ref<string | null>(null)
   const busy = ref(false)
-  // Answering starts a PM turn. The thread leaves Needs you while it runs, and
-  // the item the Inbox keeps open is then a snapshot, so the session decides.
-  const activeRunId = computed(() => detail.data.value?.activeRunId === undefined ? item().activeRunId : detail.data.value.activeRunId)
+  const approving = ref<{ planId: string, to: PlanApprovalTarget } | null>(null)
+  // Sent, and its turn not seen yet
   const sent = ref(false)
   let sentAt = 0
-  watch(() => [item().question?.text, item().plan?.id, item().failure], () => {
+  watch(id, () => {
+    taskRef.value = null
+    busy.value = false
+    approving.value = null
     sent.value = false
   })
-  // A turn can fail without a new message, and no run left means nothing to wait for
+  // The PM answered, or the turn ended with no run left and nothing new to say
+  watch(() => [session.value?.messages.findLast(m => m.role === 'pm')?.id, latest.value?.id], () => {
+    sent.value = false
+  })
   watch([activeRunId, detail.dataUpdatedAt], ([run, updated]) => {
     if (sent.value && !run && updated >= sentAt) sent.value = false
   })
   const working = computed(() => sent.value || Boolean(activeRunId.value))
-  const cantSend = computed(() => busy.value || working.value || offline.value)
+  const cantApprove = computed(() => Boolean(starting.value && (!accepted.value || waitingForStart.value)) || busy.value || approving.value !== null || working.value)
+  const cantSend = computed(() => cantApprove.value || offline.value)
 
-  // Throws, so each layout reports a failure its own way
-  async function send(message: string) {
+  // Resolves false when not sent, so the composer keeps its images
+  async function send(message: string): Promise<boolean> {
+    if (cantSend.value) return false
+    const sendingTo = id()
     busy.value = true
     try {
-      await sending.mutateAsync({ id: item().sessionId, text: message })
-      threads.add(item().sessionId)
-      sentAt = Date.now()
-      sent.value = true
-      text.value = ''
-      void detail.refetch()
+      await sending.mutateAsync({ id: sendingTo, text: message, taskRef: taskRef.value ?? undefined })
+      threads.add(sendingTo)
+      writeDraft(draftKey(sendingTo), '')
+      if (id() === sendingTo) {
+        text.value = ''
+        taskRef.value = null
+        sentAt = Date.now()
+        sent.value = true
+      }
+      return true
+    } catch (e) {
+      toast.add({ title: 'Could not send', description: errorMessage(e), color: 'error' })
+      return false
     } finally {
-      busy.value = false
+      if (id() === sendingTo) busy.value = false
     }
   }
 
-  return { approval, detail, plan, previous, counts, text, busy, offline, working, cantSend, send }
+  // One-tap answers send straight away. An answer leaves the draft and
+  // attached task alone; Grill me sends the draft.
+  async function quick(message: string, keepDraft = true): Promise<boolean> {
+    const sendingTo = id()
+    const draft = text.value
+    const task = taskRef.value
+    if (keepDraft) taskRef.value = null
+    const done = await send(message)
+    if (keepDraft && id() === sendingTo) {
+      taskRef.value = task
+      if (done) text.value = draft
+    }
+    return done
+  }
+
+  // A failed approval stays put, with the sheet open
+  async function approve(plan: Pick<Plan, 'id'>, to: PlanApprovalTarget): Promise<boolean> {
+    if (cantApprove.value) return false
+    const approvingIn = id()
+    approving.value = { planId: plan.id, to }
+    let approved: Plan
+    try {
+      approved = await approval.mutateAsync({ planId: plan.id, to })
+    } catch (e) {
+      toast.add({ title: 'Could not approve', description: errorMessage(e), color: 'error' })
+      return false
+    } finally {
+      if (id() === approvingIn) approving.value = null
+    }
+    const moveOn = options.moveOn?.()
+    if (moveOn) {
+      toast.add({ title: 'Plan approved', description: approvedPlanSummary(approved.tasks), color: 'success' })
+      await flyout.close()
+      await moveOn()
+    }
+    return true
+  }
+
+  return {
+    pending, starting, detail, session, accepted, waitingForStart, error, latest, previous, activeRunId, liveEvents,
+    pm, offline, text, taskRef, busy, approving, working, cantApprove, cantSend, send, quick, approve
+  }
 }

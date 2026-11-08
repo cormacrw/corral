@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // The one "this didn't load" state. Pass `retry` to offer another attempt.
-defineProps<{ title: string, description?: string, retry?: () => unknown, retrying?: boolean }>()
+defineProps<{ title: string, description?: string, retry?: () => unknown }>()
 </script>
 
 <template>
@@ -10,6 +10,6 @@ defineProps<{ title: string, description?: string, retry?: () => unknown, retryi
     icon="i-hugeicons-alert-circle"
     :title="title"
     :description="description"
-    :actions="retry ? [{ label: 'Retry', loading: retrying, onClick: retry }] : []"
+    :actions="retry ? [{ label: 'Retry', onClick: retry }] : []"
   />
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { cliLoginCommand } from '~/utils/labels'
+import { cliLoginCommand, GH_LOGIN_COMMAND } from '@corral/contracts/client'
 
 const { isMobile } = useDevice()
 </script>
@@ -47,7 +47,7 @@ const { isMobile } = useDevice()
             </template>
           </RunnerLogins>
           <p class="mt-2 text-xs text-muted-foreground">
-            Sign in inside the runner container: <code class="font-mono">{{ cliLoginCommand('claude') }}</code>, <code class="font-mono">{{ cliLoginCommand('codex') }}</code> and <code class="font-mono">docker exec -it corral-runner gh auth login</code>. Corral shows the state only and never reads the credentials.
+            Sign in inside the runner container: <code class="font-mono">{{ cliLoginCommand('claude') }}</code>, <code class="font-mono">{{ cliLoginCommand('codex') }}</code> and <code class="font-mono">{{ GH_LOGIN_COMMAND }}</code>. Corral shows the state only and never reads the credentials.
           </p>
         </div>
       </div>

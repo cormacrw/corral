@@ -1,5 +1,5 @@
 import { RUNNER_PROTOCOL_VERSION } from '@corral/contracts'
-import { isTaskDone, parentStage, type EpicRebaseDecision } from '@corral/core'
+import { DEFAULT_AGENT_RUNTIME, deliveryCounts, isOnBoard, isTaskDone, needsStatusReason, parentStage, type EpicRebaseDecision } from '@corral/core'
 import corralThumbnail from '~/assets/images/corral-thumbnail.svg'
 import type {
   Agent,
@@ -56,8 +56,8 @@ export const profile: Profile = { id: 'user-1', name: 'Cormac', avatarUrl: null 
 // protocol (design/settings.md, Runner)
 export const runner: RunnerStatus = {
   runners: [
-    { commit: 'prototype', serverCommit: 'prototype', behind: false, draining: false, updateRequested: false, id: 'runner-1', name: 'home-server', online: true, slotsInUse: 3, protocol: 2, needsUpdate: false, connectedAt: ago(600), lastHeartbeatAt: ago(0), slots: 4, runtimes: ['claude-code', 'codex'], roles: ['pm', 'developer', 'reviewer', 'design'] },
-    { commit: 'prototype', serverCommit: 'prototype', behind: false, draining: false, updateRequested: false, id: 'runner-2', name: 'macbook', online: false, slotsInUse: 0, protocol: 2, needsUpdate: false, connectedAt: ago(300), lastHeartbeatAt: ago(42), slots: 2, runtimes: ['claude-code'], roles: ['developer', 'reviewer'] },
+    { commit: 'prototype', serverCommit: 'prototype', behind: false, draining: false, updateRequested: false, id: 'runner-1', name: 'home-server', online: true, slotsInUse: 3, protocol: 2, needsUpdate: false, connectedAt: ago(600), lastHeartbeatAt: ago(0), slots: 4, runtimes: [DEFAULT_AGENT_RUNTIME, 'codex'], roles: ['pm', 'developer', 'reviewer', 'design'] },
+    { commit: 'prototype', serverCommit: 'prototype', behind: false, draining: false, updateRequested: false, id: 'runner-2', name: 'macbook', online: false, slotsInUse: 0, protocol: 2, needsUpdate: false, connectedAt: ago(300), lastHeartbeatAt: ago(42), slots: 2, runtimes: [DEFAULT_AGENT_RUNTIME], roles: ['developer', 'reviewer'] },
     { commit: 'prototype', serverCommit: 'prototype', behind: false, draining: false, updateRequested: false, id: 'runner-3', name: 'old-mini', online: false, slotsInUse: 0, protocol: 1, needsUpdate: true, connectedAt: ago(15), lastHeartbeatAt: ago(15), slots: 1, runtimes: [], roles: [] },
     ...['behind', 'draining', 'waiting', 'building', 'offline', 'failed'].map((state, i) => ({
       slotsInUse: state === 'draining' ? 2 : 0, protocol: RUNNER_PROTOCOL_VERSION, needsUpdate: false, id: `remote-${i}`, name: `gaming-pc-${state}`, online: state !== 'offline',
@@ -127,13 +127,13 @@ export const projects: Project[] = [
 ]
 
 export const agents: Agent[] = [
-  { id: 'a-design', name: 'Iris', role: 'designer', runtime: 'claude-code', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 1, avatarUrl: null },
+  { id: 'a-design', name: 'Iris', role: 'designer', runtime: DEFAULT_AGENT_RUNTIME, concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 1, avatarUrl: null },
   { id: 'a-paused', name: 'Pax', role: 'developer', runtime: 'codex', concurrency: 1, paused: true, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 0, avatarUrl: null },
   { id: 'a-limited', name: 'Uma', role: 'reviewer', runtime: 'codex', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: ago(-120), activeRuns: 0, avatarUrl: null },
-  { id: 'a-pm', name: 'Pam', role: 'pm', runtime: 'claude-code', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: ago(60), activeRuns: 0, avatarUrl: null },
-  { id: 'a-dev', name: 'Victor', role: 'developer', runtime: 'claude-code', concurrency: 2, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 1, avatarUrl: null },
+  { id: 'a-pm', name: 'Pam', role: 'pm', runtime: DEFAULT_AGENT_RUNTIME, concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: ago(60), activeRuns: 0, avatarUrl: null },
+  { id: 'a-dev', name: 'Victor', role: 'developer', runtime: DEFAULT_AGENT_RUNTIME, concurrency: 2, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 1, avatarUrl: null },
   { id: 'a-dev2', name: 'Dana', role: 'developer', runtime: 'codex', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 1, avatarUrl: null },
-  { id: 'a-rev', name: 'Rita', role: 'reviewer', runtime: 'claude-code', concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 2, avatarUrl: null }
+  { id: 'a-rev', name: 'Rita', role: 'reviewer', runtime: DEFAULT_AGENT_RUNTIME, concurrency: 1, paused: false, wakeIntervalSeconds: null, pausedUntil: null, activeRuns: 2, avatarUrl: null }
 ]
 
 const epicRows: Omit<Epic, 'taskId' | 'taskRef' | 'mergedAt'>[] = [
@@ -317,7 +317,7 @@ export function task(project: Project, number: number, fields: Partial<Task> & P
 
 function fixtureStatus(fields: Partial<Task> & Pick<Task, 'status'>) {
   if (fields.status === 'draft') return { status: fields.status, statusReason: null, draftSession: fields.draftSession ?? null } as const
-  if (fields.status === 'blocked' || fields.status === 'failed') {
+  if (needsStatusReason(fields.status)) {
     if (!fields.statusReason?.trim()) throw new Error('Fixture needs a reason')
     return { status: fields.status, statusReason: fields.statusReason, draftSession: null } as const
   }
@@ -452,8 +452,8 @@ function parentRow(project: Project, epic: Epic, from?: Task): Task {
   project.nextTaskNumber = Math.max(project.nextTaskNumber, ...tasks.filter(t => t.projectId === project.id).map(t => t.number + 1))
   const row = from ?? task(project, project.nextTaskNumber++, { title: epic.title, status: 'parent', statusReason: null, draftSession: null, description: doc(epic.description) })
   const subs = tasks.filter(t => t.epicId === epic.id)
-  const counted = subs.filter(t => t.status !== 'draft' && t.status !== 'backlog')
-  const counts = { ...epic, taskCount: counted.length, mergedCount: counted.filter(isTaskDone).length }
+  const counted = subs.filter(t => isOnBoard(t.status))
+  const counts = { ...epic, ...deliveryCounts(subs) }
   Object.assign(row, {
     status: 'parent', pr: epic.prNumber ? { number: epic.prNumber, url: epic.prUrl! } : null,
     rollup: { epicId: epic.id, stage: parentStage(counts, counted), reviewMode: epic.reviewMode, done: subs.filter(isTaskDone).length, total: subs.length, planned: counted.length > 0, drafting: false }
@@ -488,31 +488,31 @@ const at = (ref: string): Task => tasks.find(t => t.ref === ref)!
 
 export const runs: Run[] = [
   {
-    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-design', number: 140, agentId: 'a-design', agentName: 'Iris', agentRuntime: 'claude-code', role: 'designer', projectId: 'p-corral',
+    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-design', number: 140, agentId: 'a-design', agentName: 'Iris', agentRuntime: DEFAULT_AGENT_RUNTIME, role: 'designer', projectId: 'p-corral',
     planSessionId: null, taskId: at('COR-20').id, taskRef: 'COR-20', taskTitle: at('COR-20').title, epicId: null, epicTitle: null, state: 'running', outcome: null, summary: null,
     error: null, headSha: null, inputTokens: 12000, cacheReadTokens: 80000, outputTokens: 3000, rateLimitResetAt: null,
     queuedAt: ago(12), startedAt: ago(11), endedAt: null, timings: null
   },
   {
-    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-design-done', number: 139, agentId: 'a-design', agentName: 'Iris', agentRuntime: 'claude-code', role: 'designer', projectId: 'p-corral',
+    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-design-done', number: 139, agentId: 'a-design', agentName: 'Iris', agentRuntime: DEFAULT_AGENT_RUNTIME, role: 'designer', projectId: 'p-corral',
     planSessionId: null, taskId: at('COR-4').id, taskRef: 'COR-4', taskTitle: at('COR-4').title, epicId: null, epicTitle: null, state: 'completed', outcome: 'design_submitted', summary: 'Submitted the review screen prototype.',
     error: null, headSha: 'design-review-v1', inputTokens: 8000, cacheReadTokens: 60000, outputTokens: 2000, rateLimitResetAt: null,
     queuedAt: ago(120), startedAt: ago(119), endedAt: ago(100), timings: null
   },
   {
-    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-1', number: 128, agentId: 'a-dev2', agentName: 'Dana', agentRuntime: 'claude-code', role: 'developer', projectId: 'p-corral',
+    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-1', number: 128, agentId: 'a-dev2', agentName: 'Dana', agentRuntime: DEFAULT_AGENT_RUNTIME, role: 'developer', projectId: 'p-corral',
     planSessionId: null, taskId: at('COR-3').id, taskRef: 'COR-3', taskTitle: at('COR-3').title, epicId: null, epicTitle: null, state: 'running', outcome: null, summary: null,
     error: null, headSha: null, inputTokens: 18_200, cacheReadTokens: 240_000, outputTokens: 6_100, rateLimitResetAt: null,
     queuedAt: ago(25), startedAt: ago(24), endedAt: null, timings: null
   },
   {
-    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-2', number: 129, agentId: 'a-rev', agentName: 'Rita', agentRuntime: 'claude-code', role: 'reviewer', projectId: 'p-corral',
+    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-2', number: 129, agentId: 'a-rev', agentName: 'Rita', agentRuntime: DEFAULT_AGENT_RUNTIME, role: 'reviewer', projectId: 'p-corral',
     planSessionId: null, taskId: at('COR-4').id, taskRef: 'COR-4', taskTitle: at('COR-4').title, epicId: null, epicTitle: null, state: 'running', outcome: null, summary: null,
     error: null, headSha: '9e71e28', inputTokens: 9_000, cacheWriteTokens: 12_000, sessionStart: 'resumed_warm', cacheReadTokens: 80_000, outputTokens: 1_200, rateLimitResetAt: null,
     queuedAt: ago(8), startedAt: ago(7), endedAt: null, timings: null
   },
   {
-    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-3', number: 127, agentId: 'a-dev', agentName: 'Victor', agentRuntime: 'claude-code', role: 'developer', projectId: 'p-corral',
+    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-3', number: 127, agentId: 'a-dev', agentName: 'Victor', agentRuntime: DEFAULT_AGENT_RUNTIME, role: 'developer', projectId: 'p-corral',
     planSessionId: null, taskId: at('COR-5').id, taskRef: 'COR-5', taskTitle: at('COR-5').title, epicId: null, epicTitle: null, state: 'completed', outcome: 'pr_opened',
     summary: 'Approving a version marks it approved and supersedes earlier ones.', error: null, headSha: '5b030d7',
     inputTokens: 30_000, cacheReadTokens: 400_000, outputTokens: 9_800, rateLimitResetAt: null,
@@ -534,7 +534,7 @@ export const runs: Run[] = [
     }
   },
   {
-    runnerId: 'runner-2', runnerName: 'macbook', id: 'r-5', number: 126, agentId: 'a-rev', agentName: 'Rita', agentRuntime: 'claude-code', role: 'reviewer', projectId: 'p-corral',
+    runnerId: 'runner-2', runnerName: 'macbook', id: 'r-5', number: 126, agentId: 'a-rev', agentName: 'Rita', agentRuntime: DEFAULT_AGENT_RUNTIME, role: 'reviewer', projectId: 'p-corral',
     planSessionId: null, taskId: at('COR-5').id, taskRef: 'COR-5', taskTitle: at('COR-5').title, epicId: null, epicTitle: null, state: 'completed', outcome: 'approved',
     summary: 'Every criterion is met.', error: null, headSha: '5b030d7',
     inputTokens: 12_000, cacheReadTokens: 90_000, outputTokens: 2_000, rateLimitResetAt: null,
@@ -547,7 +547,7 @@ export const runs: Run[] = [
     [123, 'interrupted', 'The runner shut down (container stop or redeploy) and stopped the agent. Last transcript activity: 2026-10-30T10:12:03.000Z', 330],
     [124, 'failed', 'The agent was killed by SIGTERM, which came from outside Corral. Last transcript activity: 2026-10-30T11:02:55.000Z', 280]
   ] as const).map(([number, state, error, endedAgo]): Run => ({
-    runnerId: null, runnerName: null, id: `r-cut-${number}`, number, agentId: 'a-dev2', agentName: 'Dana', agentRuntime: 'claude-code', role: 'developer', projectId: 'p-corral',
+    runnerId: null, runnerName: null, id: `r-cut-${number}`, number, agentId: 'a-dev2', agentName: 'Dana', agentRuntime: DEFAULT_AGENT_RUNTIME, role: 'developer', projectId: 'p-corral',
     planSessionId: null, taskId: at('COR-3').id, taskRef: 'COR-3', taskTitle: at('COR-3').title, epicId: null, epicTitle: null, state, outcome: state === 'failed' ? 'failed' : null, summary: null,
     error, headSha: null, inputTokens: 4_000, cacheReadTokens: 22_000, outputTokens: 900, rateLimitResetAt: null,
     queuedAt: ago(endedAgo + 22), startedAt: ago(endedAgo + 21), endedAt: ago(endedAgo), timings: null
@@ -557,27 +557,27 @@ export const runs: Run[] = [
     [125, 'completed', 'The flaky test is the SSE reconnect one.', null, 240],
     [120, 'interrupted', null, 'Stopped by a human', 500]
   ] as const).map(([number, state, summary, error, endedAgo]): Run => ({
-    runnerId: 'runner-1', runnerName: 'home-server', id: `r-pm-${number}`, number, agentId: 'a-pm', agentName: 'Pam', agentRuntime: 'claude-code', role: 'pm', projectId: 'p-corral',
+    runnerId: 'runner-1', runnerName: 'home-server', id: `r-pm-${number}`, number, agentId: 'a-pm', agentName: 'Pam', agentRuntime: DEFAULT_AGENT_RUNTIME, role: 'pm', projectId: 'p-corral',
     planSessionId: null, taskId: null, taskRef: null, taskTitle: null, epicId: null, epicTitle: null, state, outcome: null, summary,
     error, headSha: null, inputTokens: 2_000, cacheReadTokens: 12_000, outputTokens: 400, rateLimitResetAt: null,
     queuedAt: ago(endedAgo + 3), startedAt: ago(endedAgo + 2), endedAt: ago(endedAgo), timings: null
   })),
   // A live Codex run, which can't take messages mid-run
   {
-    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-4', number: 130, agentId: 'a-dev', agentName: 'Victor', agentRuntime: 'claude-code', role: 'developer', projectId: 'p-site',
+    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-4', number: 130, agentId: 'a-dev', agentName: 'Victor', agentRuntime: DEFAULT_AGENT_RUNTIME, role: 'developer', projectId: 'p-site',
     planSessionId: null, taskId: at('WEB-3').id, taskRef: 'WEB-3', taskTitle: at('WEB-3').title, epicId: null, epicTitle: null, state: 'running', outcome: null, summary: null,
     error: null, headSha: null, inputTokens: 4_000, cacheReadTokens: 22_000, outputTokens: 900, rateLimitResetAt: null,
     queuedAt: ago(5), startedAt: ago(4), endedAt: null, timings: null
   },
   // An epic's integration review has no task, live and finished
   {
-    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-epic', number: 131, agentId: 'a-rev', agentName: 'Rita', agentRuntime: 'claude-code', role: 'reviewer', projectId: 'p-corral',
+    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-epic', number: 131, agentId: 'a-rev', agentName: 'Rita', agentRuntime: DEFAULT_AGENT_RUNTIME, role: 'reviewer', projectId: 'p-corral',
     planSessionId: null, taskId: null, taskRef: null, taskTitle: null, epicId: 'e-searches', epicTitle: 'Saved searches', state: 'running', outcome: null, summary: null,
     error: null, headSha: '6f1c2ab94d', inputTokens: 7_000, cacheReadTokens: 50_000, outputTokens: 1_000, rateLimitResetAt: null,
     queuedAt: ago(3), startedAt: ago(2), endedAt: null, timings: null
   },
   {
-    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-epic-done', number: 125, agentId: 'a-rev', agentName: 'Rita', agentRuntime: 'claude-code', role: 'reviewer', projectId: 'p-corral',
+    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-epic-done', number: 125, agentId: 'a-rev', agentName: 'Rita', agentRuntime: DEFAULT_AGENT_RUNTIME, role: 'reviewer', projectId: 'p-corral',
     planSessionId: null, taskId: null, taskRef: null, taskTitle: null, epicId: 'e-searches', epicTitle: 'Saved searches', state: 'completed', outcome: 'changes_requested',
     summary: 'The UI sends the wrong search field.', error: null, headSha: '4d2be81',
     inputTokens: 11_000, cacheReadTokens: 70_000, outputTokens: 1_800, rateLimitResetAt: null,
@@ -585,7 +585,7 @@ export const runs: Run[] = [
   },
   // A PM turn belongs to a Plan session, not a task or an epic
   {
-    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-pm', number: 120, agentId: 'a-pm', agentName: 'Pam', agentRuntime: 'claude-code', role: 'pm', projectId: 'p-corral',
+    runnerId: 'runner-1', runnerName: 'home-server', id: 'r-pm', number: 120, agentId: 'a-pm', agentName: 'Pam', agentRuntime: DEFAULT_AGENT_RUNTIME, role: 'pm', projectId: 'p-corral',
     planSessionId: null, taskId: null, taskRef: null, taskTitle: null, epicId: null, epicTitle: null, state: 'completed', outcome: null, summary: null,
     error: null, headSha: null, inputTokens: 2_000, cacheReadTokens: 10_000, outputTokens: 400, rateLimitResetAt: null,
     queuedAt: ago(300), startedAt: ago(299), endedAt: ago(297), timings: null
@@ -821,7 +821,7 @@ const epicReviewExtras: Record<string, Partial<EpicReview>> = {
 export function epicReview(id: string): EpicReview | null {
   const epic = epics.find(e => e.id === id)
   if (!epic) return null
-  const board = tasks.filter(t => t.epicId === id && t.status !== 'draft' && t.status !== 'backlog')
+  const board = tasks.filter(t => t.epicId === id && isOnBoard(t.status))
   const rows = board.map((t): EpicReviewTaskRow => {
     const human = t.humanReview && t.submission === null && t.status === 'merged'
     return {
@@ -876,32 +876,32 @@ export const planSessions: PlanSession[] = [
     status: 'none', activeRunId: null, createdAt: ago(120), updatedAt: ago(90)
   },
   {
-    id: 's-1', projectId: 'p-corral', title: 'Design tasks', runtime: 'claude-code',
+    id: 's-1', projectId: 'p-corral', title: 'Design tasks', runtime: DEFAULT_AGENT_RUNTIME,
     preview: 'Here is a plan with six tasks. Approve it to put them on the board.',
     unread: true, closed: false, status: 'needs_approval', activeRunId: null, createdAt: ago(60 * 26), updatedAt: ago(60 * 25)
   },
   {
-    id: 's-2', projectId: 'p-corral', title: 'Mobile push', runtime: 'claude-code',
+    id: 's-2', projectId: 'p-corral', title: 'Mobile push', runtime: DEFAULT_AGENT_RUNTIME,
     preview: 'Which push service should we use?', unread: false, closed: false, status: 'question', activeRunId: null,
     createdAt: ago(60 * 4), updatedAt: ago(60 * 3)
   },
   {
-    id: 's-3', projectId: 'p-corral', title: 'Board polish', runtime: 'claude-code',
+    id: 's-3', projectId: 'p-corral', title: 'Board polish', runtime: DEFAULT_AGENT_RUNTIME,
     preview: 'Here is a plan with two tasks. Approve it to put them on the board.', unread: false, closed: false, status: 'needs_approval', activeRunId: null,
     createdAt: ago(60 * 51), updatedAt: ago(60 * 50)
   },
   {
-    id: 's-4', projectId: 'p-corral', title: 'Long tokens', runtime: 'claude-code',
+    id: 's-4', projectId: 'p-corral', title: 'Long tokens', runtime: DEFAULT_AGENT_RUNTIME,
     preview: 'Here is what widens the thread.', unread: false, closed: false, status: 'none', activeRunId: 'r-plan-2',
     createdAt: ago(60 * 2), updatedAt: ago(5)
   },
   {
-    id: 's-5', projectId: 'p-corral', title: 'Flaky CI', runtime: 'claude-code',
+    id: 's-5', projectId: 'p-corral', title: 'Flaky CI', runtime: DEFAULT_AGENT_RUNTIME,
     preview: 'The flaky test is the SSE reconnect one.', unread: true, closed: false, status: 'none', activeRunId: null,
     createdAt: ago(60 * 7), updatedAt: ago(60 * 6)
   },
   {
-    id: 's-6', projectId: 'p-corral', title: 'Review screen design', runtime: 'claude-code',
+    id: 's-6', projectId: 'p-corral', title: 'Review screen design', runtime: DEFAULT_AGENT_RUNTIME,
     preview: 'Approve v2 of COR-4: Design review screen. Note: Start with the mobile layout', unread: false, closed: false, status: 'none', activeRunId: null,
     createdAt: ago(60 * 3), updatedAt: ago(60 * 2)
   }
@@ -1024,7 +1024,6 @@ export const releaseNotes: ReleaseNotesItem[] = [{
 }]
 export const resolvedInbox: Inbox['resolved'] = []
 
-// The inbox is derived from the tasks above that need the human
 // What a thread waits on, or nothing when it's missing the data its status needs
 function threadAttention(status: PlanSession['status'], last?: PlanMessage, plan?: Plan): PlanThreadAttention | null {
   if (status === 'question') {
@@ -1060,6 +1059,7 @@ export const epicHistory: EpicHistoryEntry[] = [
 // Items opened in the prototype, by ID (POST /inbox/read)
 export const readItems = new Set<string>()
 
+// The inbox is derived from the tasks above that need the human
 export function inbox(): Inbox {
   const needsYou: Inbox['needsYou'] = tasks
     .filter(t => t.status === 'human_review' || t.status === 'blocked' || t.status === 'failed')

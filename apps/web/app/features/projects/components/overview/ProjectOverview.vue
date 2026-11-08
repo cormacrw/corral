@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { planPath } from '~/utils/routes'
 import type { ProjectOverview } from '~/features/projects/composables/useProjectOverview'
 
 // Project overview (design/project-overview.md, design/mobile.md): the same
@@ -49,7 +50,7 @@ const { project, tasks, loading, inboxLoading, runs, history, error, load, needs
         Plan your first task with {{ pmName }}
       </p>
       <AppButton
-        :to="`/plan?project=${project.id}`"
+        :to="planPath(project.id)"
         :label="`Plan with ${pmName}`"
       />
     </div>

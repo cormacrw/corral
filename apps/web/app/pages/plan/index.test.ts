@@ -4,13 +4,13 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { useTaskFlyout } from '~/features/tasks/composables/useTaskFlyout'
+import { useTaskFlyout } from '~/composables/useTaskFlyout'
 import { testQueryClient } from '~/queries/mount-with-query'
 import PlanNewSession from '~/features/plan/components/PlanNewSession.vue'
 import PlanSheets from '~/features/plan/components/PlanSheets.vue'
 import PlanPage from './index.vue'
 
-vi.mock('~/composables/useApi', () => ({
+vi.mock('~/queries/api', () => ({
   api: { setup: { clis: vi.fn(async () => []) } }
 }))
 
@@ -58,7 +58,6 @@ async function render(url: string) {
   vi.stubGlobal('useLocalStorage', (_key: string, value: unknown) => vue.ref(value))
   vi.stubGlobal('useShell', () => ({ loaded: true, runner: { online: false }, agents: [], projects: [] }))
   vi.stubGlobal('useProjectLists', () => ({ tasks: vue.ref([]) }))
-  vi.stubGlobal('usePendingPlan', () => ({ restored: vue.ref(null) }))
   vi.stubGlobal('usePlanThreads', () => ({ add: vi.fn() }))
   const wrapper = mount(PlanPage, {
     global: {
@@ -79,13 +78,10 @@ afterEach(() => {
 
 it('keeps the sheet open on the parent opened from the attached task', async () => {
   const { wrapper, router } = await render('/plan?task=COR-1')
-  expect(wrapper.get('[data-drawer]').attributes('data-drawer')).toBe('Task COR-1')
-
-  await wrapper.get('[data-task="COR-1"]').trigger('click')
+  await wrapper.get('[data-drawer] [data-task="COR-1"]').trigger('click')
   await flushPromises()
   expect(router.currentRoute.value.fullPath).toBe('/plan?epic=epic-1')
-  expect(wrapper.get('[data-drawer]').attributes('data-drawer')).toBe('Task')
-  expect(wrapper.get('[data-epic="epic-1"]').attributes('data-mode')).toBe('flyout')
+  expect(wrapper.get('[data-drawer] [data-epic="epic-1"]').attributes('data-mode')).toBe('flyout')
   expect(wrapper.find('[data-task]').exists()).toBe(false)
 })
 
@@ -96,9 +92,9 @@ it('closes a parent task with the sheet', async () => {
   expect(router.currentRoute.value.fullPath).toBe('/plan')
 })
 
-it('puts the prompt straight above Open threads and Drafts on phones, with no pills or composer toolbar', async () => {
+it('offers no start options or project picker on phones', async () => {
   const { wrapper } = await render('/plan')
+  expect(wrapper.find('prompt-composer-stub').exists()).toBe(true)
   expect(wrapper.find('[data-testid="plan-start-options"]').exists()).toBe(false)
   expect(wrapper.find('[aria-label="Project"]').exists()).toBe(false)
-  expect(wrapper.get('prompt-composer-stub').attributes('bare')).toBe('true')
 })

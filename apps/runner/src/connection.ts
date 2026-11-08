@@ -1,5 +1,8 @@
 import {
+  parseRunnerRefusal,
+  RUNNER_CLOSE_CODES,
   RUNNER_HEARTBEAT_MS,
+  RUNNER_MAX_MESSAGE_BYTES,
   serverMessageSchema,
   protocolMessageType,
   RUNNER_PATH,
@@ -10,12 +13,13 @@ import {
   type ServerMessage
 } from '@corral/contracts'
 import { AGENT_TOOL_CONTRACT } from '@corral/contracts/agent-tools'
+import { errorText } from '@corral/core'
 import WebSocket from 'ws'
 import type { UpdateStatus } from './update-status.ts'
 
-export interface ConnectionHandlers {
+interface ConnectionHandlers {
   // Includes runs still flushing their terminal report.
-  activeRunCount?(): number
+  activeRunCount(): number
   activeRuns(): { runId: string, leaseEpoch: number }[]
   // Read on every connect, so a CLI signed in since then is advertised
   capacity(): Promise<RunnerCapacity>
@@ -26,9 +30,9 @@ export interface ConnectionHandlers {
 const MIN_BACKOFF_MS = 1000
 const MAX_BACKOFF_MS = 30_000
 // The soonest to retry after a refusal that won't change right away: the
-// protocol (4000), a newer connection with this ID (4001) or the token (4003)
+// protocol, a newer connection with this ID or the token
 const REFUSED_DELAY_MS = 15_000
-const REFUSED_CODES = new Set([4000, 4001, 4003])
+const REFUSED_CODES = new Set<number>([RUNNER_CLOSE_CODES.protocol, RUNNER_CLOSE_CODES.replaced, RUNNER_CLOSE_CODES.token])
 const HANDSHAKE_TIMEOUT_MS = 15_000
 // Heartbeats in a row with nothing back before the socket counts as dead. Two,
 // so a busy server isn't mistaken for a lost one.
@@ -56,9 +60,9 @@ export class ServerConnection {
   #helloSent = false
   #welcomed = false
 
-  readonly updateStatus: UpdateStatus | undefined
+  readonly updateStatus: UpdateStatus
 
-  constructor(serverUrl: URL, identity: { runnerId: string, name: string }, handlers: ConnectionHandlers, token?: string, updateStatus?: UpdateStatus) {
+  constructor(serverUrl: URL, identity: { runnerId: string, name: string }, handlers: ConnectionHandlers, token: string | undefined, updateStatus: UpdateStatus) {
     this.updateStatus = updateStatus
     this.#token = token
     const url = new URL(RUNNER_PATH, serverUrl)
@@ -85,24 +89,20 @@ export class ServerConnection {
     if (this.#polling) return
     this.#polling = true
     try {
-      await this.updateStatus?.refresh(this.#activeRunCount())
+      await this.updateStatus.refresh(this.#handlers.activeRunCount())
     } finally {
       this.#polling = false
     }
     const state = this.updateStatus
-    if (!state || !this.connected) return
-    const message: RunnerMessage = { type: 'runner.update-status', draining: state.draining, updateRequested: state.updateRequested, activeRunCount: this.#activeRunCount(), updateState: state.updateState, updateError: state.updateError }
+    if (!this.connected) return
+    const message: RunnerMessage = { type: 'runner.update-status', draining: state.draining, updateRequested: state.updateRequested, activeRunCount: this.#handlers.activeRunCount(), updateState: state.updateState, updateError: state.updateError }
     const json = JSON.stringify(message)
     if (json !== this.#lastUpdateSent && this.send(message)) this.#lastUpdateSent = json
   }
 
-  #activeRunCount(): number {
-    return this.#handlers.activeRunCount?.() ?? this.#handlers.activeRuns().length
-  }
-
   // Writes the status file if it changed; the 1 s poll reads the updater's answer
   refreshUpdateStatus(): Promise<void> {
-    return this.updateStatus?.write(this.#activeRunCount()) ?? Promise.resolve()
+    return this.updateStatus.write(this.#handlers.activeRunCount())
   }
 
   send(message: RunnerMessage): boolean {
@@ -121,7 +121,7 @@ export class ServerConnection {
   }
 
   #open(): void {
-    const socket = new WebSocket(this.#url, { handshakeTimeout: HANDSHAKE_TIMEOUT_MS, headers: this.#token ? { authorization: `Bearer ${this.#token}` } : {} })
+    const socket = new WebSocket(this.#url, { handshakeTimeout: HANDSHAKE_TIMEOUT_MS, maxPayload: RUNNER_MAX_MESSAGE_BYTES, headers: this.#token ? { authorization: `Bearer ${this.#token}` } : {} })
     this.#socket = socket
     this.#helloSent = false
     this.#welcomed = false
@@ -153,23 +153,19 @@ export class ServerConnection {
         // refused has to keep backing off
         this.#backoff = MIN_BACKOFF_MS
         this.#welcomed = true
-        this.updateStatus?.server(message.commit)
-        if (message.draining) this.updateStatus?.drain(message.updateRequested)
-        if (this.updateStatus?.draining) this.send({ type: 'runner.draining', updateRequested: this.updateStatus.updateRequested })
+        this.updateStatus.server(message.commit)
+        if (message.draining) this.updateStatus.drain(message.updateRequested)
+        if (this.updateStatus.draining) this.send({ type: 'runner.draining', updateRequested: this.updateStatus.updateRequested })
         this.#handlers.onStatus('connected')
       }
-      if (message.type === 'runner.drain') this.updateStatus?.drain(message.updateRequested)
+      if (message.type === 'runner.drain') this.updateStatus.drain(message.updateRequested)
       this.#handlers.onMessage(message)
       void this.refreshUpdateStatus()
     })
     socket.on('close', (code, reason) => {
       this.#stopHeartbeat()
-      if (code === 4000) {
-        try {
-          const detail = JSON.parse(reason.toString()) as { commit?: string }
-          if (typeof detail.commit === 'string') this.updateStatus?.refused(detail.commit)
-        } catch { /* Older servers may only send a readable protocol error. */ }
-      }
+      const refusal = code === RUNNER_CLOSE_CODES.protocol ? parseRunnerRefusal(reason.toString()) : null
+      if (refusal) this.updateStatus.refused(refusal.commit)
       void this.refreshUpdateStatus()
       if (this.#socket === socket) this.#socket = null
       this.#handlers.onStatus('disconnected', reason.toString() || `code ${code}`)
@@ -185,13 +181,13 @@ export class ServerConnection {
     try {
       capacity = await this.#handlers.capacity()
     } catch (error) {
-      console.warn(`Could not read this runner's capacity: ${error instanceof Error ? error.message : String(error)}`)
+      console.warn(`Could not read this runner's capacity: ${errorText(error)}`)
       socket.terminate()
       return
     }
     // That took seconds, and the socket may have gone meanwhile
     if (this.#socket !== socket || socket.readyState !== WebSocket.OPEN) return
-    socket.send(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, taskIntegrationProtocols: [TASK_INTEGRATION_PROTOCOL], taskIntegrationExecutor: true, epicRebaseExecutor: true, epicFixExecutor: true, toolContract: AGENT_TOOL_CONTRACT, commit: this.updateStatus?.commit || process.env.CORRAL_BUILD_SHA || 'development', draining: this.updateStatus?.draining ?? false, updateRequested: this.updateStatus?.updateRequested ?? false, autoUpdate: this.updateStatus?.autoUpdate ?? false, updateTarget: this.updateStatus?.serverCommit ?? '', updateState: this.updateStatus?.updateState ?? '', updateError: this.updateStatus?.updateError ?? '', ...this.#identity, ...capacity, activeRuns: this.#handlers.activeRuns() } satisfies RunnerMessage))
+    socket.send(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, taskIntegrationProtocols: [TASK_INTEGRATION_PROTOCOL], taskIntegrationExecutor: true, epicRebaseExecutor: true, epicFixExecutor: true, toolContract: AGENT_TOOL_CONTRACT, commit: this.updateStatus.commit, draining: this.updateStatus.draining, updateRequested: this.updateStatus.updateRequested, autoUpdate: this.updateStatus.autoUpdate, updateTarget: this.updateStatus.serverCommit ?? '', updateState: this.updateStatus.updateState, updateError: this.updateStatus.updateError, ...this.#identity, ...capacity, activeRuns: this.#handlers.activeRuns() } satisfies RunnerMessage))
     this.#helloSent = true
     this.#heartbeat = setInterval(() => {
       // A half-open connection stays OPEN until the kernel gives up, so silence

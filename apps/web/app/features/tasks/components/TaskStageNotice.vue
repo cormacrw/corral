@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { planThreadPath } from '~/utils/routes'
 import type { Task } from '@corral/contracts'
 
 // What this stage of the task means: read-only, a plan's Draft, or Backlog
@@ -31,7 +32,7 @@ const bannerClass = 'flex flex-wrap items-center gap-2 rounded-lg border border-
       trailing-icon="i-hugeicons-arrow-right-02"
       variant="link"
       size="sm"
-      :to="`/plan/${task.draftSession.id}`"
+      :to="planThreadPath(task.draftSession.id)"
       data-testid="task-plan-session"
     />
   </div>

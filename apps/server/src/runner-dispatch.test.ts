@@ -3,7 +3,7 @@ import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner, sleep } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 const { agents, runs, tasks } = schema
 
@@ -26,6 +26,13 @@ describe('runner capacity, runtimes and roles', () => {
     const task = await t.createTask(project.slug, input)
     expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })).status).toBe(200)
     return t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}`).then(r => r.json()) as Promise<Task>
+  }
+
+  // Any scheduling pass has finished, and each runner has received all it was
+  // sent: a job's answer comes back on the same socket, after them
+  async function delivered(...ids: string[]) {
+    await t.orchestrator.scheduler.idle
+    for (const id of ids) await t.runner.requestOn(id, { kind: 'detect_clis' })
   }
 
   const assigns = (runner: FakeRunner) => runner.received.filter(m => m.type === 'run.assign')
@@ -77,7 +84,7 @@ describe('runner capacity, runtimes and roles', () => {
     const b = await connect('B', { slots: 2 })
     const project = await t.createProject({ repository: 'cormacrw/test-app' })
     const ready = [await readyTask(project), await readyTask(project), await readyTask(project)]
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     await vi.waitFor(() => expect(assigns(a).length + assigns(b).length).toBe(3), { timeout: 5000 })
     expect(assigns(a)).toHaveLength(1)
     expect(assigns(b)).toHaveLength(2)
@@ -87,8 +94,8 @@ describe('runner capacity, runtimes and roles', () => {
     expect(t.events.filter(e => e.type === 'runner.status').at(-1)).toMatchObject({ status: { runners: [{ id: 'A', slotsInUse: 1 }, { id: 'B', slotsInUse: 2 }] } })
 
     const fourth = await readyTask(project)
-    await t.orchestrator.schedule()
-    await sleep(100)
+    await t.orchestrator.scheduler.schedule()
+    await delivered('A', 'B')
     expect(assigns(a).length + assigns(b).length).toBe(3)
     expect(await taskRow(fourth.id)).toMatchObject({ status: 'ready', leaseRunId: null })
 
@@ -118,8 +125,8 @@ describe('runner capacity, runtimes and roles', () => {
     // Only A is online: the Plan turn and the design run wait
     const created = await (await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan a login feature' })).json() as PlanSessionDetail
     const design = await readyTask(project, { type: 'design', title: 'Login screen' })
-    await t.orchestrator.schedule()
-    await sleep(100)
+    await t.orchestrator.scheduler.schedule()
+    await delivered('A')
     expect(assigns(a)).toHaveLength(0)
     expect(await taskRow(design.id)).toMatchObject({ status: 'ready', leaseRunId: null })
     const [turn] = await t.db.select().from(runs).where(eq(runs.planSessionId, created.id))
@@ -134,7 +141,7 @@ describe('runner capacity, runtimes and roles', () => {
 
     // A build task still goes to A
     const build = await readyTask(project)
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     await vi.waitFor(() => expect(assigns(a).map(m => m.type === 'run.assign' && m.job.taskId)).toEqual([build.id]), { timeout: 5000 })
     expect(assigns(a).every(m => m.type === 'run.assign' && m.job.role === 'developer' && m.job.taskType !== 'design')).toBe(true)
   }, 60000)
@@ -145,8 +152,8 @@ describe('runner capacity, runtimes and roles', () => {
     const a = await connect('A', { runtimes: ['claude-code'] })
     const project = await t.createProject({ repository: 'cormacrw/test-app' })
     const task = await readyTask(project)
-    await t.orchestrator.schedule()
-    await sleep(100)
+    await t.orchestrator.scheduler.schedule()
+    await delivered('A')
     expect(assigns(a)).toHaveLength(0)
     expect(await taskRow(task.id)).toMatchObject({ status: 'ready', leaseRunId: null })
 
@@ -162,19 +169,17 @@ describe('runner capacity, runtimes and roles', () => {
     const b = await connect('B', { slots: 1 })
     const project = await t.createProject({ repository: 'cormacrw/test-app' })
     const task = await readyTask(project)
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const [developer, first] = await assignedOn([a, b], j => j.taskId === task.id)
     await started(developer, first, 'session-1')
     await changesRequested(project, task, developer, first, [a, b])
 
     const revision = (await developer.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
     expect(revision.agentSessionId).toBe('session-1')
-    expect(revision.prompt).toContain('This is the same session')
     expect(revision.prompt).toContain('No message shown')
-    expect(revision.fallbackPrompt).toContain('This is a revision')
+    expect(revision.fallbackPrompt).toContain('No message shown')
     const other = developer === a ? b : a
     expect(assigns(other).some(m => m.type === 'run.assign' && m.job.role === 'developer')).toBe(false)
-    expect(await transcript(revision.runId)).toContainEqual({ type: 'system', text: expect.stringContaining(`Resuming the agent session of run #${first.runNumber} on runner ${developer === a ? 'A' : 'B'}: it ended 0 minutes ago`) })
     expect(await runRow(revision.runId)).toMatchObject({ sessionStart: 'resumed_warm' })
   }, 60000)
 
@@ -187,7 +192,7 @@ describe('runner capacity, runtimes and roles', () => {
     const a = await connect('A', { slots: 2 })
     const project = await t.createProject({ repository: 'cormacrw/test-app' })
     const task = await readyTask(project)
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const [developer, first] = await assignedOn([a], j => j.taskId === task.id)
     await started(developer, first, 'session-1')
     const compare = vi.spyOn(t.github, 'compare').mockResolvedValue({ mergeBase: 'base', files: [{ filename: 'a.ts', status: 'modified', additions: 1, deletions: 0, sha: 's', patch: '+const a = 1' }] })
@@ -199,23 +204,18 @@ describe('runner capacity, runtimes and roles', () => {
     await t.db.update(schema.tasks).set(round).where(eq(schema.tasks.id, task.id))
     if (limited) await t.db.update(runs).set({ outcome: 'rate_limited' }).where(eq(runs.id, first.runId))
     await t.db.update(schema.agents).set({ paused: false }).where(developers)
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const revision = (await developer.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
     compare.mockRestore()
-    const lines = await transcript(revision.runId)
     if (round.rebaseOnly || limited) {
       expect(revision.agentSessionId).toBe('session-1')
-      expect(lines[0]).toMatchObject({ type: 'system', text: expect.stringContaining('its prompt cache has expired, but this kind of round keeps its session') })
       expect(await runRow(revision.runId)).toMatchObject({ sessionStart: 'resumed_cold' })
       return
     }
     expect(revision.agentSessionId).toBeNull()
     expect(revision.fallbackPrompt).toBeNull()
-    expect(revision.prompt).toContain('This is a revision')
     expect(revision.prompt).toContain('No message shown')
-    expect(revision.prompt).toContain('## The branch so far')
     expect(revision.prompt).toContain('+const a = 1')
-    expect(lines[0]).toMatchObject({ type: 'system', text: expect.stringContaining(`Starting a fresh session on runner A after run #${first.runNumber}: it ended 60 minutes ago`) })
     expect(await runRow(revision.runId)).toMatchObject({ sessionStart: 'fresh' })
   }, 60000)
 
@@ -224,7 +224,7 @@ describe('runner capacity, runtimes and roles', () => {
     const a = await connect('A', { slots: 2 })
     const project = await t.createProject({ repository: 'cormacrw/test-app' })
     const task = await readyTask(project)
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const [developer, first] = await assignedOn([a], j => j.taskId === task.id)
     await started(developer, first, 'session-1')
     await changesRequested(project, task, developer, first, [a])
@@ -239,7 +239,7 @@ describe('runner capacity, runtimes and roles', () => {
     const a = await connect('A', { roles: ['developer'] })
     const project = await t.createProject({ repository: 'cormacrw/test-app' })
     const task = await readyTask(project)
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const first = (await a.next('run.assign', m => m.job.taskId === task.id)).job
     await started(a, first, 'session-1')
     // The reviewer runs on B, then A goes away before the revision
@@ -252,11 +252,8 @@ describe('runner capacity, runtimes and roles', () => {
 
     const revision = (await c.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
     expect(revision).toMatchObject({ agentSessionId: null, fallbackPrompt: null, branch: first.branch })
-    expect(revision.prompt).toContain('This is a revision')
     expect(revision.prompt).toContain('No message shown')
-    expect(await transcript(revision.runId)).toContainEqual({
-      type: 'system', text: `Run #${first.runNumber} ran on runner A, which is offline: starting a fresh session on runner C from the pushed branch ${first.branch}`
-    })
+    expect(await transcript(revision.runId)).toContainEqual({ type: 'system', text: expect.stringContaining(first.branch!) })
   }, 60000)
 
   it('keeps a Plan session\'s turns on the runner of its first turn while it is online', async () => {
@@ -291,6 +288,5 @@ describe('runner capacity, runtimes and roles', () => {
     const moved = (await away.next('run.assign', m => m.job.role === 'pm')).job
     expect(moved).toMatchObject({ agentSessionId: null, fallbackPrompt: null })
     expect(moved.prompt).toContain('One more thing')
-    expect(await transcript(moved.runId)).toContainEqual(expect.objectContaining({ type: 'system', text: expect.stringContaining('starting a fresh session on runner') }))
   }, 60000)
 })

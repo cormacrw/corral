@@ -113,7 +113,6 @@ export function usePinchZoom(frame: Ref<HTMLElement | null>, onSwipe: (direction
         return
       }
     }
-    // A double tap zooms in on the tapped point, or back out
     if (!canZoom() || !start || Math.hypot(at.x - start.x, at.y - start.y) > TAP_PX) return
     const now = performance.now()
     if (now - lastTap < DOUBLE_TAP_MS) {

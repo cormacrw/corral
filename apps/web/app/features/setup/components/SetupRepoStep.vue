@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { GH_LOGIN_COMMAND } from '@corral/contracts/client'
 import type { Setup } from '~/features/setup/composables/useSetup'
 
 const props = defineProps<{ setup: Setup }>()
@@ -25,7 +26,7 @@ const { isMobile } = useDevice()
         <p class="mb-2">
           Sign in inside the runner, then check again. Corral never sees the token.
         </p>
-        <pre class="overflow-x-auto overscroll-x-contain rounded bg-muted p-2 font-mono text-xs">docker exec -it corral-runner gh auth login</pre>
+        <pre class="overflow-x-auto overscroll-x-contain rounded bg-muted p-2 font-mono text-xs">{{ GH_LOGIN_COMMAND }}</pre>
         <AppButton
           label="Check again"
           :size="isMobile ? 'sm' : 'xs'"

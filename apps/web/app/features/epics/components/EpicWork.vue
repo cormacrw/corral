@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { DetailMode } from '~/composables/useTaskFlyout'
 import type { EpicDetail, Project } from '@corral/contracts'
 import { epicHistoryText } from '~/utils/labels'
 import type { useEpicDetail } from '~/features/epics/composables/useEpicDetail'
@@ -15,7 +16,7 @@ const props = defineProps<{
   activity: Detail['activity']['value']
   activityFailed: boolean
   retryActivity: () => unknown
-  mode: 'flyout' | 'page' | 'mobile'
+  mode: DetailMode
 }>()
 defineEmits<{ deleted: [] }>()
 
@@ -29,9 +30,6 @@ const tabs = computed(() => [
   { label: 'Activity', value: 'activity' },
   ...props.epic.taskId && props.epic.taskRef ? [{ label: 'Comments', value: 'comments' }] : []
 ].map(item => ({ ...item, icon: props.mode === 'mobile' ? undefined : TAB_ICONS[item.value] })))
-
-// Mobile has no flyout, so a task opens as its own page
-const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/${ref}`) : flyout.open(ref)
 </script>
 
 <template>
@@ -99,7 +97,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
       :selected="flyout.ref.value"
       :roomy="mode === 'mobile'"
       :class="mode === 'page' ? 'min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2' : 'mt-2'"
-      @open="openTask"
+      @open="flyout.open($event)"
     />
     <div
       v-else
@@ -111,7 +109,7 @@ const openTask = (ref: string) => props.mode === 'mobile' ? navigateTo(`/tasks/$
         :selected="flyout.ref.value"
         :minimap="mode === 'page'"
         :direction="mode === 'page' ? 'right' : 'down'"
-        @open="openTask($event)"
+        @open="flyout.open($event)"
       />
     </div>
   </section>

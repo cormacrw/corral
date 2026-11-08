@@ -1,15 +1,17 @@
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import type { ResolveTarget } from '@corral/core'
 import type { Evidence, InboxActionInput, InboxItem, PmActivityItem, Review, Task, TaskInboxItem } from '@corral/contracts'
 import { keys } from '~/queries/keys'
 import { taskDesignsQuery, taskPullRequestQuery } from '~/queries/tasks'
 import { inboxTldr } from '~/features/inbox/utils/inbox-summary'
 import { currentEvidence } from '~/features/evidence/utils/evidenceRounds'
+import { inboxKind, RESOLVED_KIND, type InboxItemKind } from '~/utils/inbox-kinds'
 
 // The Inbox message panel, Option D (design/inbox.md). useInboxItem owns the data
 // and the actions; this turns them into what a reviewer decides on: the ask,
 // the verdict and the artifacts.
 type Action = InboxActionInput['action']
-export type ResolveTo = 'backlog' | 'ready' | 'in_progress'
+export type ResolveTo = ResolveTarget
 export type InboxPanelTab = 'overview' | 'criteria' | 'review' | 'pr' | 'diff' | 'message'
 // What the actions and the composer need, for a task item or an epic
 export interface InboxComposerContext {
@@ -53,12 +55,12 @@ export interface InboxPanelContext extends InboxComposerContext {
   retryTask: () => void
   toggleTask: () => void
 }
-// What an item is, for the line above its subject
-export interface InboxItemKind {
-  label: string
-  icon: string
-  color: string
-}
+// What a read-only item says in place of the actions, when nothing resolved it
+export const FOR_INFORMATION = 'For your information. Nothing to do.'
+
+// The tab a panel shows: the one asked for while it exists (its content can
+// load after the page asks for it, or go away), else the overview
+export const shownTab = <T extends string>(tabs: readonly { value: string }[], wanted: T): T | 'overview' => tabs.some(t => t.value === wanted) ? wanted : 'overview'
 
 // Text is required for two. Delete isn't undone, so it waits for the composer too.
 const OPENS_COMPOSER: Action[] = ['request_changes', 'clarify', 'delete']
@@ -77,24 +79,17 @@ export function useInboxPanel(ctx: InboxPanelContext) {
   const isSpike = computed(() => task.value?.type === 'spike')
   const canAct = computed(() => item.value.type !== 'activity' && !item.value.resolution && !ctx.alreadyResolved)
 
+  // A human review says what kind of work it reviews, once the task says
   const kind = computed<InboxItemKind>(() => {
-    if (item.value.resolution) return { label: 'Resolved', icon: 'i-hugeicons-checkmark-circle-02', color: 'text-success' }
-    switch (item.value.type) {
-      case 'human_review': return {
-        label: isDesign.value ? 'Design review' : isSpike.value ? 'Spike review' : task.value ? 'Code review' : 'Human review',
-        icon: isDesign.value ? 'i-hugeicons-paint-board' : isSpike.value ? 'i-hugeicons-search-visual' : 'i-hugeicons-git-pull-request',
-        color: 'text-brand'
-      }
-      case 'question': return { label: 'Question', icon: 'i-hugeicons-help-circle', color: 'text-info' }
-      case 'blocked': return { label: 'Blocked', icon: 'i-hugeicons-pause-circle', color: 'text-warning' }
-      case 'failed': return { label: 'Failed', icon: 'i-hugeicons-cancel-circle', color: 'text-destructive' }
-      case 'stopped': return { label: 'Stopped', icon: 'i-hugeicons-stop-circle', color: 'text-warning' }
-      default: return { label: 'Activity', icon: 'i-hugeicons-pulse-01', color: 'text-muted-foreground' }
-    }
+    if (item.value.resolution) return RESOLVED_KIND
+    const base = inboxKind(item.value)
+    if (item.value.type !== 'human_review') return base
+    if (isDesign.value) return { ...base, label: 'Design review', icon: 'i-hugeicons-paint-board' }
+    if (isSpike.value) return { ...base, label: 'Spike review', icon: 'i-hugeicons-search-visual' }
+    return task.value ? { ...base, label: 'Code review' } : base
   })
 
-  // What a read-only item says in place of the actions
-  const readOnlyNote = computed(() => item.value.resolution ?? (ctx.alreadyResolved ? 'Already resolved. This task changed status elsewhere.' : 'For your information. Nothing to do.'))
+  const readOnlyNote = computed(() => item.value.resolution ?? (ctx.alreadyResolved ? 'Already resolved. This task changed status elsewhere.' : FOR_INFORMATION))
 
   const tldr = computed(() => inboxTldr(item.value.body))
 

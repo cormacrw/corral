@@ -61,9 +61,6 @@ if (isReview && await clean()) {
 const startedClean = await clean()
 const tasks = scope === 'targeted' ? ['lint', 'typecheck'] : ['lint', 'typecheck', 'test']
 await run('pnpm', ['exec', 'turbo', 'run', ...tasks, `--concurrency=${cpus}`])
-// Root scripts aren't workspace Turbo tasks.
-await run('pnpm', ['exec', 'eslint', 'scripts'])
-await run('pnpm', ['exec', 'tsc'])
 if (scope === 'targeted') console.log('Skipped the test suites: required CI runs them. Run the test files relevant to your change.')
 if (isReview && startedClean && await clean() && head === await run('git', ['rev-parse', 'HEAD'], true)) {
   const receipt = { version: 1, head, run: randomUUID(), at: new Date().toISOString() }

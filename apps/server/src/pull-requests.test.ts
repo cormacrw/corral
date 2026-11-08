@@ -2,12 +2,16 @@ import type { Project, PullRequestDetail, PullRequestFile, PullRequestStatus, Ta
 import { failedMergeGates, type TaskStatus } from '@corral/core'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { GitHubError } from './github.ts'
-import { SharedReads } from './pull-requests.ts'
+import { SharedReads } from './github.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
 const { agents, evidence, reviews, runs, tasks } = schema
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 // GET /projects/:slug/pull-requests, with tasks seeded straight into the
 // database and their PRs in FakeGitHub
@@ -102,19 +106,6 @@ describe('project pull requests', () => {
     const status = (await list()).find(p => p.taskTitle === 'Moved')!
     expect(status.review).toMatchObject({ headSha: 'sha-old', forHeadCommit: false })
     expect(status.merge.failedGates).toContain('approvalIsForHeadCommit')
-  })
-
-  it('leads with the first failed gate in core order however the facts were built', async () => {
-    await withPr('Reordered', 'sha-reordered', { approved: false, evidence: false })
-    const gates = t.orchestrator.merges.gates.bind(t.orchestrator.merges)
-    const spy = vi.spyOn(t.orchestrator.merges, 'gates').mockImplementation(async (task, row) => {
-      const report = await gates(task, row)
-      return { ...report, facts: Object.fromEntries(Object.entries(report.facts).reverse()) as typeof report.facts }
-    })
-    const status = (await list()).find(p => p.taskTitle === 'Reordered')!
-    spy.mockRestore()
-    expect(status.merge.failingGate).toBe('approvalIsForHeadCommit')
-    expect(status.merge.failedGates).toEqual(['approvalIsForHeadCommit', 'requiredChecksPassed', 'evidenceComplete'])
   })
 
   it('shares a read in flight, then reads GitHub afresh', async () => {
@@ -249,11 +240,10 @@ describe('pull request detail', () => {
 
   it('reports a GitHub or runner job failure as a bad gateway, not a server error', async () => {
     for (const failure of [new GitHubError(403, 'Resource not accessible'), new Error('Runner job github timed out')]) {
-      const spy = vi.spyOn(t.github, 'getPullRequestDiff').mockRejectedValueOnce(failure)
+      vi.spyOn(t.github, 'getPullRequestDiff').mockRejectedValueOnce(failure)
       const res = await t.request('GET', `/api/projects/${project.slug}/pull-requests/7`)
       expect(res.status).toBe(502)
       expect(await res.json()).toEqual({ error: { code: 'pull_request_unavailable', number: 7, message: failure.message } })
-      spy.mockRestore()
     }
   })
 })

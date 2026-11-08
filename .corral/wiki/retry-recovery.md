@@ -24,7 +24,7 @@ right after their transition: CI fixes in a row, integration and merge attempts,
 the review-round cap and repeated feedback. The core machine stays unaware; a cap
 with no run has a null `retryStop.runId`.
 
-A stop is durable in `tasks.retryStop`. The scheduler reconciles it before
+A stop is durable in `tasks.retryStop`, which only `retry-recovery.ts` writes; other modules read it through `idleStop`, `idleStopFilter` and `stopOf`. The scheduler reconciles it before
 claiming workers, and queues one PM run and one fresh Plan session under the
 task lock. PM runs may now link to a task for its run history, but remain
 fenced and leased by the run, independently of the worker lease. Paused PMs
@@ -46,14 +46,14 @@ comment links the conversation and names the triage run.
 
 A no-progress stop has no Failed or Blocked status: the task stays In progress
 or Agent review with no lease, so `openTaskFilter` selects it through
-`retryStop.sessionId` under the same suppression rule, as a `stopped` item dated
+`idleStopFilter` under the same suppression rule, as a `stopped` item dated
 by the stopping run's end. D10's `resolve` transition does not apply to those
 statuses, so `releaseStop` uses the `release_stop` event, which is hidden from
 the status menu and absent from the transition API. The Inbox's `resolve` action
 routes there too. Retry and Give direction keep the status, and Send back moves
 to Backlog; none resets the failed-run counter, and
 the audited human action starts a fresh streak. Findings are taken only from PM
-comments after this stop's queued-triage comment.
+comments since this stop's recovery conversation was created.
 
 Fresh huma task input or a changed target releases a repetition stop. A human
 choice in a pending recovery question resumes work only if the PM explicitly

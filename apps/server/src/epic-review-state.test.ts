@@ -1,8 +1,9 @@
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { createTask, transitionTask } from './tasks.ts'
-import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-state.ts'
+import { createFixTask, transitionTask } from './tasks.ts'
+import type { InvalidatedEpics } from './epic-review-state.ts'
+import { publishInvalidatedEpics } from './epics.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
 let t: TestApp
@@ -71,10 +72,7 @@ it('collects and publishes a reset for a task created directly on the board', as
   const { project, first } = await setup()
   const [row] = await t.db.select().from(schema.projects).where(eq(schema.projects.id, project.id))
   const invalidatedEpics: InvalidatedEpics = new Map()
-  await createTask(t.db, row!, {
-    title: 'New board work', type: 'task', description: null, priority: 'medium',
-    epicId: first.id, dependsOn: [], acceptanceCriteria: []
-  }, t.actor, { epicFix: true, invalidatedEpics })
+  await createFixTask(t.db, row!, first.id, 'New board work', t.actor, { invalidatedEpics })
   expect(t.events.filter(e => e.type === 'epic.updated')).toEqual([])
   await publishInvalidatedEpics(t.db, t.bus, invalidatedEpics)
   expect(t.events.filter(e => e.type === 'epic.updated')).toMatchObject([

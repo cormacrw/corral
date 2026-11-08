@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { taskPath } from '~/utils/routes'
 import type { Epic, Task } from '@corral/contracts'
 import { STATUS } from '~/utils/labels'
 
@@ -34,7 +35,7 @@ const expanded = ref(false)
           :key="task.id"
         >
           <NuxtLink
-            :to="`/tasks/${task.ref}`"
+            :to="taskPath(task.ref)"
             class="flex flex-wrap items-center gap-2 rounded px-1 py-3 text-sm hover:bg-muted"
           >
             <span class="font-mono text-xs text-muted-foreground">{{ task.ref }}</span>

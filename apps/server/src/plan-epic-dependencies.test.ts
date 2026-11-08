@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { claimNextTask } from './claim.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 describe('epic dependencies in plans', { timeout: 30_000 }, () => {
   let t: TestApp
@@ -14,7 +14,7 @@ describe('epic dependencies in plans', { timeout: 30_000 }, () => {
     runner = await FakeRunner.connect(t.server!.url)
   })
   afterEach(async () => {
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     await t.db.delete(schema.projects)
   })
   afterAll(async () => {
@@ -57,9 +57,11 @@ describe('epic dependencies in plans', { timeout: 30_000 }, () => {
     expect(approvedResponse.status).toBe(200)
     const approved = await approvedResponse.json() as Plan
     const [a, b] = approved.epics
-    expect(await t.db.select().from(schema.epicDependencies).where(eq(schema.epicDependencies.epicId, b!.id))).toEqual([
+    const stored = await t.db.select().from(schema.epicDependencies).where(eq(schema.epicDependencies.epicId, b!.id))
+    expect(stored).toHaveLength(2)
+    expect(stored).toEqual(expect.arrayContaining([
       { projectId: project.id, epicId: b!.id, dependsOnEpicId: a!.id }, { projectId: project.id, epicId: b!.id, dependsOnEpicId: existing!.id }
-    ])
+    ]))
     expect(await runner.call(job.runId, job.leaseEpoch, 'list_tasks', {})).toMatchObject({ ok: true, result: { epics: expect.arrayContaining([{ id: b!.id, title: 'Offline support', reviewMode: 'epic', dependsOn: [a!.id, existing!.id] }]) } })
     const [dev] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'developer'))
     await t.db.update(schema.projects).set({ paused: false }).where(eq(schema.projects.id, project.id))
@@ -105,19 +107,19 @@ describe('epic dependencies in plans', { timeout: 30_000 }, () => {
     const plan = await latest()
     const moved = await t.request('PATCH', `/api/projects/${project.slug}/tasks/${plan.tasks[0]!.ref!.split('-').at(-1)}`, { epicId: existing!.id })
     expect(moved.status).toBe(200)
-    const before = {
-      tasks: await t.db.select().from(schema.tasks),
-      taskDependencies: await t.db.select().from(schema.taskDependencies),
-      epicDependencies: await t.db.select().from(schema.epicDependencies)
-    }
+    // Sorted: none of these reads has an ORDER BY
+    const snapshot = async () => ({
+      tasks: (await t.db.select().from(schema.tasks)).sort((x, y) => x.id.localeCompare(y.id)),
+      taskDependencies: (await t.db.select().from(schema.taskDependencies)).map(d => JSON.stringify(d)).sort(),
+      epicDependencies: (await t.db.select().from(schema.epicDependencies)).map(d => JSON.stringify(d)).sort()
+    })
+    const before = await snapshot()
     const response = await t.request('POST', `/api/plan/plans/${plan.id}/approve`, { to: 'ready' })
     expect(response.status).toBe(409)
     expect(await response.json()).toMatchObject({ error: { code: 'invalid_dependencies', problems: [expect.objectContaining({
       code: 'epic_task_deadlock', epics: expect.arrayContaining(['Mobile PWA', 'Existing foundation'])
     })] } })
-    expect(await t.db.select().from(schema.tasks)).toEqual(before.tasks)
-    expect(await t.db.select().from(schema.taskDependencies)).toEqual(before.taskDependencies)
-    expect(await t.db.select().from(schema.epicDependencies)).toEqual(before.epicDependencies)
+    expect(await snapshot()).toEqual(before)
     expect((await latest()).status).toBe('proposed')
   })
 
@@ -128,6 +130,6 @@ describe('epic dependencies in plans', { timeout: 30_000 }, () => {
     expect(await call(proposal([]))).toMatchObject({ ok: true })
     const v2 = await latest()
     expect(v2.epics[1]?.dependsOn).toEqual([])
-    expect((await t.db.select().from(schema.planEpics).where(eq(schema.planEpics.planId, v1.id)))[1]?.dependsOn).toEqual(['e1'])
+    expect((await t.db.select().from(schema.planEpics).where(eq(schema.planEpics.planId, v1.id))).find(e => e.key === 'e2')?.dependsOn).toEqual(['e1'])
   })
 })

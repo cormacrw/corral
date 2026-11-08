@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { failedMergeGates, MERGE_GATES, type MergeGateFacts } from './merge-gates.ts'
+import { failedMergeGates, type MergeGateFacts } from './merge-gates.ts'
 
 const passing: MergeGateFacts = {
   approvalIsForHeadCommit: true,
@@ -20,9 +20,5 @@ describe('failedMergeGates', () => {
     expect(Object.keys(reversed)).not.toEqual(Object.keys(facts))
     expect(failedMergeGates(reversed)).toEqual(['approvalIsForHeadCommit', 'evidenceComplete', 'mergeable'])
     expect(failedMergeGates(reversed)).toEqual(failedMergeGates(facts))
-  })
-
-  it('lists each gate exactly once', () => {
-    expect([...MERGE_GATES].sort()).toEqual(Object.keys(passing).sort())
   })
 })

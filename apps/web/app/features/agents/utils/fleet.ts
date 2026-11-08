@@ -1,14 +1,13 @@
 import type { Agent, Run } from '@corral/contracts'
 import type { AgentRole } from '@corral/core'
-import { startOfDay } from '~/features/home/utils/overview.ts'
-import { isLiveRun } from '~/utils/labels.ts'
+import { dayRows } from '~/utils/days'
+import { isActiveRun } from '@corral/core'
 import { usedTokens } from './agents.ts'
 
 // The Agents page's figures (design/agent.md, Agents): runs, tokens and busy
 // time, from the history the page loads with `GET /api/runs?since=`.
 
 const HOUR = 3_600_000
-const DAY = 24 * HOUR
 
 // What a run's bar on the timeline says about it. Rate limits and
 // interruptions aren't failures (D3), so they're quiet rather than red.
@@ -21,7 +20,7 @@ export const RUN_TONE: Record<RunTone, { label: string, color: string }> = {
   quiet: { label: 'Interrupted or rate limited', color: 'var(--muted-foreground)' }
 }
 export function runTone(run: Pick<Run, 'state' | 'outcome'>): RunTone {
-  if (isLiveRun(run)) return 'live'
+  if (isActiveRun(run.state)) return 'live'
   if (run.outcome === 'changes_requested') return 'changes'
   if (run.outcome === 'failed' || run.outcome === 'stuck' || run.outcome === 'blocked' || run.state === 'failed') return 'failed'
   if (run.outcome === null || run.outcome === 'rate_limited') return 'quiet'
@@ -56,14 +55,9 @@ export function runBars(runs: Run[], agents: Pick<Agent, 'id' | 'name'>[], hours
 export const TOKEN_ROLES = ['developer', 'reviewer', 'pm', 'designer'] as const satisfies readonly AgentRole[]
 export interface TokenDay { date: Date, index: number, byRole: Record<AgentRole, number> }
 export function tokensByDay(runs: Pick<Run, 'role' | 'queuedAt' | 'inputTokens' | 'cacheWriteTokens' | 'outputTokens'>[], days: number, now: number): TokenDay[] {
-  const first = startOfDay(now) - (days - 1) * DAY
-  const rows: TokenDay[] = Array.from({ length: days }, (_, index) => ({
-    date: new Date(first + index * DAY),
-    index,
-    byRole: { developer: 0, reviewer: 0, pm: 0, designer: 0 }
-  }))
+  const { rows, rowAt } = dayRows<TokenDay>(days, now, (date, index) => ({ date, index, byRole: { developer: 0, reviewer: 0, pm: 0, designer: 0 } }))
   for (const run of runs) {
-    const row = rows[Math.round((startOfDay(Date.parse(run.queuedAt)) - first) / DAY)]
+    const row = rowAt(run.queuedAt)
     if (row) row.byRole[run.role] += usedTokens(run)
   }
   return rows
@@ -82,10 +76,4 @@ export function busyShare(runs: Run[], agent: Pick<Agent, 'id' | 'role' | 'concu
   // The PM takes one turn per Plan session (D13), so its slots aren't fixed
   const slots = agent.role === 'pm' ? 1 : Math.max(1, agent.concurrency)
   return Math.min(1, busy / (hours * HOUR * slots))
-}
-
-export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1000) return `${Math.round(n / 1000)}k`
-  return String(n)
 }

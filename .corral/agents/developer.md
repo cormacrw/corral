@@ -34,7 +34,7 @@ Your change goes live on the server you are running on soon after it merges, so 
 
 When you need to see a change working in a running Corral, use your own dev stack and the test repository **`cormacrw/test-app`** (default branch `main`). It exists for this.
 
-- The only project you may create in your dev stack is one for `cormacrw/test-app`, e.g. `POST /api/projects` with `{"name": "Test app", "prefix": "TA", "repository": "cormacrw/test-app", "defaultBranch": "main"}` (see `packages/contracts/src/api.ts`).
+- The only project you may create in your dev stack is one for `cormacrw/test-app`, e.g. `POST /api/projects` with `{"name": "Test app", "prefix": "TA", "repository": "cormacrw/test-app", "defaultBranch": "main"}` (see `'POST /projects'` in `packages/contracts/src/endpoints.ts`).
 - Never point a dev stack at `cormacrw/corral` or any other repository. Its agents use the real GitHub login and would push there.
 - Pause the project (`PATCH /api/projects/<slug>` with `{"paused": true}`) before you create tasks, and give each task a description, so nothing is claimed before you're ready.
 - Prefer checks that don't write to GitHub: a developer task that tells its agent to call `get_task`, `add_comment` and then `report_outcome` with `stuck` exercises the runner and MCP path without pushing.

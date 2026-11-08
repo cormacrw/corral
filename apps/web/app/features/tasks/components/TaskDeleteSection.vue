@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { deletionFor } from '@corral/core'
 import type { Task } from '@corral/contracts'
-import { STATUS } from '~/utils/labels'
 
 // Delete, with its confirmation. The mobile screen opens it from the header's menu.
 const props = defineProps<{ task: Task, mobile: boolean, removing: boolean }>()
 const emit = defineEmits<{ remove: [] }>()
 const open = defineModel<boolean>('open', { default: false })
-const description = computed(() => props.task.status === 'backlog' || props.task.status === 'draft'
-  ? `${STATUS[props.task.status].label} tasks are deleted outright.`
+const description = computed(() => deletionFor(props.task) === 'hard'
+  ? 'This task is deleted outright.'
   : 'Stops any run, closes the PR and deletes the branch when safe. The task and its history are kept but hidden. Dependents become Blocked.')
 </script>
 

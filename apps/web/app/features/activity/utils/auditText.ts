@@ -12,7 +12,6 @@ export function actorName(actor: Actor, agent: (role: AgentRole, runId: string |
   return 'Corral'
 }
 
-// The human confirmed it through the PM
 export const confirmedByYou = (actor: Actor) => actor.kind === 'human' && !!actor.viaPm
 
 // One line, e.g. "Pat · confirmed by you"

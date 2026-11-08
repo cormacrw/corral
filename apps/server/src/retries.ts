@@ -1,6 +1,9 @@
 // How many refused merges before giving up (D10: "GitHub merge failed and
-// retrying isn't safe"; flows.md §4 step 7). A new head starts again.
+// retrying isn't safe"). A new head starts again.
 export const MAX_MERGE_ATTEMPTS = 3
+
+// Fixes in a row that CI still failed before it needs a human, on a task or an epic
+export const MAX_CI_FIXES = 3
 
 // Merge attempts per task or epic, counted per head: refusals on one commit
 // say nothing about the next
@@ -18,6 +21,14 @@ export class HeadAttempts {
     this.#counts.delete(id)
   }
 }
+
+// The longest a task's CI wait or an epic's merge, sync or closed-PR pass waits
+// between looks at GitHub. Tests and the demo move their clock past it to make
+// every pass look.
+export const LONGEST_POLL_MS = 120_000
+
+// The longest a failed attempt waits before the next, however many failed
+export const RETRY_MAX_MS = 5 * 60_000
 
 // When to look at something again. Each `later` doubles the wait up to `maxMs`,
 // and `clear` starts over. Kept in memory: a restart just looks sooner.
@@ -38,7 +49,6 @@ export class Backoff {
     return !wait || this.#now() >= wait.until
   }
 
-  // Everything still waiting
   waiting(): string[] {
     return [...this.#waits.keys()].filter(id => !this.due(id))
   }

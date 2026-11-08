@@ -1,4 +1,5 @@
-import { AGENT_RUNTIMES, type AgentRuntime, type CliId, type CliStatus, type RepoCheck, type RepoChoice, type RepoList } from '@corral/contracts'
+import { AGENT_RUNTIMES, type AgentRuntime, type CliId } from '@corral/core'
+import { GH_LOGIN_COMMAND, type CliStatus, type RepoCheck, type RepoChoice, type RepoList } from '@corral/contracts'
 import { schema, type Executor } from '@corral/db'
 import { ApiFailure } from './errors.ts'
 import type { RunnerHub } from './runner-hub.ts'
@@ -53,7 +54,7 @@ export class RepoCatalog {
 }
 
 // The onboarding checks for one repository (design/onboarding.md step 2)
-export async function checkRepository(db: Executor, runner: RunnerHub, repository: string, timeoutMs = 5 * 60 * 1000): Promise<RepoCheck> {
+export async function checkRepository(db: Executor, runner: RunnerHub, repository: string, timeoutMs?: number): Promise<RepoCheck> {
   const usedBy = (await projectsByRepository(db)).get(repository.toLowerCase()) ?? null
   const result = await runner.request({ kind: 'check_repo', repository }, timeoutMs)
 
@@ -63,7 +64,7 @@ export async function checkRepository(db: Executor, runner: RunnerHub, repositor
       ok: result.signedIn && result.found && result.canPush,
       title: 'Runner can push',
       detail: !result.signedIn
-        ? 'The runner isn’t signed in to GitHub. Run `docker exec -it corral-runner gh auth login`.'
+        ? `The runner isn’t signed in to GitHub. Run \`${GH_LOGIN_COMMAND}\`.`
         : !result.found
             ? 'The runner’s GitHub login can’t see this repository.'
             : result.canPush

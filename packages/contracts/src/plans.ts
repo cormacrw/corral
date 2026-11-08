@@ -1,6 +1,7 @@
-import { PLAN_CHANGES, PLAN_STATUSES, TASK_STATUSES, type EpicReviewMode, type PlanChange, type PlanStatus, type TaskPriority, type TaskStatus, type TaskType } from '@corral/core'
+import { DEFAULT_AGENT_RUNTIME, PLAN_APPROVAL_TARGETS, PLAN_CHANGES, PLAN_STATUSES, type EpicReviewMode, type PlanChange, type PlanStatus, type TaskPriority, type TaskStatus, type TaskType } from '@corral/core'
 import { z } from 'zod'
-import { agentRuntime, type AgentRuntime } from './agent-runtimes.ts'
+import type { AgentRuntime } from '@corral/core'
+import { agentRuntime } from './agent-runtimes.ts'
 
 // ── Plan (D9, design/plan.md) ─────────────────────────────────────────────
 
@@ -127,50 +128,30 @@ export const startPlanSessionInput = z.strictObject({
   id: z.uuid().optional(),
   projectId: z.uuid().nullable().default(null),
   // The PM's runtime for this session (D18); only a CLI the runner has
-  runtime: agentRuntime.default('claude-code'),
+  runtime: agentRuntime.default(DEFAULT_AGENT_RUNTIME),
   text: z.string().trim().default(''),
   // "Refine a task": a Backlog task ref attached to the message
   taskRef: z.string().trim().optional()
 }).refine(input => input.text.length > 0 || input.taskRef, { message: 'Write a message or attach a task' })
-export type StartPlanSessionInput = z.infer<typeof startPlanSessionInput>
 
 // Strict: a human message is only text, so question fields are rejected
 export const planMessageInput = z.strictObject({
   text: z.string().trim().default(''),
   taskRef: z.string().trim().optional()
 }).refine(input => input.text.length > 0 || input.taskRef, { message: 'Write a message or attach a task' })
-export type PlanMessageInput = z.infer<typeof planMessageInput>
 
 // Only while the session has no messages (D18)
 export const patchPlanSessionInput = z.object({
   runtime: agentRuntime
 })
-export type PatchPlanSessionInput = z.infer<typeof patchPlanSessionInput>
-
-// The PM's ask_question: a question, optionally with a suggested answer
-// and 2–5 short answer choices
-export const askQuestionInput = z.object({
-  question: z.string().trim().min(1),
-  recommendation: z.string().trim().min(1).optional().describe('Your suggested answer, in a few words'),
-  options: z.array(z.string().trim().min(1, 'An option can’t be empty').max(120, 'An option can be at most 120 characters'))
-    .min(2, 'Give 2–5 options, or leave options out').max(5, 'Give 2–5 options, or leave options out')
-    .optional().describe('2–5 short answer choices'),
-  retryOptions: z.array(z.string().trim().min(1)).max(5).optional().describe('Recovery questions only: exact options (or recommendation) that explicitly authorize resuming the stopped task. Omit for clarification, refusal or leaving stopped.')
-})
-export type AskQuestionInput = z.infer<typeof askQuestionInput>
 
 // The plan's Drafts go to the board (Ready) or to the Backlog
 export const approvePlanInput = z.object({
-  to: z.enum(['ready', 'backlog']).default('ready')
+  to: z.enum(PLAN_APPROVAL_TARGETS).default('ready')
 })
-export type ApprovePlanInput = z.input<typeof approvePlanInput>
 
-export const listTasksInput = z.object({
-  status: z.union([z.enum(TASK_STATUSES), z.array(z.enum(TASK_STATUSES)).min(1)]).optional().describe('Only tasks in this status, or in any of these. Naming merged returns Merged tasks without includeMerged.'),
-  parent: z.string().trim().min(1).optional().describe('Only the subtasks of this task, by its ref'),
-  // Runners from before parent tasks (D31)
-  epic: z.string().trim().min(1).optional(),
-  query: z.string().trim().min(1).optional().describe('Only tasks whose ref or title contains this, ignoring case'),
-  includeMerged: z.boolean().default(false).describe('Also return Merged tasks; they are left out by default')
+// The human's answer to a PM's confirm card
+export const pmActionDecisionInput = z.object({
+  decision: z.enum(['confirm', 'cancel'])
 })
-export type ListTasksInput = z.infer<typeof listTasksInput>
+export type PmActionDecision = z.infer<typeof pmActionDecisionInput>['decision']

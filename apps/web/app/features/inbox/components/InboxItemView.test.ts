@@ -2,15 +2,17 @@
 // The Inbox page with its selected item, for what spans the page, the panel
 // and the composer. The item's logic is tested through its composables
 // (useInboxView, useInboxItem, useInboxPanel).
+import InboxPanelFooter from '~/features/inbox/components/InboxPanelFooter.vue'
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
-import { api } from '~/composables/useApi'
-import { agents, inbox, projects, pullRequestDetails, tasks } from '~/prototype/fixtures'
+import { api } from '~/queries/api'
+import { inboxOf, pullRequest, task, taskItem } from '~/features/inbox/test-items'
 import { testQueryClient } from '~/queries/mount-with-query'
 import AppLoadError from '~/components/app/AppLoadError.vue'
 import PromptComposer from '~/components/shared/PromptComposer.vue'
+import InboxItemPane from '~/features/inbox/components/InboxItemPane.vue'
 import InboxEpicPanel from '~/features/inbox/components/InboxEpicPanel.vue'
 import InboxMobileItem from '~/features/inbox/components/InboxMobileItem.vue'
 import InboxPanel from '~/features/inbox/components/InboxPanel.vue'
@@ -29,7 +31,7 @@ import InboxIndexPage from '~/pages/inbox/index.vue'
 
 // PromptComposer imports this directly
 vi.mock('~/composables/useDevice', () => ({ useDevice: () => (globalThis as unknown as { useDevice: () => unknown }).useDevice() }))
-vi.mock('~/composables/useApi', () => ({
+vi.mock('~/queries/api', () => ({
   api: {
     inbox: { get: vi.fn(), act: vi.fn(), read: vi.fn() },
     projects: { pullRequest: vi.fn() },
@@ -73,30 +75,30 @@ async function mountInbox({ selected, mobile = false }: { selected: string, mobi
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
   vi.stubGlobal('usePlanThreadDelete', () => ({ pending: vue.ref([]), remove: vi.fn() }))
   vi.stubGlobal('useTaskFlyout', () => ({ ref: vue.ref(null), epic: vue.ref(null), open: vi.fn(), close: vi.fn().mockResolvedValue(undefined) }))
-  vi.stubGlobal('useShell', () => ({ agents, projects, loaded: true, runner: { online: true } }))
+  vi.stubGlobal('useShell', () => ({ agents: [], projects: [], loaded: true, runner: { online: true } }))
   vi.stubGlobal('URL', { createObjectURL: () => 'blob:preview', revokeObjectURL: vi.fn() })
-  const data = inbox()
+  const data = inboxOf([review(), failed()])
   vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(data))
-  vi.mocked(api.inbox.read).mockResolvedValue({})
+  vi.mocked(api.inbox.read).mockResolvedValue({ ok: true })
   vi.mocked(api.inbox.act).mockResolvedValue({ task: null })
-  vi.mocked(api.tasks.byRef).mockImplementation(async ref => structuredClone(tasks.find(t => t.ref === ref)!))
+  vi.mocked(api.tasks.byRef).mockImplementation(async ref => task(ref, ref === failed().taskRef ? { status: 'failed', statusReason: 'Tests failed' } : {}))
   vi.mocked(api.tasks.evidence).mockResolvedValue([])
   vi.mocked(api.tasks.reviews).mockResolvedValue([])
   vi.mocked(api.tasks.designs).mockResolvedValue([])
-  vi.mocked(api.projects.pullRequest).mockResolvedValue(structuredClone(pullRequestDetails[0]!))
+  vi.mocked(api.projects.pullRequest).mockResolvedValue(pullRequest(64))
   // As Nuxt renders the child: keyed by its path
   const NuxtPage = vue.defineComponent({ setup: () => () => params.itemId ? vue.h(InboxItemPage, { key: params.itemId }) : vue.h(InboxIndexPage) })
   // Attached, so isVisible sees the phone's v-show
   const wrapper = mount(InboxPage, { attachTo: document.body, global: {
     plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }]],
     components: {
-      NuxtPage, InboxEpicPanel, InboxPanel, InboxPanelThumbBar, InboxPanelActions, InboxPanelArtifacts, InboxPanelDetails, InboxPanelDiff, InboxPanelMeta, InboxPanelTray, InboxPanelVerdict, InboxReleaseNotes,
+      NuxtPage, InboxItemPane, InboxPanelFooter, InboxEpicPanel, InboxPanel, InboxPanelThumbBar, InboxPanelActions, InboxPanelArtifacts, InboxPanelDetails, InboxPanelDiff, InboxPanelMeta, InboxPanelTray, InboxPanelVerdict, InboxReleaseNotes,
       ...(mobile && { InboxMobileItem, MobilePageHeader: plain }),
       PromptComposer, AppLoadError, AppButton, AppTabs, AppPanel: plain
     },
     stubs: {
       AppAlert: true, AppModal: true, EvidenceList: true, EvidenceViewer: true, InboxMessage: true, InboxDesignReviewLink: true, AppBadge: true, AppInput: true, Icon: true, UiSkeleton: true, AppSelectMenu: true,
-      MarkdownText: true, TaskFlyout: true, AgentAvatar: true, ProjectThumbnail: true, PlanThreadRow: true, NuxtLink: true, InboxMobile: true,
+      MarkdownText: true, TaskFlyout: true, AgentAvatar: true, ProjectThumbnail: true, NuxtLink: true, InboxMobile: true,
       InboxEmpty: true, InboxRunnerUpdate: true, InboxPlanThread: true, InboxMobilePlanThread: true, InboxPanelEpicContext: true, InboxEpicDecision: true, TaskLink: true, TaskRefText: true, ...(!mobile && { InboxMobileItem: true })
     }
   } })
@@ -111,8 +113,8 @@ async function mountInbox({ selected, mobile = false }: { selected: string, mobi
   return { wrapper, params, button, attachImage, primary: () => wrapper.get('[data-testid="inbox-primary"]'), composer: () => wrapper.find('textarea') }
 }
 
-const failed = () => inbox().needsYou.find(i => i.type === 'failed' && i.taskRef)!
-const review = () => inbox().needsYou.find(i => i.taskRef === 'COR-5')!
+const failed = () => taskItem('COR-6', 'failed', { sender: { name: 'Corral', role: 'system' } })
+const review = () => taskItem('COR-5', 'human_review', { prUrl: 'https://github.com/o/r/pull/64' })
 
 it('has no draft left after going back to the list', async () => {
   const item = failed()

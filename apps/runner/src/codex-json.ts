@@ -1,5 +1,5 @@
 import type { RunEvent } from '@corral/contracts'
-import { LIMIT_TEXT, parseJsonLine, parseResetTime, resultText, type ParsedLine } from './stream-json.ts'
+import { LIMIT_TEXT, parseJsonLine, parseResetTime, resultText, type ParsedLine } from './parsed-line.ts'
 
 // Turns `codex exec --json` lines into Corral's runtime-neutral RunEvents
 // (agent-runtime-and-auth.md rule 7), the same shape StreamJsonParser gives

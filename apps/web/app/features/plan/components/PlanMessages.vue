@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { planThreadPath } from '~/utils/routes'
 import type { Plan, PlanMessage, PlanSessionDetail } from '@corral/contracts'
 import { answerTo, openQuestionId } from '~/features/plan/utils/plan-questions'
+import { isPendingId } from '~/queries/keys'
 
 // The messages of a Plan conversation. Its own component with what each message
 // needs worked out once, so typing in the composer re-renders none of this.
@@ -16,14 +18,13 @@ const props = defineProps<{
   // The plan floats beside the thread, so its link points there, not the flyout
   planBeside?: boolean
 }>()
-const emit = defineEmits<{ retry: [], answer: [text: string], other: [], stop: [], resolved: [], showPlan: [] }>()
+const emit = defineEmits<{ retry: [], answer: [text: string], other: [], stop: [], showPlan: [] }>()
 const flyout = useTaskFlyout()
 const device = useDevice()
 
 const openQuestion = computed(() => openQuestionId(props.session.messages))
 const rows = computed(() => {
   const { messages, plans } = props.session
-  // What each turn posted, in order, and its first message
   const replies = new Map<string, string[]>()
   const firsts = new Map<string, string>()
   for (const m of messages) {
@@ -68,7 +69,7 @@ const rows = computed(() => {
         />
       </AppBadge>
       <span
-        v-if="props.failed && message.id.startsWith('pending-')"
+        v-if="props.failed && isPendingId(message.id)"
         class="block text-xs text-destructive"
       >Not sent</span>
     </div>
@@ -84,7 +85,7 @@ const rows = computed(() => {
       <div :class="['flex min-w-0 flex-col gap-2', device.isMobile.value && 'flex-1']">
         <NuxtLink
           v-if="message.role === 'thread' && message.senderSessionId"
-          :to="`/plan/${message.senderSessionId}`"
+          :to="planThreadPath(message.senderSessionId)"
           class="text-xs text-brand hover:underline"
         >{{ message.senderTitle ?? 'Removed thread' }} · Thread{{ message.kind === 'notification' ? ' notification' : '' }}</NuxtLink>
         <span
@@ -107,7 +108,6 @@ const rows = computed(() => {
         <PlanConfirmAction
           v-else-if="message.pendingAction"
           :message="message"
-          @resolved="emit('resolved')"
         />
         <PlanQuestion
           v-else-if="message.kind === 'question'"

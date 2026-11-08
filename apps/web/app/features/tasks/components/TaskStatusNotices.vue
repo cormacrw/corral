@@ -9,7 +9,7 @@ const emit = defineEmits<{ resume: [] }>()
 
 <template>
   <AppAlert
-    v-if="task.status === 'blocked' || task.status === 'failed'"
+    v-if="task.statusReason !== null"
     color="error"
     variant="subtle"
     :title="STATUS[task.status].label"

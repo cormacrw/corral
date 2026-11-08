@@ -4,7 +4,7 @@ import { schema } from '@corral/db'
 import { eq, ne } from 'drizzle-orm'
 import { afterAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner, sleep } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 const { agents, auditLog, epics, planSessions, runs, tasks } = schema
 
@@ -54,7 +54,7 @@ describe('removing a project', () => {
     const backlog = await t.createTask(project.slug)
     const running = await t.createTask(project.slug)
     await t.request('POST', `/api/projects/${project.slug}/tasks/${running.number}/transitions`, { type: 'approve' })
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const run = (await runner.next('run.assign', m => m.job.taskId === running.id)).job
     const [leased] = await t.db.select().from(tasks).where(eq(tasks.id, running.id))
     expect(leased).toMatchObject({ leaseRunId: run.runId, status: 'in_progress' })
@@ -92,16 +92,16 @@ describe('removing a project', () => {
     const [audit] = await t.db.select().from(auditLog).where(eq(auditLog.action, 'project.deleted'))
     expect(audit).toMatchObject({ projectId: null, detail: { projectId: project.id, name: 'Doomed' } })
 
-    // Clients are told
     expect(t.events.slice(before)).toContainEqual({ type: 'project.deleted', projectId: project.id })
 
-    // No GitHub call at all
     expect(t.github.calls.slice(githubCalls)).toEqual([])
 
     // The runner is asked to clean up the worked task's worktrees, not the backlog one's
     const cleanup = await runner.next('job.request', m => m.job.kind === 'cleanup_worktrees' && m.job.taskId === running.id)
     expect(cleanup.job).toMatchObject({ repository: project.repository })
-    await sleep(50)
+    // Every cleanup was sent before the 204; a round trip on the same socket
+    // proves any of them has arrived
+    await t.runner.requestOn('r1', { kind: 'detect_clis' })
     expect(runner.received.some(m => m.type === 'job.request' && m.job.kind === 'cleanup_worktrees' && m.job.taskId === backlog.id)).toBe(false)
 
     // The other project is untouched

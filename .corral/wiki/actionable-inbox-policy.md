@@ -2,13 +2,13 @@
 
 D11 in `docs/decisions.md` is the binding classification and escalation contract; `docs/flows.md` describes the default feature loop and recovery boundary. Needs you means unresolved human decisions, not unread conversation or internal progress. Exhausted recovery stays visible until resolved; automatic recovery and caps are retained.
 
-`HUMAN_DECISIONS_NOTE` in `packages/core/src/human-decisions.ts` is the one copy of the escalation contract: questions explain the blocker, decision and recommendation when available. The server prompts that can reach a human (PM, developer, spike, designer, rebase, task rebase, rebase review) and the built-in role instructions (`apps/runner/src/role-defaults.ts`, D13) interpolate it, so projects with no role files get it too. `.corral/agents/{developer,reviewer,designer}.md` can't import it, so `role-defaults.test.ts` asserts they contain it verbatim; change them together. Ordinary implementation choices are resolved internally.
+`HUMAN_DECISIONS_NOTE` in `packages/core/src/human-decisions.ts` is the one copy of the escalation contract: questions explain the blocker, decision and recommendation when available. The server prompts that can reach a human (PM, developer, spike, designer, rebase, task rebase, rebase review) and the built-in role instructions (`DEFAULT_ROLE_INSTRUCTIONS` in `packages/contracts/src/agent-instructions.ts`, D13) interpolate it, so projects with no role files get it too. `.corral/agents/{developer,reviewer,designer}.md` can't import it and repeat it verbatim; change them together. Ordinary implementation choices are resolved internally.
 
 Existing review routing, sensitive flags, D20/D27/D28 obligations, approvals and recovery machinery are unchanged, and nothing historical is rewritten.
 
 ## The quiet default (COR-401)
 
-`inboxTabs` in `useInboxView.ts` maps the server's lists to the tabs, and anything reading a list for position or next item uses the decisions: `moveToNext`, the phone's "n of m". Deleting a thread away from the default tab goes to `/inbox`, because moving on would open an update and mark it read.
+`tabs` in `useInboxView.ts` maps the server's lists to the tabs, and anything reading a list for position or next item uses the decisions: `moveToNext`, the phone's "n of m". Deleting a thread away from the default tab goes to `/inbox`, because moving on would open an update and mark it read.
 
 A row can leave Needs you while open, when a question is answered. `openThread` keeps the pane, and the tab only follows an item on arrival, so the list doesn't jump. `InboxEmpty` handles links that outlive their item on both layouts. Its id can be a session, task or subtask, and activity rows carry `taskId`/`epicId`, which is how it finds the source.
 

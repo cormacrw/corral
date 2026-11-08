@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { ROLE_LABELS } from '@corral/core'
 import type { AgentSettings } from '~/features/settings/composables/useAgentSettings'
 import { agentLimit } from '~/features/agents/utils/agents'
-import { ROLE, runtimeLabel } from '~/utils/labels'
+import { runtimeLabel } from '~/utils/labels'
 
 const props = defineProps<{ settings: AgentSettings }>()
 defineEmits<{ add: [] }>()
@@ -39,7 +40,7 @@ const { agents, patchAgent, saveAvatar } = props.settings
           <div class="flex items-center gap-2">
             <span class="font-medium">{{ agent.name }}</span>
             <AppBadge
-              :label="ROLE[agent.role]"
+              :label="ROLE_LABELS[agent.role]"
               color="primary"
               variant="subtle"
               size="xs"
@@ -63,17 +64,10 @@ const { agents, patchAgent, saveAvatar } = props.settings
           compact
         >
           <template #after-runtime>
-            <AppFormField
+            <ConcurrencyField
               v-if="agent.role !== 'pm'"
-              label="Concurrency"
-            >
-              <AppNumberInput
-                :model-value="agent.concurrency"
-                :min="1"
-                class="w-28"
-                @update:model-value="$event && patchAgent(agent, { concurrency: $event })"
-              />
-            </AppFormField>
+              :agent="agent"
+            />
           </template>
         </SettingsAgentFields>
         <AppFormField label="Paused">

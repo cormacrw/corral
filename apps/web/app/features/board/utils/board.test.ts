@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Task } from '@corral/contracts'
-import { activeFilterCount, boardFilterGroups, matchesOverviewEpicFilter, BOARD_COLUMNS, cardAssignee, boardMove, boardColumnKey, boardView, epicOnBoard, epicStage, epicWorkingAgents, filterLabel, filtersFromQuery, filtersToQuery, hasFilters, matchesEpicFilter, matchesFilter, COMPLETE_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds, unfinishedPrerequisites, columnEntries, matchesParentFilter } from '~/features/board/utils/board.ts'
+import { parentStage } from '@corral/core'
+import { activeFilterCount, boardFilterGroups, matchesOverviewEpicFilter, BOARD_COLUMNS, cardAssignee, boardMove, boardColumnKey, boardView, epicOnBoard, epicWorkingAgents, filterLabel, filtersFromQuery, filtersToQuery, hasFilters, matchesEpicFilter, matchesFilter, COMPLETE_WINDOW_DAYS, NO_FILTERS, onBoard, sortColumn, swipeStep, taskAgentIds, unfinishedPrerequisites, columnEntries, matchesParentFilter } from '~/features/board/utils/board.ts'
 
 const DAY = 24 * 60 * 60 * 1000
 const now = Date.parse('2026-10-29T12:00:00Z')
@@ -317,52 +318,52 @@ describe('boardView', () => {
   })
 })
 
-describe('epicStage', () => {
-  const epic = (over: Partial<Parameters<typeof epicStage>[0]> = {}) => ({
+describe('parentStage', () => {
+  const epic = (over: Partial<Parameters<typeof parentStage>[0]> = {}) => ({
     reviewMode: 'epic' as const, branch: 'corral/epic', reviewState: null, taskCount: 2, mergedCount: 1, ...over
   })
   const merged = [{ status: 'merged' as const }, { status: 'merged' as const }]
   const allMerged = { mergedCount: 2 }
 
   it('blocks on a conflict or a Blocked or Failed task, ahead of everything else', () => {
-    expect(epicStage(epic({ ...allMerged, reviewState: 'conflict' }), merged)).toBe('blocked')
-    expect(epicStage(epic(), [{ status: 'merged' }, { status: 'blocked' }])).toBe('blocked')
-    expect(epicStage(epic({ reviewState: 'human_review' }), [{ status: 'failed' }, { status: 'merged' }])).toBe('blocked')
+    expect(parentStage(epic({ ...allMerged, reviewState: 'conflict' }), merged)).toBe('blocked')
+    expect(parentStage(epic(), [{ status: 'merged' }, { status: 'blocked' }])).toBe('blocked')
+    expect(parentStage(epic({ reviewState: 'human_review' }), [{ status: 'failed' }, { status: 'merged' }])).toBe('blocked')
   })
 
   it('is done once nothing is left, epic PR included', () => {
-    expect(epicStage(epic({ ...allMerged, reviewState: 'merged' }), merged)).toBe('done')
-    expect(epicStage(epic({ ...allMerged, branch: null }), merged)).toBe('done')
+    expect(parentStage(epic({ ...allMerged, reviewState: 'merged' }), merged)).toBe('done')
+    expect(parentStage(epic({ ...allMerged, branch: null }), merged)).toBe('done')
   })
 
   it('follows the epic PR', () => {
-    expect(epicStage(epic({ ...allMerged, reviewState: 'ready_to_merge' }), merged)).toBe('ready_to_merge')
-    expect(epicStage(epic({ ...allMerged, reviewState: 'human_review' }), merged)).toBe('human_review')
+    expect(parentStage(epic({ ...allMerged, reviewState: 'ready_to_merge' }), merged)).toBe('ready_to_merge')
+    expect(parentStage(epic({ ...allMerged, reviewState: 'human_review' }), merged)).toBe('human_review')
   })
 
   it('is in Agent review once all tasks merged and the PR awaits the reviewer', () => {
     for (const reviewState of [null, 'open', 'in_review'] as const) {
-      expect(epicStage(epic({ ...allMerged, reviewState }), merged)).toBe('agent_review')
+      expect(parentStage(epic({ ...allMerged, reviewState }), merged)).toBe('agent_review')
     }
   })
 
   it('is Ready until a task starts', () => {
-    expect(epicStage(epic({ mergedCount: 0 }), [{ status: 'ready' }, { status: 'backlog' }])).toBe('ready')
+    expect(parentStage(epic({ mergedCount: 0 }), [{ status: 'ready' }, { status: 'backlog' }])).toBe('ready')
   })
 
   it('is In progress for everything else, including changes requested', () => {
-    expect(epicStage(epic(), [{ status: 'merged' }, { status: 'ready' }])).toBe('in_progress')
-    expect(epicStage(epic({ mergedCount: 0 }), [{ status: 'human_review' }, { status: 'ready' }])).toBe('in_progress')
-    expect(epicStage(epic({ ...allMerged, reviewState: 'changes_requested' }), merged)).toBe('in_progress')
-    expect(epicStage(epic({ reviewState: 'open' }), [{ status: 'merged' }, { status: 'in_progress' }])).toBe('in_progress')
+    expect(parentStage(epic(), [{ status: 'merged' }, { status: 'ready' }])).toBe('in_progress')
+    expect(parentStage(epic({ mergedCount: 0 }), [{ status: 'human_review' }, { status: 'ready' }])).toBe('in_progress')
+    expect(parentStage(epic({ ...allMerged, reviewState: 'changes_requested' }), merged)).toBe('in_progress')
+    expect(parentStage(epic({ reviewState: 'open' }), [{ status: 'merged' }, { status: 'in_progress' }])).toBe('in_progress')
   })
 
   it('takes a direct epic from In progress to Done with no review column', () => {
     const direct = { reviewMode: 'direct' as const, branch: null }
-    expect(epicStage(epic(direct), [{ status: 'merged' }, { status: 'in_progress' }])).toBe('in_progress')
-    expect(epicStage(epic({ ...direct, ...allMerged }), merged)).toBe('done')
+    expect(parentStage(epic(direct), [{ status: 'merged' }, { status: 'in_progress' }])).toBe('in_progress')
+    expect(parentStage(epic({ ...direct, ...allMerged }), merged)).toBe('done')
     for (const reviewState of ['open', 'in_review', 'human_review', 'ready_to_merge'] as const) {
-      expect(epicStage(epic({ ...direct, ...allMerged, reviewState }), merged)).toBe('done')
+      expect(parentStage(epic({ ...direct, ...allMerged, reviewState }), merged)).toBe('done')
     }
   })
 })
@@ -396,7 +397,7 @@ describe('epicOnBoard', () => {
   it('keeps a finished epic in Done for the window after a design is approved', () => {
     const direct = epic({ reviewMode: 'direct', branch: null })
     const approvedAgo = (ms: number) => ({ type: 'design' as const, status: 'approved' as const, mergedAt: null, updatedAt: new Date(now - ms).toISOString() })
-    expect(epicStage(direct, [approvedAgo(DAY)])).toBe('done')
+    expect(parentStage(direct, [approvedAgo(DAY)])).toBe('done')
     expect(epicOnBoard(direct, [approvedAgo(DAY)], now)).toBe(true)
     expect(epicOnBoard(direct, [old, approvedAgo(DAY)], now)).toBe(true)
     expect(epicOnBoard(direct, [approvedAgo(4 * DAY)], now)).toBe(false)
@@ -475,7 +476,7 @@ describe('overview epic filters', () => {
   it.each(['open', 'in_review', 'human_review', 'ready_to_merge', 'conflict', 'merged'] as const)('uses the done stage for epic PR state %s', (reviewState) => {
     const reviewing = { ...epic, reviewMode: 'epic' as const, reviewState, mergedCount: 1 }
     const tasks = [{ status: 'merged' as const }]
-    const done = epicStage(reviewing, tasks) === 'done'
+    const done = parentStage(reviewing, tasks) === 'done'
     expect(matchesOverviewEpicFilter(reviewing, tasks, 'closed')).toBe(done)
     expect(matchesOverviewEpicFilter(reviewing, tasks, 'open')).toBe(!done)
     expect(matchesOverviewEpicFilter(reviewing, tasks, 'in-progress')).toBe(!done)

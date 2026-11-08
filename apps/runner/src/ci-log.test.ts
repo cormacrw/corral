@@ -1,5 +1,5 @@
+import { ciExcerpt } from '@corral/contracts'
 import { describe, expect, it } from 'vitest'
-import { ciExcerpt } from '../../server/src/ci-output.ts'
 import { CiLogScanner, logLine } from './ci-log.ts'
 
 const stamp = '2026-10-30T12:00:00.1234567Z '

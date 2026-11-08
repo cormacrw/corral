@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { ROLE_LABELS } from '@corral/core'
 import { useQuery } from '@tanstack/vue-query'
 import { agentsQuery } from '~/queries/agents'
 import { profileQuery, runnerQuery } from '~/queries/system'
-import { ROLE, runnerSummary, runtimeLabel } from '~/utils/labels'
+import { runnerSummary, runtimeLabel } from '~/utils/labels'
+import { settingsPath, settingsSection } from '~/utils/routes'
 
 // Settings on mobile (design/settings.md, design/mobile.md): one screen that
 // lists the sections, each opening its own screen, with Appearance (colour
@@ -12,13 +14,17 @@ const { data: runner } = useQuery(runnerQuery())
 const { data: agents } = useQuery(agentsQuery())
 const install = useInstall()
 const name = computed(() => profile.value?.name || 'You')
+const row = (section: 'profile' | 'runner' | 'performance') => {
+  const { label, icon } = settingsSection(section)!
+  return { to: settingsPath(section), label, icon }
+}
 const runnerStatus = computed(() => `${runner.value?.online ? 'Online' : 'Offline'} · ${runnerSummary(runner.value ?? null)}`)
 </script>
 
 <template>
   <div class="flex flex-col gap-2 pb-8">
     <NuxtLink
-      to="/settings/profile"
+      :to="settingsPath('profile')"
       class="flex items-center gap-4 px-4 pt-4 pb-2"
     >
       <AgentAvatar
@@ -35,16 +41,12 @@ const runnerStatus = computed(() => `${runner.value?.online ? 'Online' : 'Offlin
     <ul class="divide-y divide-border border-y border-border">
       <li>
         <SettingsRow
-          to="/settings/profile"
-          icon="i-hugeicons-user"
-          label="Profile"
+          v-bind="row('profile')"
         />
       </li>
       <li>
         <SettingsRow
-          to="/settings/runner"
-          icon="i-hugeicons-server-stack-01"
-          label="Runners"
+          v-bind="row('runner')"
           :description="runnerStatus"
           data-testid="settings-runner"
         >
@@ -58,9 +60,7 @@ const runnerStatus = computed(() => `${runner.value?.online ? 'Online' : 'Offlin
       </li>
       <li>
         <SettingsRow
-          to="/settings/performance"
-          icon="i-hugeicons-dashboard-speed-02"
-          label="Performance"
+          v-bind="row('performance')"
           data-testid="settings-performance"
         />
       </li>
@@ -79,7 +79,7 @@ const runnerStatus = computed(() => `${runner.value?.online ? 'Online' : 'Offlin
         class="flex items-center gap-2 pr-4"
       >
         <NuxtLink
-          :to="`/settings/agents#agent-${agent.id}`"
+          :to="`${settingsPath('agents')}#agent-${agent.id}`"
           class="flex min-h-14 min-w-0 flex-1 items-center gap-3 py-3 pl-4"
         >
           <AgentAvatar
@@ -90,7 +90,7 @@ const runnerStatus = computed(() => `${runner.value?.online ? 'Online' : 'Offlin
             <span class="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span class="truncate font-medium text-foreground">{{ agent.name }}</span>
               <AppBadge
-                :label="ROLE[agent.role]"
+                :label="ROLE_LABELS[agent.role]"
                 color="primary"
                 variant="subtle"
                 size="xs"

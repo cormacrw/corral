@@ -16,7 +16,6 @@ export function useBoardColumnTabs<C extends { key: string }>(columns: Ref<C[]>,
     if (next && next.key !== column.value?.key) void router.replace({ query: { ...route.query, column: next.key } })
   }
 
-  // Keep the open tab in view as it changes
   const tabs = useTemplateRef<HTMLElement[]>('tabs')
   async function scrollTab(i: number) {
     await nextTick()

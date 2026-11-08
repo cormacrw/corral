@@ -15,13 +15,14 @@ row in that table. That covers review claims, human actions, task PR merges and
 the task merge.
 
 A conflict before the final checkpoint isn't resolved at all (COR-445). `#defer`
-ends the operation as `failed` with `CONFLICT_DEFERRED`, so the lock goes and
+ends the operation as `failed` with the `conflictDeferred` ending
+(`apps/server/src/operations.ts`), so the lock goes and
 nothing runs. Resolving one earlier costs a run each time the target moves, and
 the target usually moves again before the task lands.
 
 Pending has no column: `deferredConflicts` reads the task's newest `rebase` row, so
 any later rebase or fix ends it by being newer. A deferred row isn't a failure
-(`NOT_FAILURES`). `begin` skips a retry on the same head and target unless the
+(`countsAsFailure` leaves it out). `begin` skips a retry on the same head and target unless the
 task has reached `finalCheckpoint`, since those commits would conflict the same
 way. Approval is refused during an active rebase, so the state `#prepare` reads
 can't go stale in the unsafe direction: an approval just after `#defer` is seen by
@@ -34,7 +35,7 @@ checkpoint first, since it may have removed the conflict. `finalCheckpoint` also
 needs the approved head, because any other head is about to lose approval.
 
 A hand rebase or GitHub's update branch leaves no row of ours, so `begin` marks
-the deferred row `CONFLICT_GONE` when the head is no longer behind.
+the deferred row with the `conflictGone` ending when the head is no longer behind.
 
 `EpicMerger` is what stops a conflicted task merging: it checks the head isn't
 behind in `#advance`, and again in `#merge` just before asking GitHub, because the
@@ -127,7 +128,7 @@ it may come back with `base_conflict` when a resolved file differs.
 
 ## Approval
 
-`approvalFate` (`epic-rebase-approval.ts`) is the one place that decides what a
+`approvalFate` (`packages/core/src/approval-fate.ts`) is the one place that decides what a
 published head inherits. It runs in `#complete`, on the journal row returned by
 the state change, so a stale copy can't decide. Everything starts from
 `prHeadSha === expectedTargetSha`: a head that reached the branch any other way
@@ -143,8 +144,9 @@ A fix's verdict is `behaviourChanged` on the operation's report, bound to the
 reported commit like `resolutionReview`. `approvalFate` reads it for an operation
 with `fix` set; the review path below is for old resolution tasks.
 
-A resolution task doesn't invalidate review (`keepEpicReview`). Any other new
-board task does, and it would otherwise wipe the approval the rebase protects.
+A resolution task never invalidated review (`asResolutionTasks` in
+`test-resolution-task.ts` builds one the same way). Any other new board task
+does, and it would otherwise wipe the approval the rebase protects.
 
 The server's compare runs in `#checkResolution`, before the push, because the
 old head may not be reachable afterwards. It goes onto `resolutionReview`, which

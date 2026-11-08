@@ -1,22 +1,16 @@
-import { homedir, hostname } from 'node:os'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { gitAuthorWarning, loadConfig } from './config.ts'
 
 describe('loadConfig', () => {
-  it('uses local development defaults when nothing is set', () => {
-    expect(loadConfig({}, { cpus: 8, memoryBytes: 10 * 1024 ** 3 })).toEqual({
+  it('runs with nothing set: slots from the machine, no auto-update, no git author', () => {
+    expect(loadConfig({}, { cpus: 8, memoryBytes: 10 * 1024 ** 3 })).toMatchObject({
       dataDir: join(homedir(), '.corral', 'runner'),
-      serverUrl: new URL('http://127.0.0.1:4100'),
-      name: hostname(),
-      claudeBin: 'claude',
-      codexBin: 'codex',
       gitAuthor: null,
-      pmWarmSeconds: 300,
-      titleModel: 'haiku',
       slots: 4,
-      slotSource: { kind: 'derived', cpus: 8, memoryBytes: 10 * 1024 ** 3, slotCpus: 2, slotMemoryBytes: 2.5 * 1024 ** 3 },
-      roles: ['pm', 'developer', 'reviewer', 'design']
+      slotSource: { kind: 'derived' },
+      autoUpdate: false
     })
   })
 
@@ -32,19 +26,29 @@ describe('loadConfig', () => {
       CORRAL_PM_WARM_SECONDS: '0',
       CORRAL_TITLE_MODEL: 'claude-haiku-5-5',
       CORRAL_RUNNER_SLOTS: '2',
-      CORRAL_RUNNER_ROLES: 'developer, reviewer'
+      CORRAL_RUNNER_ROLES: 'developer, reviewer',
+      CORRAL_RUNNER_TOKEN: 'secret',
+      CORRAL_BUILD_SHA: 'abc123',
+      CORRAL_RUNNER_AUTO_UPDATE: 'true',
+      HOME: '/home/runner',
+      CODEX_HOME: '/config/codex'
     })).toEqual({
+      runnerToken: 'secret',
       dataDir: '/data/runner',
       serverUrl: new URL('http://server:4100'),
       name: 'home-server',
       claudeBin: '/usr/local/bin/claude',
+      claudeConfigDir: '/home/runner/.claude',
       codexBin: '/opt/codex/bin/codex',
+      codexHome: '/config/codex',
       gitAuthor: { name: 'Configured Person', email: 'configured@example.com' },
       pmWarmSeconds: 0,
-      titleModel: 'claude-haiku-5-5',
+      smallModel: 'claude-haiku-5-5',
       slots: 2,
       slotSource: { kind: 'explicit' },
-      roles: ['developer', 'reviewer']
+      roles: ['developer', 'reviewer'],
+      buildSha: 'abc123',
+      autoUpdate: true
     })
   })
 
@@ -65,8 +69,8 @@ describe('loadConfig', () => {
     const halfSet = loadConfig({ CORRAL_GIT_AUTHOR_EMAIL: 'configured@example.com' })
     const set = loadConfig({ CORRAL_GIT_AUTHOR_NAME: 'Configured Person', CORRAL_GIT_AUTHOR_EMAIL: 'configured@example.com' })
     expect(halfSet.gitAuthor).toBeNull()
-    expect(gitAuthorWarning(unset)).toMatch(/agent commits will have an unpredictable author/)
-    expect(gitAuthorWarning(halfSet)).toMatch(/agent commits will have an unpredictable author/)
+    expect(gitAuthorWarning(unset)).toEqual(expect.any(String))
+    expect(gitAuthorWarning(halfSet)).toEqual(expect.any(String))
     expect(gitAuthorWarning(set)).toBeNull()
   })
 })

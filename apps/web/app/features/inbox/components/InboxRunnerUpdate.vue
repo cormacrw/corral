@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { settingsPath } from '~/utils/routes'
 import type { RunnerUpdateItem } from '@corral/contracts'
 import { useMutation } from '@tanstack/vue-query'
 import { updateRunner } from '~/queries/system'
@@ -51,7 +52,7 @@ const retry = useMutation(updateRunner)
           label="Runner settings"
           size="sm"
           variant="outline"
-          to="/settings/runner"
+          :to="settingsPath('runner')"
         />
       </div>
       <p

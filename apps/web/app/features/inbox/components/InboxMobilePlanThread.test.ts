@@ -6,16 +6,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { createMemoryHistory, createRouter, useRoute, useRouter } from 'vue-router'
 import type { Plan, PlanThreadItem } from '@corral/contracts'
-import { useTaskFlyout } from '~/features/tasks/composables/useTaskFlyout'
+import { useTaskFlyout } from '~/composables/useTaskFlyout'
 import InboxMobilePlanThread from '~/features/inbox/components/InboxMobilePlanThread.vue'
+import InboxQuestionAnswer from '~/features/inbox/components/InboxQuestionAnswer.vue'
 import PlanDetail from '~/features/plan/components/PlanDetail.vue'
 import PlanSheets from '~/features/plan/components/PlanSheets.vue'
 
 const mocks = vi.hoisted(() => ({
   message: vi.fn(), close: vi.fn(), session: vi.fn(), read: vi.fn(), approve: vi.fn(),
-  replace: vi.fn(), remove: vi.fn(), add: vi.fn(), toast: vi.fn(), deleteThread: vi.fn()
+  replace: vi.fn(), remove: vi.fn(), add: vi.fn(), toast: vi.fn(), deleteThread: vi.fn(), moveToNext: vi.fn()
 }))
-vi.mock('~/composables/useApi', () => ({ api: { plan: mocks } }))
+vi.mock('~/queries/api', () => ({ api: { plan: mocks } }))
+// The Inbox around the thread, which moves on to the next item
+vi.mock('~/features/inbox/composables/useInboxView', () => ({ useInboxView: () => ({ moveToNext: mocks.moveToNext, deleteThread: mocks.deleteThread }) }))
 
 const question: PlanThreadItem = {
   id: 's-2', sessionId: 's-2', type: 'plan_thread', taskId: null, taskRef: null, prUrl: null, resolution: null,
@@ -37,6 +40,10 @@ const AppDrawer = defineComponent({
     ? h('section', { 'data-sheet': p.title }, [h('h2', p.title), slots.body?.(), slots.footer?.(), slots.content?.(), h('button', { onClick: () => emit('update:open', false) }, `Dismiss ${p.title}`)])
     : null
 })
+const AppTextarea = defineComponent({
+  props: ['modelValue'], emits: ['update:modelValue'],
+  setup: (p, { attrs, emit }) => () => h('textarea', { ...attrs, value: p.modelValue, onInput: (e: Event) => emit('update:modelValue', (e.target as HTMLTextAreaElement).value) })
+})
 const AppDropdownMenu = defineComponent({
   props: ['items'], setup: p => () => h('button', { onClick: () => p.items[0].onSelect() }, p.items[0].label)
 })
@@ -49,14 +56,16 @@ function screen(item = question) {
         AppButton, AppDrawer, AppDropdownMenu, PlanSheets,
         MobilePageHeader: defineComponent({ setup: (_, { slots }) => () => h('header', slots.actions?.()) }),
         PlanQuestion: defineComponent({
-          props: ['message', 'disabled', 'writing', 'draft'],
-          emits: ['answer', 'other', 'submit', 'update:draft'],
-          setup: (p, { emit }) => () => h('div', [
+          props: ['message', 'disabled', 'writing'],
+          emits: ['answer', 'other'],
+          setup: (p, { emit, slots }) => () => h('div', [
             h('button', { disabled: p.disabled, onClick: () => emit('answer', 'ntfy') }, p.message.text),
             h('button', { onClick: () => emit('other') }, 'Other…'),
-            p.writing ? h('textarea', { 'data-testid': 'plan-question-other', 'value': p.draft, 'onInput': (e: Event) => emit('update:draft', (e.target as HTMLTextAreaElement).value) }) : null
+            p.writing ? slots.other?.() : null
           ])
         }),
+        AppTextarea, InboxQuestionAnswer,
+        PlanRunnerOffline: defineComponent({ setup: () => () => null }),
         PromptComposer: defineComponent({ setup: () => () => h('textarea') }),
         MarkdownText: defineComponent({ props: ['text'], setup: p => () => h('p', p.text) }),
         AgentAvatar: defineComponent({ setup: () => () => h('span') }),
@@ -102,7 +111,8 @@ describe('focused mobile Plan thread', () => {
     expect(mocks.session).toHaveBeenCalledWith('s-2')
     await click(w, 'Which service?')
     expect(mocks.message).toHaveBeenCalledWith('s-2', 'ntfy', undefined)
-    expect(mocks.replace).toHaveBeenCalledWith('/inbox')
+    // The thread stays open while the PM's turn streams in, as on the web
+    expect(mocks.replace).not.toHaveBeenCalled()
   })
 
   it('writes Other… inside the question and sends it with Submit', async () => {
@@ -124,7 +134,7 @@ describe('focused mobile Plan thread', () => {
     expect(w.find('textarea').exists()).toBe(false)
     await click(w, label)
     expect(mocks.approve).toHaveBeenCalledWith('plan-1', label === 'Approve to board' ? 'ready' : 'backlog')
-    expect(mocks.replace).toHaveBeenCalledWith('/inbox')
+    expect(mocks.moveToNext).toHaveBeenCalled()
   })
 
   it('shows a failed turn with a reply box that retries in its session', async () => {
@@ -134,25 +144,22 @@ describe('focused mobile Plan thread', () => {
     const w = screen(failed)
     await flushPromises()
     expect(w.text()).toContain('The PM exited with code 1')
-    expect(w.text()).toContain('Open in Plan')
     expect(w.find('textarea').exists()).toBe(true)
     expect(mocks.read).toHaveBeenCalledWith('s-2')
   })
 
-  it('deletes from the menu without asking and returns to the Inbox', async () => {
+  it('deletes from the menu without asking and moves on through the Inbox', async () => {
     const w = screen()
     await click(w, 'Delete thread')
-    expect(w.text()).not.toContain('Close this thread?')
-    expect(mocks.deleteThread).toHaveBeenCalledWith(question.sessionId)
-    // The session is closed later, after the Undo window
+    // The Inbox deletes it, waits out Undo before closing, and moves on
+    expect(mocks.deleteThread).toHaveBeenCalledWith(question)
     expect(mocks.close).not.toHaveBeenCalled()
-    expect(mocks.replace).toHaveBeenCalledWith('/inbox')
   })
 
   it('disables answers during a PM turn', async () => {
     const w = screen({ ...question, activeRunId: 'run-1' })
     expect(w.findAll('button').find(b => b.text() === 'Which service?')!.attributes('disabled')).toBeDefined()
-    expect(w.text()).toContain('Juno is working…')
+    expect(w.text()).toContain('working')
   })
 })
 
@@ -199,7 +206,7 @@ describe('a task opened from the mobile plan sheet', () => {
       props: { item: { ...planItem, status: 'needs_approval', question: null, plan: { id: planned.id, version: planned.version, title: planned.title, summary: planned.summary, epicCount: 0, taskCount: 0 }, planId: planned.id, failure: null } },
       global: { plugins: [[VueQueryPlugin, { queryClient: testQueryClient() }], router],
         components: {
-          AppButton, AppDrawer, AppDropdownMenu, PlanDetail, PlanSheets,
+          AppButton, AppDrawer, AppDropdownMenu, PlanDetail, PlanSheets, PlanRunnerOffline: stub(),
           AppBadge: stub(), Icon: stub(), AppTabs: stub(), UiSkeleton: stub(), AsyncEpicGraph: stub('div'),
           MobilePageHeader: defineComponent({ setup: (_, { slots }) => () => h('header', slots.actions?.()) }),
           MarkdownText: defineComponent({ props: ['text'], setup: p => () => h('p', p.text) }),

@@ -1,3 +1,5 @@
+import { stripAnsi } from '@corral/contracts'
+
 // Reads a CI log as it arrives, so one too long to hold (tens of megabytes is
 // normal) still gives both of the things worth keeping: its end, and the
 // failure lines that turbo printed long before its end.
@@ -14,8 +16,6 @@ const MAX_PARTIAL_CHARS = 4096
 // What a test runner prints under a FAIL line: the assertion and its diff
 const CONTEXT_LINES = 8
 
-// eslint-disable-next-line no-control-regex -- terminal colours are what this removes
-const ANSI = /\u001B\[[0-9;]*[A-Za-z]/g
 const TIMESTAMP = /^\d{4}-\d\d-\d\dT[\d:.]+Z ?/
 // `@corral/web:test: ` when turbo prefixes lines rather than grouping them
 const TURBO_PREFIX = /^([^\s:]+:[^\s:]+): ?/
@@ -28,7 +28,7 @@ const FAILURE = /^\s*(?:FAIL\s|[×✗✖]\s|##\[error\]|ERROR\b|ELIFECYCLE\b|\S+
 const PASSED = /^\s*[✓✔]\s/
 
 export function logLine(raw: string): string {
-  return raw.replace(ANSI, '').replace(/\r$/, '').replace(TIMESTAMP, '')
+  return stripAnsi(raw).replace(/\r$/, '').replace(TIMESTAMP, '')
 }
 
 export class CiLogScanner {

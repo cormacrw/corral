@@ -1,8 +1,8 @@
 # Query layer
 
-Server data in `apps/web` lives in TanStack Query, in `app/queries/`. `app/plugins/query.client.ts` installs the client (`client.ts`) and connects it to `useLive`'s stream, real or mock, so the prototype works the same way. `useLive` holds only the SSE connection and its status.
+Server data in `apps/web` lives in TanStack Query, in `app/queries/`. `app/plugins/query.client.ts` installs the client (`client.ts`) and connects it (`live.ts`) to the stream in `stream.ts`, real or mock, so the prototype works the same way. `useLive` in `stream.ts` holds only the SSE connection and its status; components import it from there.
 
-Only `app/queries/` talks to the server. Lint fails on any other import of `useApi`, and of `subscribeLive` or `subscribeReconnect`, in `apps/web/app` (tests aside); `nuxt.config.ts` drops them from auto-imports, which lint can't see. Pages tell failures apart with `ApiError` from `~/queries/client`. A request with no query or mutation shape, such as `checkRepo` or the page-exit `closePlanThreadOnExit`, is a small function there too.
+Only `app/queries/` talks to the server. The transport (`api.ts`, and the stream in `stream.ts`) lives there, outside auto-imports, and lint fails on any other import of `~/queries/api`, or of `subscribeLive` or `subscribeReconnect`, in `apps/web/app` (tests aside). Pages tell failures apart with `ApiError` from `~/queries/client`. A request with no query or mutation shape, such as `checkRepo` or the page-exit `closePlanThreadOnExit`, is a small function there too.
 
 ## Shell data
 
@@ -12,7 +12,7 @@ The setup middleware runs in the first navigation, before mount. Only `/` and `/
 
 Refetch on window focus is off. On return `useLive` checks the stream instead: if it isn't open, or nothing (including the server's `ping`) has arrived for two heartbeats, it reconnects, and reconnecting invalidates everything. A phone asleep can leave `readyState` open with a dead socket, which is why the heartbeat counts. Query data is shallow (`shallow: true` in the defaults, and on each `useQueries`), so replace it whole and never mutate it.
 
-`reloadShell()` refetches all of it, for a human pressing Retry or Reconnect. `connectQueries` marks a `plan.session` for the open thread read before writing it, so the cache gets the read session. `usePendingPlan` gets every event there too, with or without a conversation mounted; the client plugin passes both in.
+`reloadShell()` refetches all of it, for a human pressing Retry or Reconnect. A thread is on screen when its session query is observed (`threadOnScreen`), which only an open conversation or Inbox pane does, through `useThreadSession`. That reads it as it opens, and `connectQueries` marks a `plan.session` for a thread on screen read before writing it, so no list shows a live reply unread.
 
 ## Run transcripts
 
@@ -28,11 +28,11 @@ Pull requests have no event for CI or base branch changes, so `pullRequestsQuery
 
 ## Project lists
 
-`useProjectLists(slug)` observes the shared task and task lists in `tasks.ts` and `epics.ts`. The desktop and mobile shells use `useAllProjectLists` to load every project's lists up front for counts, Home and palette search. Board, Backlog, Overview, Plan and task/task properties read these same entries; `useLive` no longer stores tasks or tasks with subtasks or loads lists. Lists have the query client's 30-minute cache lifetime, so route changes keep content visible while a stale entry refreshes. Only cold-load errors surface as list errors; failed background refetches preserve cached content, including cached empty lists, on Board, Backlog and Overview.
+`useProjectLists(slug)` observes the shared task and epic lists in `tasks.ts` and `epics.ts`. The desktop and mobile shells use `useAllProjectLists` to load every project's lists up front for counts, Home and palette search. Board, Backlog, Overview, Plan and task/epic properties read these same entries; the stream no longer stores tasks or epics or loads lists. Lists have the query client's 30-minute cache lifetime, so route changes keep content visible while a stale entry refreshes. Only cold-load errors surface as list errors; failed background refetches preserve cached content, including cached empty lists, on Board, Backlog and Overview.
 
 Task events update loaded lists immediately. EpicDetail derives prerequisite and blocked-task progress from the shared tasks with `epicWithLiveCounts`, so task creation, moves and deletion update the counts and waiting alert without needing an `epic.updated` event. Drafts are excluded both on fetch and on event writes, since they live only in their plan. Deleting a project empties its cached lists and removes its observers/search entries by deriving those from the current project list.
 
-Board/Backlog and their task/task flyouts use `defineMutation` for task creation, patching, transitions and deletion, task patching and task dependencies. Desktop drag moves and task Status actions (including mobile) use `moveTask` on top of the transition mutation: cancel an older list fetch, optimistically move the single card, then take the response on success or restore just that card on rejection. If it cancelled a fetch, it refetches the list afterwards. A newer event for the card wins over rollback; other cards' live changes are preserved. Drag targets follow D10's existing human actions, and Board filters remain in the URL.
+Board/Backlog and their task/epic flyouts use `defineMutation` for task creation, patching, transitions and deletion, epic patching and epic dependencies. Desktop drag moves and task Status actions (including mobile) use `moveTask` on top of the transition mutation: cancel an older list fetch, optimistically move the single card, then take the response on success or restore just that card on rejection. If it cancelled a fetch, it refetches the list afterwards. A newer event for the card wins over rollback; other cards' live changes are preserved. Drag targets and the Status menu share `boardMove`, D10's human actions, and Board filters remain in the URL.
 
 ## Task and subtask details
 
@@ -56,11 +56,15 @@ Task patches, transitions, resume and design approval finish on their response: 
 
 `queries/setup.ts` holds the CLI scan and repository list. `clisQuery` has `staleTime: 0`: a login changes on the runner with no event, so each visit shows the last scan and rescans behind it. Refresh on the repository step is the `refreshRepos` mutation, which asks past the server's cache and writes the result to the one `keys.setup.repos()` entry.
 
-Removing a project goes through `clearProject`, from both `removeProject` and the `project.deleted` event, in either order. It removes the project's own queries, by slug and by the `projectId` in cached tasks, tasks with subtasks, runs and sessions, and filters the lists that span projects. A query still on screen is reset instead, since a removed query stays with its observer, so the page refetches to its 404. The repository list refetches too: its rows name the project using them, on creation as well as removal. Add a query holding project data and it needs to be covered there.
+Removing a project goes through `clearProject`, from both `removeProject` and the `project.deleted` event, in either order. It removes the project's own queries, by slug and by the `projectId` in cached tasks, epics, runs and sessions, and filters the lists that span projects. A query still on screen is reset instead, since a removed query stays with its observer, so the page refetches to its 404. The repository list refetches too: its rows name the project using them, on creation as well as removal. Add a query holding project data and it needs to be covered there.
 
-`pages/projects/[slug].vue` wraps every project route and shows `ProjectNotFound` once the list lacks the slug. `useRemovingProject` holds that back while Settings removes the project and moves on. It's a task route because leaving `<NuxtPage />` out of `app.vue` stalls the first navigation, and because it holds what the tabs share. `provideProject` keeps the observers for the project, its lists and the default flow window for as long as the task lives, and tabs read them with `useProject()`. A tab mounting its own observer would refetch anything past `staleTime`, so moving between tabs would request data events already keep current. `useProjectOverview` reads the Inbox, active runs and the five most recent tasks' history and runs as queries, from the task. It preloads them once so the first Overview visit makes no requests and never briefly shows empty activity. While another tab is open its observers are disabled, so an event only marks them stale, and `staleTime: Infinity` means opening Overview fetches only what an event marked. The task prefetches Pull requests once when the project is known, without an observer. Its page observes that cache with `refetchOnMount: false`: entering the tab makes no request, and only that mounted page polls every 30 seconds or refetches on task/run events. While on Board or another tab, those events mark the inactive entry stale without fetching; the first poll after opening Pull requests corrects it within 30 seconds. Project queries wait until the shell list resolves a real project; Overview waits for its lists too.
+`pages/projects/[slug].vue` wraps every project route and shows `ProjectNotFound` once the list lacks the slug. `useRemovingProject` holds that back while Settings removes the project and moves on. It's a parent route because leaving `<NuxtPage />` out of `app.vue` stalls the first navigation, and because it holds what the tabs share. `provideProject` keeps the observers for the project, its lists and the default flow window for as long as the parent route lives, and tabs read them with `useProject()`. A tab mounting its own observer would refetch anything past `staleTime`, so moving between tabs would request data events already keep current. `useProjectOverview` reads the Inbox, active runs and the five most recent tasks' history and runs as queries, from the parent route. It preloads them once so the first Overview visit makes no requests and never briefly shows empty activity. While another tab is open its observers are disabled, so an event only marks them stale, and `staleTime: Infinity` means opening Overview fetches only what an event marked. The parent route prefetches Pull requests once when the project is known, without an observer. Its page observes that cache with `refetchOnMount: false`: entering the tab makes no request, and only that mounted page polls every 30 seconds or refetches on task/run events. While on Board or another tab, those events mark the inactive entry stale without fetching; the first poll after opening Pull requests corrects it within 30 seconds. Project queries wait until the shell list resolves a real project; Overview waits for its lists too.
 
 ## Rules
+
+- A mutation the server can refuse with a 409 because what the human saw changed lists what to refetch in `onConflict`.
+- Temporary entries (a comment, a Plan start's first message) use `pendingId()`; `isPendingId` recognises them.
+- `keys.ts` `projectData` lists what the cache holds for a project; `clearProject` and `removedProjectStale` derive from it.
 
 - Skeletons depend on `isPending` only. It stays false for a query with data, so background refetches show no loading state. Never use `isFetching` for a skeleton.
 - Events carrying a full entity write it into the cache. Derived data (inbox, counts, metrics) is invalidated.
@@ -72,14 +76,14 @@ Removing a project goes through `clearProject`, from both `removeProject` and th
 1. Add the key to `keys.ts`, under its domain.
 2. Add `queryOptions` to `app/queries/<domain>.ts`, built on `api`.
 3. Add the key to the events that change it in `dependencies.ts`.
-4. Call `useQuery(xQuery(...))`. If it's a new prototype endpoint, add a `route(...)` to `mock-api.ts`.
+4. Call `useQuery(xQuery(...))`. A new endpoint goes in the contracts endpoint table first (see [endpoints.md](endpoints.md)).
 
 ## Add a mutation
 
 ```ts
-export const patchEpic = defineMutation<Task, { id: string, input: PatchEpicInput }>({
-  mutationFn: ({ id, input }) => api.tasks with subtasks.patch(id, input),
-  invalidates: (_, { id }) => [keys.tasks with subtasks.lists(), keys.tasks with subtasks.detail(id)]
+export const patchEpic = defineMutation<Epic, { id: string, input: PatchEpicInput }>({
+  mutationFn: ({ id, input }) => api.epics.patch(id, input),
+  invalidates: (_, { id }) => [keys.epics.lists(), keys.epics.detail(id)]
 })
 const patch = useMutation(patchEpic)
 ```
@@ -92,7 +96,7 @@ A new `ServerEvent` type doesn't compile until it has an entry in `eventDependen
 
 - `cache.set` writes only to loaded entries: a list built from one event would look complete.
 - Events carry a project ID and a task ID; keys use a slug and a ref. `cache.slug` and `cache.taskRef` look those up in the cache. When they miss, invalidate the wider key, as `taskStale` does.
-- A write that lands during a fetch is requeued, because that fetch started before the change and would overwrite it.
+- Every in-place write goes through `writeQuery`. A write that lands during a fetch is applied again to that fetch's result, because the fetch started before the change and would overwrite it.
 
 ## Coalescing
 
@@ -110,9 +114,9 @@ On SSE reconnect, everything is invalidated and active queries refetch. Inactive
 
 Plan, Inbox Plan panes, session navigation, drafts and finished turn steps now read queries. `plan.message` and `plan.updated` update the shared session detail even while its thread is unmounted. Session snapshots preserve messages, plan revisions and metadata that arrived during the request, so an older response cannot briefly hide a live reply. Conversation scrolling watches the session ID and message/transcript counts individually; read echoes and metadata updates do not move the log.
 
-`usePendingPlan` keeps its retry/restoration state and seeds the query cache before navigation. The client plugin connects it to the cache so the reconciled POST result is written even after navigation away. Only starting/failed entries override the query; accepted threads use the shared session cache. Server human messages remove the temporary bubble, including when an event beats the POST response. See [optimistic-plan-starts.md](optimistic-plan-starts.md).
+`usePlanStarts` (`queries/plan.ts`) keeps starts in the cache under `keys.plan.starts()` and seeds the session before navigation, so the reconciled POST result is written even after navigation away, and events update a start through the same `eventDependencies` writes as its session. Only starting/failed entries override the query; accepted threads use the shared session cache. Server human messages remove the temporary bubble, including when an event beats the POST response. See [optimistic-plan-starts.md](optimistic-plan-starts.md).
 
-`markPlanRead` patches unread flags in place and sends a fire-and-forget acknowledgement, without invalidating queries. A `plan.session` echo with the same `updatedAt` keeps the session's list position. Approvals and thread closes use mutations to invalidate Plan and Inbox queries; approval also invalidates task lists.
+Reading goes through one `markRead` mutation (`queries/inbox.ts`) for every item kind: it patches unread flags in place before the request, without invalidating queries, and a failure refetches the Inbox. A `plan.session` echo with the same `updatedAt` keeps the session's list position. Approvals and thread closes use mutations to invalidate Plan and Inbox queries; approval also invalidates task lists.
 
 ## Inbox
 
@@ -120,7 +124,7 @@ Plan, Inbox Plan panes, session navigation, drafts and finished turn steps now r
 
 A mutation that resolves the selected item spreads `holdsInbox` into `useMutation`, on the page or in a child. While one runs, the list stays as it was when it started: events still update the cache, but a removed row can't move the selection. A failure lets go. On success the page takes the same position from the fresh list with `moveToNext`, then releases, so nothing shows between the two. It prefetches the next task first, for at most a second, and does nothing if the selection changed meanwhile. Changing selection also releases. The `holdsInbox` key lives on the Inbox's `useMutation` calls, not on the shared definitions, so approving from Plan holds nothing.
 
-Reading patches the cached Inbox with `inboxWithRead`: `markPlanRead` and `readDeployment` before their requests, and the `markedRead` events on every tab. `inboxQuery` reapplies reads made during its fetch. A fetch that starts after the patch but reaches the server before the read can briefly restore the unread dot, until the `markedRead` event clears it. A failed release-note read refetches to bring the dot back; the component reads once per deployment, so that can't loop.
+Reading patches the cached Inbox with `inboxWithRead`: `markRead` before its request, and the `markedRead` events on every tab. Like every in-place write, a read made during an Inbox fetch is applied again to its result (`writeQuery`). A fetch that starts after the patch but reaches the server before the read can briefly restore the unread dot, until the `markedRead` event clears it. A failed release-note read refetches to bring the dot back; the component reads once per deployment, so that can't loop.
 
 An open item's PR (`keys.tasks.pullRequest`) refreshes when a `run.updated` for its task has `endedAt` set, since that's when a developer's push lands. Earlier `run.updated` events skip it: each fetch is a GitHub read through the runner, and lease changes would cost one every time. `keys.tasks.pullRequests(ref)` covers every PR of the task. Task and Inbox mutations reach it through `keys.tasks.detail(ref)`, and a push from outside a run shows only after `staleTime`, on remount or window focus.
 

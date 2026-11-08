@@ -1,10 +1,10 @@
 <script setup lang="ts">
+import { ROLE_LABELS } from '@corral/core'
 import { computed, ref } from 'vue'
 import type { Ref } from 'vue'
 import type { AuditEntry, Comment, Evidence, Review, Run, Task } from '@corral/contracts'
 import type { AgentRole } from '@corral/core'
 import { actorLabel, actorName } from '~/features/activity/utils/auditText'
-import { ROLE } from '~/utils/labels'
 
 // The Activity, Evidence and History tabs of a task (design/task.md)
 const props = defineProps<{
@@ -26,11 +26,10 @@ const shell = useShell()
 const tab = ref<'activity' | 'evidence' | 'history'>(useRoute().query.evidence ? 'evidence' : 'activity')
 const tabs = computed(() => [{ label: 'Activity', value: 'activity' }, { label: `Evidence (${props.evidence.length})`, value: 'evidence' }, { label: 'History', value: 'history' }])
 
-// The task's runs say which agent acted; the PM is found by its role
 const agentName = (role: AgentRole, runId: string | null) => {
   const run = runId ? props.runs.find(r => r.id === runId) : undefined
   if (run) return run.agentName
-  return role === 'pm' ? (shell.agents.find(a => a.role === 'pm')?.name ?? ROLE.pm) : ROLE[role]
+  return role === 'pm' ? (shell.agents.find(a => a.role === 'pm')?.name ?? ROLE_LABELS.pm) : ROLE_LABELS[role]
 }
 const authorName = (actor: Comment['author']) => actorName(actor, agentName)
 const authorLabel = (actor: Comment['author']) => actorLabel(actor, agentName)

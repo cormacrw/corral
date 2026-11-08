@@ -1,6 +1,7 @@
-import type { TaskStatus } from '@corral/core'
+import { deliveryInProgress, type TaskStatus } from '@corral/core'
+import { cliLoginCommand } from '@corral/contracts/client'
 import { describe, expect, it } from 'vitest'
-import { agentStatus, cliLoginCommand, detectedRuntimes, epicHistoryText, epicInProgress, epicReviewStatus, epicWithLiveCounts, inboxItemLink, plural, prNumberLabel, runRef, runTitle, runTokens, statusCounts, taskCounts } from './labels.ts'
+import { agentStatus, detectedRuntimes, epicHistoryText, epicReviewStatus, epicWithLiveCounts, inboxItemLink, plural, runRef, runTitle, runTokens, statusCounts, taskCounts } from './labels.ts'
 
 const tasks = (...statuses: TaskStatus[]) => statuses.map(status => ({ status }))
 
@@ -52,8 +53,8 @@ describe('runtimes', () => {
   })
 
   it('signs Codex in with device auth', () => {
-    expect(cliLoginCommand('codex')).toBe('docker exec -it corral-runner codex login --device-auth')
-    expect(cliLoginCommand('claude')).toBe('docker exec -it corral-runner claude')
+    expect(cliLoginCommand('codex')).toContain('--device-auth')
+    expect(cliLoginCommand('claude')).not.toContain('--device-auth')
   })
 })
 
@@ -83,10 +84,10 @@ describe('agentStatus', () => {
     expect(agentStatus(idle, now)).toBeNull()
   })
 
-  it('can omit Working when the layout already indicates work', () => {
-    expect(agentStatus({ ...idle, activeRuns: 1 }, now)).not.toBeNull()
-    expect(agentStatus({ ...idle, activeRuns: 1 }, now, false)).toBeNull()
-    expect(agentStatus({ ...idle, paused: true }, now, false)).toEqual(paused)
+  it('marks Working only on request', () => {
+    expect(agentStatus({ ...idle, activeRuns: 1 }, now, true)).not.toBeNull()
+    expect(agentStatus({ ...idle, activeRuns: 1 }, now)).toBeNull()
+    expect(agentStatus({ ...idle, paused: true }, now)).toEqual(paused)
   })
 })
 
@@ -105,11 +106,11 @@ describe('epic review status', () => {
   })
 
   it('keeps a parent task in progress until its PR merges, and a direct one until its tasks do', () => {
-    expect(epicInProgress({ ...epic, reviewState: 'human_review' })).toBe(true)
-    expect(epicInProgress({ ...epic, reviewState: 'merged' })).toBe(false)
-    expect(epicInProgress({ ...epic, reviewMode: 'direct' })).toBe(false)
-    expect(epicInProgress({ ...epic, branch: null })).toBe(false)
-    expect(epicInProgress({ ...epic, taskCount: 0, mergedCount: 0 })).toBe(false)
+    expect(deliveryInProgress({ ...epic, reviewState: 'human_review' })).toBe(true)
+    expect(deliveryInProgress({ ...epic, reviewState: 'merged' })).toBe(false)
+    expect(deliveryInProgress({ ...epic, reviewMode: 'direct' })).toBe(false)
+    expect(deliveryInProgress({ ...epic, branch: null })).toBe(false)
+    expect(deliveryInProgress({ ...epic, taskCount: 0, mergedCount: 0 })).toBe(false)
   })
 
   it('counts live board tasks, leaving out Drafts and Backlog', () => {
@@ -155,9 +156,4 @@ it('counts in the singular and the plural', () => {
   expect(plural(1, 'task')).toBe('1 task')
   expect(plural(0, 'task')).toBe('0 tasks')
   expect(plural(2, 'run')).toBe('2 runs')
-})
-
-it('names a PR by number when its URL has one', () => {
-  expect(prNumberLabel('https://github.com/o/r/pull/41')).toBe('#41')
-  expect(prNumberLabel(null)).not.toMatch(/#/)
 })

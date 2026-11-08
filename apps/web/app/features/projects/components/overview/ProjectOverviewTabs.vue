@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { projectPath } from '~/utils/routes'
 import type { ProjectOverview } from '~/features/projects/composables/useProjectOverview'
 import { matchesOverviewEpicFilter } from '~/features/board/utils/board'
 
@@ -55,7 +56,7 @@ const matching = computed(() => epics.value.filter(group => group.epic && matche
             />
           </div>
           <AppButton
-            :to="`/projects/${project?.slug}/backlog`"
+            :to="projectPath(project?.slug ?? '', 'backlog')"
             label="Open Backlog"
             variant="link"
             size="sm"

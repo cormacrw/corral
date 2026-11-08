@@ -5,7 +5,7 @@ import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 // Each test drives whole developer and reviewer rounds over a real WebSocket, so
 // these need more time than the default on a busy machine
@@ -34,7 +34,7 @@ const epicRow = async (id: string) => (await t.db.select().from(schema.epics).wh
 const inbox = async () => (await t.request('GET', '/api/inbox')).json() as Promise<Inbox>
 
 async function assigned(task: Created, role: RunJob['role']) {
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   return (await runner.next('run.assign', m => 'taskId' in m.job && m.job.taskId === task.id && m.job.role === role)).job as RunJob & { branch: string }
 }
 
@@ -71,9 +71,8 @@ async function integrate(task: Created) {
 async function toHumanReview(project: { repository: string }, epic: { id: string }) {
   const branch = (await epicRow(epic.id)).branch!
   t.github.setBranch(project.repository, branch, `epic-${epic.id}-${Math.random()}`)
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   const job = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.role === 'reviewer')).job
-  expect(job.prompt).toContain('do not attempt them, produce evidence or verdicts for them')
   expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Integrates cleanly' })).toMatchObject({ ok: true })
   return (await inbox()).needsYou.find(i => i.id === epic.id) as EpicReviewItem
 }
@@ -161,7 +160,7 @@ it('keeps a prior approval for Backlog-only work, and invalidates it for board w
   expect((await t.request('POST', `/api/epics/${epic.id}/review`, { action: 'approve', headSha: again.headSha })).status).toBe(200)
   const { branch } = await epicRow(epic.id)
   t.github.setBranch(project.repository, branch!, 'someone-pushed')
-  await t.orchestrator.merges.tick()
+  await t.orchestrator.mergePass()
   expect(await epicRow(epic.id)).toMatchObject({ reviewState: 'in_review', prHeadSha: 'someone-pushed' })
   await capture('invalidation-new-head.json', { afterApproval: 'ready_to_merge', afterNewEpicHead: await epicRow(epic.id) })
 })

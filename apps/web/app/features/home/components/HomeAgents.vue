@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { ROLE_LABELS } from '@corral/core'
+import { agentPath } from '~/utils/routes'
 import type { Agent, Project } from '@corral/contracts'
-import { projectColor, ROLE } from '~/utils/labels'
+import { projectColor } from '~/utils/labels'
 
 defineProps<{
   agents: {
@@ -34,7 +36,7 @@ defineProps<{
               :working="working"
             />
             <span class="font-semibold text-foreground">{{ agent.name }}</span>
-            <span class="text-sm text-muted-foreground">{{ ROLE[agent.role] }}</span>
+            <span class="text-sm text-muted-foreground">{{ ROLE_LABELS[agent.role] }}</span>
             <span
               v-if="status"
               class="ms-auto text-xs text-muted-foreground"
@@ -68,7 +70,7 @@ defineProps<{
             </p>
           </div>
           <NuxtLink
-            :to="`/agents/${agent.name.toLowerCase()}`"
+            :to="agentPath(agent.name)"
             :aria-label="agent.name"
             class="absolute inset-0 rounded-lg"
           />

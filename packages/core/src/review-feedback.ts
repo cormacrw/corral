@@ -1,3 +1,5 @@
+import { clip } from './ids.ts'
+
 // Spotting a reviewer that asks for the same changes twice in a row, so the
 // task goes to a human instead of round-tripping until the review-round cap.
 // A plain token comparison: cheap, deterministic and no model call.
@@ -82,7 +84,7 @@ export const FIX_TITLE_PREFIX = 'Fix integration: '
 export function feedbackFixTitle(feedback: string): string {
   const [sentence = ''] = feedbackPoints(feedback)[0]!.split(/(?<=[.!?])\s/)
   const title = sentence.replace(/[.!;:,]+$/, '')
-  return `${FIX_TITLE_PREFIX}${title.length > FIX_TITLE_LENGTH ? `${title.slice(0, FIX_TITLE_LENGTH - 1).trimEnd()}…` : title}`
+  return `${FIX_TITLE_PREFIX}${clip(title, FIX_TITLE_LENGTH)}`
 }
 
 // "1 criterion met; 2 criteria need a human check", for a verdict with human checks

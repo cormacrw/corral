@@ -11,10 +11,9 @@ import PlanDetailGroup from '~/features/plan/components/PlanDetailGroup.vue'
 
 // A plan's content: its title and counts, its tasks under each epic, and what
 // changed since the previous version. The plan flyout and a Plan thread in the
-// Inbox both show it. The default slot goes under the counts, as a summary.
-// `wide`: in a pane padded like the Inbox body, so its rows line up with it.
-// `hideTitle`: the pane's own heading already says it.
-const props = defineProps<{ plan: Plan, previous: Plan | null, wide?: boolean, hideTitle?: boolean }>()
+// Inbox both show it. The default slot goes under the counts, as a summary;
+// `title` replaces the heading, for a pane whose own heading says it.
+const props = defineProps<{ plan: Plan, previous: Plan | null }>()
 
 const tasks = computed(() => currentTasks(props.plan))
 // The plan's tasks under each of its epics, in the order the PM gave them.
@@ -38,14 +37,13 @@ const graphTasks = computed<Record<string, Task[]>>(() => Object.fromEntries(gra
 </script>
 
 <template>
-  <div :class="props.wide && '[&>*]:px-5'">
+  <div>
     <div class="flex flex-col gap-1 px-4 pt-4 pb-3">
-      <h2
-        v-if="!props.hideTitle"
-        class="text-lg font-semibold"
-      >
-        {{ props.plan.title }}
-      </h2>
+      <slot name="title">
+        <h2 class="text-lg font-semibold">
+          {{ props.plan.title }}
+        </h2>
+      </slot>
       <p class="text-xs text-muted-foreground">
         <template v-if="epicCount > 0">
           {{ plural(epicCount, 'epic') }} ·

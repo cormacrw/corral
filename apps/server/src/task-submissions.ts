@@ -1,9 +1,11 @@
+import { deliversCode } from '@corral/core'
 import { TASK_INTEGRATION_PROTOCOL } from '@corral/contracts'
 import { schema, type Executor } from '@corral/db'
-import { asc, eq, max } from 'drizzle-orm'
+import { and, asc, eq, gt, max, notExists, sql } from 'drizzle-orm'
+import { auditText } from './audit.ts'
 import { isEpicResolution } from './task-base.ts'
 
-const { epics, tasks, taskSubmissions } = schema
+const { auditLog, epics, reviews, tasks, taskSubmissions } = schema
 
 type TaskFacts = Pick<typeof tasks.$inferSelect, 'prNumber' | 'branch' | 'type'>
 type EpicFacts = Pick<typeof epics.$inferSelect, 'reviewMode' | 'branch' | 'reviewState'>
@@ -12,7 +14,7 @@ type EpicFacts = Pick<typeof epics.$inferSelect, 'reviewMode' | 'branch' | 'revi
 // after it take a PR to the target branch (taskBase).
 function prFreeEligible(task: TaskFacts, epic: EpicFacts | undefined): epic is EpicFacts & { branch: string } {
   return task.prNumber === null && epic?.reviewMode === 'epic' && epic.reviewState !== 'merged' && !!epic.branch
-    && !!task.branch && task.branch !== epic.branch && !isEpicResolution(task) && ['task', 'bug'].includes(task.type)
+    && !!task.branch && task.branch !== epic.branch && !isEpicResolution(task) && deliversCode(task.type)
 }
 
 // Persists the PR-free path for a task whose developer run is going to a runner
@@ -59,4 +61,19 @@ export async function recordTaskSubmission(db: Executor, input: {
     await tx.update(tasks).set({ integrationProtocol: TASK_INTEGRATION_PROTOCOL, headSha: input.submittedHeadSha, updatedAt: new Date() }).where(eq(tasks.id, task.id))
     return submission!
   })
+}
+
+// A review row that is a verdict on the task's latest submission. A human
+// resolving Blocked resets the round counter (D10), so even this head and round
+// may have a verdict from an older submission. Uses existing history so
+// already-stranded tasks recover too.
+export function verdictForSubmission(db: Executor) {
+  return and(eq(reviews.taskId, tasks.id), eq(reviews.headSha, tasks.headSha), eq(reviews.round, tasks.reviewRounds),
+    notExists(db.select({ one: sql`1` }).from(auditLog).where(and(
+      eq(auditLog.taskId, tasks.id),
+      eq(auditLog.action, 'task.transition'),
+      sql`${auditText('task.transition', 'from')} = 'in_progress'`,
+      sql`${auditText('task.transition', 'to')} = 'agent_review'`,
+      gt(auditLog.createdAt, reviews.createdAt)
+    ))))
 }

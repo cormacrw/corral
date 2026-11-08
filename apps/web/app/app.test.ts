@@ -11,7 +11,9 @@ vi.stubGlobal('watch', watch)
 vi.stubGlobal('nextTick', nextTick)
 vi.stubGlobal('useHead', () => {})
 vi.stubGlobal('useSeoMeta', () => {})
-vi.stubGlobal('useLive', () => ({ connect: vi.fn() }))
+vi.mock('~/queries/stream', () => ({ useLive: () => ({ connect: vi.fn() }) }))
+// The real shell fetches from the API, left in flight when the window closes
+vi.mock('~/queries/shell', () => ({ startShell: () => () => {} }))
 vi.stubGlobal('useDevice', () => ({ isMobile: ref(true) }))
 vi.stubGlobal('useRoute', () => ({ meta: {} }))
 vi.stubGlobal('computed', computed)
@@ -38,7 +40,6 @@ describe('app shell gesture zoom protection', () => {
     const wrapper = mount(App, { global })
     expect(gesture('gesturestart')).toBe(false)
     expect(gesture('gesturechange')).toBe(false)
-    // Normal scrolling events are not canceled.
     expect(gesture('touchmove')).toBe(true)
     wrapper.unmount()
     expect(gesture('gesturestart')).toBe(true)

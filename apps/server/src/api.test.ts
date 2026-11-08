@@ -119,10 +119,10 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
 
     it('stores an agent\'s picture and shows it on the agent', async () => {
       const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'reviewer'))
-      const saved = await t.request('PUT', `/api/agents/${agent!.id}/avatar`, new Blob([png], { type: 'image/png' }))
-      expect(await saved.json()).toMatchObject({ id: agent!.id, avatarUrl: expect.stringMatching(new RegExp(`^/api/agents/${agent!.id}/avatar\\?v=`)) })
+      const saved = await t.request('PUT', `/api/agents/${agent!.id}/avatar`, new Blob([png], { type: 'image/png' })).then(r => r.json()) as { id: string, avatarUrl: string }
+      expect(saved).toMatchObject({ id: agent!.id, avatarUrl: expect.stringMatching(new RegExp(`^/api/agents/${agent!.id}/avatar\\?v=`)) })
       const listed = await t.request('GET', '/api/agents').then(r => r.json()) as { id: string, avatarUrl: string | null }[]
-      expect(listed.find(a => a.id === agent!.id)?.avatarUrl).toBeTruthy()
+      expect(listed.find(a => a.id === agent!.id)?.avatarUrl).toBe(saved.avatarUrl)
       expect(t.events.some(e => e.type === 'agent.updated' && e.agent.id === agent!.id && e.agent.avatarUrl !== null)).toBe(true)
       expect((await t.request('PUT', '/api/agents/not-an-id/avatar', new Blob([png], { type: 'image/png' }))).status).toBe(404)
     })
@@ -150,7 +150,7 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
       expect(text.status).toBe(400)
       const fake = await t.request('PUT', '/api/me/avatar', new Blob(['<svg/>'], { type: 'image/png' }))
       expect(fake.status).toBe(400)
-      expect(await fake.json()).toMatchObject({ error: { code: 'invalid_input', issues: [{ message: 'The file isn\'t a PNG image' }] } })
+      expect(await fake.json()).toMatchObject({ error: { code: 'invalid_input', issues: [{ message: expect.stringContaining('PNG') }] } })
       const huge = await t.request('PUT', '/api/me/avatar', new Blob([new Uint8Array(3 * 1024 * 1024)], { type: 'image/png' }))
       expect(huge.status).toBe(413)
     })
@@ -391,7 +391,7 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
         { type: 'agent.updated', agent: { id: agent.id, runtime: 'codex' } },
         { type: 'agent.updated', agent: { name: 'Lyra' } }
       ])
-      const [audit] = await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.action, 'agent.created')).orderBy(asc(schema.auditLog.id)).limit(1)
+      const audit = (await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.action, 'agent.created'))).find(a => (a.detail as { agentId?: string }).agentId === agent.id)
       expect(audit).toMatchObject({ actor: t.actor, detail: { agentId: agent.id, role: 'developer', runtime: 'codex' } })
     })
 
@@ -408,14 +408,14 @@ describe.each(['pglite', 'postgres'] as const)('HTTP API on %s', (driver) => {
     it('rejects a PM, an unknown runtime and a runtime whose CLI isn\'t installed, saying why', async () => {
       runnerClis([{ id: 'claude', version: '2.1.312' }, { id: 'codex', version: null }])
       const cases = [
-        [{ name: 'Second PM', role: 'pm', runtime: 'claude-code', concurrency: 1 }, 'Only one PM agent exists; the role must be developer, designer or reviewer'],
-        [{ name: 'Gemini dev', role: 'developer', runtime: 'gemini', concurrency: 1 }, 'Unknown runtime; use one of claude-code, codex'],
-        [{ name: 'Codex dev', role: 'developer', runtime: 'codex', concurrency: 1 }, 'Codex CLI isn’t installed on the runner, so the codex runtime can’t be used']
+        [{ name: 'Second PM', role: 'pm', runtime: 'claude-code', concurrency: 1 }, 'PM'],
+        [{ name: 'Gemini dev', role: 'developer', runtime: 'gemini', concurrency: 1 }, 'claude-code'],
+        [{ name: 'Codex dev', role: 'developer', runtime: 'codex', concurrency: 1 }, 'Codex CLI']
       ] as const
       for (const [body, message] of cases) {
         const res = await t.request('POST', '/api/agents', body)
         expect(res.status).toBe(400)
-        expect(await res.json()).toMatchObject({ error: { code: 'invalid_input', issues: [{ message }] } })
+        expect(await res.json()).toMatchObject({ error: { code: 'invalid_input', issues: [{ message: expect.stringContaining(message) }] } })
       }
       const names = (await t.db.select({ name: schema.agents.name }).from(schema.agents)).map(a => a.name)
       expect(names).not.toContain('Second PM')

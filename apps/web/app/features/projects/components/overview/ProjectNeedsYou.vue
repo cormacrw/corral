@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { inboxPath } from '~/utils/routes'
 import type { ProjectOverview } from '~/features/projects/composables/useProjectOverview'
 import { inboxItemBadge } from '~/utils/labels'
 import TimeAgo from '~/components/shared/TimeAgo.vue'
@@ -20,7 +21,7 @@ defineProps<{ items: ProjectOverview['needsYou']['value'], loading: boolean, mob
         :variant="mobile && items.length ? 'solid' : 'subtle'"
       />
       <AppButton
-        to="/inbox"
+        :to="inboxPath()"
         label="Open Inbox"
         variant="link"
         size="sm"
@@ -37,7 +38,7 @@ defineProps<{ items: ProjectOverview['needsYou']['value'], loading: boolean, mob
       >
         <NuxtLink
           v-if="mobile"
-          :to="`/inbox/${item.id}`"
+          :to="inboxPath(item.id)"
           class="flex items-center gap-2 px-4 py-3 active:bg-muted"
         >
           <span class="min-w-0 flex-1">
@@ -62,7 +63,7 @@ defineProps<{ items: ProjectOverview['needsYou']['value'], loading: boolean, mob
         </NuxtLink>
         <NuxtLink
           v-else
-          :to="`/inbox/${item.id}`"
+          :to="inboxPath(item.id)"
           class="flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted"
         >
           <AppBadge

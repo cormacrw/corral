@@ -7,7 +7,6 @@ export function inboxTldr(body: string) {
   return plain.length > 180 ? `${plain.slice(0, 177).trimEnd()}…` : plain
 }
 
-// A review's verdict at a glance
 export const verdictMark = (approved: boolean) => approved
   ? { icon: 'i-hugeicons-checkmark-circle-02', color: 'text-success' }
   : { icon: 'i-hugeicons-alert-circle', color: 'text-warning' }

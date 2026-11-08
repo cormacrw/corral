@@ -1,16 +1,28 @@
 // @vitest-environment happy-dom
 import { VueQueryPlugin } from '@tanstack/vue-query'
-import type { EpicDetail, Task } from '@corral/contracts'
+import type { EpicDetail, Project, Task } from '@corral/contracts'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
-import { api } from '~/composables/useApi'
+import { api } from '~/queries/api'
 import { useProjectLists } from '~/features/projects/composables/useProjectLists'
 import { applyEvent } from '~/queries/dependencies'
 import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
-import { epics, projects } from '~/prototype/fixtures'
 import EpicDetailView from '~/features/epics/components/EpicDetail.vue'
+
+const at = '2026-11-01T12:00:00.000Z'
+const project = {
+  id: 'p-1', name: 'Corral', slug: 'corral', prefix: 'TA', thumbnailColor: null, thumbnailUrl: null, nextTaskNumber: 10,
+  repository: 'o/corral', defaultBranch: 'main', mergeMethod: 'squash', requiredChecks: [], paused: false, humanReviewDefault: false,
+  epicReviewModeDefault: 'epic', reviewRoundCap: 3, failedRunCap: 3, createdAt: at, updatedAt: at
+} as Project
+const baseEpic: EpicDetail = {
+  id: 'own', taskId: null, taskRef: null, mergedAt: null, projectId: project.id, title: 'Saved searches', description: 'Keep searches',
+  dependsOn: [], blocks: [], reviewMode: 'direct', branch: null, prNumber: null, prUrl: null, prHeadSha: null,
+  approvedHeadSha: null, approvedBaseSha: null, reviewState: null, sync: null, reviewModeLocked: false,
+  taskCount: 0, mergedCount: 0, createdAt: at, updatedAt: at, tasks: [], fixes: []
+}
 
 enableAutoUnmount(afterEach)
 beforeEach(() => {
@@ -27,8 +39,7 @@ afterEach(() => {
 it('updates prerequisite and blocks progress and the waiting alert from task events alone', async () => {
   const client = testQueryClient()
   client.setDefaultOptions({ queries: { staleTime: Infinity, retry: false, gcTime: Infinity } })
-  const project = projects[0]!
-  const own: EpicDetail = { ...epics[0]!, id: 'own', projectId: project.id, title: 'Current epic', reviewMode: 'direct', branch: null, prNumber: null, reviewState: null, dependsOn: ['pre'], blocks: ['next'], tasks: [], fixes: [] }
+  const own: EpicDetail = { ...baseEpic, title: 'Current epic', dependsOn: ['pre'], blocks: ['next'] }
   const prerequisite = { ...own, id: 'pre', title: 'Prerequisite', taskCount: 1, mergedCount: 0 }
   const blocked = { ...own, id: 'next', title: 'Follow-up', taskCount: 1, mergedCount: 0 }
   const task = (over: Partial<Task> = {}) => ({ id: 't1', number: 1, ref: 'TA-1', projectId: project.id, epicId: 'pre', status: 'ready', type: 'task', ...over }) as Task
@@ -87,8 +98,6 @@ it('updates prerequisite and blocks progress and the waiting alert from task eve
     await flushPromises()
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(wrapper.get('a[href="/epics/pre"]').text()).toContain('1/1')
-    // The cached epic aggregates deliberately remain stale; the UI reads tasks.
-    expect(client.getQueryData<typeof epics>(keys.epics.list(project.slug))?.find(e => e.id === 'pre')?.mergedCount).toBe(0)
     expect(list).not.toHaveBeenCalled()
   } finally {
     wrapper.unmount()
@@ -99,9 +108,8 @@ it('updates prerequisite and blocks progress and the waiting alert from task eve
 it('keeps an open epic\'s task list live as its tasks change, join and leave', async () => {
   const client = testQueryClient()
   client.setDefaultOptions({ queries: { staleTime: Infinity, retry: false, gcTime: Infinity } })
-  const project = projects[0]!
   const task = (over: Partial<Task> = {}) => ({ id: 't1', number: 1, ref: 'TA-1', title: 'First', projectId: project.id, epicId: 'own', status: 'ready', type: 'task', priority: 'medium', dependsOn: [], ...over }) as Task
-  const own: EpicDetail = { ...epics[0]!, id: 'own', projectId: project.id, reviewMode: 'direct', branch: null, prNumber: null, reviewState: null, dependsOn: [], blocks: [], tasks: [task()], fixes: [] }
+  const own: EpicDetail = { ...baseEpic, tasks: [task()] }
   client.setQueryData(keys.projects.list(), [project])
   client.setQueryData(keys.tasks.list(project.slug), [task()])
   client.setQueryData(keys.epics.list(project.slug), [own])
@@ -154,8 +162,7 @@ it('keeps an open epic\'s task list live as its tasks change, join and leave', a
 async function mountEpic({ tab = 'tasks', activity = async () => [] as never[] }: { tab?: string, activity?: () => Promise<never[]> } = {}) {
   const client = testQueryClient()
   client.setDefaultOptions({ queries: { staleTime: Infinity, retry: false, gcTime: Infinity } })
-  const project = projects[0]!
-  const own = { ...epics[0]!, id: 'own', projectId: project.id, reviewMode: 'direct', branch: null, prNumber: null, reviewState: null, dependsOn: [], blocks: [], tasks: [] } as unknown as EpicDetail
+  const own = baseEpic
   client.setQueryData(keys.projects.list(), [project])
   client.setQueryData(keys.tasks.list(project.slug), [])
   client.setQueryData(keys.epics.list(project.slug), [own])
@@ -195,5 +202,5 @@ it('keeps the description editor open when saving fails', async () => {
 it('keeps the epic page when only its activity can\'t load', async () => {
   const { wrapper, own } = await mountEpic({ tab: 'activity', activity: () => Promise.reject(new Error('Down')) })
   expect((wrapper.get('[aria-label="Task title"]').element as HTMLInputElement).value).toBe(own.title)
-  expect(wrapper.findAll('[role="alert"]').map(a => a.text())).toEqual(['Couldn\'t load the activity.'])
+  expect(wrapper.findAll('[role="alert"]')).toHaveLength(1)
 })

@@ -1,27 +1,27 @@
 <script setup lang="ts">
-import { computed, provide, ref, watch } from 'vue'
+import { planPath } from '~/utils/routes'
+import { computed, ref, watch } from 'vue'
 import { useElementSize } from '@vueuse/core'
-import { FLYOUT_SHEETS } from '~/features/tasks/composables/useTaskFlyout'
+import { provideFlyoutHost } from '~/composables/useTaskFlyout'
 import { STOP_ASKING } from '~/features/plan/utils/plan-questions'
-import { usePlanActions } from '~/features/plan/composables/usePlanActions'
-import { usePlanRunner } from '~/features/plan/composables/usePlanRunner'
-import { usePlanSession } from '~/features/plan/composables/usePlanSession'
+import { usePlanThread } from '~/features/plan/composables/usePlanThread'
+import { useRestoredStart } from '~/features/plan/composables/usePlanStart'
 import { usePlanThreadScroll } from '~/features/plan/composables/usePlanThreadScroll'
 
 // A Plan conversation (design/plan.md)
 const props = defineProps<{ sessionId: string }>()
-const emit = defineEmits<{ read: [] }>()
-provide(FLYOUT_SHEETS, true)
 const router = useRouter()
 const shell = useShell()
 const flyout = useTaskFlyout()
 const device = useDevice()
+provideFlyoutHost({ sheets: true, docked: () => !device.isMobile.value })
 const id = () => props.sessionId
 
-const state = usePlanSession(id, () => emit('read'))
-const { pending, starting, detail, session, accepted, waitingForStart, error, latest, previous, activeRunId, liveEvents } = state
-const { pm, offline } = usePlanRunner()
-const { text, taskRef, busy, approving, cantApprove, cantSend, send, quick, approve } = usePlanActions(id, state, () => offline.value)
+// A phone goes to a new thread once a plan is approved, so the next request
+// is a tap away; desktop stays on the session
+const { pending, starting, detail, session, accepted, waitingForStart, error, latest, previous, activeRunId, liveEvents, pm, text, taskRef, busy, approving, cantApprove, cantSend, send, quick, approve }
+  = usePlanThread(id, { moveOn: () => device.isMobile.value ? () => router.push(planPath()) : null })
+const restored = useRestoredStart()
 const pmName = computed(() => pm.value?.name ?? 'PM')
 const project = computed(() => shell.projects.find(p => p.id === session.value?.projectId) ?? null)
 const load = () => detail.refetch()
@@ -30,8 +30,8 @@ useSeoMeta({ title: () => `${session.value?.title ?? 'Plan'} · Corral` })
 
 async function backToPrompt() {
   if (!starting.value) return
-  pending.restored.value = starting.value
-  await router.push('/plan')
+  restored.value = starting.value
+  await router.push(planPath())
 }
 
 // Desktop floats the latest plan beside the thread when the column has room
@@ -83,7 +83,7 @@ const { log, content, onLogScroll } = usePlanThreadScroll(() => {
           menu
         />
         <AppButton
-          to="/plan"
+          :to="planPath()"
           icon="i-hugeicons-add-01"
           variant="ghost"
           color="neutral"
@@ -146,7 +146,6 @@ const { log, content, onLogScroll } = usePlanThreadScroll(() => {
                 :plan-beside="beside"
                 @show-plan="card?.focus()"
                 @retry="send('Please continue.')"
-                @resolved="load"
                 @answer="quick"
                 @other="composer?.focus()"
                 @stop="quick(STOP_ASKING)"
@@ -177,7 +176,7 @@ const { log, content, onLogScroll } = usePlanThreadScroll(() => {
             <PlanDetail
               :plan="latest"
               :previous="previous"
-              :busy="approving === latest.id"
+              :busy="approving?.planId === latest.id"
               :disabled="cantApprove"
               card
               @approve="approve(latest, $event)"
@@ -219,7 +218,7 @@ const { log, content, onLogScroll } = usePlanThreadScroll(() => {
           <PlanDetail
             :plan="latest"
             :previous="previous"
-            :busy="approving === latest.id"
+            :busy="approving?.planId === latest.id"
             :disabled="cantApprove"
             @approve="approve(latest, $event)"
             @close="flyout.close()"

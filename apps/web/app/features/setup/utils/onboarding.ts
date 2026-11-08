@@ -1,6 +1,7 @@
 import type { Project, RepoChoice } from '@corral/contracts'
+import { SECTIONS, SETUP_PATH } from '~/utils/routes'
 
-export const isSetupPath = (path: string) => path === '/setup' || path.startsWith('/setup/')
+export const isSetupPath = (path: string) => path === SETUP_PATH || path.startsWith(`${SETUP_PATH}/`)
 
 // Where the setup middleware sends a navigation, or undefined to let it
 // through. Onboarding is done once the server has a project, whichever
@@ -16,8 +17,8 @@ export function onboardingRedirect(
   const setup = isSetupPath(to.path)
   // The add-project flow reuses the wizard's repository step on both layouts.
   if (setup && (!first || to.query.add === '1')) return
-  if (!first) return '/setup'
-  if (to.path === '/' || setup) return '/home'
+  if (!first) return SETUP_PATH
+  if (to.path === '/' || setup) return SECTIONS.home.to
 }
 
 // What "Paste a GitHub URL" leaves for the access check: owner/name

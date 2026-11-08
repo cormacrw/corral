@@ -1,22 +1,17 @@
 <script setup lang="ts">
+import { SECTIONS, SETTINGS_SECTIONS, settingsPath } from '~/utils/routes'
+
 // The desktop section menu (design/settings.md). Phones list the sections on
 // /settings instead (SettingsMobile).
-const SECTIONS = [
-  { label: 'Profile', to: '/settings/profile', icon: 'i-hugeicons-user' },
-  { label: 'Agents', to: '/settings/agents', icon: 'i-hugeicons-robot-01' },
-  { label: 'Runners', to: '/settings/runner', icon: 'i-hugeicons-server-stack-01' },
-  { label: 'Performance', to: '/settings/performance', icon: 'i-hugeicons-dashboard-speed-02' },
-  { label: 'Appearance', to: '/settings/appearance', icon: 'i-hugeicons-paint-board' }
-]
 
 const route = useRoute()
 const install = useInstall()
 // /settings shows Profile on desktop, so it counts as that section
 const current = computed(() => {
   const path = route.path.replace(/\/$/, '')
-  return path === '/settings' ? '/settings/profile' : path
+  return path === SECTIONS.settings.to ? settingsPath('profile') : path
 })
-const items = computed(() => SECTIONS.map(section => ({ ...section, active: current.value === section.to })))
+const items = computed(() => SETTINGS_SECTIONS.map(({ section, label, icon }) => ({ label, icon, to: settingsPath(section), active: current.value === settingsPath(section) })))
 </script>
 
 <template>

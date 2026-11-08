@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { taskPath } from '~/utils/routes'
 import type { Backlog } from '~/features/board/composables/useBacklog'
 import { moveGroupLabel, movableRows, priorityText } from '~/features/board/utils/backlog'
 import { PRIORITY } from '~/utils/labels'
@@ -105,7 +106,7 @@ const { search, showCompleted, collapsed, groups, summary, planTo, pmName, inPla
             class="flex items-center border-t border-border pe-2"
           >
             <NuxtLink
-              :to="`/tasks/${task.ref}`"
+              :to="taskPath(task.ref)"
               class="flex min-w-0 flex-1 flex-col gap-1 px-3 py-3 text-sm active:bg-muted"
             >
               <span class="flex items-baseline gap-3">

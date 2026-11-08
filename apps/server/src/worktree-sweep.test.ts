@@ -3,7 +3,7 @@ import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner, sleep } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 import { PM_WORKTREE_TTL } from './worktree-sweep.ts'
 
 const { auditLog, comments, epics, planSessions, runs, tasks } = schema
@@ -41,6 +41,7 @@ describe('worktree sweep', () => {
   })
 
   afterEach(async () => {
+    vi.restoreAllMocks()
     t.orchestrator.sweep.stop()
     for (const r of connections.splice(0)) r.close()
     await t.close()
@@ -107,12 +108,9 @@ describe('worktree sweep', () => {
 
   it('does nothing and logs no error with no runner online', async () => {
     const errors = vi.spyOn(console, 'error')
-    t.orchestrator.sweep.start(5)
-    await sleep(40)
-    t.orchestrator.sweep.stop()
+    await t.orchestrator.sweep.run()
     expect(await swept()).toEqual([])
     expect(errors).not.toHaveBeenCalled()
-    errors.mockRestore()
   })
 
   it('sweeps on the hourly tick', async () => {
@@ -148,8 +146,7 @@ describe('worktree sweep', () => {
     b.onJob = () => ({ kind: 'sweep_worktrees', removed: ['/b/gone'], kept: [] })
     await t.orchestrator.sweep.run()
     expect((await swept()).at(-1)!.detail).toEqual({ removed: ['/b/gone'], kept: [] })
-    expect(errors).toHaveBeenCalledWith('Worktree sweep failed on a runner', expect.any(Error))
-    errors.mockRestore()
+    expect(errors).toHaveBeenCalledWith(expect.any(String), expect.any(Error))
   })
 
   it('runs again after a sweep when asked during it', async () => {

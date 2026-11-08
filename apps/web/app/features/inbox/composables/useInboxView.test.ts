@@ -4,15 +4,15 @@ import { useMutation, VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
-import { api } from '~/composables/useApi'
-import { inboxTabs, provideInboxView } from '~/features/inbox/composables/useInboxView'
-import { inbox, tasks } from '~/prototype/fixtures'
+import { api } from '~/queries/api'
+import { provideInboxView } from '~/features/inbox/composables/useInboxView'
+import { inboxOf, project, task, taskItem } from '~/features/inbox/test-items'
 import { invalidateKeys } from '~/queries/dependencies'
 import { holdsInbox } from '~/queries/inbox'
 import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
 
-vi.mock('~/composables/useApi', () => ({ api: { inbox: { get: vi.fn(), read: vi.fn() }, tasks: { byRef: vi.fn() } } }))
+vi.mock('~/queries/api', () => ({ api: { inbox: { get: vi.fn(), read: vi.fn() }, tasks: { byRef: vi.fn() } } }))
 
 const wrappers: VueWrapper[] = []
 beforeEach(() => {
@@ -24,11 +24,25 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-const taskItem = (data: Inbox, type: InboxItem['type'] = 'failed') => data.needsYou.find(i => i.type === type && i.taskRef)!
+// Three decisions and a question, release notes, and a resolved task
+const inbox = (): Inbox => inboxOf([
+  taskItem('COR-5', 'human_review', { unread: true }),
+  taskItem('COR-6', 'failed'),
+  taskItem('COR-7', 'failed'),
+  taskItem('COR-8', 'question')
+], {
+  activity: [{
+    id: 'release-1', deploymentId: 'release-1', type: 'release_notes', project, subject: 'Release notes', preview: '',
+    sender: { name: 'Juno', role: 'pm' }, at: '2026-11-01T00:00:00.000Z', fromSha: null, toSha: 'b2', notes: null, notesStatus: 'ready',
+    unread: true, taskId: null, taskRef: null, prUrl: null, resolution: null
+  }],
+  resolved: [taskItem('COR-1', 'activity', { id: 'audit-1', resolution: 'Merged' })]
+})
+const failedItem = (data: Inbox, type: InboxItem['type'] = 'failed') => data.needsYou.find(i => i.type === type && i.taskRef)!
 
 // The view as pages/inbox.vue provides it, with an action that holds the list
 // (as useInboxItem's does) driven by the test
-async function mountView({ selected = null as string | null, docked = null as string | null, data = inbox() } = {}) {
+async function mountView({ selected = null as string | null, docked = null as string | null, data = inbox() as Inbox | null } = {}) {
   for (const name of ['ref', 'shallowRef', 'computed', 'watch', 'watchEffect', 'onBeforeUnmount'] as const) vi.stubGlobal(name, vue[name])
   const params = vue.reactive<{ itemId?: string }>({ itemId: selected ?? undefined })
   const replace = vi.fn(async ({ path }: { path: string }) => {
@@ -42,9 +56,10 @@ async function mountView({ selected = null as string | null, docked = null as st
   vi.stubGlobal('usePlanThreadDelete', () => ({ pending: vue.ref([]), remove: vi.fn() }))
   vi.stubGlobal('useMobileHeader', () => vue.ref(null))
   let served = data
-  vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(served))
-  vi.mocked(api.inbox.read).mockResolvedValue({})
-  vi.mocked(api.tasks.byRef).mockImplementation(async ref => structuredClone(tasks.find(t => t.ref === ref)!))
+  // No data: the Inbox hasn't loaded yet
+  vi.mocked(api.inbox.get).mockImplementation(() => served ? Promise.resolve(structuredClone(served)) : new Promise(() => {}))
+  vi.mocked(api.inbox.read).mockResolvedValue({ ok: true })
+  vi.mocked(api.tasks.byRef).mockImplementation(async ref => task(ref))
   const client = testQueryClient()
   let view!: ReturnType<typeof provideInboxView>
   let resolving!: ReturnType<typeof useMutation<void, Error, Promise<void>>>
@@ -78,21 +93,27 @@ async function mountView({ selected = null as string | null, docked = null as st
   } }
 }
 
-describe('inboxTabs', () => {
-  it('lists the server\'s decisions and resolved items, leaving informational items out', () => {
+describe('the Inbox tabs', () => {
+  it('lists the server\'s decisions and resolved items, leaving informational items out', async () => {
     const server = inbox()
-    expect(inboxTabs(server)).toEqual({ needsYou: server.needsYou, resolved: server.resolved })
+    const v = await mountView({ data: server })
+    expect(v.ids()).toEqual(server.needsYou.map(i => i.id))
+    expect(v.view.tabItems.value.map(t => t.count)).toEqual([server.count, server.resolved.length])
+    v.view.tab.value = 'resolved'
+    expect(v.ids()).toEqual(server.resolved.map(i => i.id))
   })
 
-  it('has empty tabs before the Inbox loads', () => {
-    expect(inboxTabs(null)).toEqual({ needsYou: [], resolved: [] })
+  it('has empty tabs before the Inbox loads', async () => {
+    const v = await mountView({ data: null })
+    expect(v.ids()).toEqual([])
+    expect(v.view.tabItems.value.map(t => t.count)).toEqual([0, 0])
   })
 })
 
 describe('the Inbox selection', () => {
   it('keeps the selection, list and count when an informational update arrives', async () => {
     const data = inbox()
-    const item = taskItem(data)
+    const item = failedItem(data)
     const v = await mountView({ selected: item.id, data })
     const before = v.ids()
     const count = v.view.count.value
@@ -123,7 +144,7 @@ describe('the Inbox selection', () => {
     ['a task item selected', true]
   ])('leaves the task dock alone on a live refresh, with %s', async (_, selecting) => {
     const data = inbox()
-    const v = await mountView({ selected: selecting ? taskItem(data).id : null, docked: 'COR-1', data })
+    const v = await mountView({ selected: selecting ? failedItem(data).id : null, docked: 'COR-1', data })
     await v.refresh()
     expect(v.flyout.close).not.toHaveBeenCalled()
     expect(v.flyout.open).not.toHaveBeenCalled()
@@ -133,7 +154,7 @@ describe('the Inbox selection', () => {
 describe('while an action on the selected item runs', () => {
   it('holds the list, then moves to the item at the same position', async () => {
     const data = inbox()
-    const item = taskItem(data)
+    const item = failedItem(data)
     const v = await mountView({ selected: item.id, data })
     const before = v.ids()
     const position = before.indexOf(item.id)
@@ -154,7 +175,7 @@ describe('while an action on the selected item runs', () => {
 
   it('moves on with the dock left open, even when the item left the list first', async () => {
     const data = inbox()
-    const item = taskItem(data)
+    const item = failedItem(data)
     const next = data.needsYou.find(i => i.taskRef && i.id !== item.id)!
     const v = await mountView({ selected: item.id, docked: 'COR-1', data })
     const action = v.startAction()
@@ -170,7 +191,7 @@ describe('while an action on the selected item runs', () => {
 
   it('lets go of the list when the action fails, closing the dock if the item has gone', async () => {
     const data = inbox()
-    const item = taskItem(data)
+    const item = failedItem(data)
     const v = await mountView({ selected: item.id, docked: 'COR-1', data })
     const action = v.startAction()
     await flushPromises()
@@ -190,7 +211,7 @@ describe('while an action on the selected item runs', () => {
 describe('moving on after resolving', () => {
   async function resolved(remaining: (data: Inbox, item: InboxItem) => Inbox) {
     const data = inbox()
-    const item = taskItem(data)
+    const item = failedItem(data)
     const v = await mountView({ selected: item.id, data })
     const action = v.startAction()
     await flushPromises()
@@ -203,7 +224,7 @@ describe('moving on after resolving', () => {
 
   it('opens the next decision, past release notes', async () => {
     const data = inbox()
-    const next = data.needsYou.find(i => i.taskRef && i.id !== taskItem(data).id)!
+    const next = data.needsYou.find(i => i.taskRef && i.id !== failedItem(data).id)!
     const note = data.activity.find(i => i.type === 'release_notes')!
     const v = await resolved(d => ({ ...d, needsYou: [next], resolved: [], activity: [note] }))
     await v.view.moveToNext()
@@ -220,7 +241,7 @@ describe('moving on after resolving', () => {
     const v = await resolved((d, item) => ({ ...d, needsYou: d.needsYou.filter(i => i.id !== item.id && i.taskRef) }))
     let finish!: () => void
     vi.mocked(api.tasks.byRef).mockReturnValue(new Promise((resolve) => {
-      finish = () => resolve(tasks[0]!)
+      finish = () => resolve(task('COR-1'))
     }))
     const moving = v.view.moveToNext()
     await flushPromises()

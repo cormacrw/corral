@@ -1,22 +1,12 @@
 import { matchMutation, queryOptions, useQuery, useQueryClient } from '@tanstack/vue-query'
-import type { Inbox, InboxActionInput, InboxReadInput, Task } from '@corral/contracts'
+import type { QueryClient } from '@tanstack/vue-query'
+import type { Inbox, InboxActionInput, InboxItem, PlanSession, PlanSessionDetail, Task } from '@corral/contracts'
 import { computed, onScopeDispose, shallowRef } from 'vue'
-import { api } from '~/composables/useApi'
-import { defineMutation, inboxWithRead, invalidateKeys, writeTaskResponse } from './dependencies'
+import { api } from './api'
+import { defineMutation, inboxWithRead, invalidateKeys, writeQuery, writeTaskResponse } from './dependencies'
 import { keys } from './keys'
 
-// Reads land in the cache as they happen, and a response can predate them
-const unreadIds = (inbox: Inbox | undefined) => [...inbox?.needsYou ?? [], ...inbox?.activity ?? []].filter(i => i.unread).map(i => i.id)
-
-export const inboxQuery = () => queryOptions({
-  queryKey: keys.inbox(),
-  queryFn: async ({ client }) => {
-    const before = client.getQueryData<Inbox>(keys.inbox())
-    const loaded = await api.inbox.get()
-    const still = new Set(unreadIds(client.getQueryData<Inbox>(keys.inbox())))
-    return unreadIds(before).filter(id => !still.has(id)).reduce((inbox, id) => inboxWithRead(inbox, id), loaded)
-  }
-})
+export const inboxQuery = () => queryOptions({ queryKey: keys.inbox(), queryFn: () => api.inbox.get() })
 
 export const actOnInboxItem = defineMutation<{ task: Task | null }, { taskId: string, input: InboxActionInput }>({
   mutationFn: ({ taskId, input }) => api.inbox.act(taskId, input),
@@ -28,22 +18,25 @@ export const actOnInboxItem = defineMutation<{ task: Task | null }, { taskId: st
   refreshes: ({ task }) => task ? [] : [keys.tasks.lists()]
 })
 
-// Clears the dot before the request. A failure refetches the true state.
-export const readDeployment = {
-  ...defineMutation<unknown, string>({ mutationFn: id => api.deployments.read(id), invalidates: [] }),
-  onMutate: (id: string, { client }: { client: ReturnType<typeof useQueryClient> }) => {
-    client.setQueryData<Inbox>(keys.inbox(), inbox => inbox && inboxWithRead(inbox, id))
-  },
-  onError: (_error: Error, _id: string, _context: unknown, { client }: { client: ReturnType<typeof useQueryClient> }) => invalidateKeys(client, [keys.inbox()])
-}
+// Plan threads and release notes are read through their session and deployment
+export type ReadTarget = Pick<InboxItem, 'type' | 'id'>
+const sendRead = ({ type, id }: ReadTarget): Promise<unknown> =>
+  type === 'plan_thread' ? api.plan.read(id) : type === 'release_notes' ? api.deployments.read(id) : api.inbox.read({ type, id })
 
-// Any other item, when opened. Plan threads and release notes read their own way.
-export const readInboxItem = {
-  ...defineMutation<unknown, InboxReadInput>({ mutationFn: input => api.inbox.read(input), invalidates: [] }),
-  onMutate: ({ id }: InboxReadInput, { client }: { client: ReturnType<typeof useQueryClient> }) => {
-    client.setQueryData<Inbox>(keys.inbox(), inbox => inbox && inboxWithRead(inbox, id))
+// Reading is an acknowledgement, not a content change: the dot clears before
+// the request and nothing refetches, so its echo event can't reorder a list.
+// A failure refetches the Inbox to bring the dot back. Callers read by item,
+// not by its flag, so that can't loop.
+export const markRead = {
+  mutationFn: sendRead,
+  onMutate: ({ type, id }: ReadTarget, { client }: { client: QueryClient }) => {
+    if (type === 'plan_thread') {
+      writeQuery<PlanSessionDetail>(client, keys.plan.session(id), session => session && { ...session, unread: false })
+      writeQuery<PlanSession[]>(client, keys.plan.sessions(), sessions => sessions?.map(session => session.id === id ? { ...session, unread: false } : session))
+    }
+    writeQuery<Inbox>(client, keys.inbox(), inbox => inbox && inboxWithRead(inbox, id))
   },
-  onError: (_error: Error, _input: InboxReadInput, _context: unknown, { client }: { client: ReturnType<typeof useQueryClient> }) => invalidateKeys(client, [keys.inbox()])
+  onError: (_error: Error, _target: ReadTarget, _context: unknown, { client }: { client: QueryClient }) => invalidateKeys(client, [keys.inbox()])
 }
 
 export const dismissDeployment = defineMutation<unknown, string>({

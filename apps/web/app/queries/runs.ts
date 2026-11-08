@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/vue-query'
 import type { Run } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { api } from '~/queries/api'
 import { defineMutation } from './dependencies'
 import type { RunFilter } from './keys'
 import { keys } from './keys'
@@ -17,5 +17,5 @@ export const messageRun = ({ slug, id, text }: { slug: string, id: string, text:
 
 export const stopRun = defineMutation<Run, string>({
   mutationFn: id => api.runs.stop(id),
-  invalidates: (_, id) => [keys.runs.lists(), keys.runs.detail(id), keys.agents.list()]
+  invalidates: (_, id) => [keys.runs.lists(), keys.runs.transcript(id), keys.agents.list()]
 })

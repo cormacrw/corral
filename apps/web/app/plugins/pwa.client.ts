@@ -1,5 +1,5 @@
-import type { BeforeInstallPromptEvent } from '~/features/shell/composables/useInstall'
-import { runningStandalone } from '~/features/shell/composables/useInstall'
+import type { BeforeInstallPromptEvent } from '~/composables/useInstall'
+import { runningStandalone } from '~/composables/useInstall'
 import { STANDALONE_QUERY } from '~/utils/device'
 
 // The installable app (D17, design/mobile.md): registers public/sw.js, which

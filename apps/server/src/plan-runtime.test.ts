@@ -3,7 +3,7 @@ import { schema } from '@corral/db'
 import { and, eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 const { agents, auditLog, planSessions } = schema
 
@@ -105,7 +105,7 @@ describe('plan session runtime', () => {
       await t.request('GET', '/api/setup/clis')
       const res = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Hi', runtime: 'codex' })
       expect(res.status).toBe(400)
-      expect(JSON.stringify(await res.json())).toContain('Codex CLI isn’t installed')
+      expect(JSON.stringify(await res.json())).toContain('Codex CLI')
     } finally {
       runner.onJob = onJob
       await t.request('GET', '/api/setup/clis')

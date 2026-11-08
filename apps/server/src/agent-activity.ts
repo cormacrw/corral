@@ -1,4 +1,4 @@
-import { ACTIVE_RUN_STATES, taskRef } from '@corral/core'
+import { ACTIVE_RUN_STATES, clip, isAgentPaused, taskRef } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, desc, eq, inArray, notInArray, sql, type SQL } from 'drizzle-orm'
 import { listAgents } from './runs.ts'
@@ -12,10 +12,6 @@ const RECENT_RUNS = { team: 3, agent: 20 }
 const TEXT_LIMIT = { team: 200, agent: 500 }
 
 export class UnknownAgent extends Error {}
-
-function clip(text: string | null, limit: number): string | null {
-  return text && text.length > limit ? `${text.slice(0, limit - 1).trimEnd()}…` : text
-}
 
 async function agentRuns(db: Executor, where: SQL | undefined, order: SQL[], limit: number, textLimit: number) {
   const rows = await db.select({ run: runs, projectName: projects.name, prefix: projects.prefix, taskNumber: tasks.number, taskTitle: tasks.title, epicTitle: epics.title }).from(runs)
@@ -34,8 +30,8 @@ async function agentRuns(db: Executor, where: SQL | undefined, order: SQL[], lim
     epic: run.epicId === null ? null : { id: run.epicId, title: epicTitle },
     role: run.role,
     runner: run.runnerName,
-    summary: clip(run.summary, textLimit),
-    error: clip(run.error, textLimit),
+    summary: run.summary && clip(run.summary, textLimit),
+    error: run.error && clip(run.error, textLimit),
     rateLimitResetAt: run.rateLimitResetAt?.toISOString() ?? null,
     queuedAt: run.queuedAt.toISOString(),
     startedAt: run.startedAt?.toISOString() ?? null,
@@ -54,7 +50,7 @@ export async function agentActivity(db: Executor, name?: string) {
   const now = new Date()
   return {
     agents: await Promise.all((named ? [named] : all).map(async (agent) => {
-      const paused = agent.paused || (agent.pausedUntil !== null && new Date(agent.pausedUntil) > now)
+      const paused = isAgentPaused(agent, now)
       const [activeRuns, recentRuns] = await Promise.all([
         // Runs already working come first, so a long queue can't hide them
         agentRuns(db, and(eq(runs.agentId, agent.id), inArray(runs.state, [...ACTIVE_RUN_STATES])), [sql`${runs.startedAt} desc nulls last`, desc(runs.number)], ACTIVE_RUN_LIMIT, TEXT_LIMIT[scope]),

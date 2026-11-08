@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import type { TaskStatus, TaskType } from '@corral/core'
-import { dashboardCounts, isToday, liveRunTitle } from '~/features/home/utils/dashboard.ts'
+import { TASK_STATUSES, type TaskStatus, type TaskType } from '@corral/core'
+import { dashboardCounts, homeColumn, IN_PROGRESS_STAGES, liveRunTitle } from '~/features/home/utils/figures'
+import { sameDay as isToday } from '~/utils/days'
 
 const now = new Date(2026, 9, 29, 15, 0)
 const task = (status: TaskStatus, extra: { mergedAt?: string | null, reviewRounds?: number, type?: TaskType, updatedAt?: string } = {}) => ({ status, type: 'task' as const, updatedAt: '', mergedAt: null, reviewRounds: 0, ...extra })
 
 describe('dashboardCounts', () => {
+  it('gives every in-progress Board column its own stage, so the stage bar adds up', () => {
+    expect([...IN_PROGRESS_STAGES]).toEqual(TASK_STATUSES.filter(s => homeColumn(s) === 'in_progress'))
+  })
+
   it('counts Ready as to do and the four working stages as in progress', () => {
     const counts = dashboardCounts([
       task('backlog'), task('ready'), task('ready'),

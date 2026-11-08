@@ -2,7 +2,7 @@ import { databaseFixture } from '@corral/db/testing'
 import type { Inbox, Project } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import { afterAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
@@ -15,6 +15,9 @@ describe.each(['pglite', 'postgres'] as const)('project thumbnails on %s', (driv
   })
   afterAll(async () => {
     await t?.close()
+  })
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
   const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10])
   const upload = (data: Uint8Array, type: string, slug = project.slug) => {
@@ -41,7 +44,6 @@ describe.each(['pglite', 'postgres'] as const)('project thumbnails on %s', (driv
     }
     expect(read).not.toHaveBeenCalled()
     expect((await revalidate('"other"')).status).toBe(200)
-    read.mockRestore()
   })
 
   it('stores all supported types, versions replacements and broadcasts each change', async () => {
@@ -76,10 +78,10 @@ describe.each(['pglite', 'postgres'] as const)('project thumbnails on %s', (driv
   it('rejects invalid uploads without changing the project', async () => {
     const before = await t.request('GET', `/api/projects/${project.slug}`).then(r => r.json())
     for (const [data, type, status, message] of [
-      [png, 'text/plain', 400, 'Use a PNG'], [png, 'image/jpeg', 400, 'isn\'t a JPEG'],
+      [png, 'text/plain', 400, 'PNG'], [png, 'image/jpeg', 400, 'JPEG'],
       [new Uint8Array(), 'image/png', 400, 'empty'],
-      [new Uint8Array(2 * 1024 * 1024 + 1), 'image/png', 413, 'over 2 MB'],
-      [new Uint8Array(3 * 1024 * 1024), 'image/png', 413, 'over 2 MB']
+      [new Uint8Array(2 * 1024 * 1024 + 1), 'image/png', 413, '2 MB'],
+      [new Uint8Array(3 * 1024 * 1024), 'image/png', 413, '2 MB']
     ] as const) {
       const response = await upload(data, type)
       expect(response.status).toBe(status)

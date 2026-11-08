@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import pg from 'pg'
 import { attemptAll, operationError } from './failures.ts'
 import * as schema from './schema.ts'
-import { timedDriver } from './query-timing.ts'
+import { DEFAULT_SLOW_QUERY_MS, timedDriver } from './query-timing.ts'
 
 // Postgres when deployed and in CI; PGlite in development and tests (D14)
 export type DatabaseLocation =
@@ -66,7 +66,13 @@ function postgresPool(connectionString: string, limits: pg.PoolConfig = {}): pg.
 
 // Opens the database and applies any pending migrations. Only apps/server
 // calls this (D8).
-export async function openDatabase(location: DatabaseLocation): Promise<DatabaseHandle> {
+export interface OpenOptions {
+  // Queries slower than this are logged
+  slowQueryMs?: number
+}
+
+export async function openDatabase(location: DatabaseLocation, options: OpenOptions = {}): Promise<DatabaseHandle> {
+  const slowQueryMs = options.slowQueryMs ?? DEFAULT_SLOW_QUERY_MS
   if (location.driver === 'postgres') {
     // Migrations may take as long as they take, so they run before the limit
     const migrating = postgresPool(location.url)
@@ -77,7 +83,7 @@ export async function openDatabase(location: DatabaseLocation): Promise<Database
     }
     await migrating.end()
     const pool = postgresPool(location.url, { statement_timeout: STATEMENT_TIMEOUT_MS })
-    return { db: drizzleNodePg(timedDriver(pool), { schema, casing }), close: () => pool.end() }
+    return { db: drizzleNodePg(timedDriver(pool, slowQueryMs), { schema, casing }), close: () => pool.end() }
   }
 
   // PGlite creates its own folder but not missing parents
@@ -86,7 +92,7 @@ export async function openDatabase(location: DatabaseLocation): Promise<Database
     ? new PGlite({ loadDataDir: location.loadDataDir })
     : location.dataDir === null ? new PGlite() : new PGlite(location.dataDir)
   reportPgliteWarnings(client)
-  const db = drizzlePglite(timedDriver(client), { schema, casing })
+  const db = drizzlePglite(timedDriver(client, slowQueryMs), { schema, casing })
   try {
     await migratePglite(db, { migrationsFolder })
   } catch (error) {

@@ -1,16 +1,13 @@
-import type { CreateDeploymentInput, Deployment } from '@corral/contracts'
-import { richTextToMarkdown, taskRef, type TaskType } from '@corral/core'
+import { type CreateDeploymentInput, type Deployment } from '@corral/contracts'
+import { DEFAULT_AGENT_RUNTIME, richTextToMarkdown, taskRef, type TaskType } from '@corral/core'
 import { schema, type Database, type Executor } from '@corral/db'
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
-import { releaseNotesPrompt } from './prompts.ts'
+import { findPmAgent } from './pm-agent.ts'
 import { RunnerDisconnected, type RunnerHub } from './runner-hub.ts'
 
-const { agents, deployments, projects, tasks } = schema
-
-// The runner gives the CLI two minutes; this covers the round trip
-const NOTES_TIMEOUT_MS = 130_000
+const { deployments, projects, tasks } = schema
 
 const TYPE_HEADINGS: Record<TaskType, string> = { task: 'Tasks', bug: 'Bugs', spike: 'Spikes', design: 'Designs' }
 
@@ -108,8 +105,7 @@ export class ReleaseNotes {
 
   async #drain(): Promise<void> {
     const { db, runner } = this.#d
-    const [pm] = await db.select({ runtime: agents.runtime }).from(agents).where(eq(agents.role, 'pm')).limit(1)
-    const runtime = pm?.runtime ?? 'claude-code'
+    const runtime = (await findPmAgent(db))?.runtime ?? DEFAULT_AGENT_RUNTIME
     while (runner.pick(runtime)) {
       const [row] = await db.select().from(deployments).where(eq(deployments.notesStatus, 'pending')).orderBy(asc(deployments.createdAt)).limit(1)
       if (!row) return
@@ -124,7 +120,7 @@ export class ReleaseNotes {
     if (!project) return
     let answer: string
     try {
-      const result = await this.#d.runner.request({ kind: 'release_notes', runtime, prompt: releaseNotesPrompt({ projectName: project.name, ...changes }) }, NOTES_TIMEOUT_MS)
+      const result = await this.#d.runner.request({ kind: 'release_notes', runtime, prompt: releaseNotesPrompt({ projectName: project.name, ...changes }) }, undefined, runtime)
       answer = result.notes.trim()
       if (!answer) throw new Error('Empty release notes')
     } catch (error) {
@@ -178,4 +174,15 @@ export function withEveryChange(notes: string, changes: Changes): string {
     ...changes.commits.filter(subject => !notes.includes(subject)).map(subject => `- ${subject}`)
   ]
   return missing.length ? `${notes}\n\n## Also in this deployment\n\n${missing.join('\n')}` : notes
+}
+
+// A deployment's release notes (COR-128). `tasks` are the shipped tasks and
+// `commits` the subjects of commits that match no task.
+function releaseNotesPrompt(input: { projectName: string, tasks: { ref: string, type: string, title: string, description: string }[], commits: string[] }): string {
+  const tasks = input.tasks.map(t => `- ${t.ref} (${t.type}): ${t.title}${t.description ? `\n  ${t.description.slice(0, 1000).replace(/\s*\n\s*/g, ' ')}` : ''}`)
+  return [
+    `Write short, user-facing release notes in markdown for a deployment of "${input.projectName}". Say what changed for someone using it, not how it was built. Use the headings "## Features", "## Fixes" and "## Other changes", leaving out any with nothing under it, with one bullet per change. End each bullet with the ref of its task, such as (${input.tasks[0]?.ref ?? 'ABC-12'}). Every task below gets a bullet. Every commit under "Commits with no task" gets a bullet under "## Other changes" with its subject exactly as written. Reply with the notes only, with no introduction.`,
+    tasks.length ? `Tasks:\n${tasks.join('\n')}` : '',
+    input.commits.length ? `Commits with no task:\n${input.commits.map(subject => `- ${subject}`).join('\n')}` : ''
+  ].filter(Boolean).join('\n\n')
 }

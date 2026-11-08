@@ -1,13 +1,15 @@
 // @vitest-environment happy-dom
+import { MutationObserver } from '@tanstack/vue-query'
 import { describe, expect, it, vi } from 'vitest'
 import type { PlanSessionDetail } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { api } from '~/queries/api'
 import { applyEvent } from './dependencies'
 import { keys } from './keys'
 import { testQueryClient } from './mount-with-query'
-import { markPlanRead, planSessionQuery } from './plan'
+import { markRead } from './inbox'
+import { planSessionQuery } from './plan'
 
-vi.mock('~/composables/useApi', () => ({ api: { plan: { session: vi.fn(), read: vi.fn() } } }))
+vi.mock('~/queries/api', () => ({ api: { plan: { session: vi.fn(), read: vi.fn() } } }))
 const detail = (): PlanSessionDetail => ({
   id: 's-1', title: 'Search filters', unread: true, updatedAt: '2026-10-29T12:00:00Z',
   messages: [{ id: 'm-1', sessionId: 's-1', role: 'human', kind: 'message', text: 'Add filters' }],
@@ -58,9 +60,9 @@ describe('Plan session cache', () => {
     client.setQueryData(keys.plan.session(saved.id), saved)
     vi.mocked(api.plan.read).mockResolvedValue({ ...saved, unread: false })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    markPlanRead(client, saved.id)
+    void new MutationObserver(client, markRead).mutate({ type: 'plan_thread', id: saved.id })
     applyEvent(client, { type: 'plan.session', session: { ...saved, unread: false } })
-    expect(api.plan.read).toHaveBeenCalledWith(saved.id)
+    await vi.waitFor(() => expect(api.plan.read).toHaveBeenCalledWith(saved.id))
     expect(invalidate).not.toHaveBeenCalled()
     expect(client.getQueryData<PlanSessionDetail>(keys.plan.session(saved.id))?.unread).toBe(false)
     expect(client.getQueryData<PlanSessionDetail[]>(keys.plan.sessions())?.map(s => s.id)).toEqual(['newest', saved.id])

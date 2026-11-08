@@ -1,59 +1,37 @@
-import { taskRef, type Actor } from '@corral/core'
-import { schema, type Database, type Executor } from '@corral/db'
-import { and, asc, desc, eq, inArray, isNotNull, isNull, gt, notInArray, notLike } from 'drizzle-orm'
-import { appendAudit, auditEvent, type TransitionDetail } from './audit.ts'
-import { EpicSynchronizer } from './epic-sync.ts'
-import type { EventBus } from './events.ts'
-import { MAX_CI_FIXES } from './ci-output.ts'
-import { triageCap } from './retry-recovery.ts'
-import type { CheckResult, GitHubClient } from './github.ts'
-import { ciFixesInARow } from './task-base.ts'
-import type { RunnerHub } from './runner-hub.ts'
-import { applyTransition, lockTask, type ProjectRow } from './tasks.ts'
+import { ACTIVE_OPERATION_STATES, errorText, SERVER_ACTOR, taskRef } from '@corral/core'
+import { schema, type EpicRow, type Executor, type OperationRow, type ProjectRow, type SubmissionRow, type TaskRow } from '@corral/db'
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull } from 'drizzle-orm'
+import { appendAudit, auditEvent } from './audit.ts'
+import { checkRows } from './checks.ts'
+import type { EpicSynchronizer } from './epic-sync.ts'
+import { activeOperation, beginOperation, countsAsFailure, endedBy, endingText, moveOperation, runnerUnavailable, type BranchWriterDeps, type OperationEnding } from './operations.ts'
+import { lockTask } from './task-rows.ts'
+import { applyTransition, recordTaskMerged } from './tasks.ts'
+import { ciFailed, settleTask, type ServerChange } from './task-settle.ts'
+import { addCommentWithTransition } from './comments.ts'
 
-const { comments, epics, projects, taskIntegrationOperations: operations, taskSubmissions: submissions, tasks } = schema
-type OperationRow = typeof operations.$inferSelect
-type SubmissionRow = typeof submissions.$inferSelect
-type EpicRow = typeof epics.$inferSelect
+const { epics, projects, taskIntegrationOperations: operations, taskSubmissions: submissions, tasks } = schema
 
-const server: Actor = { kind: 'system', component: 'server' }
-const ACTIVE = ['pending', 'running', 'reconciling'] as const
-
-// Why an operation ended, when that says nothing against the submission: these
-// retry at once, and anything else counts towards MAX_FAILED_OPERATIONS
-const TARGET_MOVED = 'The task\'s branch moved'
-const INTERRUPTED = 'Interrupted before a candidate was ready'
-// Rows from before D31 say epic
-const RETRIES = [TARGET_MOVED, 'The epic branch moved', 'The parent branch moved', INTERRUPTED]
-const CANCELLED = 'The task left Ready to merge'
-// Starts the error of a job the runner couldn't answer: a network blip or a lost
-// runner says nothing against the submission, so it's retried on a later pass
-const UNAVAILABLE = 'The runner could not finish the job'
+// Endings that say nothing against the submission: these retry at once, and
+// anything else counts towards MAX_FAILED_OPERATIONS
+const RETRIES: OperationEnding[] = ['targetMoved', 'interrupted', 'cancelled']
 const MAX_FAILED_OPERATIONS = 3
 // Fresh operations one epic may go through in a pass, when its branch keeps moving
 const MAX_OPERATIONS_PER_PASS = 5
 
-const PREPARE_TIMEOUT_MS = 12 * 60_000
-const PUSH_TIMEOUT_MS = 3 * 60_000
-const INSPECT_TIMEOUT_MS = 11 * 60_000
 // A required check that hasn't appeared on the candidate by now doesn't run on
 // such a commit (a PR-only workflow, say), and is left to the epic PR's merge gate
 const CHECK_APPEAR_MS = 3 * 60_000
 const CHECK_FINISH_MS = 60 * 60_000
 
-export interface IntegrationDeps {
-  db: Database
-  events: EventBus
-  github: GitHubClient
-  runner: RunnerHub
-  now?: () => Date
-  wake?: (taskIds: string[]) => void
+export interface IntegrationDeps extends BranchWriterDeps {
+  // Rebases the epic branch between integrations, at its checkpoint
+  sync: Pick<EpicSynchronizer, 'due' | 'begin' | 'step'>
+  // Told about every task whose status this changed
+  settled: (taskId: string) => Promise<void>
 }
 
-// `settled` is told about every task whose status this changed
-type Settled = (taskId: string) => Promise<void>
 // Whether the kill switch or the update hold is on right now
-type Stopped = () => boolean
 
 // Moves approved PR-free tasks onto their epic branch (D27, flows.md section 4),
 // one at a time per epic. Every step is journaled in task_integration_operations
@@ -63,39 +41,35 @@ type Stopped = () => boolean
 // epic head, and a task becomes Merged only from a fresh read of the remote.
 export class TaskIntegrator {
   #d: IntegrationDeps
-  #settled: Settled
-  #sync: EpicSynchronizer
   #busy = new Set<string>()
   // Operations whose candidate is waiting on CI or a pause, neither of which
   // needs a remote read. The push's compare-and-swap catches a branch that moved.
   #awaitingChecks = new Set<string>()
 
-  constructor(deps: IntegrationDeps, settled: Settled) {
+  constructor(deps: IntegrationDeps) {
     this.#d = deps
-    this.#settled = settled
-    this.#sync = new EpicSynchronizer(deps, settled)
   }
 
   #now(): Date {
-    return this.#d.now?.() ?? new Date()
+    return this.#d.now()
   }
 
   get inFlight(): number {
     return this.#busy.size
   }
 
-  async tick(stopped: Stopped): Promise<void> {
+  async tick(): Promise<void> {
     const { db } = this.#d
     if (!this.#d.runner.integrationRunner() && !this.#d.runner.epicRebaseRunner()) return
-    const active = await db.select({ epicId: operations.epicId }).from(operations).where(inArray(operations.state, [...ACTIVE]))
+    const active = await db.select({ epicId: operations.epicId }).from(operations).where(inArray(operations.state, [...ACTIVE_OPERATION_STATES]))
     const waiting = await this.#waiting().then(rows => rows.map(r => ({ epicId: r.task.epicId! })))
-    const due = await this.#sync.due().then(ids => ids.map(epicId => ({ epicId })))
+    const due = await this.#d.sync.due().then(ids => ids.map(epicId => ({ epicId })))
     for (const epicId of new Set([...active, ...waiting, ...due].map(r => r.epicId))) {
-      if (stopped()) return
+      if (this.#d.gate.halted) return
       if (this.#busy.has(epicId)) continue
       this.#busy.add(epicId)
       try {
-        await this.#advance(epicId, stopped)
+        await this.#advance(epicId)
       } catch (error) {
         console.error(`Integration for epic ${epicId} failed`, error)
       } finally {
@@ -113,17 +87,17 @@ export class TaskIntegrator {
       .orderBy(asc(tasks.updatedAt), asc(tasks.id))
   }
 
-  async #advance(epicId: string, stopped: Stopped): Promise<void> {
-    for (let n = 0; n < MAX_OPERATIONS_PER_PASS && !stopped(); n++) {
-      const [active] = await this.#d.db.select().from(operations).where(and(eq(operations.epicId, epicId), inArray(operations.state, [...ACTIVE])))
+  async #advance(epicId: string): Promise<void> {
+    for (let n = 0; n < MAX_OPERATIONS_PER_PASS && !this.#d.gate.halted; n++) {
+      const active = await activeOperation(this.#d.db, epicId)
       // Between integrations is the epic's checkpoint: nothing else is writing
-      const rebase = active?.kind === 'rebase' ? active : active ? null : await this.#sync.begin(epicId, stopped)
+      const rebase = active?.kind === 'rebase' ? active : active ? null : await this.#d.sync.begin(epicId)
       if (rebase) {
-        if (!await this.#sync.step(rebase, stopped)) return
+        if (!await this.#d.sync.step(rebase)) return
         continue
       }
       const operation = active ?? await this.#begin(epicId)
-      if (!operation || !await this.#step(operation, stopped)) return
+      if (!operation || !await this.#step(operation)) return
     }
   }
 
@@ -133,7 +107,7 @@ export class TaskIntegrator {
     for (const { task, project, epic } of await this.#waiting(epicId)) {
       const expected = epic.branch ? await github.branchHead(project.repository, epic.branch) : null
       if (!expected) {
-        await this.#transition(task.id, { type: 'block', reason: `The task's branch ${epic.branch ?? '(none)'} doesn't exist, so this task can't be integrated` }, { event: 'merge_failed' })
+        await this.#settle(task.id, { event: { type: 'block', reason: `The task's branch ${epic.branch ?? '(none)'} doesn't exist, so this task can't be integrated` }, detail: { event: 'merge_failed' } })
         continue
       }
       const operation = await db.transaction(async (tx) => {
@@ -142,13 +116,12 @@ export class TaskIntegrator {
         const [submission] = await tx.select().from(submissions).where(eq(submissions.taskId, task.id)).orderBy(desc(submissions.sequence)).limit(1)
         // Approval binds to one commit: anything else goes back for review
         if (!submission || submission.agentApprovedHeadSha !== locked.task.headSha) {
-          await applyTransition(tx, locked.task, locked.project, { type: 'head_moved' }, server, { event: 'head_moved', headSha: locked.task.headSha ?? '' })
+          await applyTransition(tx, locked.task, locked.project, { type: 'head_moved' }, SERVER_ACTOR, { event: 'head_moved', headSha: locked.task.headSha ?? '' })
           return null
         }
-        const [last] = await tx.select({ leaseEpoch: operations.leaseEpoch }).from(operations).where(eq(operations.epicId, epicId)).orderBy(desc(operations.leaseEpoch)).limit(1)
-        const [created] = await tx.insert(operations).values({ submissionId: submission.id, epicId, kind: 'integrate', expectedTargetSha: expected, leaseEpoch: (last?.leaseEpoch ?? 0) + 1 }).onConflictDoNothing().returning()
+        const created = await beginOperation(tx, { submissionId: submission.id, epicId, kind: 'integrate', expectedTargetSha: expected })
         if (created) await this.#audit(tx, created, locked.task.id, project.id, 'started')
-        return created ?? null
+        return created
       })
       if (operation) return operation
     }
@@ -156,7 +129,7 @@ export class TaskIntegrator {
   }
 
   async #audit(tx: Executor, operation: OperationRow, taskId: string, projectId: string, event: 'started' | 'succeeded' | 'failed' | 'checks_deferred', extra: { commitSha?: string, error?: string } = {}): Promise<void> {
-    await appendAudit(tx, { projectId, taskId, actor: server }, auditEvent('integration.operation', {
+    await appendAudit(tx, { projectId, taskId, actor: SERVER_ACTOR }, auditEvent('integration.operation', {
       operationId: operation.id, submissionId: operation.submissionId!, event, expectedTargetSha: operation.expectedTargetSha, leaseEpoch: operation.leaseEpoch, ...extra
     }))
   }
@@ -171,23 +144,22 @@ export class TaskIntegrator {
   }
 
   // One step of the operation. True when the epic should be looked at again now.
-  async #step(operation: OperationRow, stopped: Stopped): Promise<boolean> {
+  async #step(operation: OperationRow): Promise<boolean> {
     const ctx = await this.#context(operation)
-    if (operation.state === 'pending') return this.#prepare(operation, ctx, stopped)
-    if (operation.state === 'running' && this.#awaitingChecks.has(operation.id)) return this.#gate(operation, ctx, stopped)
-    return this.#reconcile(operation, ctx, stopped)
+    if (operation.state === 'pending') return this.#prepare(operation, ctx)
+    if (operation.state === 'running' && this.#awaitingChecks.has(operation.id)) return this.#gate(operation, ctx)
+    return this.#reconcile(operation, ctx)
   }
 
-  async #prepare(pending: OperationRow, ctx: Context, stopped: Stopped): Promise<boolean> {
+  async #prepare(pending: OperationRow, ctx: Context): Promise<boolean> {
     const { db, runner } = this.#d
     const { submission, task, project, epic } = ctx
-    if (stopped()) return false
-    if (task.status !== 'ready_to_merge' || task.deletedAt) return this.#fail(pending, ctx, CANCELLED)
+    if (this.#d.gate.halted) return false
+    if (task.status !== 'ready_to_merge' || task.deletedAt) return this.#fail(pending, ctx, endingText('cancelled'))
     if (task.paused || project.paused) return false
     const runnerId = runner.integrationRunner()
     if (!runnerId) return false
-    const [operation] = await db.update(operations).set({ state: 'running', runnerId, updatedAt: this.#now() })
-      .where(and(eq(operations.id, pending.id), eq(operations.state, 'pending'), eq(operations.leaseEpoch, pending.leaseEpoch))).returning()
+    const operation = await moveOperation(db, pending, ['pending'], { state: 'running', runnerId, updatedAt: this.#now() })
     if (!operation) return false
     let prepared
     try {
@@ -197,32 +169,32 @@ export class TaskIntegrator {
         message: `${taskRef(project.prefix, task.number)}: ${task.title}\n\nCorral-Submission: ${submission.id}\n`,
         committedAt: operation.createdAt.toISOString(),
         candidateRef: project.requiredChecks.length > 0 ? candidateRef(operation) : null
-      }, PREPARE_TIMEOUT_MS)
+      })
     } catch (error) {
-      return this.#fail(operation, ctx, `${UNAVAILABLE}: ${message(error)}`)
+      return this.#fail(operation, ctx, runnerUnavailable(errorText(error)))
     }
     switch (prepared.status) {
       case 'integrated':
         await this.#complete(operation, ctx, prepared.commitSha!)
         return true
       case 'moved':
-        return this.#fail(operation, ctx, TARGET_MOVED)
+        return this.#fail(operation, ctx, endingText('targetMoved'))
       case 'failed':
         return this.#fail(operation, ctx, `Could not build a candidate: ${prepared.error ?? 'unknown error'}`)
       case 'conflict':
         await this.#fail(operation, ctx, `Conflicts with the task's branch: ${prepared.files.join(', ')}`)
-        await this.#transition(task.id, { type: 'base_conflict', approvedHeadSha: task.headSha! }, { event: 'base_conflict' },
-          `The task's branch \`${epic.branch}\` has moved and this work no longer applies to it cleanly${prepared.files.length ? `: ${prepared.files.map(f => `\`${f}\``).join(', ')}` : ''}. Rebase onto \`origin/${epic.branch}\`, resolve the conflicts, and report commit_submitted.`)
+        await this.#settle(task.id, { event: { type: 'base_conflict', approvedHeadSha: task.headSha! }, detail: { event: 'base_conflict' },
+          comment: `The task's branch \`${epic.branch}\` has moved and this work no longer applies to it cleanly${prepared.files.length ? `: ${prepared.files.map(f => `\`${f}\``).join(', ')}` : ''}. Rebase onto \`origin/${epic.branch}\`, resolve the conflicts, and report commit_submitted.` })
         return true
       case 'empty':
         await this.#fail(operation, ctx, 'The change is already on the task\'s branch')
-        await this.#transition(task.id, { type: 'ci_failed' }, { event: 'ci_failed', checks: [] },
-          `Applied to the task's branch \`${epic.branch}\`, this submission changes nothing, so there is nothing to integrate. Check it against \`origin/${epic.branch}\` and report commit_submitted.`)
+        await this.#settle(task.id, { event: { type: 'ci_failed' }, detail: { event: 'ci_failed', checks: [] },
+          comment: `Applied to the task's branch \`${epic.branch}\`, this submission changes nothing, so there is nothing to integrate. Check it against \`origin/${epic.branch}\` and report commit_submitted.` })
         return true
       case 'prepared': {
         const [ready] = await db.update(operations).set({ resultHeadSha: prepared.commitSha, updatedAt: this.#now() }).where(eq(operations.id, operation.id)).returning()
         // Preparing can take minutes: the gate needs the task as it is now
-        return this.#gate(ready!, await this.#context(ready!), stopped)
+        return this.#gate(ready!, await this.#context(ready!))
       }
     }
   }
@@ -232,11 +204,11 @@ export class TaskIntegrator {
   // checked by. Required checks that only run on the epic PR stay at its merge.
   // The kill switch and the update hold are read at each step here, because any
   // wait can outlast them. A stopped operation stays running, to resume as it was.
-  async #gate(operation: OperationRow, ctx: Context, stopped: Stopped): Promise<boolean> {
+  async #gate(operation: OperationRow, ctx: Context): Promise<boolean> {
     const { db, runner } = this.#d
     const { submission, task, project, epic } = ctx
-    if (stopped()) return false
-    if (task.status !== 'ready_to_merge' || task.deletedAt || task.headSha !== submission.agentApprovedHeadSha) return this.#fail(operation, ctx, CANCELLED)
+    if (this.#d.gate.halted) return false
+    if (task.status !== 'ready_to_merge' || task.deletedAt || task.headSha !== submission.agentApprovedHeadSha) return this.#fail(operation, ctx, endingText('cancelled'))
     // Nothing shared moves while paused; the operation carries on afterwards
     if (task.paused || project.paused) {
       this.#awaitingChecks.add(operation.id)
@@ -247,43 +219,36 @@ export class TaskIntegrator {
       this.#awaitingChecks.add(operation.id)
       return false
     }
-    if (stopped()) return false
+    if (this.#d.gate.halted) return false
     this.#awaitingChecks.delete(operation.id)
     if (verdict.state === 'failed') {
       await this.#fail(operation, ctx, `Required checks failed on candidate ${operation.resultHeadSha}: ${verdict.checks.map(c => c.name).join(', ')}`)
-      if (await ciFixesInARow(db, task.id) >= MAX_CI_FIXES) {
-        await this.#transition(task.id, { type: 'fail', reason: `CI still fails after ${MAX_CI_FIXES} fixes in a row: ${verdict.checks.map(c => c.name).join(', ')}` }, { event: 'ci_failed', checks: verdict.checks.map(c => c.name) })
-        return true
-      }
-      await this.#transition(task.id, { type: 'ci_failed' }, { event: 'ci_failed', checks: verdict.checks.map(c => c.name) },
-        ['CI failed on this task\'s work applied to the task\'s branch, which has not moved. Fix it and report commit_submitted.', '', ...verdict.checks.map(c => `- ${c.name}: failed${c.url ? ` (${c.url})` : ''}`)].join('\n'), { ciFix: verdict.checks.map(c => ({ name: c.name, url: c.url })), approvedHeadSha: task.headSha })
+      await this.#settle(task.id, await ciFailed(db, task.id, verdict.checks, task.headSha, 'CI failed on this task\'s work applied to the task\'s branch, which has not moved. Fix it and report commit_submitted.'))
       return true
     }
     if (verdict.state === 'timed_out') {
       const reason = `Required checks never finished on candidate ${operation.resultHeadSha}: ${verdict.checks.map(c => c.name).join(', ')}`
       await this.#fail(operation, ctx, reason)
-      await this.#transition(task.id, { type: 'block', reason }, { event: 'merge_failed' })
+      await this.#settle(task.id, { event: { type: 'block', reason }, detail: { event: 'merge_failed' } })
       return true
     }
     if (verdict.deferred.length > 0) await this.#audit(db, operation, task.id, project.id, 'checks_deferred', { error: verdict.deferred.join(', ') })
     // From here the result is unknown until the remote has been read
-    const [pushing] = await db.update(operations).set({ state: 'reconciling', updatedAt: this.#now() })
-      .where(and(eq(operations.id, operation.id), eq(operations.state, 'running'), eq(operations.leaseEpoch, operation.leaseEpoch))).returning()
+    const pushing = await moveOperation(db, operation, ['running'], { state: 'reconciling', updatedAt: this.#now() })
     if (!pushing) return false
     // Nothing was sent, so this isn't an unknown result. The original time keeps
     // the age of its checks.
-    if (stopped()) {
-      await db.update(operations).set({ state: 'running', updatedAt: operation.updatedAt })
-        .where(and(eq(operations.id, operation.id), eq(operations.state, 'reconciling'), eq(operations.leaseEpoch, operation.leaseEpoch)))
+    if (this.#d.gate.halted) {
+      await moveOperation(db, operation, ['reconciling'], { state: 'running', updatedAt: operation.updatedAt })
       return false
     }
     let error: string | null
     try {
       error = (await runner.requestOn<'integration_push'>(operation.runnerId!, {
         kind: 'integration_push', repository: project.repository, targetBranch: epic.branch!, expectedTargetSha: operation.expectedTargetSha, candidateSha: operation.resultHeadSha!
-      }, PUSH_TIMEOUT_MS)).error
+      })).error
     } catch (failure) {
-      error = `${UNAVAILABLE}: ${message(failure)}`
+      error = runnerUnavailable(errorText(failure))
     }
     if (error) await db.update(operations).set({ error }).where(eq(operations.id, operation.id))
     return true
@@ -292,28 +257,29 @@ export class TaskIntegrator {
   async #checks(project: ProjectRow, operation: OperationRow): Promise<CheckVerdict> {
     const required = project.requiredChecks
     if (required.length === 0) return { state: 'passed', deferred: [] }
+    // A read that fails is tried again on a later pass, like a check still running
     const found = await this.#d.github.checks(project.repository, operation.resultHeadSha!).catch(() => null)
     if (!found) return { state: 'waiting' }
-    const reported = required.map(name => found.find(c => c.name === name)).filter((c): c is CheckResult => c !== undefined)
-    const failed = reported.filter(c => c.conclusion === 'failure')
+    const rows = checkRows(required, found)
+    const failed = rows.filter(c => c.conclusion === 'failure')
     if (failed.length > 0) return { state: 'failed', checks: failed }
     const age = this.#now().getTime() - operation.updatedAt.getTime()
-    const pending = reported.filter(c => c.conclusion === 'pending')
+    const pending = rows.filter(c => c.conclusion === 'pending')
     if (pending.length > 0) return age >= CHECK_FINISH_MS ? { state: 'timed_out', checks: pending } : { state: 'waiting' }
-    const deferred = required.filter(name => !reported.some(c => c.name === name))
+    const deferred = rows.filter(c => c.conclusion === 'missing').map(c => c.name)
     return deferred.length > 0 && age < CHECK_APPEAR_MS ? { state: 'waiting' } : { state: 'passed', deferred }
   }
 
   // Nothing is assumed about an operation found part-way, or one whose push
   // has an unknown result: the remote says what happened. A failed read leaves
   // it as it is for the next pass.
-  async #reconcile(operation: OperationRow, ctx: Context, stopped: Stopped): Promise<boolean> {
+  async #reconcile(operation: OperationRow, ctx: Context): Promise<boolean> {
     const { runner } = this.#d
     const runnerId = runner.integrationRunner()
     if (!runnerId) return false
     let remote
     try {
-      remote = await runner.requestOn<'integration_inspect'>(runnerId, { kind: 'integration_inspect', repository: ctx.project.repository, targetBranch: ctx.epic.branch!, submissionId: ctx.submission.id }, INSPECT_TIMEOUT_MS)
+      remote = await runner.requestOn<'integration_inspect'>(runnerId, { kind: 'integration_inspect', repository: ctx.project.repository, targetBranch: ctx.epic.branch!, submissionId: ctx.submission.id })
     } catch (error) {
       console.error(`Could not read the epic branch for integration ${operation.id}`, error)
       return false
@@ -322,11 +288,11 @@ export class TaskIntegrator {
       await this.#complete(operation, ctx, remote.integratedSha)
       return true
     }
-    if (remote.targetSha !== operation.expectedTargetSha) return this.#fail(operation, ctx, TARGET_MOVED)
+    if (remote.targetSha !== operation.expectedTargetSha) return this.#fail(operation, ctx, endingText('targetMoved'))
     if (operation.state === 'reconciling') return this.#fail(operation, ctx, operation.error ?? 'The push did not reach the task\'s branch')
     // Found running after a restart, with the branch where it was left
-    if (operation.resultHeadSha && operation.runnerId && runner.isOnline(operation.runnerId)) return this.#gate(operation, ctx, stopped)
-    return this.#fail(operation, ctx, INTERRUPTED)
+    if (operation.resultHeadSha && operation.runnerId && runner.isOnline(operation.runnerId)) return this.#gate(operation, ctx)
+    return this.#fail(operation, ctx, endingText('interrupted'))
   }
 
   // The operation, the submission's integrated commit and Merged commit together
@@ -336,21 +302,19 @@ export class TaskIntegrator {
     await db.transaction(async (tx) => {
       // Not lockTask: a deleted task's commit is on the branch all the same
       const [current] = await tx.select().from(tasks).where(eq(tasks.id, task.id)).for('update')
-      const [done] = await tx.update(operations).set({ state: 'succeeded', resultHeadSha: commitSha, error: null, updatedAt: this.#now() })
-        .where(and(eq(operations.id, operation.id), inArray(operations.state, [...ACTIVE]), eq(operations.leaseEpoch, operation.leaseEpoch))).returning()
+      const done = await moveOperation(tx, operation, ACTIVE_OPERATION_STATES, { state: 'succeeded', resultHeadSha: commitSha, error: null, updatedAt: this.#now() })
       if (!done) return
       await tx.update(submissions).set({ integratedCommitSha: commitSha, integratedAt: this.#now() }).where(eq(submissions.id, submission.id))
       await this.#audit(tx, operation, task.id, project.id, 'succeeded', { commitSha })
       if (current!.status === 'ready_to_merge' && !current!.deletedAt) {
-        await applyTransition(tx, current!, project, { type: 'integrated', confirmedOnEpicBranch: true }, server, { event: 'integrated', submissionId: submission.id, integratedCommitSha: commitSha })
-        await tx.update(tasks).set({ mergeCommitSha: commitSha, mergedAt: this.#now(), updatedAt: this.#now() }).where(eq(tasks.id, task.id))
+        await recordTaskMerged(tx, { task: current!, project }, { type: 'integrated', confirmedOnEpicBranch: true }, { event: 'integrated', submissionId: submission.id, integratedCommitSha: commitSha }, { commitSha, at: this.#now() })
       } else {
         // Sent back while its push was landing: the commit stands, and the task stays open
-        await tx.insert(comments).values({ taskId: task.id, author: server, body: `This submission reached the task's branch as ${commitSha} just as the task left Ready to merge. The task stays open; base any further work on \`origin/${submission.targetBranch}\`.` })
+        await addCommentWithTransition(tx, task.id, { body: `This submission reached the task's branch as ${commitSha} just as the task left Ready to merge. The task stays open; base any further work on \`origin/${submission.targetBranch}\`.` }, SERVER_ACTOR)
       }
     })
     await this.#finish(operation, ctx)
-    await this.#settled(task.id)
+    await this.#d.settled(task.id)
   }
 
   // Ends an operation that didn't integrate. True: look at the epic again now,
@@ -361,17 +325,16 @@ export class TaskIntegrator {
     const { db } = this.#d
     const { submission, task, project } = ctx
     await db.transaction(async (tx) => {
-      const [failed] = await tx.update(operations).set({ state: 'failed', error, updatedAt: this.#now() })
-        .where(and(eq(operations.id, operation.id), inArray(operations.state, [...ACTIVE]), eq(operations.leaseEpoch, operation.leaseEpoch))).returning()
+      const failed = await moveOperation(tx, operation, ACTIVE_OPERATION_STATES, { state: 'failed', error, updatedAt: this.#now() })
       if (failed) await this.#audit(tx, operation, task.id, project.id, 'failed', { error })
     })
     await this.#finish(operation, ctx)
     const counted = await db.select({ id: operations.id }).from(operations)
-      .where(and(eq(operations.submissionId, submission.id), eq(operations.state, 'failed'), notInArray(operations.error, [...RETRIES, CANCELLED]), notLike(operations.error, `${UNAVAILABLE}%`)))
+      .where(and(eq(operations.submissionId, submission.id), eq(operations.state, 'failed'), countsAsFailure(RETRIES)))
     if (counted.length >= MAX_FAILED_OPERATIONS) {
-      await this.#transition(task.id, { type: 'fail', reason: `Integration failed ${counted.length} times: ${error}` }, { event: 'merge_failed' })
+      await this.#settle(task.id, { event: { type: 'fail', reason: `Integration failed ${counted.length} times: ${error}` }, detail: { event: 'merge_failed' }, cap: true })
     }
-    return [...RETRIES, CANCELLED].includes(error)
+    return endedBy(error, ...RETRIES)
   }
 
   async #finish(operation: OperationRow, ctx: Context): Promise<void> {
@@ -380,29 +343,18 @@ export class TaskIntegrator {
     await this.#d.github.deleteBranch(ctx.project.repository, candidateRef(operation)).catch(error => console.error(`Could not delete ${candidateRef(operation)}`, error))
   }
 
-  async #transition(taskId: string, event: Parameters<typeof applyTransition>[3], detail: TransitionDetail, comment?: string, values?: Partial<typeof tasks.$inferInsert>): Promise<void> {
-    await this.#d.db.transaction(async (tx) => {
-      const { task, project } = await lockTask(tx, taskId)
-      if (task.status !== 'ready_to_merge' || task.leaseRunId) return
-      await applyTransition(tx, task, project, event, server, detail)
-      // Both of this class's failures are caps
-      if (event.type === 'fail') await triageCap(tx, taskId, true)
-      if (values) await tx.update(tasks).set(values).where(eq(tasks.id, taskId))
-      if (comment) await tx.insert(comments).values({ taskId, author: server, body: comment })
-    })
-    await this.#settled(taskId)
+  async #settle(taskId: string, change: ServerChange): Promise<void> {
+    if (await settleTask(this.#d.db, taskId, change)) await this.#d.settled(taskId)
   }
 }
 
-type Context = { submission: SubmissionRow, task: typeof tasks.$inferSelect, project: ProjectRow, epic: EpicRow }
+type Context = { submission: SubmissionRow, task: TaskRow, project: ProjectRow, epic: EpicRow }
 
 type CheckVerdict =
   | { state: 'waiting' }
   | { state: 'passed', deferred: string[] }
-  | { state: 'failed', checks: CheckResult[] }
-  | { state: 'timed_out', checks: CheckResult[] }
+  | { state: 'failed', checks: ReturnType<typeof checkRows> }
+  | { state: 'timed_out', checks: ReturnType<typeof checkRows> }
 
 // Where CI sees a candidate. The operation's ID keeps a retry off an older run.
 const candidateRef = (operation: OperationRow) => `corral/candidates/${operation.id}`
-
-const message = (error: unknown) => error instanceof Error ? error.message : String(error)

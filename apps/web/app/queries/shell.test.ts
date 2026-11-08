@@ -3,20 +3,19 @@ import type { ServerEvent } from '@corral/contracts'
 import { flushPromises } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, ref, watch } from 'vue'
-import { api } from '~/composables/useApi'
+import { api } from '~/queries/api'
 import { createQueryClient } from './client'
 import { applyEvent } from './dependencies'
 import { connectQueries, MAX_WAIT_MS, QUIET_MS } from './live'
 import { keys } from './keys'
-import { reloadShell, shell, startShell } from './shell'
+import { reloadShell, startShell, useShell } from './shell'
 
-vi.mock('~/composables/useApi', async original => ({ ...await original<typeof import('~/composables/useApi')>(), api: {
+vi.mock('~/queries/api', async original => ({ ...await original<typeof import('~/queries/api')>(), api: {
   projects: { list: vi.fn() }, agents: { list: vi.fn() }, runner: vi.fn(), status: vi.fn(),
   me: { get: vi.fn() }, plan: { sessions: vi.fn() }, inbox: { get: vi.fn() }
 } }))
 
-// useLive and useShell with Nuxt's auto-imports stubbed
-const pendingApply = vi.fn()
+// useLive with Nuxt's auto-imports stubbed
 const eventSources: FakeEventSource[] = []
 class FakeEventSource {
   handlers: Record<string, (message: { data: string }) => void> = {}
@@ -38,8 +37,7 @@ vi.stubGlobal('EventSource', FakeEventSource)
 const useState = vi.fn((_key: string, init: () => unknown) => ref(init()))
 vi.stubGlobal('useState', useState)
 
-const { useLive } = await import('~/composables/useLive')
-const { useShell } = await import('~/features/shell/composables/useShell')
+const { useLive } = await import('~/queries/stream')
 
 const run = { id: 'r1', projectId: 'p1', taskId: 't1' }
 const task = { id: 't1', ref: 'TA-1', projectId: 'p1', status: 'ready', epicId: null }
@@ -59,7 +57,7 @@ describe('shell queries', () => {
     vi.mocked(api.plan.sessions).mockResolvedValue([])
     vi.mocked(api.inbox.get).mockResolvedValue({ count: 2, needsYou: [] } as never)
     client = createQueryClient()
-    stops = [startShell(client), connectQueries(client, { onEvent: pendingApply })]
+    stops = [startShell(client), connectQueries(client)]
   })
   afterEach(() => {
     stops.forEach(stop => stop())
@@ -134,9 +132,10 @@ describe('shell queries', () => {
   it('hands events on with no conversation mounted', async () => {
     useLive().connect()
     await loaded()
-    const session = { id: 's1', unread: false }
-    eventSources.at(-1)!.emit({ type: 'plan.session', session } as ServerEvent)
-    expect(pendingApply).toHaveBeenCalledWith(expect.objectContaining({ type: 'plan.session', session }))
+    const session = { id: 's1', unread: false, messages: [], plans: [] }
+    client.setQueryData(keys.plan.starts(), { s1: { session, message: 'Hi', state: 'starting', error: null, sending: true, sessionReceived: false } })
+    eventSources.at(-1)!.emit({ type: 'plan.session', session: { id: 's1', unread: false, title: 'Hi' } } as ServerEvent)
+    expect(client.getQueryData<Record<string, { state: string, session: { title?: string } }>>(keys.plan.starts())?.s1).toMatchObject({ state: 'accepted', session: { title: 'Hi' } })
   })
 
   it('keeps loaded through a failed background refetch and reports the error', async () => {
@@ -145,8 +144,9 @@ describe('shell queries', () => {
     const reload = reloadShell()
     await vi.advanceTimersByTimeAsync(10_000)
     await reload
-    expect(shell()!.loaded.value).toBe(true)
-    expect(shell()!.error.value).toBe('down')
+    const shellData = useShell()
+    expect(shellData.loaded).toBe(true)
+    expect(shellData.error).toBe('down')
   })
 
   it('asks for nothing while the data is fresh, however many read it', async () => {

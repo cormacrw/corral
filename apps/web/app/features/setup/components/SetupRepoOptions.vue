@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { Setup } from '~/features/setup/composables/useSetup'
+import { MERGE_METHOD } from '~/utils/labels'
 
-const MERGE_METHODS = [{ label: 'Squash and merge', value: 'squash' }, { label: 'Merge commit', value: 'merge' }, { label: 'Rebase and merge', value: 'rebase' }]
+const mergeMethods = Object.entries(MERGE_METHOD).map(([value, label]) => ({ label, value }))
 
 const props = defineProps<{ setup: Setup }>()
 const { prefix, prefixError, setPrefix, checking, defaultBranch, mergeMethod } = props.setup
@@ -45,7 +46,7 @@ const { isMobile } = useDevice()
       <AppSelectMenu
         :id="id"
         v-model="mergeMethod"
-        :items="MERGE_METHODS"
+        :items="mergeMethods"
       />
     </AppFormField>
   </div>

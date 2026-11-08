@@ -1,13 +1,14 @@
+import { errorText } from '@corral/core'
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import { exec } from './exec.ts'
 
-// Leave 120 seconds for the upload and 15 seconds for file handling within
-// Codex's 180-second MCP tool budget (codex.ts).
+// Well inside an attach_evidence call's budget, which also has to cover the
+// upload (MCP_TOOL_TIMEOUT_SECONDS in budgets.ts less TOOL_CALL_TIMEOUT_MS)
 const CONVERT_TIMEOUT_MS = 45_000
 const MAX_REASON_CHARS = 300
 
-export type ConvertedVideo = { ok: true, fileName: string, data: Buffer } | { ok: false, error: string }
+type ConvertedVideo = { ok: true, fileName: string, data: Buffer } | { ok: false, error: string }
 
 // H.264/AAC in an MP4 with the index up front, which Safari on macOS and iOS
 // can play and stream. yuv420p is the only pixel format they all decode, and
@@ -39,7 +40,7 @@ export async function convertToMp4(path: string, scratchDir: string, maxBytes: n
     if (size > maxBytes) return { ok: false, error: `the MP4 is ${(size / 1024 / 1024).toFixed(1)} MB, over the ${maxBytes / 1024 / 1024} MB limit` }
     return { ok: true, fileName, data: await readFile(output) }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+    return { ok: false, error: errorText(error) }
   } finally {
     if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {})
   }

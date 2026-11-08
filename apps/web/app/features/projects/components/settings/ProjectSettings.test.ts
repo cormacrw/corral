@@ -22,7 +22,7 @@ import { projectsQuery } from '~/queries/projects'
 import { testQueryClient } from '~/queries/mount-with-query'
 
 const { setThumbnail, clearThumbnail, list, patch } = vi.hoisted(() => ({ setThumbnail: vi.fn(), clearThumbnail: vi.fn(), list: vi.fn(), patch: vi.fn() }))
-vi.mock('~/composables/useApi', () => ({ api: { projects: { setThumbnail, clearThumbnail, list, patch } }, ApiError: class extends Error {} }))
+vi.mock('~/queries/api', () => ({ api: { projects: { setThumbnail, clearThumbnail, list, patch } } }))
 const add = vi.fn()
 const original = { id: 'p1', slug: 'test-app', name: 'Test app', prefix: 'TA', thumbnailColor: '#64748b', thumbnailUrl: null, defaultBranch: 'main', mergeMethod: 'squash', requiredChecks: [], humanReviewDefault: false, epicReviewModeDefault: 'epic', reviewRoundCap: 5, failedRunCap: 3 } as unknown as Project
 const Button = defineComponent({ props: ['label', 'disabled'], setup: (props, { attrs }) => () => h('button', { ...attrs, disabled: props.disabled }, props.label) })

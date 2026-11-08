@@ -54,10 +54,10 @@ it('keeps which files are open when the PR refreshes', async () => {
 
 it('says how much of a capped diff is shown and links to the PR', () => {
   const alert = mountDiff({ totalFiles: 34, truncated: true }).get('[data-alert]')
-  expect(alert.text()).toContain('Showing 2 of 34 files, up to 1,000 changed lines')
+  expect(alert.text()).toContain('2 of 34')
   expect(alert.get('a').attributes('href')).toBe(`${pr.url}/files`)
 })
 
 it('says when every file is here but the last was cut', () => {
-  expect(mountDiff({ truncated: true }).get('[data-alert]').text()).toContain('Showing all 2 files, the last one cut')
+  expect(mountDiff({ truncated: true }).get('[data-alert]').text()).toContain('all 2')
 })

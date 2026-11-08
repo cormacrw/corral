@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import type { AgentRuns } from '~/features/runs/composables/useAgentRuns'
-import { duration, isLiveRun, runBadge, runRef, runTitle, runTokens } from '~/utils/labels'
+import { isActiveRun } from '@corral/core'
+import type { AgentRuns } from '~/features/agents/composables/useAgentRuns'
+import { duration, runBadge, runRef, runTitle, runTokens } from '~/utils/labels'
+import { agentPath, taskPath } from '~/utils/routes'
 
 // One run's transcript on mobile (design/agent.md, design/mobile.md). It
 // fills the screen: its own header with the run and its controls, the
@@ -9,7 +11,7 @@ import { duration, isLiveRun, runBadge, runRef, runTitle, runTokens } from '~/ut
 // header and tab bar here.
 const props = defineProps<{ view: AgentRuns }>()
 const { name, agent, pending, events, now, selected, stop, stopping, sent } = props.view
-const live = computed(() => !!selected.value && isLiveRun(selected.value))
+const live = computed(() => !!selected.value && isActiveRun(selected.value.state))
 </script>
 
 <template>
@@ -17,7 +19,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
     <header class="shrink-0 border-b border-border pt-(--shell-top) ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]">
       <div class="flex min-h-14 items-center gap-2 px-2 py-1">
         <AppButton
-          :to="`/agents/${name}`"
+          :to="agentPath(name)"
           icon="i-hugeicons-arrow-left-02"
           variant="ghost"
           color="neutral"
@@ -46,7 +48,7 @@ const live = computed(() => !!selected.value && isLiveRun(selected.value))
         </div>
         <AppButton
           v-if="selected?.taskRef"
-          :to="`/tasks/${selected.taskRef}`"
+          :to="taskPath(selected.taskRef)"
           icon="i-hugeicons-task-done-01"
           variant="ghost"
           color="neutral"

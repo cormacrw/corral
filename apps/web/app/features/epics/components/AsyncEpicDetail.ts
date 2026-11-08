@@ -1,4 +1,4 @@
-import { asyncChunk, loadEpicDetail } from '~/utils/chunks'
-import DetailLoading from '~/features/tasks/components/DetailLoading.vue'
+import { asyncChunk } from '~/utils/chunks'
+import DetailLoading from '~/components/shared/DetailLoading.vue'
 
-export default asyncChunk(loadEpicDetail, DetailLoading)
+export default asyncChunk(() => import('~/features/epics/components/EpicDetail.vue'), DetailLoading)

@@ -1,4 +1,5 @@
-import type { RunEvent, RunPhase, RunTimings } from '@corral/contracts'
+import type { RunEvent } from '@corral/contracts'
+import type { RunPhase, RunTimings } from '@corral/core'
 
 // Times one run for run.ended. The run is always in exactly one phase, so the
 // phases add up to the total. A phase entered during another pauses it: a

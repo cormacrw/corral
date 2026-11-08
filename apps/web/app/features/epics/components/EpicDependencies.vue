@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { epicPath } from '~/utils/routes'
 import { errorMessage } from '~/lib/errors'
 import type { Epic } from '@corral/contracts'
 import { useMutation } from '@tanstack/vue-query'
@@ -49,7 +50,7 @@ async function setDependencies(ids: string[]) {
       class="flex items-center gap-2"
     >
       <NuxtLink
-        :to="`/epics/${item.id}`"
+        :to="epicPath(item.id)"
         class="min-w-0 flex-1 text-sm text-brand hover:underline"
       >
         {{ item.title }} · {{ item.mergedCount }}/{{ item.taskCount }} done
@@ -95,7 +96,7 @@ async function setDependencies(ids: string[]) {
     <NuxtLink
       v-for="item in blocked"
       :key="item.id"
-      :to="`/epics/${item.id}`"
+      :to="epicPath(item.id)"
       class="block text-sm text-brand hover:underline"
     >
       {{ item.title }} · {{ item.mergedCount }}/{{ item.taskCount }} done

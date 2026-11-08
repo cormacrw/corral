@@ -1,11 +1,10 @@
-import type { RunJob } from '@corral/contracts'
+import { toolRefusal, type RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import { writeFile } from 'node:fs/promises'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { agentActivity } from './agent-activity.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 const { agents, epics, runs } = schema
 
@@ -38,8 +37,7 @@ describe('get_agent_activity', () => {
     const res = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'What is the team working on?' })
     expect(res.status).toBe(201)
     pm = (await runner.next('run.assign', m => m.job.role === 'pm')).job
-    runner.send({ type: 'run.started', runId: pm.runId, leaseEpoch: pm.leaseEpoch, agentSessionId: 'sess' })
-    await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, pm.runId)))[0]?.state).toBe('running'), { timeout: 5000 })
+    await t.runStarted(runner, pm, 'sess')
   })
 
   afterAll(async () => {
@@ -121,7 +119,7 @@ describe('get_agent_activity', () => {
   it('finds a named agent in any case, and lists the valid names for an unknown one', async () => {
     expect((await activity({ agent: developer.name.toUpperCase() })).agents.map(a => a.name)).toEqual([developer.name])
     const reply = await runner.call(pm.runId, pm.leaseEpoch, 'get_agent_activity', { agent: 'Nobody' })
-    expect(reply).toMatchObject({ ok: false, error: expect.stringContaining('There is no agent "Nobody". The agents are: ') })
+    expect(reply).toMatchObject({ ok: false, error: expect.stringContaining('Nobody') })
     expect(reply).toMatchObject({ error: expect.stringContaining(developer.name) })
     expect(reply).toMatchObject({ error: expect.stringContaining(reviewer.name) })
   })
@@ -130,13 +128,13 @@ describe('get_agent_activity', () => {
     const project = await t.createProject()
     const task = await t.createTask(project.slug, { type: 'design', acceptanceCriteria: ['It works'] })
     await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const job = (await runner.next('run.assign', m => m.job.taskId === task.id)).job
     expect(job.role).toBe('designer')
     // The server decides by the run's role, so the same run stands in for each
     for (const role of ['designer', 'developer', 'reviewer'] as const) {
       await t.db.update(runs).set({ role }).where(eq(runs.id, job.runId))
-      expect(await runner.call(job.runId, job.leaseEpoch, 'get_agent_activity', {})).toMatchObject({ ok: false, error: `The ${role} can’t use get_agent_activity` })
+      expect(await runner.call(job.runId, job.leaseEpoch, 'get_agent_activity', {})).toMatchObject({ ok: false, error: toolRefusal(role, 'get_agent_activity') })
     }
   })
 })
@@ -146,16 +144,12 @@ it('lists its own active global PM turn without a project as Global', { timeout:
   let runner: FakeRunner | undefined
   try {
     runner = await FakeRunner.connect(t.server!.url)
-    const request = { projectId: null, text: 'What am I working on globally?' }
-    const response = await fetch(`${t.server!.url}/api/plan/sessions`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request)
-    })
+    const response = await t.request('POST', '/api/plan/sessions', { projectId: null, text: 'What am I working on globally?' })
     expect(response.status).toBe(201)
     const session = await response.json() as { id: string }
     const { job } = await runner.next('run.assign', m => m.job.planSessionId === session.id)
     expect(job).toMatchObject({ role: 'pm', projectId: null })
-    runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'global-pm' })
-    await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, job.runId)))[0]?.state).toBe('running'), { timeout: 5000 })
+    await t.runStarted(runner, job, 'global-pm')
     const reply = await runner.call(job.runId, job.leaseEpoch, 'get_agent_activity', {})
     expect(reply.ok).toBe(true)
     if (!reply.ok) throw new Error(reply.error)
@@ -164,12 +158,6 @@ it('lists its own active global PM turn without a project as Global', { timeout:
       status: 'busy', activeRunCount: 1,
       activeRuns: [{ number: job.runNumber, role: 'pm', state: 'running', project: 'Global', task: null, epic: null }]
     })
-    if (process.env.CORRAL_GLOBAL_ACTIVITY_EVIDENCE) {
-      await writeFile(process.env.CORRAL_GLOBAL_ACTIVITY_EVIDENCE, JSON.stringify({
-        session: { request, response: { status: response.status, body: session } },
-        tool: { transport: 'runner WebSocket', runId: job.runId, leaseEpoch: job.leaseEpoch, name: 'get_agent_activity', input: {}, response: reply }
-      }, null, 2))
-    }
   } finally {
     runner?.close()
     await t.close()

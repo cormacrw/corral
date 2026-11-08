@@ -12,6 +12,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, rename, rm } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
+import { DEV_INSTANCE_FILE, type DevInstance } from '@corral/contracts'
 import { Seeder } from './harness.ts'
 import { seedDemo } from './scenarios.ts'
 
@@ -28,14 +29,20 @@ if (existsSync(dataDir) && !values.force) {
 // PGlite has one process per data dir: replacing it under a running server
 // would lose the seed or corrupt the database
 if (!process.env.CORRAL_DEMO_SEEDING_FOR_DEV) {
+  const instance = devInstance()
+  if (instance && resolve(instance.serverDataDir) === dataDir && isRunning(instance.pid)) {
+    console.error(`A dev server (pid ${instance.pid}) is using ${dataDir}. Stop it first, or run \`pnpm dev:demo --reseed\`.`)
+    process.exit(1)
+  }
+}
+
+// No dev.json: nothing is running from this checkout
+function devInstance(): DevInstance | null {
   try {
-    const instance = JSON.parse(readFileSync(join(root, '.corral', 'dev.json'), 'utf8')) as { pid: number, serverDataDir: string }
-    if (resolve(instance.serverDataDir) === dataDir && isRunning(instance.pid)) {
-      console.error(`A dev server (pid ${instance.pid}) is using ${dataDir}. Stop it first, or run \`pnpm dev:demo --reseed\`.`)
-      process.exit(1)
-    }
-  } catch {
-    // No dev.json: nothing is running from this checkout
+    return JSON.parse(readFileSync(join(root, DEV_INSTANCE_FILE), 'utf8')) as DevInstance
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
   }
 }
 
@@ -54,7 +61,7 @@ await mkdir(building, { recursive: true })
 const seeder = await Seeder.open(building, process.env.CORRAL_PUBLIC_URL || 'http://localhost:3000')
 try {
   await seedDemo(seeder)
-  seeder.github.save(join(building, 'demo-github.json'))
+  seeder.github.save(building)
 } finally {
   await seeder.close()
 }

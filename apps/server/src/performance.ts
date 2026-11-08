@@ -29,10 +29,9 @@ export class PerformanceSamples {
   private readonly db: Database
   readonly slowRequestMs: number
 
-  constructor(db: Database, slowRequestMs = process.env.CORRAL_SLOW_REQUEST_MS) {
+  constructor(db: Database, slowRequestMs = 500) {
     this.db = db
-    const threshold = slowRequestMs === undefined ? 500 : Number(slowRequestMs)
-    this.slowRequestMs = Number.isFinite(threshold) && threshold >= 0 ? threshold : 500
+    this.slowRequestMs = slowRequestMs
     this.flushTimer = setInterval(() => {
       void this.flush()
     }, 1000).unref()

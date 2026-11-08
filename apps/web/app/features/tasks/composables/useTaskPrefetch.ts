@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/vue-query'
 import type { Task } from '@corral/contracts'
 import { taskCommentsQuery, taskQuery } from '~/queries/tasks'
-import { preloadTaskChunks } from '~/utils/chunks'
+import { preloadTaskChunks } from '~/features/tasks/utils/chunks'
 
 // Long enough that moving the pointer across a list asks for nothing
 const HOVER_MS = 100

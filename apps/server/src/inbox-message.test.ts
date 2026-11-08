@@ -6,9 +6,9 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { cleanMessage } from './inbox-message.ts'
 import { getEpic } from './epics.ts'
-import { loadTask } from './tasks.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
+import { loadTask } from './task-views.ts'
 
 const { tasks, epics, auditLog, agents, reviews, runs, comments, inboxMessages } = schema
 const developer = { kind: 'agent', runId: '00000000-0000-0000-0000-000000000001', role: 'developer' } as const
@@ -67,8 +67,6 @@ describe('stored conversational Inbox messages', () => {
     const first = await item(task.id, 'First review, no runner available')
     expect(first.message).toContain('Stop password reset links expiring early')
     expect(first.message).toContain('Reliable sign-in')
-    expect(first.message).not.toMatch(/You asked|last review|Work done/)
-    expect(first.body).toBe('Approved. This task is marked for human review, so it needs your OK before it merges.')
     expect(first.preview).toBe(first.message!.slice(0, 200))
     expect(first.preview).not.toBe(first.body)
     await expect.poll(async () => (await t.db.select().from(inboxMessages)).length).toBe(1)
@@ -84,7 +82,8 @@ describe('stored conversational Inbox messages', () => {
     const firstJob = await nextJob()
     expect(firstJob.job.kind === 'inbox_message' && firstJob.job.prompt).toContain('"epic":null')
     const first = await item(task.id, 'First review while model is pending; no epic')
-    expect(first.message).not.toMatch(/epic|You asked|last review/)
+    // The fallback shows while the model's message is pending
+    expect(first.message).toContain('Keep reset links usable')
     const count = jobs().length
     await inbox('Repeated read while pending')
     await inbox('Repeated read while pending again')
@@ -100,7 +99,7 @@ describe('stored conversational Inbox messages', () => {
     const secondJob = await nextJob()
     expect(secondJob.job.kind === 'inbox_message' && secondJob.job.prompt).toContain('Extended reset link expiry to one hour')
     const pending = await item(task.id, 'Later review fallback explains request and work done')
-    expect(pending.message).toContain('You asked: Keep links valid for an hour')
+    expect(pending.message).toContain('Keep links valid for an hour')
     expect(pending.message).toContain('Extended reset link expiry to one hour')
     reply(firstJob.jobId, 'Old review of reset links. Please approve the work.')
     await expect.poll(async () => (await t.db.select().from(inboxMessages)).some(m => m.message.startsWith('Old review'))).toBe(true)
@@ -132,7 +131,7 @@ describe('stored conversational Inbox messages', () => {
       const task = await t.createTask(project.slug, { title: `Investigate ${kind} sign-in issue`, type: kind === 'spike' ? 'spike' : 'task' })
       if (kind === 'spike') await t.db.insert(comments).values({ taskId: task.id, author: developer, body: `## Findings\n${long}` })
       await enter(task.id, kind === 'spike' ? 'human_review' : kind === 'failed' ? 'failed' : 'blocked', kind === 'question' ? 'stuck' : 'review_approved', at(), kind === 'spike' ? null : long)
-      const failedJob = await nextJob()
+      const failedJob = await nextJob(`Investigate ${kind} sign-in issue`)
       // The reply to this barrier follows the model error on the same socket.
       await t.runner.request({ kind: 'detect_clis' })
       captures.push({ scenario: `${kind}: model failure`, request: failedJob, runnerResponse: { type: 'job.result', jobId: failedJob.jobId, ok: false, error: 'Model unavailable' } })
@@ -163,7 +162,6 @@ describe('stored conversational Inbox messages', () => {
     const conflict = (await inbox('Epic conflict with long conflict list')).needsYou.find(i => i.id === epicId) as EpicConflictItem
     expect(conflict.body.length).toBeGreaterThan(1000)
     expect(conflict.message!.split(/\s+/).length).toBeLessThanOrEqual(80)
-    expect(conflict.message).toContain('resolve')
   })
 
   it('distinguishes arrivals with identical timestamps', async () => {

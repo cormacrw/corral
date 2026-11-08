@@ -2,7 +2,7 @@ import { schema } from '@corral/db'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { LocalBlobStore } from './blob-store.ts'
 import { byteRange } from './byte-range.ts'
@@ -41,6 +41,10 @@ describe('evidence file byte ranges', () => {
     await t?.close()
   })
 
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it.each([
     [undefined, 200, 0, 255],
     ['bytes=0-1', 206, 0, 1],
@@ -75,7 +79,6 @@ describe('evidence file byte ranges', () => {
     const res = await app.request(path, { headers: { range: 'bytes=0-1' } })
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(data.slice(0, 2))
     expect(whole).not.toHaveBeenCalled()
-    whole.mockRestore()
   })
 
   it.each([

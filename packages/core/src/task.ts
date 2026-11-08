@@ -1,3 +1,4 @@
+import type { EpicReviewMode } from './project.ts'
 import type { TaskStatus } from './status.ts'
 
 // Task fields other than status (PRD §4.3, design/task.md)
@@ -14,9 +15,31 @@ export type TaskType = typeof TASK_TYPES[number]
 export const TASK_KINDS = ['normal', 'fix', 'conflict'] as const
 export type TaskKind = typeof TASK_KINDS[number]
 
+// Types whose work is code, delivered through a PR or a submitted commit.
+// Spikes deliver findings and designs a prototype (D19, D20).
+export const CODE_TASK_TYPES = ['task', 'bug'] as const satisfies readonly TaskType[]
+
+export function deliversCode(type: TaskType): boolean {
+  return (CODE_TASK_TYPES as readonly TaskType[]).includes(type)
+}
+
 // D19/D20: spikes and designs always go to Human review, whatever their flag says
 export function requiresHumanReview(type: TaskType, humanReview: boolean): boolean {
-  return type === 'spike' || type === 'design' || humanReview
+  return !deliversCode(type) || humanReview
+}
+
+// A subtask on the negotiated PR-free protocol submits commits to its
+// parent's branch instead of opening a PR (D27). 0 is the PR path.
+export function isPrFree(task: { integrationProtocol: number }): boolean {
+  return task.integrationProtocol > 0
+}
+
+// Whether the task's own flag asks for Human review once its task with
+// subtasks is counted (D27, D28): an each_task one sends every subtask to the
+// human, and a PR-free subtask's flag and human checks wait for its task's
+// approval instead. Designs and spikes go to Human review whatever this says.
+export function humanReviewFlag(task: { humanReview: boolean, integrationProtocol: number }, mode: EpicReviewMode | null): boolean {
+  return !isPrFree(task) && (mode === 'each_task' || task.humanReview)
 }
 
 // The deliverable type is fixed once work is approved or awaiting merge. Spikes
@@ -27,10 +50,19 @@ export function canChangeType(task: { status: TaskStatus, type: TaskType }, to: 
   if (to === task.type) return true
   if (['approved', 'ready_to_merge', 'merged'].includes(task.status)) return false
   if (task.status === 'draft' || task.status === 'backlog') return true
-  return ![task.type, to].some(type => type === 'spike' || type === 'design')
+  return [task.type, to].every(deliversCode)
 }
 
 // Task IDs are PREFIX-NUMBER, e.g. COR-29 (D13)
 export function taskRef(prefix: string, number: number): string {
   return `${prefix}-${number}`
+}
+
+// Matches any PREFIX-NUMBER, in either case; whether the prefix is a project's
+// is for the lookup to say
+export const TASK_REF_PATTERN = /^([A-Za-z]+)-(\d+)$/
+
+export function parseTaskRef(ref: string): { prefix: string, number: number } | null {
+  const match = TASK_REF_PATTERN.exec(ref)
+  return match ? { prefix: match[1]!.toUpperCase(), number: Number(match[2]) } : null
 }

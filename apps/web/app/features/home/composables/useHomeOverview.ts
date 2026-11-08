@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/vue-query'
 import { todayStats } from '~/features/agents/utils/agents'
-import { formatTokens } from '~/features/agents/utils/fleet'
-import { formatDuration, mergedByDay, openWork, recentEpics, weekOverWeek } from '~/features/home/utils/overview'
+import { formatDuration, homeColumn, isInProgress, mergedByDay, openWork, recentEpics, weekOverWeek } from '~/features/home/utils/figures'
 import { workspaceFlowQuery } from '~/queries/projects'
-import { isWorking, projectColor } from '~/utils/labels'
+import { isWorking, projectColor, tokens } from '~/utils/labels'
+import { sameDay } from '~/utils/days'
 
 // The web Home (design/home.md): every project at a glance. Tasks and epics
 // come from the lists the shell loads, runs from the shared history, and
@@ -21,13 +21,13 @@ export function useHomeOverview() {
   const week = computed(() => weekOverWeek(merged30.value))
 
   const allTasks = computed(() => shell.projects.flatMap(p => lists.tasks.value[p.id] ?? []))
-  const inFlight = computed(() => allTasks.value.filter(t => ['in_progress', 'agent_review', 'human_review', 'ready_to_merge'].includes(t.status)).length)
-  const blocked = computed(() => allTasks.value.filter(t => t.status === 'blocked' || t.status === 'failed').length)
+  const inFlight = computed(() => allTasks.value.filter(t => isInProgress(t.status)).length)
+  const blocked = computed(() => allTasks.value.filter(t => homeColumn(t.status) === 'blocked').length)
   const working = computed(() => shell.agents.filter(isWorking).length)
 
   const today = computed(() => {
-    const stats = todayStats(history.runs.value, [], history.now.value)
-    const failed = history.runs.value.filter(r => r.state === 'failed' && new Date(r.queuedAt).toDateString() === new Date(history.now.value).toDateString()).length
+    const stats = todayStats(history.runs.value, history.now.value)
+    const failed = history.runs.value.filter(r => r.state === 'failed' && sameDay(r.queuedAt, history.now.value)).length
     return { ...stats, failed }
   })
 
@@ -56,7 +56,7 @@ export function useHomeOverview() {
     mergedSpark: merged30.value.slice(-14).map(d => d.total),
     cycle: cycle.value,
     runsToday: today.value.runs,
-    runsHint: `${formatTokens(today.value.tokens)} tokens${today.value.failed ? ` · ${today.value.failed} failed` : ''}`
+    runsHint: `${tokens(today.value.tokens)} tokens${today.value.failed ? ` · ${today.value.failed} failed` : ''}`
   }))
 
   return {

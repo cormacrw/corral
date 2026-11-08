@@ -24,18 +24,18 @@ Sequential work or work changing the same files stays in one task. A big
 feature always gets one task, even with one task, so it appears in task views;
 independent fixes stay standalone. There is no task-size target.
 
-This guidance lives in the runner's PM defaults (`apps/runner/src/role-defaults.ts`),
-the server's opening PM prompt (`apps/server/src/prompts.ts`) and the
-`propose_plan` tool description (`apps/runner/src/mcp.ts`). The server sends
-its opening prompt for every new session, regardless of project role overrides,
-and includes it again when reconstructing a lost session. Existing sessions
-retain their conversation and are not sent a new opening prompt on each turn.
+This guidance lives in the server's opening PM prompt (`apps/server/src/prompts.ts`)
+and the `propose_plan` tool description (`packages/contracts/src/tool-definitions.ts`).
+The server sends its opening prompt for every new session, regardless of project
+role overrides, and includes it again when reconstructing a lost session.
+Existing sessions retain their conversation and are not sent a new opening
+prompt on each turn.
 
 ## Human review on plan tasks
 
 `normalizeProposedPlan` reads a missing `humanReview` as `false`, so the
-server's `propose_plan` handler records which keys left it out and `#propose`
-in `apps/server/src/plan.ts` resolves them before checking the plan: a new
+server's `propose_plan` handler records which keys left it out and `propose`
+in `apps/server/src/plan-proposals.ts` resolves them before checking the plan: a new
 top-level task (no `ref`, no parent) takes `project.humanReviewDefault`, a new
 sub-task stays off, and a task with a `ref` keeps the existing task's flag.
 Where the project reviews by default, an explicit `humanReview: false` on a new

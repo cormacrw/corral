@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shownImageSrc, storedImageSrc } from '~/features/tasks/utils/editor-image'
+import { shownImageSrc, storedImageSrc } from '~/utils/attachments'
 
 const id = '0d6f7c2e-5b1a-4c3d-9e8f-1a2b3c4d5e6f'
 

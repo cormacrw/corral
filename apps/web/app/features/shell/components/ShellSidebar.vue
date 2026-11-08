@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { ROLE_LABELS } from '@corral/core'
 import { planAttention } from '~/features/plan/utils/plan-attention'
-import { isWorking, ROLE } from '~/utils/labels'
+import { isWorking } from '~/utils/labels'
+import { ADD_PROJECT_PATH, agentPath, PROJECT_PAGES, projectPath, SECTIONS, settingsPath } from '~/utils/routes'
 
 // The app shell's navigation (design/app-shell.md): global nav, projects,
 // agents and the runner. Opens the search palette through `search`.
@@ -12,12 +14,8 @@ const route = useRoute()
 const attentionCount = computed(() => threads.value.filter(s => planAttention(s)).length)
 const currentSlug = computed(() => typeof route.params.slug === 'string' ? route.params.slug : null)
 const RUNNER_DOT = { success: 'bg-success', warning: 'bg-warning', error: 'bg-destructive' }
-const PROJECT_PAGES = [
-  { path: 'board', label: 'Board', count: 'board' },
-  { path: 'backlog', label: 'Backlog', count: 'backlog' },
-  { path: 'pull-requests', label: 'Pull requests' },
-  { path: 'settings', label: 'Settings' }
-] as const
+const COUNTED = new Set(['board', 'backlog'] as const)
+const counted = (page: string): page is 'board' | 'backlog' => COUNTED.has(page as 'board')
 </script>
 
 <template>
@@ -57,31 +55,31 @@ const PROJECT_PAGES = [
           <!-- A gap, so neighbouring highlights don't touch -->
           <UiSidebarMenu class="gap-0.5">
             <ShellNavItem
-              to="/home"
-              label="Home"
+              :to="SECTIONS.home.to"
+              :label="SECTIONS.home.label"
               icon="i-hugeicons-home-01"
-              :active="isActive('/home')"
+              :active="isActive(SECTIONS.home.to)"
             />
             <ShellNavItem
-              to="/agents"
-              label="Agents"
+              :to="SECTIONS.agents.to"
+              :label="SECTIONS.agents.label"
               icon="i-hugeicons-user-multiple"
-              :active="route.path === '/agents'"
+              :active="route.path === SECTIONS.agents.to"
             />
             <ShellNavItem
-              to="/plan"
-              label="Plan"
+              :to="SECTIONS.plan.to"
+              :label="SECTIONS.plan.label"
               icon="i-hugeicons-message-01"
-              :active="isActive('/plan')"
+              :active="isActive(SECTIONS.plan.to)"
               :badge="attentionCount"
               :badge-label="`${attentionCount} threads need attention`"
             />
             <ShellThreads />
             <ShellNavItem
-              to="/inbox"
-              label="Inbox"
+              :to="SECTIONS.inbox.to"
+              :label="SECTIONS.inbox.label"
               icon="i-hugeicons-inbox"
-              :active="isActive('/inbox')"
+              :active="isActive(SECTIONS.inbox.to)"
               :badge="shell.inboxCount"
             />
           </UiSidebarMenu>
@@ -95,7 +93,7 @@ const PROJECT_PAGES = [
           title="Add project"
         >
           <NuxtLink
-            to="/setup?step=repo&add=1"
+            :to="ADD_PROJECT_PATH"
             aria-label="Add project"
           >
             <Icon name="i-hugeicons-add-01" />
@@ -114,7 +112,7 @@ const PROJECT_PAGES = [
               :is-active="currentSlug === project.slug"
               class="group-data-[collapsible=icon]:p-1.5!"
             >
-              <NuxtLink :to="`/projects/${project.slug}`">
+              <NuxtLink :to="projectPath(project.slug)">
                 <!-- The agent avatars' size, so two initials have room -->
                 <ProjectThumbnail
                   :project="project"
@@ -137,18 +135,18 @@ const PROJECT_PAGES = [
             <UiSidebarMenuSub v-if="isExpanded(project)">
               <UiSidebarMenuSubItem
                 v-for="page in PROJECT_PAGES"
-                :key="page.path"
+                :key="page.page"
               >
                 <UiSidebarMenuSubButton
                   as-child
-                  :is-active="isActive(`/projects/${project.slug}/${page.path}`)"
+                  :is-active="isActive(projectPath(project.slug, page.page))"
                 >
-                  <NuxtLink :to="`/projects/${project.slug}/${page.path}`">
+                  <NuxtLink :to="projectPath(project.slug, page.page)">
                     <span>{{ page.label }}</span>
                     <span
-                      v-if="'count' in page"
+                      v-if="counted(page.page)"
                       class="ms-auto text-xs text-muted-foreground"
-                    >{{ counts.get(project.id)?.[page.count] }}</span>
+                    >{{ counted(page.page) && counts.get(project.id)?.[page.page] }}</span>
                   </NuxtLink>
                 </UiSidebarMenuSubButton>
               </UiSidebarMenuSubItem>
@@ -166,18 +164,18 @@ const PROJECT_PAGES = [
           >
             <UiSidebarMenuButton
               as-child
-              :tooltip="`${agent.name} · ${ROLE[agent.role]}`"
-              :is-active="isActive(`/agents/${agent.name.toLowerCase()}`)"
+              :tooltip="`${agent.name} · ${ROLE_LABELS[agent.role]}`"
+              :is-active="isActive(agentPath(agent.name))"
               class="group-data-[collapsible=icon]:p-1.5!"
             >
-              <NuxtLink :to="`/agents/${agent.name.toLowerCase()}`">
+              <NuxtLink :to="agentPath(agent.name)">
                 <!-- Nav icon size, so rows stay one height and fit when collapsed -->
                 <AgentAvatar
                   :name="agent.name"
                   :working="isWorking(agent)"
                   size="2xs"
                 />
-                <span class="min-w-0 truncate">{{ agent.name }} <span class="text-muted-foreground">· {{ ROLE[agent.role] }}</span></span>
+                <span class="min-w-0 truncate">{{ agent.name }} <span class="text-muted-foreground">· {{ ROLE_LABELS[agent.role] }}</span></span>
                 <span
                   v-if="statusOf(agent)"
                   class="ms-auto min-w-0 truncate text-xs text-muted-foreground"
@@ -192,10 +190,10 @@ const PROJECT_PAGES = [
       <UiSidebarGroup class="mt-auto">
         <UiSidebarMenu>
           <ShellNavItem
-            to="/settings/profile"
-            label="Settings"
+            :to="settingsPath('profile')"
+            :label="SECTIONS.settings.label"
             icon="i-hugeicons-settings-01"
-            :active="isActive('/settings')"
+            :active="isActive(SECTIONS.settings.to)"
           />
         </UiSidebarMenu>
       </UiSidebarGroup>

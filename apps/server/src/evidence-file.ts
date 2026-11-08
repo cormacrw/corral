@@ -1,3 +1,5 @@
+import { IMMUTABLE_CACHE } from './blob-store.ts'
+
 // Evidence is the agent's file, with a type and name it chose, served from
 // Corral's own origin. Only types a browser can't run are served inline.
 // PDFs stay inline for the viewer's iframe, whose plugin refuses a sandboxed
@@ -15,8 +17,7 @@ export function evidenceHeaders(contentType: string | null, fileName: string | n
     'content-disposition': contentDisposition(inline ? 'inline' : 'attachment', fileName ?? 'evidence'),
     'x-content-type-options': 'nosniff',
     ...(type !== 'application/pdf' && { 'content-security-policy': 'sandbox' }),
-    // Blobs are immutable, so they can be cached forever
-    'cache-control': 'private, max-age=31536000, immutable'
+    'cache-control': IMMUTABLE_CACHE
   }
 }
 

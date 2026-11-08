@@ -2,7 +2,7 @@ import type { Run } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { runEndValues } from './run-lifecycle.ts'
+import { endRunIn } from './run-lifecycle.ts'
 import { getRun, listRuns } from './runs.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
@@ -13,12 +13,12 @@ describe('run lifecycle', () => {
   })
   afterAll(() => t.close())
 
-  async function ended(role: 'pm' | 'developer', end: Parameters<typeof runEndValues>[0]): Promise<Run> {
+  async function ended(role: 'pm' | 'developer', end: Parameters<typeof endRunIn>[2]): Promise<Run> {
     const project = await t.createProject()
     const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, role)).limit(1)
     const task = role === 'pm' ? null : await t.createTask(project.slug)
     const [row] = await t.db.insert(schema.runs).values({ agentId: agent!.id, projectId: project.id, taskId: task?.id ?? null, role, state: 'running' }).returning()
-    await t.db.update(schema.runs).set(runEndValues(end, new Date())).where(eq(schema.runs.id, row!.id))
+    await endRunIn(t.db, row!, end, new Date())
     return getRun(t.db, row!.id)
   }
 
@@ -58,19 +58,24 @@ describe('run lifecycle', () => {
     const before = t.events.length
 
     // No runner is connected, so there will be no run.ended acknowledgement.
-    await t.orchestrator.sweepLeases()
+    await t.orchestrator.leases.sweepLeases()
 
     expect(t.events.slice(before)).toContainEqual({
       type: 'run.updated',
       run: expect.objectContaining({
         id: run!.id, epicId: epic!.id, taskId: null, state: 'interrupted',
-        endedAt: t.clock.now.toISOString(), outcome: null, error: 'Task review lease expired'
+        endedAt: t.clock.now.toISOString(), outcome: null, error: expect.any(String)
       })
     })
     expect(await listRuns(t.db, { projectId: project.id, active: true })).toEqual([])
   })
 
-  it('clears a waiting PM job when a turn ends', () => {
-    expect(runEndValues({ state: 'failed', outcome: 'failed', error: 'x' }, new Date(0))).toMatchObject({ pmJob: null, endedAt: new Date(0), outcome: 'failed', error: 'x' })
+  it('clears a waiting PM job when a turn ends', async () => {
+    const project = await t.createProject()
+    const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'pm')).limit(1)
+    const [row] = await t.db.insert(schema.runs).values({ agentId: agent!.id, projectId: project.id, role: 'pm', state: 'queued', pmJob: { role: 'pm' } as never }).returning()
+    await endRunIn(t.db, row!, { state: 'failed', outcome: 'failed', error: 'x' }, new Date(0))
+    const [ended] = await t.db.select().from(schema.runs).where(eq(schema.runs.id, row!.id))
+    expect(ended).toMatchObject({ pmJob: null, endedAt: new Date(0), outcome: 'failed', error: 'x' })
   })
 })

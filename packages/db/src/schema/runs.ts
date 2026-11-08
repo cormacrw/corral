@@ -13,8 +13,8 @@ import {
   uuid,
   type AnyPgColumn
 } from 'drizzle-orm/pg-core'
-import { DESIGNER_RUN_OUTCOMES, DEVELOPER_RUN_OUTCOMES, PM_RUN_OUTCOMES, REVIEWER_RUN_OUTCOMES, TERMINAL_RUN_STATES, type EpicFixKind, type RebaseReview } from '@corral/core'
-import { createdAt, updatedAt } from './columns.ts'
+import { ACTIVE_RUN_STATES, DEFAULT_AGENT_RUNTIME, DESIGNER_RUN_OUTCOMES, DEVELOPER_RUN_OUTCOMES, EPIC_RUN_ROLES, PM_RUN_OUTCOMES, REVIEWER_RUN_OUTCOMES, TERMINAL_RUN_STATES, type EpicFixKind, type RebaseReview, type RetryContext, type RunSessionStart, type RunTimings } from '@corral/core'
+import { createdAt, sqlList, updatedAt } from './columns.ts'
 import { agentRole, runOutcome, runState } from './enums.ts'
 import { epics } from './epics.ts'
 // Import cycle with plans.ts: runs.planSessionId and planMessages.runId go
@@ -29,7 +29,7 @@ export const agents = pgTable('agents', {
   id: uuid().primaryKey().defaultRandom(),
   name: text().notNull().unique(),
   role: agentRole().notNull(),
-  runtime: text().notNull().default('claude-code'),
+  runtime: text().notNull().default(DEFAULT_AGENT_RUNTIME),
   // Applies across all projects (D13)
   concurrency: integer().notNull().default(1),
   paused: boolean().notNull().default(false),
@@ -49,7 +49,6 @@ export const agents = pgTable('agents', {
   check('agents_wake_interval_positive', sql`${t.wakeIntervalSeconds} > 0`)
 ])
 
-const sqlList = (values: readonly string[]) => sql.raw(`(${values.map(v => `'${v}'`).join(', ')})`)
 const terminalStates = sqlList(TERMINAL_RUN_STATES)
 
 // One agent session (PRD §4.5). PM recovery turns link to their task.
@@ -81,7 +80,7 @@ export const runs = pgTable('runs', {
   // The commit a developer run pushed, or a reviewer run reviewed
   headSha: text(),
   // Inputs at dispatch, for detecting completed failures with no progress.
-  retryContext: jsonb().$type<{ head: string, target: string, human: string }>(),
+  retryContext: jsonb().$type<RetryContext>(),
   review: text().$type<RebaseReview>(),
   conflictedFiles: jsonb().$type<string[]>(),
   // A round keeping a PR healthy (D29): what started it, on a task or an epic,
@@ -104,9 +103,9 @@ export const runs = pgTable('runs', {
   cacheReadTokens: integer(),
   outputTokens: integer(),
   // How an author run's agent session began; null on other runs and older ones
-  sessionStart: text().$type<'fresh' | 'resumed_warm' | 'resumed_cold'>(),
+  sessionStart: text().$type<RunSessionStart>(),
   // Phase and tool timings from the runner; null from older runners
-  timings: jsonb(),
+  timings: jsonb().$type<RunTimings>(),
   queuedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   startedAt: timestamp({ withTimezone: true }),
   endedAt: timestamp({ withTimezone: true })
@@ -118,10 +117,10 @@ export const runs = pgTable('runs', {
   index().on(t.agentId, t.queuedAt),
   index().on(t.planSessionId),
   index().on(t.projectId),
-  // The few live runs among many finished ones. Lists ACTIVE_RUN_STATES.
+  // The few live runs among many finished ones
   index('runs_active_number_index').on(t.number)
-    .where(sql`${t.state} in ('queued', 'starting', 'running', 'waiting_for_input', 'stopping')`),
-  check('runs_task_unless_pm', sql`${t.taskId} is not null or ${t.role} = 'pm' or (${t.epicId} is not null and ${t.role} in ('reviewer', 'developer'))`),
+    .where(sql`${t.state} in ${sqlList(ACTIVE_RUN_STATES)}`),
+  check('runs_task_unless_pm', sql`${t.taskId} is not null or ${t.role} = 'pm' or (${t.epicId} is not null and ${t.role} in ${sqlList(EPIC_RUN_ROLES)})`),
   // A PM turn may link to its recovery task, but never an epic; a designer never
   // to an epic, and a reviewer or developer to one or the other. planSessionId isn't checked: it
   // goes null when its session is deleted.

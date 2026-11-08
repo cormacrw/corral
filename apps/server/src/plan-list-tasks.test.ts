@@ -3,7 +3,7 @@ import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 interface Board {
   epics: { id: string, dependsOn: string[] }[]
@@ -18,7 +18,7 @@ describe('list_tasks', { timeout: 30_000 }, () => {
     runner = await FakeRunner.connect(t.server!.url)
   })
   afterEach(async () => {
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     await t.db.delete(schema.projects)
   })
   afterAll(async () => {

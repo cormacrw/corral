@@ -1,36 +1,45 @@
 import type { CheckScope } from '@corral/contracts'
-import { claudeCodeRuntime } from './agent.ts'
-import { codexRuntime } from './codex.ts'
-import type { GitAuthor, RunnerConfig } from './config.ts'
-import type { ParsedLine } from './stream-json.ts'
+import type { AgentRuntime as RuntimeId } from '@corral/core'
+import type { GitAuthor } from './config.ts'
+import type { ParsedLine } from './parsed-line.ts'
 
 // The AgentRuntime interface (agent-runtime-and-auth.md). The run manager
 // starts agents only through it, picking the adapter by the job's runtime id
-// (D15), so another CLI means another adapter here, not changes there. Each
-// adapter turns its CLI's output into neutral ParsedLines.
+// (D15). Everything that differs between CLIs lives in the adapters (claude.ts,
+// codex.ts); runtimes.ts builds the registry.
 
-export type { ParsedLine } from './stream-json.ts'
+export type ParsedLineHandler = (raw: string, parsed: ParsedLine) => void
 
-export interface RuntimeOptions {
-  cwd: string
-  // cwd isn't a checkout: a global PM session (D30)
-  noRepository?: boolean | undefined
-  prompt: string
-  // Role instructions from the repo, plus the runner's notes
-  systemPrompt: string
-  mcpConfigPath: string
-  model: string | null
-  resumeSessionId: string | null
-  // Set on PM follow-up turns: resuming this session adds no "Session started" note
-  quietResume?: boolean
-  gitAuthor: GitAuthor | null
-  checkScope?: CheckScope | null | undefined
-  // The project's shared Turbo cache on this runner (turboCachePath)
-  turboCacheDir?: string | null | undefined
-  onLine(raw: string, parsed: ParsedLine): void
+export interface McpServer {
+  type?: string
+  url?: string
+  command?: string
+  args?: string[]
 }
 
-export type SessionOptions = Omit<RuntimeOptions, 'prompt'>
+export interface SessionOptions {
+  cwd: string
+  // The run's own folder outside the checkout; an adapter may keep files there
+  scratchDir: string
+  // cwd isn't a checkout: a global PM session (D30)
+  noRepository: boolean
+  // Role instructions from the repo, plus the runner's notes
+  systemPrompt: string
+  mcpServers: Record<string, McpServer>
+  model: string | null
+  resumeSessionId: string | null
+  // Resuming this session adds no "Session started" note (PM follow-up turns)
+  quietResume: boolean
+  gitAuthor: GitAuthor | null
+  checkScope: CheckScope | null
+  // The project's shared Turbo cache on this runner (turboCachePath)
+  turboCacheDir: string | null
+  onLine: ParsedLineHandler
+}
+
+export interface RuntimeOptions extends SessionOptions {
+  prompt: string
+}
 
 export interface AgentExit {
   code: number | null
@@ -65,23 +74,40 @@ export interface AgentSession extends AgentProcess {
   nextIdle(): Promise<TurnResult | null>
 }
 
-export const STOP_GRACE_MS = 5_000
-
-export interface AgentRuntime {
+// What a run needs from an adapter
+export interface AgentLauncher {
   id: string
-  // Reads what a one-shot run needs from disk, off the event loop's main path
-  // (runner rule 1). spawn gets what this returns, so call it first when defined.
-  prepare?(options: RuntimeOptions): Promise<RuntimeOptions>
+  // Does the disk work a start needs, off the event loop's main path (runner
+  // rule 1). spawn and spawnSession get what this returns, so call it first.
+  prepare?<T extends SessionOptions>(options: T): Promise<T>
   // A one-shot run: answers the prompt and exits
   spawn(options: RuntimeOptions): AgentProcess
-  // A long-lived process that takes turns. Runtimes without it never keep a
-  // PM session warm; each turn cold-starts with a resume instead (D9).
+  // A long-lived process that takes turns, and messages mid-run. Runtimes
+  // without it never keep a PM session warm or take messages; each turn
+  // cold-starts with a resume instead (D9).
   spawnSession?(options: SessionOptions): AgentSession
 }
 
-export type RuntimeRegistry = ReadonlyMap<string, AgentRuntime>
-
-export function createRuntimeRegistry(config: RunnerConfig): RuntimeRegistry {
-  const runtimes: AgentRuntime[] = [claudeCodeRuntime(config.claudeBin), codexRuntime(config.codexBin)]
-  return new Map(runtimes.map(runtime => [runtime.id, runtime]))
+interface CliDetection {
+  version: string | null
+  signedIn: boolean
 }
+
+interface AskOptions {
+  model: string | null
+  timeoutMs: number
+}
+
+export interface AgentRuntime extends AgentLauncher {
+  id: RuntimeId
+  // The CLI's version and whether it is signed in. Corral never reads the login itself (D2).
+  detect(): Promise<CliDetection>
+  // One non-interactive call with no tools, no MCP servers and no saved
+  // session, from a folder with no project docs. It runs outside the
+  // RunManager, so it never takes a slot or waits for one (COR-40).
+  ask(prompt: string, options: AskOptions): Promise<string>
+  // The user-skills folder the CLI reads
+  skillsDir: string
+}
+
+export type RuntimeRegistry = ReadonlyMap<string, AgentLauncher>

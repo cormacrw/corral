@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { settingsPath } from '~/utils/routes'
 import { errorMessage } from '~/lib/errors'
 import type AppAlert from '~/components/app/AppAlert.vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import { patchProject, projectsQuery } from '~/queries/projects'
+import { useLive } from '~/queries/stream'
 import { liftUpdateHold as liftUpdateHoldMutation, resumeAll as resumeAllMutation, runnerQuery, statusQuery } from '~/queries/system'
 
 // Shell-wide banners (design/app-shell.md), shared by the web and mobile
@@ -52,7 +54,7 @@ const banner = computed<InstanceType<typeof AppAlert>['$props'] & { 'data-testid
     return { color: 'warning', variant: 'solid', icon: 'i-hugeicons-pause', title: `${project.name} is paused. No new runs will start; work already running will finish.`, actions: [{ label: 'Resume', color: 'neutral', variant: 'solid', onClick: () => attempt('Could not resume', () => patching.mutateAsync({ slug: project.slug, input: { paused: false } })) }] }
   }
   if (runner.value && !runner.value.online) {
-    return { 'color': 'warning', 'variant': 'subtle', 'icon': 'i-hugeicons-server-stack-01', 'title': runnerBanner.value, 'data-testid': 'runner-offline-banner', 'actions': [{ label: 'Runners', color: 'neutral', variant: 'outline', to: '/settings/runner' }] }
+    return { 'color': 'warning', 'variant': 'subtle', 'icon': 'i-hugeicons-server-stack-01', 'title': runnerBanner.value, 'data-testid': 'runner-offline-banner', 'actions': [{ label: 'Runners', color: 'neutral', variant: 'outline', to: settingsPath('runner') }] }
   }
   if (connection.value === 'reconnecting') {
     return { color: 'neutral', variant: 'subtle', icon: 'i-hugeicons-refresh', title: 'Reconnecting to Corral…' }

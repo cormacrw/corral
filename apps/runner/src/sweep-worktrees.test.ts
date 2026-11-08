@@ -3,18 +3,24 @@ import { chmod, mkdir, readdir, rm, stat, utimes, writeFile } from 'node:fs/prom
 import { dirname, join } from 'node:path'
 import type { RunnerMessage, RunJob } from '@corral/contracts'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { AgentExit, AgentRuntime } from './agent-runtime.ts'
+import type { AgentExit, AgentLauncher } from './agent-runtime.ts'
 import { loadConfig, type RunnerConfig } from './config.ts'
-import type { ServerConnection } from './connection.ts'
 import { exec, git } from './exec.ts'
 import { runSetupJob } from './jobs.ts'
+import { createRuntimes } from './runtimes.ts'
+import { pruneTurboCaches, type LocalRuns } from './sweep.ts'
 import type { ToolServer } from './mcp.ts'
-import { barePath } from './repos.ts'
+import { barePath, pmWorktreePath, worktreePath } from './layout.ts'
 import { RunManager } from './run-manager.ts'
-import { createTestDataDir, pmJob, TEST_REPOSITORY } from './test-repo.ts'
-import { pmWorktreePath, prepareWorkspace, pruneTurboCaches, worktreePath } from './workspace.ts'
+import { createTestDataDir, pmJob, TEST_REPOSITORY, testConnection } from './test-repo.ts'
+import { prepareWorkspace } from './workspace.ts'
 
 const PROJECT = randomUUID()
+
+// No PM turn running, every run still here and every project busy, unless a test says otherwise
+function localRuns(overrides: Partial<LocalRuns> = {}): LocalRuns {
+  return { pmTurnRunning: () => false, hasRun: () => true, projectRunning: () => true, ...overrides }
+}
 
 async function exists(path: string): Promise<boolean> {
   return stat(path).then(() => true, () => false)
@@ -29,13 +35,15 @@ describe('sweep_worktrees', () => {
     config = { ...loadConfig({}), dataDir }
   })
 
+  const setup = (runs: LocalRuns) => ({ config, runtimes: createRuntimes(config), runs })
+
   afterEach(async () => {
     await exec('chmod', ['-R', 'u+w', dirname(dataDir)])
     await rm(dirname(dataDir), { recursive: true, force: true })
   })
 
   function sweep(keepTaskIds: string[], keepPlanSessionIds: string[], pmTurnRunning?: (id: string) => boolean) {
-    return runSetupJob(config, { kind: 'sweep_worktrees', keepTaskIds, keepPlanSessionIds }, pmTurnRunning)
+    return runSetupJob(setup(localRuns(pmTurnRunning ? { pmTurnRunning } : {})), { kind: 'sweep_worktrees', keepTaskIds, keepPlanSessionIds })
   }
 
   async function prepare(job: Partial<RunJob>): Promise<void> {
@@ -149,10 +157,10 @@ describe('sweep_worktrees', () => {
 
   it('never removes the pm worktree of a turn running on the runner', async () => {
     const sent: RunnerMessage[] = []
-    const connection = { send: (message: RunnerMessage) => sent.push(message) > 0 } as unknown as ServerConnection
+    const connection = testConnection((message: RunnerMessage) => sent.push(message) > 0)
     const tools = { register: () => () => {}, url: () => 'http://127.0.0.1:9/mcp' } as unknown as ToolServer
     let finish!: (exit: AgentExit) => void
-    const runtime: AgentRuntime = {
+    const runtime: AgentLauncher = {
       id: 'fake',
       spawn: (options) => {
         options.onLine('{}', { events: [], sessionId: 'fake-session', rateLimit: null, result: null })
@@ -176,7 +184,7 @@ describe('sweep_worktrees', () => {
   })
 
   describe('epic checkouts', () => {
-    const job = (keepEpicIds?: string[]) => runSetupJob(config, { kind: 'sweep_worktrees', keepTaskIds: [], keepPlanSessionIds: [], ...(keepEpicIds ? { keepEpicIds } : {}) })
+    const job = (keepEpicIds?: string[]) => runSetupJob(setup(localRuns()), { kind: 'sweep_worktrees', keepTaskIds: [], keepPlanSessionIds: [], ...(keepEpicIds ? { keepEpicIds } : {}) })
     const epicId = randomUUID()
     async function epicWorktree() {
       const prepared = await prepareWorkspace(dataDir, pmJob({ runId: 'e1', role: 'reviewer', planSessionId: null, taskId: null, taskRef: null, epicId, branch: 'main', headSha: 'origin/main' }))
@@ -186,7 +194,6 @@ describe('sweep_worktrees', () => {
 
     it('removes one whose epic is off the list', async () => {
       const path = await epicWorktree()
-      expect(path).toMatch(/epic-[0-9a-f-]+-review$/)
       expect(await job([])).toEqual({ kind: 'sweep_worktrees', removed: [path], kept: [] })
       expect(await exists(path)).toBe(false)
     })
@@ -202,6 +209,15 @@ describe('sweep_worktrees', () => {
       await job()
       expect(await exists(path)).toBe(true)
     })
+
+    it('keeps a developer checkout with uncommitted changes', async () => {
+      const prepared = await prepareWorkspace(dataDir, pmJob({ runId: 'e2', role: 'developer', planSessionId: null, taskId: null, taskRef: null, epicId, branch: `corral/epic-${epicId}`, headSha: null }))
+      expect(prepared.error).toBeNull()
+      const path = prepared.workspace!.path
+      await writeFile(join(path, 'work.txt'), 'not committed\n')
+      expect(await job([])).toEqual({ kind: 'sweep_worktrees', removed: [], kept: [path] })
+      expect(await exists(join(path, 'work.txt'))).toBe(true)
+    })
   })
 
   describe('scratch and spool files', () => {
@@ -215,7 +231,7 @@ describe('sweep_worktrees', () => {
       return scratch(name)
     }
     const sweepFiles = (keepPlanSessionIds: string[], pmTurnRunning: (id: string) => boolean = () => false, runIsHere?: (id: string) => boolean) =>
-      runSetupJob(config, { kind: 'sweep_worktrees', keepTaskIds: [], keepPlanSessionIds }, pmTurnRunning, runIsHere)
+      runSetupJob(setup(localRuns({ pmTurnRunning, ...(runIsHere ? { hasRun: runIsHere } : {}) })), { kind: 'sweep_worktrees', keepTaskIds: [], keepPlanSessionIds })
 
     it('removes the PM scratch of a session off the keep list, and keeps the rest', async () => {
       const [kept, active, gone] = [randomUUID(), randomUUID(), randomUUID()]
@@ -289,7 +305,7 @@ describe('sweep_worktrees', () => {
 
     it('leaves the cache of a project with an active run alone, through the sweep job', async () => {
       await Promise.all([entry('busy', 'old', 30), entry('idle', 'old', 30)])
-      await runSetupJob(config, { kind: 'sweep_worktrees', keepTaskIds: [], keepPlanSessionIds: [] }, () => false, () => false, project => project === 'busy')
+      await runSetupJob(setup(localRuns({ hasRun: () => false, projectRunning: project => project === 'busy' })), { kind: 'sweep_worktrees', keepTaskIds: [], keepPlanSessionIds: [] })
       expect(await hashes('busy')).toEqual(['old'])
       expect(await exists(cache('idle'))).toBe(true)
       expect(await hashes('idle')).toEqual([])

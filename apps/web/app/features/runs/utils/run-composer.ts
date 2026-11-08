@@ -1,6 +1,6 @@
-import { RUNTIMES_TAKING_MESSAGES } from '@corral/contracts/client'
+import { isActiveRun, RUNTIMES_TAKING_MESSAGES } from '@corral/core'
 import type { Agent, Run } from '@corral/contracts'
-import { isLiveRun, runtimeLabel } from '~/utils/labels'
+import { runtimeLabel } from '~/utils/labels'
 
 // What the agent page shows under a run's transcript (design/agent.md):
 // finished runs stay read-only (PRD §7.11), a PM turn is messaged in Plan,
@@ -13,7 +13,7 @@ export type RunComposer
     | { kind: 'disabled', reason: string }
 
 export function runComposer(run: Pick<Run, 'state' | 'role'>, agent: Pick<Agent, 'name' | 'runtime'>, runnerOnline: boolean): RunComposer {
-  if (!isLiveRun(run)) return { kind: 'read-only' }
+  if (!isActiveRun(run.state)) return { kind: 'read-only' }
   if (run.role === 'pm') return { kind: 'plan' }
   if (!(RUNTIMES_TAKING_MESSAGES as readonly string[]).includes(agent.runtime)) {
     return { kind: 'disabled', reason: `${runtimeLabel(agent.runtime)} can't take messages mid-run. Comment on the task and ${agent.name} reads it on its next run.` }

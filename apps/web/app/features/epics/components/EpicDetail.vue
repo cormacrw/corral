@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { epicPath, taskPath } from '~/utils/routes'
+import type { DetailMode } from '~/composables/useTaskFlyout'
 import { useEpicDetail } from '~/features/epics/composables/useEpicDetail'
-import DetailHeader from '~/features/tasks/components/DetailHeader.vue'
+import DetailHeader from '~/components/shared/DetailHeader.vue'
 import EpicDependencies from '~/features/epics/components/EpicDependencies.vue'
 import EpicDescription from '~/features/epics/components/EpicDescription.vue'
 import EpicDetailTitle from '~/features/epics/components/EpicDetailTitle.vue'
@@ -13,7 +15,7 @@ import EpicWork from '~/features/epics/components/EpicWork.vue'
 // An epic: its title, description and progress, and the dependency tree of
 // its tasks. Docked in the flyout, as a page with room for a big tree, or
 // as the mobile screen, where tasks open as pages (design/mobile.md).
-const props = defineProps<{ epicId: string, mode: 'flyout' | 'page' | 'mobile' }>()
+const props = defineProps<{ epicId: string, mode: DetailMode }>()
 const emit = defineEmits<{ close: [] }>()
 const { epicResult, activityResult, epic, error, project, parent, activity, prerequisites, blockedEpics, waiting, choices, saved, patch } = useEpicDetail(() => props.epicId)
 </script>
@@ -22,7 +24,7 @@ const { epicResult, activityResult, epic, error, project, parent, activity, prer
   <div class="flex h-full min-h-0 flex-col">
     <DetailHeader
       :mode="mode"
-      :path="epic?.taskRef ? `/tasks/${epic.taskRef}` : `/epics/${epicId}`"
+      :path="epic?.taskRef ? taskPath(epic.taskRef) : epicPath(epicId)"
       :saved="saved"
       @close="emit('close')"
     >

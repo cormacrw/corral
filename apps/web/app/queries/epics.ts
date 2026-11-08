@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/vue-query'
 import type { Epic, EpicReviewActionInput, PatchEpicInput } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { api } from '~/queries/api'
 import { defineMutation } from './dependencies'
 import { keys } from './keys'
 
@@ -20,7 +20,8 @@ export const setEpicDependencies = defineMutation<Epic, { id: string, dependsOn:
 
 export const reviewEpic = defineMutation<{ ok: boolean }, { id: string, input: EpicReviewActionInput }>({
   mutationFn: ({ id, input }) => api.epics.review(id, input),
-  invalidates: (_, { id }) => [keys.inbox(), keys.epics.lists(), keys.epics.detail(id)]
+  invalidates: (_, { id }) => [keys.inbox(), keys.epics.lists(), keys.epics.detail(id)],
+  onConflict: ({ id }) => [keys.inbox(), keys.epics.detail(id)]
 })
 
 export const retryEpicSync = defineMutation<{ ok: boolean }, { id: string }>({

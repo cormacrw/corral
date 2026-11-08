@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import type { Evidence } from '@corral/contracts'
+import type { EvidenceKind } from '@corral/core'
 import { computed } from 'vue'
 import EvidenceFiles from '~/features/evidence/components/EvidenceFiles.vue'
 
 const props = defineProps<{ evidence: Evidence[] }>()
 const emit = defineEmits<{ open: [item: Evidence] }>()
-const human = computed(() => props.evidence.filter(e => ['screenshot', 'video', 'request'].includes(e.kind)))
+// What a person looks at; every other file kind is an artifact
+const HUMAN_KINDS: readonly EvidenceKind[] = ['screenshot', 'video', 'request']
+const human = computed(() => props.evidence.filter(e => HUMAN_KINDS.includes(e.kind)))
 const notes = computed(() => props.evidence.filter(e => e.kind === 'note'))
-const artifacts = computed(() => props.evidence.filter(e => ['test_output', 'log', 'text', 'other'].includes(e.kind)))
+const artifacts = computed(() => props.evidence.filter(e => e.kind !== 'note' && !HUMAN_KINDS.includes(e.kind)))
 </script>
 
 <template>

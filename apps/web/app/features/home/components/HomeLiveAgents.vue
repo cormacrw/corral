@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { isActiveRun, ROLE_LABELS } from '@corral/core'
+import { agentPath } from '~/utils/routes'
 import type { Agent, Project, Run } from '@corral/contracts'
-import { elapsed, liveRunTitle } from '~/features/home/utils/dashboard'
-import { agentStatus, isLiveRun, ROLE, runtimeLabel } from '~/utils/labels'
+import { elapsed, liveRunTitle } from '~/features/home/utils/figures'
+import { agentStatus, runtimeLabel } from '~/utils/labels'
 
 // The agents with live runs, and what each run is on. Agents that are paused
 // or waiting out a usage limit are listed too, since they hold work back.
@@ -10,8 +12,8 @@ const props = defineProps<{ agents: Agent[], runs: Run[], projects: (Project & {
 const rows = computed(() => props.agents
   .map(agent => ({
     agent,
-    status: agentStatus(agent, props.now, false),
-    runs: props.runs.filter(r => r.agentId === agent.id && isLiveRun(r))
+    status: agentStatus(agent, props.now),
+    runs: props.runs.filter(r => r.agentId === agent.id && isActiveRun(r.state))
   }))
   .filter(row => row.runs.length || row.status))
 const projectOf = (id: string | null) => props.projects.find(p => p.id === id)
@@ -34,7 +36,7 @@ const projectOf = (id: string | null) => props.projects.find(p => p.id === id)
       <div class="min-w-0 flex-1">
         <div class="flex items-baseline gap-2 text-sm">
           <span class="font-medium">{{ agent.name }}</span>
-          <span class="text-xs text-muted-foreground">{{ ROLE[agent.role] }} · {{ runtimeLabel(agent.runtime) }}</span>
+          <span class="text-xs text-muted-foreground">{{ ROLE_LABELS[agent.role] }} · {{ runtimeLabel(agent.runtime) }}</span>
           <AppBadge
             v-if="status"
             :label="status.label"
@@ -65,7 +67,7 @@ const projectOf = (id: string | null) => props.projects.find(p => p.id === id)
         </p>
       </div>
       <NuxtLink
-        :to="`/agents/${agent.name.toLowerCase()}`"
+        :to="agentPath(agent.name)"
         :aria-label="agent.name"
         class="absolute inset-0 rounded-lg"
       />

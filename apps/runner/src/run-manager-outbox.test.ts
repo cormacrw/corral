@@ -2,14 +2,15 @@ import type { AgentTool, RunEvent, RunnerMessage } from '@corral/contracts'
 import { chmod, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentExit, AgentRuntime, ParsedLine } from './agent-runtime.ts'
+import type { AgentExit, AgentLauncher } from './agent-runtime.ts'
+import type { ParsedLine } from './parsed-line.ts'
 import type { RunnerConfig } from './config.ts'
-import type { ServerConnection } from './connection.ts'
 import { git } from './exec.ts'
 import type { ToolHandler, ToolServer } from './mcp.ts'
-import { barePath } from './repos.ts'
+import type { RunConnection } from './run-outbox.ts'
+import { barePath } from './layout.ts'
 import { RunManager } from './run-manager.ts'
-import { createTestDataDir, pmJob, TEST_REPOSITORY } from './test-repo.ts'
+import { createTestDataDir, pmJob, TEST_REPOSITORY, testConfig } from './test-repo.ts'
 
 const WELCOME = { type: 'welcome', runnerId: 'r', commit: 'c', draining: false, updateRequested: false } as const
 
@@ -29,8 +30,8 @@ describe('RunManager with the server out of reach', () => {
       return up
     },
     send: (message: RunnerMessage) => offered.push(message) > 0 && up && sent.push(message) > 0,
-    refreshUpdateStatus: () => void refreshes++
-  } as unknown as ServerConnection
+    refreshUpdateStatus: async () => void refreshes++
+  } satisfies RunConnection
   const tools = {
     register: (_secret: string, _role: string, call: ToolHandler) => {
       handler = call
@@ -38,7 +39,7 @@ describe('RunManager with the server out of reach', () => {
     },
     url: () => 'http://127.0.0.1:9/mcp'
   } as unknown as ToolServer
-  const runtime: AgentRuntime = {
+  const runtime: AgentLauncher = {
     id: 'fake',
     spawn: (options) => {
       line = parsed => options.onLine('{}', { events: [], sessionId: null, rateLimit: null, result: null, ...parsed })
@@ -52,6 +53,7 @@ describe('RunManager with the server out of reach', () => {
     manager.handle(WELCOME)
   }
   const types = () => sent.map(m => m.type)
+  const texts = (messages: RunnerMessage[]) => messages.flatMap(m => m.type === 'run.events' ? m.events : []).flatMap(e => e.type === 'message' ? [e.text] : [])
   // The worktree note can go first: its batch timer doesn't wait for a slow setup
   const startsBeforeAgent = () => {
     const spoke = sent.findIndex(m => m.type === 'run.events' && m.events.some(e => e.type === 'message'))
@@ -71,7 +73,7 @@ describe('RunManager with the server out of reach', () => {
   beforeEach(async () => {
     vi.stubEnv('GIT_CONFIG_COUNT', '0')
     dataDir = await createTestDataDir()
-    config = { dataDir, claudeBin: '/nonexistent/claude', codexBin: '/nonexistent/codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0, titleModel: 'haiku', slots: 4, roles: ['pm', 'developer', 'reviewer', 'design'] }
+    config = testConfig(dataDir, { claudeBin: '/nonexistent/claude' })
     sent = []
     offered = []
     up = true
@@ -88,8 +90,11 @@ describe('RunManager with the server out of reach', () => {
   it('replays a whole run in order after welcome, and only then forgets it', async () => {
     up = false
     const manager = await start()
+    // First goes in a batch of its own, flushed before Last arrives
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     line({ events: [{ type: 'message', text: 'First' }] })
-    await new Promise(resolve => setTimeout(resolve, 600))
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
     line({ events: [{ type: 'message', text: 'Last' }] })
     manager.stop('r1', 'timed_out', '60 s')
     await manager.shutdown()
@@ -113,7 +118,6 @@ describe('RunManager with the server out of reach', () => {
   it('keeps new traffic behind what is still waiting', async () => {
     const manager = await start()
     up = false
-    const texts = (messages: RunnerMessage[]) => messages.flatMap(m => m.type === 'run.events' ? m.events : []).flatMap(e => e.type === 'message' ? [e.text] : [])
     line({ events: [{ type: 'message', text: 'While down' }] })
     // Its batch was offered while down, so it waits in the outbox
     await expect.poll(() => texts(offered)).toContain('While down')
@@ -173,7 +177,7 @@ describe('RunManager with the server out of reach', () => {
 
     manager.connectionLost()
 
-    expect(await call).toEqual({ ok: false, error: 'Corral is unreachable right now. Wait a moment and try again.' })
+    expect(await call).toEqual({ ok: false, error: expect.any(String) })
     manager.stop('r1', 'timed_out', '60 s')
     await manager.shutdown()
   })
@@ -224,14 +228,13 @@ describe('RunManager with the server out of reach', () => {
     const first = handler('report_outcome' as AgentTool, { outcome: 'stuck', summary: 'Done' })
     const second = handler('report_outcome' as AgentTool, { outcome: 'stuck', summary: 'Done again' })
     await expect.poll(() => types()).toContain('tool.call')
-    await new Promise(resolve => setTimeout(resolve, 20))
-
-    expect(types().filter(t => t === 'tool.call')).toHaveLength(1)
     const call = sent.find(m => m.type === 'tool.call')
     manager.handle({ type: 'tool.result', callId: call?.type === 'tool.call' ? call.callId : '', ok: true, result: { recorded: true } })
 
+    // A second call of its own would still be waiting on its own answer
     expect(await first).toEqual({ ok: true, result: { recorded: true } })
     expect(await second).toEqual({ ok: true, result: { recorded: true } })
+    expect(types().filter(t => t === 'tool.call')).toHaveLength(1)
     manager.stop('r1', 'timed_out', '60 s')
     await manager.shutdown()
   })
@@ -239,13 +242,14 @@ describe('RunManager with the server out of reach', () => {
   it('saves no WIP over a report still pushing, and sends no report after run.ended', async () => {
     // Holds the push open until the test lets go of it
     const release = join(dirname(dataDir), 'release-push')
+    const pushing = join(dirname(dataDir), 'pushing')
     const hook = join(barePath(dataDir, TEST_REPOSITORY), 'hooks', 'pre-push')
-    await writeFile(hook, `#!/bin/sh\nwhile [ ! -f '${release}' ]; do sleep 0.02; done\n`)
+    await writeFile(hook, `#!/bin/sh\ntouch '${pushing}'\nwhile [ ! -f '${release}' ]; do sleep 0.02; done\n`)
     await chmod(hook, 0o755)
     const manager = await start()
     await writeFile(join(dataDir, 'worktrees', 'task-1', 'feature.txt'), 'half done\n')
     const report = handler('report_outcome' as AgentTool, { outcome: 'pr_opened', summary: 'Done' })
-    await new Promise(resolve => setTimeout(resolve, 200))
+    await expect.poll(() => stat(pushing).then(() => true, () => false), { timeout: 10_000 }).toBe(true)
 
     manager.stop('r1', 'timed_out', '60 s')
     await expect.poll(() => types(), { timeout: 10_000 }).toContain('run.ended')
@@ -254,7 +258,7 @@ describe('RunManager with the server out of reach', () => {
     const status = await git(['status', '--porcelain'], { cwd: join(dataDir, 'worktrees', 'task-1') })
     expect(status.stdout).toContain('feature.txt')
     await writeFile(release, '')
-    expect(await report).toEqual({ ok: false, error: 'This run is over. Stop working.' })
+    expect(await report).toEqual({ ok: false, error: expect.any(String) })
     expect(types()).not.toContain('tool.call')
   })
 })

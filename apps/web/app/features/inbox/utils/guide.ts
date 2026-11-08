@@ -22,7 +22,7 @@ export interface GuideStep {
   other: boolean
 }
 
-export const OTHER_CHANGES_WHY = 'Hunks the guide didn\'t place in a step, such as imports, docs and small tidy-ups. Read them before you approve.'
+const OTHER_CHANGES_WHY = 'Hunks the guide didn\'t place in a step, such as imports, docs and small tidy-ups. Read them before you approve.'
 
 export function hunkCount(pr: PullRequestDetail): number {
   return pr.files.reduce((n, f) => n + splitPatchHunks(f.patch).length, 0)
@@ -30,7 +30,7 @@ export function hunkCount(pr: PullRequestDetail): number {
 
 // Whether the line cap cut this file's patch partway (the server keeps the
 // start of the file that goes over it), so its last hunk is incomplete
-export function patchCut(file: PullRequestDetail['files'][number]): boolean {
+function patchCut(file: PullRequestDetail['files'][number]): boolean {
   if (!file.patch) return false
   const changed = file.patch.split('\n').filter(l => l.startsWith('+') || l.startsWith('-')).length
   return changed < file.additions + file.deletions

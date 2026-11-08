@@ -54,7 +54,7 @@ describe('mobile Board stages', () => {
 
   it('falls back for unknown stage keys and keeps epic tab selection in the query', async () => {
     const { wrapper, route } = board('top', 'unknown')
-    expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe('Ready 0')
+    expect(wrapper.get('[role="tab"][aria-selected="true"]').attributes('id')).toBe('board-tab-ready')
     await wrapper.get('#board-tab-complete').trigger('click')
     expect(route.query).toEqual({ view: 'top', column: 'complete' })
     expect(wrapper.get('[role="tabpanel"]').attributes('aria-label')).toBe('Complete, 0')

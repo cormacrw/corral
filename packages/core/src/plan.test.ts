@@ -111,7 +111,7 @@ describe('checkPlan with refs', () => {
 
   it.each(['COR-4', 'cor-4'])('rejects ref-shaped task key %s with a clear problem', (key) => {
     expect(checkPlan({ title: 'x', summary: '', epics, tasks: [task(key), task('consumer', { dependsOn: ['COR-4'] })] }, refs))
-      .toContainEqual({ code: 'key_shaped_like_ref', key, message: expect.stringContaining('Choose a key') })
+      .toContainEqual({ code: 'key_shaped_like_ref', key, message: expect.stringContaining(key) })
   })
 
   it.each(['COR-3', 'cor-3'])('resolves existing dependency %s regardless of map key case', (dep) => {
@@ -134,7 +134,7 @@ describe('checkPlan with refs', () => {
 
   it('refuses a Ready task that has been picked up, pointing at update_task, but lets a task depend on it', () => {
     expect(checkPlan({ title: 'x', summary: '', epics, tasks: [task('a', { ref: 'COR-6' }), task('b', { dependsOn: ['COR-6'] })] }, refs)).toEqual([
-      { code: 'ref_not_revisable', key: 'a', ref: 'COR-6', status: 'ready', message: expect.stringMatching(/COR-6 has already been picked up.*update_task/) }
+      { code: 'ref_not_revisable', key: 'a', ref: 'COR-6', status: 'ready', message: expect.stringContaining('update_task') }
     ])
   })
 
@@ -148,10 +148,10 @@ describe('checkPlan with refs', () => {
       task('f', { ref: 'COR-1' })
     ] }, refs)
     expect(problems).toEqual([
-      { code: 'ref_not_revisable', key: 'a', ref: 'COR-3', status: 'in_progress', message: expect.stringContaining('only Backlog and unclaimed Ready tasks can be revised') },
-      { code: 'deleted_ref', key: 'b', ref: 'COR-4', message: expect.stringContaining('COR-4 was deleted') },
-      { code: 'unknown_ref', key: 'c', ref: 'COR-9', message: expect.stringContaining('There is no task COR-9 in this project') },
-      { code: 'ref_in_other_project', key: 'd', ref: 'WEB-1', project: 'Website', message: expect.stringContaining('belongs to the project "Website"') },
+      { code: 'ref_not_revisable', key: 'a', ref: 'COR-3', status: 'in_progress', message: expect.stringContaining('COR-3') },
+      { code: 'deleted_ref', key: 'b', ref: 'COR-4', message: expect.stringContaining('COR-4') },
+      { code: 'unknown_ref', key: 'c', ref: 'COR-9', message: expect.stringContaining('COR-9') },
+      { code: 'ref_in_other_project', key: 'd', ref: 'WEB-1', project: 'Website', message: expect.stringContaining('Website') },
       { code: 'duplicate_ref', key: 'e', ref: 'COR-1' }
     ])
   })

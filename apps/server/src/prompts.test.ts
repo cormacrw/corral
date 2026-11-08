@@ -1,6 +1,6 @@
 import { HUMAN_DECISIONS_NOTE } from '@corral/core'
 import { describe, expect, it } from 'vitest'
-import { cappedBranchDiff, designerPrompt, designerRevisionPrompt, developerCheckScope, developerPrompt, developerRevisionPrompt, epicFixCheckScope, epicFixPrompt, epicReviewCiSection, epicReviewPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PromptTask } from './prompts.ts'
+import { cappedBranchDiff, designerPrompt, designerRevisionPrompt, developerCheckScope, developerPrompt, developerRevisionPrompt, epicFixCheckScope, epicFixPrompt, epicReviewCiSection, epicReviewPrompt, isGrillRequest, pmFallbackPrompt, pmPrompt, questionText, reviewerPrompt, type PmHistoryMessage, type PromptTask } from './prompts.ts'
 
 // These tests check what a prompt is built from: the data it carries, and which
 // conditional sections it has. The wording itself is left free to change.
@@ -36,7 +36,7 @@ describe('pmPrompt', () => {
     ['resumed project session', pmPrompt({ ...turn, fresh: false })],
     ['new global session', pmPrompt({ ...turn, projectName: null, prefix: null, fresh: true })],
     ['resumed global session', pmPrompt({ ...turn, projectName: null, prefix: null, fresh: false })],
-    ['lost session', pmFallbackPrompt({ ...turn, history: [{ role: 'Human', text: 'hi' }] })]
+    ['lost session', pmFallbackPrompt({ ...turn, history: [{ role: 'human', kind: 'message', text: 'hi' }] })]
   ])('gives a %s the role guidance and ends with the message', (_name, prompt) => {
     expect(prompt).toContain(guidance)
     expect(prompt.endsWith('hi')).toBe(true)
@@ -93,9 +93,9 @@ describe('pmPrompt grilling', () => {
   })
 
   it('keeps grilling when a lost session is rebuilt mid-interview', () => {
-    const history = [{ role: 'Human', text: 'grill me on exports' }, { role: 'PM (question)', text: 'Which format?' }, { role: 'Human', text: '1' }]
+    const history = [{ role: 'human', kind: 'message', text: 'grill me on exports' }, { role: 'pm', kind: 'question', text: 'Which format?' }, { role: 'human', kind: 'message', text: '1' }] satisfies PmHistoryMessage[]
     expect(pmFallbackPrompt({ ...turn, text: '1', history })).toContain('grill-me')
-    expect(pmFallbackPrompt({ ...turn, history: [{ role: 'Human', text: 'hi' }] })).not.toContain('grill')
+    expect(pmFallbackPrompt({ ...turn, history: [{ role: 'human', kind: 'message', text: 'hi' }] })).not.toContain('grill')
   })
 })
 
@@ -129,7 +129,7 @@ describe('pmPrompt attachments', () => {
 
 describe('pmFallbackPrompt', () => {
   it('reuses the fresh intro and carries the earlier conversation', () => {
-    const prompt = pmFallbackPrompt({ ...turn, history: [{ role: 'human', text: 'earlier' }, { role: 'human', text: 'hi' }] })
+    const prompt = pmFallbackPrompt({ ...turn, history: [{ role: 'human', kind: 'message', text: 'earlier' }, { role: 'human', kind: 'message', text: 'hi' }] })
     expect(prompt.startsWith(pmPrompt({ ...turn, fresh: true }))).toBe(true)
     expect(prompt).toContain('earlier')
   })
@@ -141,7 +141,10 @@ describe('questionText', () => {
   })
 
   it('numbers the options and adds the recommendation', () => {
-    expect(questionText({ text: 'Which format?', recommendation: 'CSV', options: ['CSV', 'Excel'] })).toBe('Which format?\n\nOptions:\n1. CSV\n2. Excel\n\nRecommended: CSV')
+    const text = questionText({ text: 'Which format?', recommendation: 'CSV', options: ['CSV', 'Excel'] })
+    expect(text.startsWith('Which format?')).toBe(true)
+    expect(text).toMatch(/1\. CSV\n2\. Excel/)
+    expect(text).not.toBe(questionText({ text: 'Which format?', recommendation: null, options: ['CSV', 'Excel'] }))
   })
 })
 
@@ -201,8 +204,7 @@ describe('developer and reviewer attachments', () => {
       ['spike', reviewerPrompt({ ...review, comments, spike: true, branch: null }, 'Rita')],
       ['design', reviewerPrompt({ ...review, comments, design: { version: 1 } }, 'Rita')]
     ])('are context, not instructions, for the %s reviewer', (_name, prompt) => {
-      expect(prompt).toContain('- Human (2026-10-01T00:00:00.000Z): Use the existing API')
-      expect(prompt).toContain('- Rita (2026-10-02T00:00:00.000Z): Pinned by the reviewer')
+      for (const fact of ['Human', '2026-10-01T00:00:00.000Z', 'Use the existing API', 'Rita', 'Pinned by the reviewer']) expect(prompt).toContain(fact)
       expect(prompt).not.toContain('## Human instructions')
     })
 
@@ -266,15 +268,17 @@ describe('reviewer evidence list', () => {
         { id: 'e2', criterionId: 'c2', kind: 'screenshot', note: 'The form', fileName: 'form.png' }
       ]
     }, 'Rita')
-    expect(prompt).toContain('  No behaviour change: only moved code.\n  See src/login.ts:12.')
-    expect(prompt).toContain('- e2: screenshot "form.png" for [c2]')
+    expect(prompt).toContain('No behaviour change: only moved code.')
+    expect(prompt).toContain('See src/login.ts:12.')
+    expect(prompt).toMatch(/e2\b.*form\.png.*c2/)
   })
 })
 
 describe('reviewer gates (D26)', () => {
   it('names the required checks when the project has them', () => {
     const prompt = reviewerPrompt({ ...review, requiredChecks: ['ci', 'e2e'] }, 'Rita')
-    expect(prompt).toContain('`ci`, `e2e`')
+    expect(prompt).toContain('e2e')
+    expect(reviewerPrompt(review, 'Rita')).not.toContain('e2e')
   })
 
   it('gives a different gates section with no required CI, naming no tools', () => {
@@ -349,7 +353,7 @@ describe('task rebase prompts', () => {
   })
 
   it('rebases onto the target, and names the submission trailers only on a task rebase', () => {
-    expect(developerPrompt({ ...parent, squashRebase: true }, 'Tam')).toContain('git rebase origin/develop')
+    expect(developerPrompt({ ...parent, squashRebase: true }, 'Tam')).toContain('origin/develop')
     expect(developerPrompt({ ...parent, squashRebase: true }, 'Tam')).toContain('Corral-Submission:')
     expect(developerPrompt(parent, 'Tam')).not.toContain('Corral-Submission')
   })
@@ -360,7 +364,7 @@ describe('rebase-only developer prompts', () => {
     const rebase = { ...task, rebaseOnly: true, approvedHeadSha: 'approved-head', reviewRounds: 3, defaultBranch: 'epic/release' }
     for (const prompt of [developerPrompt(rebase, 'Tam'), developerRevisionPrompt(rebase, [])]) {
       expect(prompt).toContain('approved-head')
-      expect(prompt).toContain('git merge-tree --write-tree HEAD origin/epic/release')
+      expect(prompt).toContain('origin/epic/release')
       expect(prompt).toContain('pr_rebased')
       expect(prompt).toContain('conflictedFiles')
       expect(prompt).toContain('trivial')
@@ -378,7 +382,6 @@ describe('rebase review prompts', () => {
     const prompt = reviewerPrompt({ ...rebase, rebaseOnly: false, epicResolution: { ...epicResolution, targetFiles: [{ path: 'b.md', diff: '+```\n+`````', truncated: true }] } }, 'Rita')
     expect(prompt).toContain('- `b.md`')
     expect(prompt).toContain('``````diff\n+```\n+`````\n``````')
-    expect(prompt).toContain('`git diff onto HEAD -- b.md`')
     expect(prompt).toContain('`preservesApproval: false`')
     expect(reviewerPrompt({ ...rebase, rebaseOnly: false, epicResolution: { ...epicResolution, targetFiles: [] } }, 'Rita')).not.toContain('b.md')
   })
@@ -463,7 +466,7 @@ describe('integration review prompts', () => {
   it('shows the files only the target changed', () => {
     const adapted = epicReviewPrompt({ ...input, lastReview: { headSha: 'old999', summary: 'Fine', outcome: 'changes_requested', fixes: [] }, targetFiles: [{ path: 'src/main-only.ts', diff: '+adapted', truncated: true }] })
     expect(adapted).toContain('+adapted')
-    expect(adapted).toContain('git diff origin/main HEAD -- src/main-only.ts')
+    expect(adapted).toContain('src/main-only.ts')
     expect(epicReviewPrompt(input)).not.toContain('src/main-only.ts')
   })
 

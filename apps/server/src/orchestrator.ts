@@ -1,206 +1,177 @@
-import { RUNNER_HEARTBEAT_MS, type GlobalStatus, type InboxActionInput, type PmRunJob, type RunnerMessage, type Task } from '@corral/contracts'
-import { ACTIVE_RUN_STATES, type Actor } from '@corral/core'
-import { EpicFixes } from './epic-fixes.ts'
-import { schema } from '@corral/db'
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import type { RunnerMessage } from '@corral/contracts'
+import type { Database } from '@corral/db'
 import { AgentTools } from './agent-tools.ts'
-import { appendAudit, auditEvent } from './audit.ts'
+import type { BlobStore } from './blob-store.ts'
+import { Commands } from './commands.ts'
+import { Controls } from './controls.ts'
 import type { ReleaseNotes } from './deployments.ts'
+import { EpicFixes } from './epic-fix-runs.ts'
+import { EpicMerger } from './epic-merge.ts'
 import { EpicPullRequests } from './epic-prs.ts'
+import { EpicReviewRuns } from './epic-review-runs.ts'
+import { EpicSynchronizer } from './epic-sync.ts'
+import type { EventBus } from './events.ts'
+import type { GitHubClient } from './github.ts'
 import { HumanActions } from './human-actions.ts'
 import { LeaseReconcile } from './lease-reconcile.ts'
 import { MergeOrchestrator } from './merge.ts'
-import type { PlanService } from './plan.ts'
+import { Placement } from './placement.ts'
+import { PlanService } from './plan.ts'
+import { PlanProposals } from './plan-proposals.ts'
+import { PlanSessions } from './plan-sessions.ts'
 import { PmActions } from './pm-actions.ts'
-import { PmCalls } from './pm-calls.ts'
-import { PmDecisions } from './pm-decisions.ts'
+import { pmBoardTools } from './pm-board-tools.ts'
+import { pmCalls } from './pm-calls.ts'
+import { pmDecisions } from './pm-decisions.ts'
+import { pmDirectTools } from './pm-direct-tools.ts'
 import { PmDispatch } from './pm-dispatch.ts'
 import { PmTools } from './pm-tools.ts'
-import { KILL_SWITCH_STOP, RunContexts, type OrchestratorDeps, type PlanSessionRow, type RunCore } from './run-context.ts'
+import { RecoveryPass } from './recovery-pass.ts'
+import { RunContexts } from './run-context.ts'
 import { RunEnding } from './run-ending.ts'
 import { RunExits } from './run-exits.ts'
+import { RunGate } from './run-gate.ts'
 import { RunJobs } from './run-jobs.ts'
 import { RunOutcomes } from './run-outcomes.ts'
-import type { RunnerHandlers } from './runner-hub.ts'
+import { RUNNER_STALE_MS, type RunnerHandlers, type RunnerHub } from './runner-hub.ts'
 import { Scheduler } from './scheduler.ts'
-import type { TaskContentEdit } from './tasks.ts'
+import { TaskIntegrator } from './task-integration.ts'
+import type { Transcripts } from './transcripts.ts'
 import { WorktreeSweep } from './worktree-sweep.ts'
 
-export { actorLabel } from './run-jobs.ts'
-export { feedbackComment, findingsMarker, MAX_NOTE_LENGTH, noteProblem } from './run-outcomes.ts'
-export type { OrchestratorDeps } from './run-context.ts'
+export interface OrchestratorDeps {
+  db: Database
+  events: EventBus
+  runner: RunnerHub
+  github: GitHubClient
+  blobs: BlobStore
+  transcripts: Transcripts
+  releaseNotes: ReleaseNotes
+  // Where people open Corral, for links in PR bodies
+  publicUrl: string
+  now?: () => Date
+}
 
-const { runs, settings } = schema
+type ActiveRuns = { runId: string, leaseEpoch: number }[]
 
-// A runner reconnects within its backoff and next heartbeat. Longer than both.
-const STARTUP_GRACE_MS = 3 * RUNNER_HEARTBEAT_MS
-const SPOOL_SWEEP_MS = 60 * 60 * 1000
-
-// Drives runs (flows.md §2): the runner hub's handlers and the API's way in.
-// The work is in its parts: the scheduler claims and assigns, lease-reconcile
-// keeps leases alive and reconciles lost runs, agent-tools and run-outcomes
-// handle every agent tool call, each fenced by its lease epoch.
+// Drives runs (flows.md §2). Only wires the parts together, each with what it
+// calls, and runs the timer; routes call the part that owns what they do. The
+// scheduler claims and assigns, lease-reconcile keeps leases alive and
+// reconciles lost runs, agent-tools and run-outcomes handle every agent tool
+// call, each fenced by its lease epoch, and run-ending owns how runs end.
 export class Orchestrator implements RunnerHandlers {
-  #c: RunCore
+  readonly gate = new RunGate()
+  readonly runs: RunContexts
+  readonly ending: RunEnding
+  readonly placement: Placement
+  readonly jobs: RunJobs
+  readonly outcomes: RunOutcomes
+  readonly epicPrs: EpicPullRequests
+  readonly epicReviews: EpicReviewRuns
+  readonly fixes: EpicFixes
+  readonly merges: MergeOrchestrator
+  readonly integrations: TaskIntegrator
+  readonly epicMerges: EpicMerger
+  readonly sweep: WorktreeSweep
+  readonly commands: Commands
+  readonly sessions: PlanSessions
+  readonly proposals: PlanProposals
+  readonly plans: PlanService
+  readonly pm: PmDispatch
+  readonly human: HumanActions
+  readonly recovery: RecoveryPass
+  readonly scheduler: Scheduler
+  readonly controls: Controls
+  readonly pmActions: PmActions
+  readonly pmTools: PmTools
+  readonly leases: LeaseReconcile
+  readonly exits: RunExits
+  readonly tools: AgentTools
+  #runner: RunnerHub
+  #releaseNotes: ReleaseNotes
+  #now: () => Date
   #timer: NodeJS.Timeout | null = null
   #ticking: Promise<void> | null = null
-  readonly pmActions: PmActions
-  readonly pmDecisions: PmDecisions
-  readonly epicPrs: EpicPullRequests
-  readonly pmTools: PmTools
-  readonly merges: MergeOrchestrator
-  readonly sweep: WorktreeSweep
 
   constructor(deps: OrchestratorDeps) {
-    this.pmActions = new PmActions({
-      db: deps.db,
-      events: deps.events,
-      prepare: (sessionId, tool, input) => this.#c.pmCalls.prepare(sessionId, tool, input),
-      execute: (sessionId, tool, prepared, actor) => this.#c.pmCalls.execute(sessionId, tool, prepared, actor),
-      sessionChanged: async sessionId => this.plans?.actionSessionChanged(sessionId)
+    const { db, events, runner, github, blobs, transcripts, publicUrl } = deps
+    const now = () => deps.now?.() ?? new Date()
+    const gate = this.gate
+    // The scheduler is built last; the parts before it only wake it later
+    const wake = (taskIds: readonly string[] = []) => this.scheduler.poke(taskIds)
+    this.#runner = runner
+    this.#releaseNotes = deps.releaseNotes
+    this.#now = now
+
+    const runs = this.runs = new RunContexts(db)
+    const epicPrs = this.epicPrs = new EpicPullRequests({ db, events, github, publicUrl, now })
+    const epicReviews = this.epicReviews = new EpicReviewRuns({ db, events, github, now })
+    // Three passes merge work: task PRs, PR-free subtasks onto their task's
+    // branch (which the synchronizer keeps on its target), and tasks' own PRs
+    const merges = this.merges = new MergeOrchestrator({ db, events, github, runner, gate, now, wake })
+    const settled = (taskId: string) => merges.settled(taskId)
+    const sync = new EpicSynchronizer({ db, events, github, runner, gate, now, wake, settled })
+    const integrations = this.integrations = new TaskIntegrator({ db, events, github, runner, gate, now, wake, sync, settled })
+    const epicMerges = this.epicMerges = new EpicMerger({ db, events, github, runner, gate, now, wake, headMoved: id => epicPrs.headMoved(id) })
+    // A redeploy waits for merges in flight in any of them
+    const merging = {
+      get inFlight() {
+        return merges.inFlight + integrations.inFlight + epicMerges.inFlight
+      }
+    }
+    this.sweep = new WorktreeSweep({ db, runner, now })
+    const commands = this.commands = new Commands({ db, events, blobs, runner, merges, now, wake, noticeTaskEdit: (taskId, edit, actor) => this.human.noticeTaskEdit(taskId, edit, actor) })
+    const sessions = this.sessions = new PlanSessions(db, events)
+    const proposals = this.proposals = new PlanProposals({ db, events, sessions, wake })
+    // A Plan session's turns are PM runs, and closing one stops its run
+    const plans = this.plans = new PlanService({
+      db, events, runner, sessions, proposals,
+      recoveryReady: taskIds => void this.scheduler.schedule(taskIds),
+      stopRun: (runId, actor) => this.human.stopRun(runId, actor),
+      startRun: (session, job) => this.pm.startPmRun(session, job)
     })
-    this.pmTools = new PmTools({ db: deps.db, events: deps.events, runner: deps.runner, transcripts: deps.transcripts, orchestrator: this, editEntity: (sessionId, tool, input, actor) => this.#c.pmCalls.editEntity(sessionId, tool, input, actor) })
-    this.pmDecisions = new PmDecisions({
-      db: deps.db,
-      inboxAction: (taskId, input, actor) => this.inboxAction(taskId, input, actor),
-      approveDesign: (taskId, version, note, actor) => this.approveDesign(taskId, version, note, actor)
+    const ending = this.ending = new RunEnding({ db, events, runner, transcripts, github, now, runs, plans, epicPrs, epicReviews, wake })
+    const placement = this.placement = new Placement({ runner, gate, runs, ending })
+    const jobs = this.jobs = new RunJobs({ db, github, runner, now, ending })
+    const outcomes = this.outcomes = new RunOutcomes({ db, events, github, blobs, publicUrl, runs, ending })
+    const fixes = this.fixes = new EpicFixes({ db, github, now, ending, publishEpic: id => epicPrs.publish(id) })
+    const pm = this.pm = new PmDispatch({ db, runner, gate, now, runs, ending, placement, merges: merging })
+    const human = this.human = new HumanActions({ db, events, runner, github, now, runs, ending, plans, pm, merges, commands, wake })
+    const recovery = this.recovery = new RecoveryPass({
+      db, events, github, runner, now, pm, sessions,
+      publishRun: async (runId) => {
+        const ctx = await runs.load(runId)
+        if (ctx) await ending.publish(ctx)
+      }
     })
-    this.epicPrs = new EpicPullRequests(deps)
-    this.merges = new MergeOrchestrator({
-      db: deps.db,
-      events: deps.events,
-      github: deps.github,
-      runner: deps.runner,
-      wake: ids => this.poke(ids),
-      epicHeadMoved: id => this.epicPrs.headMoved(id),
-      ...(deps.now && { now: deps.now })
+    const scheduler = this.scheduler = new Scheduler({ db, github, runner, gate, now, runs, ending, placement, jobs, epicPrs, epicReviews, fixes, pm, recovery })
+    const controls = this.controls = new Controls({ db, events, gate, now, runs, ending, scheduler, pm, merges: merging })
+    // Every PM tool, and the cards of those that ask the human first (D30)
+    const pmTools = this.pmTools = new PmTools({
+      db,
+      propose: (sessionId, runId, tool, prepared, actor) => this.pmActions.propose(sessionId, runId, tool, prepared, actor),
+      handlers: {
+        ...pmBoardTools({ db, blobs, sessions, proposals, commands }),
+        ...pmDirectTools({ db, runner, transcripts, controls, human, plans, commands }),
+        ...pmCalls({ db, runs, human, controls, commands }),
+        ...pmDecisions({ db, human })
+      }
     })
-    this.sweep = new WorktreeSweep({ db: deps.db, runner: deps.runner, ...(deps.now && { now: deps.now }) })
-    const core = {
-      d: deps,
-      now: () => deps.now?.() ?? new Date(),
-      stopped: false,
-      updating: false,
-      finishingUpdate: false,
-      plans: null,
-      releaseNotes: null,
-      epicPrs: this.epicPrs,
-      pmTools: this.pmTools,
-      pmActions: this.pmActions,
-      pmDecisions: this.pmDecisions,
-      merges: this.merges,
-      sweep: this.sweep
-    } as RunCore
-    core.runs = new RunContexts(core)
-    core.ending = new RunEnding(core)
-    core.jobs = new RunJobs(core)
-    core.outcomes = new RunOutcomes(core)
-    core.fixes = new EpicFixes(core)
-    core.tools = new AgentTools(core)
-    core.human = new HumanActions(core)
-    core.pm = new PmDispatch(core)
-    core.pmCalls = new PmCalls(core, this)
-    core.leases = new LeaseReconcile(core)
-    core.exits = new RunExits(core)
-    core.scheduler = new Scheduler(core)
-    this.#c = core
+    this.pmActions = new PmActions({ db, events, sessions, tools: pmTools })
+    const leases = this.leases = new LeaseReconcile({ db, runner, transcripts, now, runs, ending })
+    this.exits = new RunExits({ db, events, transcripts, now, runs, ending, leases, plans, wake })
+    this.tools = new AgentTools({ db, blobs, publicUrl, runs, ending, jobs, outcomes, fixes, epicReviews, pmTools })
   }
 
-  get plans(): PlanService | null {
-    return this.#c.plans
-  }
-
-  set plans(plans: PlanService | null) {
-    this.#c.plans = plans
-  }
-
-  get releaseNotes(): ReleaseNotes | null {
-    return this.#c.releaseNotes
-  }
-
-  set releaseNotes(releaseNotes: ReleaseNotes | null) {
-    this.#c.releaseNotes = releaseNotes
-  }
-
-  // Reads the kill switch; called once at startup
+  // Called once at startup
   async init(): Promise<void> {
     await this.pmActions.recoverInterrupted()
-    const [row] = await this.#c.d.db.select().from(settings).where(eq(settings.key, 'stopped'))
-    this.#c.stopped = row?.value === true
-    this.merges.stopped = this.#c.stopped
-  }
-
-  get stopped(): boolean {
-    return this.#c.stopped
-  }
-
-  get status(): GlobalStatus {
-    return { stopped: this.#c.stopped, updating: this.#c.updating }
-  }
-
-  // The update hold drains workers/merges while PM turns still start, then
-  // queues new PM turns while active turns finish. Returns the busy count so
-  // the deploy can call it until that reaches zero. Kept in memory: the
-  // redeployed server starts without it.
-  async holdForUpdate(): Promise<number> {
-    if (!this.#c.updating) {
-      this.#c.updating = true
-      this.merges.stopped = true
-      this.#c.d.events.publish({ type: 'global.status', status: this.status })
-    }
-    // A pass that began before the hold may still be claiming
-    await this.#c.scheduler.idle
-    await this.#c.pm.idle
-    await this.#c.pm.updatePhase()
-    // PM turns still waiting for a slot keep their job and start after the update
-    const live = await this.#c.d.db.select({ id: runs.id }).from(runs).where(and(inArray(runs.state, [...ACTIVE_RUN_STATES]), isNull(runs.pmJob)))
-    return live.length + this.merges.inFlight
-  }
-
-  releaseUpdate(): void {
-    if (!this.#c.updating) return
-    this.#c.updating = false
-    this.#c.finishingUpdate = false
-    this.merges.stopped = this.#c.stopped
-    this.#c.d.events.publish({ type: 'global.status', status: this.status })
-    this.poke()
-  }
-
-  // The kill switch (PRD §7.11): nothing new starts, and every live run is
-  // stopped. Resuming lets the scheduler carry on; stopped runs retry.
-  async stopAll(actor: Actor): Promise<void> {
-    await this.#setStopped(true, actor)
-    await this.#stopLive()
-    // A pass already claiming can commit a run after that read
-    await this.#c.scheduler.idle
-    await this.#c.pm.idle
-    await this.#stopLive()
-  }
-
-  async #stopLive(): Promise<void> {
-    const live = await this.#c.d.db.select({ id: runs.id }).from(runs).where(inArray(runs.state, [...ACTIVE_RUN_STATES]))
-    for (const { id } of live) {
-      const ctx = await this.#c.runs.load(id)
-      if (!ctx) continue
-      await this.#c.ending.stop(ctx, KILL_SWITCH_STOP, { reason: 'Corral was stopped', keepWork: true })
-    }
-  }
-
-  async resumeAll(actor: Actor): Promise<void> {
-    await this.#setStopped(false, actor)
-    this.poke()
-  }
-
-  async #setStopped(stopped: boolean, actor: Actor): Promise<void> {
-    this.#c.stopped = stopped
-    this.merges.stopped = stopped || this.#c.updating
-    await this.#c.d.db.insert(settings).values({ key: 'stopped', value: stopped }).onConflictDoUpdate({ target: settings.key, set: { value: stopped, updatedAt: this.#c.now() } })
-    await appendAudit(this.#c.d.db, { actor }, stopped ? auditEvent('corral.stopped', {}) : auditEvent('corral.resumed', {}))
-    this.#c.d.events.publish({ type: 'global.status', status: this.status })
+    await this.controls.init()
   }
 
   start(intervalMs = 15_000): void {
-    this.#c.leases.sweepFrom = this.#c.now().getTime() + STARTUP_GRACE_MS
+    // A runner reconnects within its backoff and next heartbeat, so within the time a silent one is dropped
+    this.leases.sweepFrom = this.#now().getTime() + RUNNER_STALE_MS
     this.#timer = setInterval(() => void this.tick(), intervalMs)
     this.sweep.start()
   }
@@ -215,7 +186,7 @@ export class Orchestrator implements RunnerHandlers {
   // pass would work from older rows than the first has already acted on.
   // Silent runners are dropped even so, since they're what makes a pass slow.
   tick(): Promise<void> {
-    this.#c.d.runner.dropSilent()
+    this.#runner.dropSilent()
     this.#ticking ??= this.#tickOnce().finally(() => {
       this.#ticking = null
     })
@@ -223,102 +194,39 @@ export class Orchestrator implements RunnerHandlers {
   }
 
   async #tickOnce(): Promise<void> {
-    await this.sweepLeases().catch(error => console.error('Lease sweep failed', error))
-    await this.merges.tick().catch(error => console.error('Merge pass failed', error))
-    await this.schedule()
-    if (Date.now() - this.#c.leases.spoolsSweptAt >= SPOOL_SWEEP_MS) await this.sweepSpools().catch(error => console.error('Spool sweep failed', error))
+    await this.leases.sweepLeases().catch(error => console.error('Lease sweep failed', error))
+    await this.mergePass().catch(error => console.error('Merge pass failed', error))
+    await this.scheduler.schedule()
+    if (this.leases.spoolSweepDue()) await this.leases.sweepSpools().catch(error => console.error('Spool sweep failed', error))
   }
 
-  sweepLeases(): Promise<void> {
-    return this.#c.leases.sweepLeases()
+  async mergePass(): Promise<void> {
+    if (this.gate.halted || !this.#runner.online) return
+    await this.merges.tick()
+    if (this.gate.halted) return
+    await this.integrations.tick()
+    await this.epicMerges.tick()
   }
 
-  sweepSpools(): Promise<void> {
-    return this.#c.leases.sweepSpools()
-  }
-
-  // Asks for a scheduling pass soon; see Scheduler
-  poke(taskIds: readonly string[] = []): void {
-    this.#c.scheduler.poke(taskIds)
-  }
-
-  schedule(taskIds: readonly string[] = []): Promise<void> {
-    return this.#c.scheduler.schedule(taskIds)
-  }
-
-  refreshLoad(): Promise<void> {
-    return this.#c.ending.refreshLoad()
-  }
-
-  assertPmRunPossible() {
-    return this.#c.pm.assertPmRunPossible()
-  }
-
-  startPmRun(session: PlanSessionRow, job: Omit<PmRunJob, 'runId' | 'runNumber' | 'leaseEpoch'>): Promise<string> {
-    return this.#c.pm.startPmRun(session, job)
-  }
-
-  stopRun(runId: string, actor: Actor): Promise<void> {
-    return this.#c.human.stopRun(runId, actor)
-  }
-
-  resumeTask(taskId: string, actor: Actor): Promise<void> {
-    return this.#c.human.resumeTask(taskId, actor)
-  }
-
-  messageRun(...args: Parameters<HumanActions['messageRun']>) {
-    return this.#c.human.messageRun(...args)
-  }
-
-  noticeTaskEdit(taskId: string, edit: TaskContentEdit, actor: Actor): Promise<void> {
-    return this.#c.human.noticeTaskEdit(taskId, edit, actor)
-  }
-
-  taskChanged(taskId: string): Promise<void> {
-    return this.#c.human.taskChanged(taskId)
-  }
-
-  inboxAction(taskId: string, input: InboxActionInput, actor: Actor): Promise<Task | null> {
-    return this.#c.human.inboxAction(taskId, input, actor)
-  }
-
-  approveDesign(taskId: string, version: number | undefined, note: string | undefined, actor: Actor): Promise<void> {
-    return this.#c.human.approveDesign(taskId, version, note, actor)
-  }
-
-  deleteTask(taskId: string, actor: Actor, reason: string | null): Promise<void> {
-    return this.#c.human.deleteTask(taskId, actor, reason)
-  }
-
-  deleteProject(projectId: string, actor: Actor): Promise<void> {
-    return this.#c.human.deleteProject(projectId, actor)
-  }
-
-  // Runner traffic
-
-  onConnected(activeRuns: { runId: string, leaseEpoch: number }[], runnerId: string): Promise<void> {
-    return this.#c.leases.onConnected(activeRuns, runnerId)
+  onConnected(activeRuns: ActiveRuns, runnerId: string): Promise<void> {
+    return this.leases.onConnected(activeRuns, runnerId)
   }
 
   onReady(): void {
-    this.poke()
-    void this.releaseNotes?.sweep()
+    this.scheduler.poke()
+    void this.#releaseNotes.sweep()
     void this.sweep.run()
   }
 
-  onHeartbeat(activeRuns: { runId: string, leaseEpoch: number }[], runnerId: string, sentAt?: number): Promise<void> {
-    return this.#c.leases.onHeartbeat(activeRuns, runnerId, sentAt)
-  }
-
-  async onDisconnected(): Promise<void> {
-    // Nothing yet: leases expire on their own if the runner doesn't come back
+  onHeartbeat(activeRuns: ActiveRuns, runnerId: string, sentAt?: number): Promise<void> {
+    return this.leases.onHeartbeat(activeRuns, runnerId, sentAt)
   }
 
   onRunMessage(message: Extract<RunnerMessage, { type: 'run.started' | 'run.events' | 'run.ended' }>, runnerId: string): Promise<void> {
-    return this.#c.exits.onRunMessage(message, runnerId)
+    return this.exits.onRunMessage(message, runnerId)
   }
 
   onToolCall(message: Extract<RunnerMessage, { type: 'tool.call' }>, runnerId: string): Promise<unknown> {
-    return this.#c.tools.onToolCall(message, runnerId)
+    return this.tools.onToolCall(message, runnerId)
   }
 }

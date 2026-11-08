@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { SECTIONS } from '~/utils/routes'
+
 definePageMeta({ key: 'task' })
 
 // The task page (design/task.md, page mode). On mobile it's the full-page
@@ -8,7 +10,7 @@ const ref = computed(() => String(route.params.ref).toUpperCase())
 const device = useDevice()
 // A shared link has nothing to go back to
 const router = useRouter()
-const back = () => window.history.state?.back ? router.back() : navigateTo('/projects')
+const back = () => window.history.state?.back ? router.back() : navigateTo(SECTIONS.projects.to)
 useSeoMeta({ title: () => `${ref.value} · Corral` })
 </script>
 

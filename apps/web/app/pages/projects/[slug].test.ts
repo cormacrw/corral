@@ -7,7 +7,7 @@ import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
 
 const { list } = vi.hoisted(() => ({ list: vi.fn() }))
-vi.mock('~/composables/useApi', () => ({ api: { projects: { list } } }))
+vi.mock('~/queries/api', () => ({ api: { projects: { list } } }))
 vi.stubGlobal('computed', computed)
 vi.stubGlobal('useRoute', () => ({ params: { slug: 'corral' } }))
 vi.stubGlobal('definePageMeta', vi.fn())

@@ -7,7 +7,6 @@ import { isSetupPath, onboardingRedirect } from '~/features/setup/utils/onboardi
 // First run: with no projects, everything leads to onboarding; once the
 // server has one, onboarding is over on every device (design/onboarding.md)
 export default defineNuxtRouteMiddleware(async (to) => {
-  // Resolve media queries and the saved override before choosing a landing page.
   const client = useQueryClient()
   let projects = client.getQueryData<Project[]>(keys.projects.list())
   if (!projects) {
@@ -32,7 +31,8 @@ export default defineNuxtRouteMiddleware(async (to) => {
     // shell finds the list cached and doesn't ask again.
     try {
       const list = await fetchProjectsOnce()
-      // Anything but a list (say, a proxy's HTML page) says nothing either way
+      // JSON that isn't a list says nothing either way. A page that isn't JSON
+      // at all, such as a proxy's, already failed in the request.
       if (!Array.isArray(list)) return
       projects = client.setQueryData<Project[]>(keys.projects.list(), list)!
     } catch {

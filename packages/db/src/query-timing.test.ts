@@ -6,22 +6,24 @@ import { createTestDatabase, databaseFixture } from './testing.ts'
 
 afterEach(() => {
   vi.restoreAllMocks()
-  vi.unstubAllEnvs()
 })
 
 for (const driver of ['pglite', 'postgres'] as const) {
   describe(`${driver} query timing`, () => {
+    // Logs every query; `defaults` keeps the default threshold
     let handle: DatabaseHandle
+    let defaults: DatabaseHandle
     databaseFixture(driver, async () => {
-      handle = (driver === 'pglite' ? await createTestDatabase('pglite') : await createTestDatabase('postgres'))!
+      handle = (driver === 'pglite' ? await createTestDatabase('pglite', { slowQueryMs: 0 }) : await createTestDatabase('postgres', { slowQueryMs: 0 }))!
+      defaults = (driver === 'pglite' ? await createTestDatabase('pglite') : await createTestDatabase('postgres'))!
     })
     afterAll(async () => {
       await handle?.close()
+      await defaults?.close()
     })
 
     it('isolates concurrent contexts and measures prepared queries, transactions and failures', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-      vi.stubEnv('CORRAL_SLOW_QUERY_MS', '0')
       const first = { queryCount: 0, dbTimeMs: 0, route: () => '/api/first/:id' }
       const second = { queryCount: 0, dbTimeMs: 0, route: () => '/api/second' }
       await Promise.all([
@@ -47,8 +49,7 @@ for (const driver of ['pglite', 'postgres'] as const) {
       expect(first.queryCount).toBe(2)
     })
 
-    it('uses the default threshold for invalid configuration and counts prepared executions', async () => {
-      vi.stubEnv('CORRAL_SLOW_QUERY_MS', '-1')
+    it('uses the default threshold when none is given and counts prepared executions', async () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
       let clock = 0
       vi.spyOn(performance, 'now').mockImplementation(() => {
@@ -56,7 +57,7 @@ for (const driver of ['pglite', 'postgres'] as const) {
         return clock
       })
       const timing = { queryCount: 0, dbTimeMs: 0, route: () => '/api/prepared' }
-      const prepared = handle.db.select().from((await import('./schema.ts')).settings).prepare('timing_test')
+      const prepared = defaults.db.select().from((await import('./schema.ts')).settings).prepare('timing_test')
       await requestQueryTiming.run(timing, async () => {
         await prepared.execute()
         await prepared.execute()

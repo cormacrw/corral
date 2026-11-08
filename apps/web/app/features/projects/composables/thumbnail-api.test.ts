@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
-import { api } from '~/composables/useApi'
+import { api } from '~/queries/api'
 
 afterEach(() => vi.unstubAllGlobals())
 

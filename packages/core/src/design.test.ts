@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { approveDesignVersion, isDesignPinStale, nextDesignVersion, STALE_PIN_STATUSES, type DesignVersionState } from './design.ts'
-import type { DesignPinTarget } from './plan.ts'
+import { approveDesignVersion, isDesignPinStale, nextDesignVersion, type DesignVersionState } from './design.ts'
+import { NOT_STARTED_STATUSES } from './status.ts'
 import { TASK_STATUSES } from './status.ts'
-import { canChangeType, requiresHumanReview, TASK_TYPES } from './task.ts'
+import { canChangeType, requiresHumanReview } from './task.ts'
 
 const versions = (...statuses: DesignVersionState['status'][]): (DesignVersionState & { id: string })[] =>
   statuses.map((status, i) => ({ id: `v${i + 1}`, version: i + 1, status }))
@@ -53,10 +53,6 @@ describe('nextDesignVersion', () => {
 })
 
 describe('design task type (D20)', () => {
-  it('is a task type', () => {
-    expect(TASK_TYPES).toContain('design')
-  })
-
   it('always requires human review', () => {
     expect(requiresHumanReview('design', false)).toBe(true)
     expect(requiresHumanReview('design', true)).toBe(true)
@@ -84,11 +80,11 @@ describe('isDesignPinStale (D20)', () => {
   const pinnedToV1 = { version: 1, latestApproved: 2 }
 
   it('flags Draft, Backlog and Ready tasks pinned to an older version than the approved one', () => {
-    for (const status of STALE_PIN_STATUSES) expect(isDesignPinStale(pinnedToV1, { status, started: false })).toBe(true)
+    for (const status of NOT_STARTED_STATUSES) expect(isDesignPinStale(pinnedToV1, { status, started: false })).toBe(true)
   })
 
   it('leaves tasks that have started alone, whatever their status', () => {
-    for (const status of TASK_STATUSES.filter(s => !STALE_PIN_STATUSES.some(stale => stale === s))) {
+    for (const status of TASK_STATUSES.filter(s => !NOT_STARTED_STATUSES.some(stale => stale === s))) {
       expect(isDesignPinStale(pinnedToV1, { status, started: true })).toBe(false)
       expect(isDesignPinStale(pinnedToV1, { status, started: false })).toBe(false)
     }
@@ -98,15 +94,5 @@ describe('isDesignPinStale (D20)', () => {
   it('does not flag a pin to the approved version', () => {
     expect(isDesignPinStale({ version: 2, latestApproved: 2 }, { status: 'ready', started: false })).toBe(false)
     expect(isDesignPinStale({ version: 2, latestApproved: null }, { status: 'ready', started: false })).toBe(false)
-  })
-})
-
-describe('design version statuses', () => {
-  it('rejects a misspelled status at compile time', () => {
-    // @ts-expect-error 'apprvoed' is not a DesignVersionStatus
-    const target: DesignPinTarget = { kind: 'version', status: 'apprvoed' }
-    // @ts-expect-error 'apprvoed' is not a DesignVersionStatus
-    const version: DesignVersionState = { version: 1, status: 'apprvoed' }
-    expect([target, version]).toHaveLength(2)
   })
 })

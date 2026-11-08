@@ -1,3 +1,5 @@
+import { DEFAULT_SERVER_PORT } from '@corral/contracts'
+import { DEFAULT_SLOW_QUERY_MS } from '@corral/db'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -17,6 +19,11 @@ export interface ServerConfig {
   // A demo instance (`pnpm dev:demo`): a saved fake GitHub and a demo runner
   // instead of real ones (src/demo/). Never set in a deployment.
   demo: boolean
+  // The commit this image was built from; runners on another commit are told to update
+  buildSha: string
+  // Requests and queries slower than these are logged
+  slowRequestMs: number
+  slowQueryMs: number
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
@@ -29,11 +36,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     runnerListen: env.CORRAL_RUNNER_LISTEN ? parseListen(env.CORRAL_RUNNER_LISTEN) : undefined,
     dataDir: resolve(env.CORRAL_SERVER_DATA_DIR || join(homedir(), '.corral', 'server')),
     host: env.CORRAL_SERVER_HOST || '127.0.0.1',
-    port: parsePort(env.CORRAL_SERVER_PORT, 4100),
+    port: parsePort(env.CORRAL_SERVER_PORT, DEFAULT_SERVER_PORT),
     databaseUrl: env.CORRAL_DATABASE_URL || undefined,
     publicUrl: (env.CORRAL_PUBLIC_URL || 'http://localhost:3000').replace(/\/+$/, ''),
-    demo: env.CORRAL_DEMO === '1'
+    demo: env.CORRAL_DEMO === '1',
+    buildSha: env.CORRAL_BUILD_SHA || 'development',
+    slowRequestMs: parseThreshold(env.CORRAL_SLOW_REQUEST_MS, 500),
+    slowQueryMs: parseThreshold(env.CORRAL_SLOW_QUERY_MS, DEFAULT_SLOW_QUERY_MS)
   }
+}
+
+// A bad value falls back to the default rather than stopping the server
+function parseThreshold(value: string | undefined, fallback: number): number {
+  const threshold = value === undefined ? fallback : Number(value)
+  return Number.isFinite(threshold) && threshold >= 0 ? threshold : fallback
 }
 
 function parsePort(value: string | undefined, fallback: number): number {

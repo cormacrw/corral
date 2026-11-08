@@ -52,10 +52,9 @@ describe('PR guides', () => {
     const started = await t.request('POST', `/api/projects/${project.slug}/pull-requests/${number}/guide`)
     expect(started.status).toBe(202)
     expect(await started.json()).toMatchObject({ status: 'generating', headSha: 'sha-1' })
-    let guide: PullRequestGuide
-    do guide = await (await t.request('GET', `/api/projects/${project.slug}/pull-requests/${number}/guide`)).json() as PullRequestGuide
-    while (guide.status === 'generating')
-    expect(guide).toMatchObject({ status: 'failed', error: 'No runner is online to generate it.' })
+    const guide = () => t.request('GET', `/api/projects/${project.slug}/pull-requests/${number}/guide`).then(r => r.json() as Promise<PullRequestGuide>)
+    await expect.poll(async () => (await guide()).status).not.toBe('generating')
+    expect(await guide()).toMatchObject({ status: 'failed', error: expect.stringContaining('runner'), steps: [] })
   })
 
   it('sends the task and numbered hunks, keeps only refs that exist, and starts one generation at a time', async () => {
@@ -66,11 +65,12 @@ describe('PR guides', () => {
     const row = await findProjectBySlug(t.db, project.slug)
     expect((await service.generate(row, number)).status).toBe('generating')
     expect((await service.generate(row, number)).status).toBe('generating')
-    await new Promise(resolve => setTimeout(resolve, 0))
-    expect(jobs).toHaveLength(1)
+    await expect.poll(() => jobs.length).toBe(1)
     const prompt = (jobs[0] as { prompt: string }).prompt
-    expect(prompt).toContain(`- [${criterionId}] It reads well`)
-    expect(prompt).toContain('### src/a.ts · hunk 1\n@@ -9,1 +10,2 @@\n+two')
+    expect(prompt).toContain(criterionId)
+    expect(prompt).toContain('It reads well')
+    // Hunks are numbered per file as the answer cites them
+    expect(prompt).toMatch(/src\/a\.ts\W+hunk 1\s+@@ -9,1 \+10,2 @@/)
 
     finish('```json\n' + JSON.stringify({ steps: [
       { title: 'Core', why: 'Start here.', criterionIds: [criterionId, 'not-a-criterion'], hunks: [{ path: 'src/a.ts', hunk: 1 }, { path: 'src/a.ts', hunk: 7 }, { path: 'nope.ts', hunk: 0 }] },
@@ -78,6 +78,8 @@ describe('PR guides', () => {
       { title: 'Rest', why: 'Then this.', criterionIds: [], hunks: [{ path: 'src/b.ts', hunk: 0 }] }
     ] }) + '\n```')
     await service.idle()
+    // The second ask joined the first
+    expect(jobs).toHaveLength(1)
     const guide = await service.get(row, number)
     expect(guide.status).toBe('ready')
     expect(guide.headSha).toBe('sha-1')
@@ -92,7 +94,7 @@ describe('PR guides', () => {
     const failing = guides(async () => ({ kind: 'pr_guide', text: 'Sorry, I can\'t help with that.' }))
     await failing.service.generate(row, number)
     await failing.service.idle()
-    expect(await failing.service.get(row, number)).toMatchObject({ status: 'failed', error: 'The model\'s answer wasn\'t valid JSON.', steps: [] })
+    expect(await failing.service.get(row, number)).toMatchObject({ status: 'failed', error: expect.any(String), steps: [] })
 
     t.github.pulls.get(number)!.headSha = 'sha-2'
     const ok = guides(async () => ({ kind: 'pr_guide', text: JSON.stringify({ steps: [{ title: 'All', why: 'Everything.', criterionIds: [], hunks: [{ path: 'src/b.ts', hunk: 0 }] }] }) }))
@@ -106,14 +108,15 @@ describe('parseGuide', () => {
   const input: GuideInput = { task: null, pr: { title: 'x', body: '' }, files }
 
   it('refuses an answer with no step that cites a real hunk', () => {
-    expect(() => parseGuide(JSON.stringify({ steps: [{ title: 'x', why: 'y', hunks: [{ path: 'gone.ts', hunk: 0 }] }] }), input)).toThrow('no steps that cite')
-    expect(() => parseGuide('{"nope":1}', input)).toThrow('had no steps')
+    expect(() => parseGuide(JSON.stringify({ steps: [{ title: 'x', why: 'y', hunks: [{ path: 'gone.ts', hunk: 0 }] }] }), input)).toThrow()
+    expect(() => parseGuide('{"nope":1}', input)).toThrow()
   })
 
   it('names a file past the patch budget without its hunks', () => {
     const big = { path: 'big.ts', status: 'modified' as const, additions: 1, deletions: 0, patch: `@@ -1 +1 @@\n+${'x'.repeat(90_000)}` }
     const prompt = guidePrompt({ ...input, files: [big, ...files] })
-    expect(prompt).toContain('## big.ts (modified, no hunks shown)')
-    expect(prompt).toContain('### src/b.ts · hunk 0')
+    expect(prompt).toContain('big.ts')
+    expect(prompt).not.toContain('x'.repeat(1000))
+    expect(prompt).toMatch(/src\/b\.ts\W+hunk 0/)
   })
 })

@@ -9,7 +9,7 @@ import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
 
 const flow = vi.hoisted(() => vi.fn())
-vi.mock('~/composables/useApi', () => ({ api: { projects: { flow } } }))
+vi.mock('~/queries/api', () => ({ api: { projects: { flow } } }))
 for (const [name, value] of Object.entries({ computed, ref })) vi.stubGlobal(name, value)
 const { default: ProjectFlow } = await import('~/features/projects/components/overview/ProjectFlow.vue')
 let client: ReturnType<typeof testQueryClient>
@@ -29,7 +29,6 @@ const sample = (days: number): FlowMetrics => ({
   fixes: { reReviewed: 2, skippedReview: 5, epicDeveloperRuns: 3 }, epicReviews: { reviews: 6, epics: 4, perEpic: 1.5 }, sessions: [{ round: 'revision', sessionStart: 'resumed_warm', runs: 2, inputTokens: 10, cacheWriteTokens: 1000, cacheReadTokens: 500_000, outputTokens: 2000, costedRuns: 1, weightedCost: 0.14 }, { round: 'other', sessionStart: 'fresh', runs: 1, inputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0, costedRuns: 0, weightedCost: 0 }], tokens: { firstBuild: 1_200_000, followUp: 300_000 }
 })
 enableAutoUnmount(afterEach)
-// Choose a window by its label
 const choose = (wrapper: VueWrapper, window: string) => wrapper.get('[aria-label="Flow window"]').findAll('button').find(b => b.text() === window)!.trigger('click')
 // The slowest task's lead time, which differs per sample
 const lead = (wrapper: VueWrapper) => wrapper.get('a[href="/tasks/COR-1"]').text()

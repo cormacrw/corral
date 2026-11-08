@@ -3,7 +3,6 @@ import { createTestDatabase } from '@corral/db/testing'
 import { eq } from 'drizzle-orm'
 import { expect, it } from 'vitest'
 import { ensureAgents } from './bootstrap.ts'
-import { actorLabel } from './orchestrator.ts'
 
 it('adds a Claude designer to existing agents and preserves it on restart', async () => {
   const handle = await createTestDatabase('pglite')
@@ -23,10 +22,6 @@ it('adds a Claude designer to existing agents and preserves it on restart', asyn
     await handle.close()
   }
 }, 30_000) // Opening and migrating PGlite here, as in hooks (hookTimeout)
-
-it('labels a designer actor for run comments and audit context', () => {
-  expect(actorLabel({ kind: 'agent', role: 'designer', runId: 'design-run' })).toBe('Designer')
-})
 
 it('seeds the missing designer even when another role already uses its default name', async () => {
   const handle = await createTestDatabase('pglite')

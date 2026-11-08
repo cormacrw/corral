@@ -1,25 +1,22 @@
-import { ATTACHMENT_MAX_BYTES, type Attachment, type AttachmentContentType } from '@corral/contracts'
-import { attachmentIdsInMarkdown, attachmentIdsInRichText, attachmentUrl, type Actor } from '@corral/core'
+import { ATTACHMENT_MAX_BYTES, type Attachment, type ImageContentType } from '@corral/contracts'
+import { attachmentIdsInMarkdown, attachmentIdsInRichText, attachmentUrl, isUuid, type Actor } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, eq, inArray } from 'drizzle-orm'
 import type { BlobHandle, BlobStore } from './blob-store.ts'
-import { ApiFailure } from './errors.ts'
-import { declaredImageType, hasImageSignature } from './images.ts'
+import { declaredImageType, validateImage } from './images.ts'
 import { findProjectBySlug } from './projects.ts'
 
 const { attachments } = schema
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const EXTENSIONS: Record<AttachmentContentType, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' }
+const EXTENSIONS: Record<ImageContentType, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' }
 
 type AttachmentRow = typeof attachments.$inferSelect
 
 function toAttachment(row: AttachmentRow): Attachment {
-  return { id: row.id, mimeType: row.mimeType as AttachmentContentType, fileName: row.fileName, byteSize: row.byteSize, url: attachmentUrl(row.id) }
+  return { id: row.id, mimeType: row.mimeType as ImageContentType, fileName: row.fileName, byteSize: row.byteSize, url: attachmentUrl(row.id) }
 }
 
-// Only the name part, without paths or control characters
-function cleanFileName(name: string | undefined, type: AttachmentContentType): string {
+function cleanFileName(name: string | undefined, type: ImageContentType): string {
   const cleaned = (name ?? '').split(/[\\/]/).pop()!.replace(/\p{Cc}/gu, '').trim()
   return cleaned || `image.${EXTENSIONS[type]}`
 }
@@ -30,12 +27,7 @@ function cleanFileName(name: string | undefined, type: AttachmentContentType): s
 export async function createAttachment(db: Executor, blobs: BlobStore, slug: string, upload: { data: Uint8Array, contentType: string | undefined, name: string | undefined }, actor: Actor): Promise<Attachment> {
   const project = await findProjectBySlug(db, slug)
   const { data } = upload
-  const invalid = (message: string) => new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['file'], message }] })
-  const type = declaredImageType(upload.contentType)
-  if (!type) throw invalid('Use a PNG, JPEG, WebP or GIF image')
-  if (data.byteLength === 0) throw invalid('The image is empty')
-  if (data.byteLength > ATTACHMENT_MAX_BYTES) throw new ApiFailure(413, { code: 'invalid_input', issues: [{ path: ['file'], message: 'The image is over 10 MB' }] })
-  if (!hasImageSignature(data, type)) throw invalid(`The file isn't a ${type.slice(6).toUpperCase()} image`)
+  const type = validateImage(data, upload.contentType, { maxBytes: ATTACHMENT_MAX_BYTES, field: 'file' })
   const blob = await blobs.put(data)
   const [row] = await db.insert(attachments).values({
     projectId: project.id,
@@ -48,9 +40,8 @@ export async function createAttachment(db: Executor, blobs: BlobStore, slug: str
   return toAttachment(row!)
 }
 
-// The stored image, for GET /attachments/:id/file
 export async function readAttachment(db: Executor, blobs: BlobStore, id: string): Promise<{ file: BlobHandle, type: string } | null> {
-  if (!UUID.test(id)) return null
+  if (!isUuid(id)) return null
   const [row] = await db.select({ blob: attachments.blob, type: attachments.mimeType }).from(attachments).where(eq(attachments.id, id))
   if (!row || !declaredImageType(row.type)) return null
   const file = await blobs.open(row.blob)
@@ -59,8 +50,8 @@ export async function readAttachment(db: Executor, blobs: BlobStore, id: string)
 
 // An attachment with its bytes, only if it belongs to the project: for the
 // agents' get_attachment tool, which must not read across projects
-export async function readProjectAttachment(db: Executor, blobs: BlobStore, projectId: string, id: string): Promise<{ id: string, fileName: string, mimeType: AttachmentContentType, byteSize: number, data: Uint8Array } | null> {
-  if (!UUID.test(id)) return null
+export async function readProjectAttachment(db: Executor, blobs: BlobStore, projectId: string, id: string): Promise<{ id: string, fileName: string, mimeType: ImageContentType, byteSize: number, data: Uint8Array } | null> {
+  if (!isUuid(id)) return null
   const [row] = await db.select().from(attachments).where(and(eq(attachments.id, id), eq(attachments.projectId, projectId)))
   const mimeType = row ? declaredImageType(row.mimeType) : null
   if (!row || !mimeType) return null

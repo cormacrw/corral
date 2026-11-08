@@ -1,10 +1,15 @@
 <script setup lang="ts">
+import { SECTIONS, settingsSection } from '~/utils/routes'
+
 // The Settings frame around every section: the section menu on desktop, a
 // page header on mobile, which List, Agents and Runners replace with their own
 // edge-to-edge layouts.
 const route = useRoute()
 const { isMobile } = useDevice()
-const fullBleed = computed(() => isMobile.value && ['/settings', '/settings/agents', '/settings/runner'].includes(route.path.replace(/\/$/, '')))
+const fullBleed = computed(() => {
+  const path = route.path.replace(/\/$/, '')
+  return isMobile.value && (path === SECTIONS.settings.to || Boolean(settingsSection(path.split('/')[2])?.fullBleed))
+})
 </script>
 
 <template>

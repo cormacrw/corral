@@ -3,7 +3,7 @@ import { markdownToRichText, richTextToMarkdown } from '@corral/core'
 import { schema } from '@corral/db'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 // A task's implementation plan travels through propose_plan beside its
 // description, and a plan revision that changes only the plan is a change
@@ -15,7 +15,7 @@ describe('implementation plans in proposed plans', { timeout: 30_000 }, () => {
     runner = await FakeRunner.connect(t.server!.url)
   })
   afterEach(async () => {
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     await t.db.delete(schema.projects)
   })
   afterAll(async () => {

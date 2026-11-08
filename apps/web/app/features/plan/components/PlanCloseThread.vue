@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { planPath } from '~/utils/routes'
 import { errorMessage } from '~/lib/errors'
 import type { PlanSession } from '@corral/contracts'
 import { useMutation } from '@tanstack/vue-query'
@@ -25,7 +26,7 @@ async function close() {
     await closing.mutateAsync(props.session.id)
     threads.remove(props.session.id)
     open.value = false
-    if (route.params.sessionId === props.session.id) await router.push('/plan')
+    if (route.params.sessionId === props.session.id) await router.push(planPath())
   } catch (e) {
     toast.add({ title: 'Could not close thread', description: errorMessage(e), color: 'error' })
   } finally {

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { SETUP_STEP_TIMEOUTS } from '@corral/contracts'
 
 export interface ExecResult {
   code: number | null
@@ -22,7 +23,8 @@ export interface ExecOptions {
 
 // Far past anything a command here prints, including a paginated `gh api`
 export const MAX_OUTPUT_CHARS = 64 * 1024 * 1024
-const GROUP_STOP_GRACE_MS = 5000
+// How long a process group gets between SIGTERM and SIGKILL
+export const STOP_GRACE_MS = 5000
 
 // Detached groups don't get the terminal's signals, so they go when we do
 const groups = new Set<number>()
@@ -30,12 +32,22 @@ process.on('exit', () => {
   for (const pid of groups) signalGroup(pid, 'SIGTERM')
 })
 
-function signalGroup(pid: number | undefined, signal: NodeJS.Signals): void {
+export function signalGroup(pid: number | undefined, signal: NodeJS.Signals): void {
   if (!pid) return
   try {
     process.kill(-pid, signal)
   } catch {
     // The group is already gone
+  }
+}
+
+export function groupAlive(pid: number | undefined): boolean {
+  if (!pid) return false
+  try {
+    process.kill(-pid, 0)
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -71,7 +83,7 @@ export function exec(command: string, args: string[], options: ExecOptions = {})
       hardStop = setTimeout(() => {
         signalGroup(child.pid, 'SIGKILL')
         done(failed())
-      }, GROUP_STOP_GRACE_MS)
+      }, STOP_GRACE_MS)
     }
 
     const child = spawn(command, args, {
@@ -81,7 +93,8 @@ export function exec(command: string, args: string[], options: ExecOptions = {})
       stdio: ['pipe', 'pipe', 'pipe']
     })
     if (options.group && child.pid) groups.add(child.pid)
-    const timer = setTimeout(() => abort(`Timed out after ${options.timeoutMs} ms`), options.timeoutMs ?? 120_000)
+    const limitMs = options.timeoutMs ?? SETUP_STEP_TIMEOUTS.command
+    const timer = setTimeout(() => abort(`Timed out after ${limitMs} ms`), limitMs)
 
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
       if (failure) return

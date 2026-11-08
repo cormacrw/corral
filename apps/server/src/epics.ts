@@ -1,17 +1,19 @@
 import type { Epic, EpicDetail, EpicFixDeveloper, EpicSync, PatchEpicInput } from '@corral/contracts'
-import { ACTIVE_RUN_STATES, checkEpicDependencies, isTaskDone, taskRef, type CompletionState, type Actor } from '@corral/core'
-import { schema, type Executor } from '@corral/db'
+import { ACTIVE_OPERATION_STATES, ACTIVE_RUN_STATES, deliveryCounts, isPrFree, isUuid, taskRef, type Actor, type CompletionState } from '@corral/core'
+import { schema, type Executor, type EpicRow, type ProjectRow } from '@corral/db'
 import { and, asc, eq, inArray, isNotNull, or, sql } from 'drizzle-orm'
-import { appendAudit, auditEvent } from './audit.ts'
+import { appendAudit, auditEvent, toAuditEntries } from './audit.ts'
 import { epicFixRuns } from './epic-fixes.ts'
-import { deferredConflicts, openDecision, waitingOn } from './epic-rebase-approval.ts'
 import { ApiFailure, notFound } from './errors.ts'
-import { deliveredAt, syncParentContent } from './parents.ts'
-import { toAuditEntries, toTasks, type ProjectRow } from './tasks.ts'
+import type { InvalidatedEpics } from './epic-review-state.ts'
+import type { EventBus } from './events.ts'
+import { getRun } from './runs.ts'
+import { pullRequestUrl } from './github-urls.ts'
+import { deferredConflicts, openDecision, waitingOn } from './operations.ts'
+import { checkParentCycles, deliveredAt, syncParentContent } from './parents.ts'
+import { toTasks } from './task-views.ts'
 
-const { agents, auditLog, epics, epicDependencies, runs, taskDependencies, taskIntegrationOperations, projects, tasks } = schema
-
-type EpicRow = typeof epics.$inferSelect
+const { agents, auditLog, epics, epicDependencies, runs, taskIntegrationOperations, projects, tasks } = schema
 
 // Epics group a plan's tasks (D9). Counts leave out Drafts and Backlog tasks, which aren't on
 // the board yet; the detail includes them so the canvas shows the whole plan.
@@ -41,6 +43,28 @@ export async function loadEpic(db: Executor, epicId: string): Promise<Epic> {
     epicSyncs(db, project, [row])
   ])
   return toEpic(row, project, taskRows, edges, syncs.get(row.id) ?? null, await parentRefs(db, project, [row]))
+}
+
+// `epic.updated` carries the epic without its tasks
+export async function publishEpic(db: Executor, events: EventBus, epicId: string): Promise<void> {
+  events.publish({ type: 'epic.updated', epic: await loadEpic(db, epicId) })
+}
+
+// Runs a write that may invalidate epics' reviews, then publishes those
+// epics once it has committed. Not for a write inside another transaction.
+export async function withInvalidatedEpics<T>(db: Executor, events: EventBus, write: (invalidated: InvalidatedEpics) => Promise<T>): Promise<T> {
+  const invalidated: InvalidatedEpics = new Map()
+  const result = await write(invalidated)
+  await publishInvalidatedEpics(db, events, invalidated)
+  return result
+}
+
+// Flush only after the enclosing transaction commits, never from a savepoint.
+export async function publishInvalidatedEpics(db: Executor, events: EventBus, invalidated: InvalidatedEpics): Promise<void> {
+  for (const [id, runIds] of invalidated) {
+    await publishEpic(db, events, id)
+    for (const runId of runIds) events.publish({ type: 'run.updated', run: await getRun(db, runId) })
+  }
 }
 
 export async function getEpic(db: Executor, epicId: string): Promise<EpicDetail> {
@@ -78,7 +102,7 @@ async function epicSyncs(db: Executor, project: ProjectRow, rows: EpicRow[]): Pr
   if (ids.length === 0) return syncs
   const active = await db.select({ operation: taskIntegrationOperations, number: tasks.number, status: tasks.status, statusReason: tasks.statusReason }).from(taskIntegrationOperations)
     .leftJoin(tasks, eq(tasks.id, taskIntegrationOperations.resolutionTaskId))
-    .where(and(inArray(taskIntegrationOperations.epicId, ids), eq(taskIntegrationOperations.kind, 'rebase'), inArray(taskIntegrationOperations.state, ['pending', 'running', 'reconciling'])))
+    .where(and(inArray(taskIntegrationOperations.epicId, ids), eq(taskIntegrationOperations.kind, 'rebase'), inArray(taskIntegrationOperations.state, [...ACTIVE_OPERATION_STATES])))
   const working = await db.select({ epicId: runs.epicId, agentId: runs.agentId, name: agents.name, runId: runs.id, runNumber: runs.number }).from(runs).innerJoin(agents, eq(agents.id, runs.agentId))
     .where(and(inArray(runs.epicId, ids), eq(runs.role, 'developer'), inArray(runs.state, [...ACTIVE_RUN_STATES])))
   const developers = new Map(working.map(({ epicId, ...developer }): [string, EpicFixDeveloper] => [epicId!, developer]))
@@ -106,7 +130,7 @@ async function epicSyncs(db: Executor, project: ProjectRow, rows: EpicRow[]): Pr
 
 export async function findEpic(db: Executor, epicId: string): Promise<{ row: EpicRow, project: ProjectRow }> {
   // IDs come from URLs; a malformed one is simply unknown
-  if (!/^[0-9a-f-]{36}$/i.test(epicId)) throw notFound()
+  if (!isUuid(epicId)) throw notFound()
   const [found] = await db.select({ row: epics, project: projects }).from(epics)
     .innerJoin(projects, eq(projects.id, epics.projectId)).where(eq(epics.id, epicId))
   if (!found) throw notFound()
@@ -115,7 +139,7 @@ export async function findEpic(db: Executor, epicId: string): Promise<{ row: Epi
 
 // A deleted task counts here: its PR may already have merged into the epic branch
 export function reviewModeLocked(epic: { prNumber: number | null }, taskRows: { status: string, prNumber: number | null, integrationProtocol: number }[]): boolean {
-  return epic.prNumber !== null || taskRows.some(t => t.prNumber !== null || t.integrationProtocol > 0 || t.status === 'merged')
+  return epic.prNumber !== null || taskRows.some(t => t.prNumber !== null || isPrFree(t) || t.status === 'merged')
 }
 
 async function parentRefs(db: Executor, project: ProjectRow, rows: EpicRow[]): Promise<Map<string, string>> {
@@ -126,7 +150,6 @@ async function parentRefs(db: Executor, project: ProjectRow, rows: EpicRow[]): P
 }
 
 function toEpic(row: EpicRow, project: ProjectRow, taskRows: (CompletionState & { prNumber: number | null, integrationProtocol: number, deletedAt: Date | null })[], edges: { epicId: string, dependsOnEpicId: string }[], sync: EpicSync | null, parents: Map<string, string>): Epic {
-  const counted = taskRows.filter(t => !t.deletedAt && t.status !== 'draft' && t.status !== 'backlog')
   return {
     id: row.id,
     taskId: row.taskId,
@@ -139,7 +162,7 @@ function toEpic(row: EpicRow, project: ProjectRow, taskRows: (CompletionState & 
     reviewMode: row.reviewMode,
     branch: row.branch,
     prNumber: row.prNumber,
-    prUrl: row.prNumber ? `https://github.com/${project.repository}/pull/${row.prNumber}` : null,
+    prUrl: row.prNumber ? pullRequestUrl(project.repository, row.prNumber) : null,
     prHeadSha: row.prHeadSha,
     approvedHeadSha: row.approvedHeadSha,
     approvedBaseSha: row.approvedBaseSha,
@@ -147,8 +170,7 @@ function toEpic(row: EpicRow, project: ProjectRow, taskRows: (CompletionState & 
     mergedAt: deliveredAt(row)?.toISOString() ?? null,
     sync,
     reviewModeLocked: reviewModeLocked(row, taskRows),
-    taskCount: counted.length,
-    mergedCount: counted.filter(isTaskDone).length,
+    ...deliveryCounts(taskRows.map(t => ({ ...t, deleted: t.deletedAt !== null }))),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
   }
@@ -166,19 +188,7 @@ export async function setEpicDependencies(db: Executor, epicId: string, dependsO
   return db.transaction(async (tx) => {
     const { project } = await findEpic(tx, epicId)
     await tx.select().from(projects).where(eq(projects.id, project.id)).for('update')
-    const all = await listEpics(tx, project)
-    const graph = new Map(all.map(e => [e.id, e.dependsOn]))
-    graph.set(epicId, [...new Set(dependsOn)])
-    const rows = await tx.select({ id: tasks.id, epicId: tasks.epicId, status: tasks.status, type: tasks.type, deletedAt: tasks.deletedAt, parentOf: epics.id }).from(tasks).leftJoin(epics, eq(epics.taskId, tasks.id)).where(eq(tasks.projectId, project.id))
-    const edges = await tx.select({ taskId: taskDependencies.taskId, dependsOnId: taskDependencies.dependsOnId }).from(taskDependencies)
-      .innerJoin(tasks, eq(tasks.id, taskDependencies.taskId)).where(eq(tasks.projectId, project.id))
-    const dependencies = Map.groupBy(edges, e => e.taskId)
-    const problems = checkEpicDependencies(graph, rows.map(t => ({
-      ...t, deleted: t.deletedAt !== null, dependsOn: (dependencies.get(t.id) ?? []).map(e => e.dependsOnId)
-    })), new Map(all.map(e => [e.id, e.title])))
-    if (problems.length) throw new ApiFailure(400, {
-      code: 'invalid_input', issues: problems.map(p => ({ message: `Dependency cycle or deadlock: ${p.epics.join(' → ')}` }))
-    })
+    await checkParentCycles(tx, project, { changedEpic: { id: epicId, dependsOn } })
     await replaceEpicDependencies(tx, project.id, epicId, dependsOn)
     await tx.update(epics).set({ updatedAt: new Date() }).where(eq(epics.id, epicId))
     await appendAudit(tx, { projectId: project.id, actor }, auditEvent('epic.updated', { epicId, changed: ['dependsOn'], dependsOn }))

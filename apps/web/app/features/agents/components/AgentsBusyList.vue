@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { ROLE_LABELS } from '@corral/core'
+import { agentPath } from '~/utils/routes'
 import type { Agent } from '@corral/contracts'
-import { ROLE, runtimeLabel } from '~/utils/labels'
+import { runtimeLabel } from '~/utils/labels'
 
 // Every agent, its status and the share of the last hours it spent running
 defineProps<{
@@ -19,7 +21,7 @@ defineProps<{
       :key="agent.id"
     >
       <NuxtLink
-        :to="`/agents/${agent.name.toLowerCase()}`"
+        :to="agentPath(agent.name)"
         class="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-muted"
       >
         <AgentAvatar
@@ -29,7 +31,7 @@ defineProps<{
         <div class="min-w-0 flex-1">
           <div class="flex items-baseline gap-2 text-sm">
             <span class="font-medium">{{ agent.name }}</span>
-            <span class="truncate text-xs text-muted-foreground">{{ ROLE[agent.role] }} · {{ runtimeLabel(agent.runtime) }}</span>
+            <span class="truncate text-xs text-muted-foreground">{{ ROLE_LABELS[agent.role] }} · {{ runtimeLabel(agent.runtime) }}</span>
             <span
               v-if="status"
               class="ms-auto shrink-0 text-xs text-muted-foreground"

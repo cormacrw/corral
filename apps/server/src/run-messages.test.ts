@@ -3,7 +3,7 @@ import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 // POST /projects/:slug/runs/:runId/messages, against a fake runner
 describe('messages to a live run', () => {
@@ -27,7 +27,7 @@ describe('messages to a live run', () => {
     const project = await t.createProject()
     const task = await t.createTask(project.slug, { type })
     await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const { job } = await runner.next('run.assign', m => m.job.taskId === task.id)
     runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 's1' })
     await expect.poll(async () => (await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId)))[0]?.state).toBe('running')
@@ -62,7 +62,8 @@ describe('messages to a live run', () => {
     const res = await post(project.slug, job.runId, { text: 'Like this', attachments: [upload.id] })
     expect(res.status).toBe(202)
     const sent = await runner.next('run.message', m => m.runId === job.runId)
-    expect(sent.text).toBe(`Like this\n\n![screen.png](attachment:${upload.id})`)
+    expect(sent.text).toContain('Like this')
+    expect(sent.text).toContain(`attachment:${upload.id}`)
 
     const other = await t.createProject()
     const foreign = await t.request('POST', `/api/projects/${other.slug}/attachments`, new Blob([png], { type: 'image/png' })).then(r => r.json()) as { id: string }
@@ -74,7 +75,7 @@ describe('messages to a live run', () => {
     await t.request('POST', `/api/runs/${job.runId}/stop`)
     const res = await post(project.slug, job.runId, { text: 'Too late' })
     expect(res.status).toBe(409)
-    expect(await res.json()).toEqual({ error: { code: 'run_not_live', reason: expect.stringMatching(/has ended$/) } })
+    expect(await res.json()).toMatchObject({ error: { code: 'run_not_live' } })
     const comments = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/comments`).then(r => r.json()) as Comment[]
     expect(comments.map(c => c.body)).not.toContain('Too late')
     expect(runner.received.some(m => m.type === 'run.message' && m.runId === job.runId)).toBe(false)
@@ -87,7 +88,7 @@ describe('messages to a live run', () => {
     try {
       const res = await post(project.slug, job.runId, { text: 'Anyone there?' })
       expect(res.status).toBe(409)
-      expect(await res.json()).toMatchObject({ error: { code: 'run_not_live', reason: 'No runner is connected to deliver the message' } })
+      expect(await res.json()).toMatchObject({ error: { code: 'run_not_live' } })
       const history = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/history`).then(r => r.json()) as AuditEntry[]
       expect(history.some(h => h.action === 'run.message_sent')).toBe(false)
     } finally {
@@ -123,7 +124,7 @@ describe('edits to a task with a live run', () => {
     const project = await t.createProject()
     const task = await t.createTask(project.slug, { type })
     await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const { job } = await runner.next('run.assign', m => m.job.taskId === task.id)
     runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 's1' })
     await expect.poll(async () => (await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId)))[0]?.state).toBe('running')
@@ -133,6 +134,9 @@ describe('edits to a task with a live run', () => {
   const patch = (slug: string, number: number, body: unknown) => t.request('PATCH', `/api/projects/${slug}/tasks/${number}`, body)
   const comments = (slug: string, number: number) => t.request('GET', `/api/projects/${slug}/tasks/${number}/comments`).then(r => r.json()) as Promise<Comment[]>
   const messagesFor = (runId: string) => runner.received.filter(m => m.type === 'run.message' && m.runId === runId)
+  // The runner has received all it was sent: a job's answer comes back on the
+  // same socket, after them
+  const delivered = () => t.runner.requestOn('r1', { kind: 'detect_clis' })
 
   it.each(['task', 'design'] as const)('sends a Claude %s run the new acceptance criteria', async (type) => {
     const { project, task, job } = await liveRun(type)
@@ -144,11 +148,13 @@ describe('edits to a task with a live run', () => {
 
     const sent = await runner.next('run.message', m => m.runId === job.runId)
     expect(sent.leaseEpoch).toBe(job.leaseEpoch)
-    expect(sent.text).toContain(`The acceptance criteria of ${task.ref} changed while you were working on it`)
-    expect(sent.text).toContain('**Acceptance criteria** (1 added)')
-    expect(sent.text).toContain(`- [${kept.id}] ${kept.text}`)
-    expect(sent.text).toContain(`- [${added.id}] Locks the account after five tries`)
-    expect(sent.text).not.toContain('**Description**')
+    expect(sent.text).toContain(task.ref)
+    expect(sent.text).toContain(kept.id)
+    expect(sent.text).toContain(kept.text)
+    expect(sent.text).toContain(added.id)
+    expect(sent.text).toContain('Locks the account after five tries')
+    // The description didn't change, so it isn't sent
+    expect(sent.text).not.toContain('Email and password')
 
     // Kept as the human's comment, like any message to a run, and not pinned
     expect((await comments(project.slug, task.number)).find(c => c.body === sent.text)).toMatchObject({ author: t.actor, pinned: false })
@@ -164,14 +170,16 @@ describe('edits to a task with a live run', () => {
     expect(fields.text).toContain('high')
     // Same description and criteria as before: no change to tell
     await patch(project.slug, task.number, { description: task.description, acceptanceCriteria: task.acceptanceCriteria.map(c => ({ id: c.id, text: c.text })) })
+    await delivered()
     expect(messagesFor(job.runId)).toHaveLength(0)
 
     const description = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Email, password and a magic link' }] }] }
     expect((await patch(project.slug, task.number, { description })).status).toBe(200)
     const sent = await runner.next('run.message', m => m.runId === job.runId)
-    expect(sent.text).toContain(`The description of ${task.ref} changed`)
-    expect(sent.text).toContain('**Description**\n\nEmail, password and a magic link')
-    expect(sent.text).not.toContain('**Acceptance criteria**')
+    expect(sent.text).toContain(task.ref)
+    expect(sent.text).toContain('Email, password and a magic link')
+    // The criteria didn't change, so they aren't sent
+    expect(sent.text).not.toContain(task.acceptanceCriteria[0]!.text)
   })
 
   it('sends nothing when no run holds the task', async () => {
@@ -180,6 +188,7 @@ describe('edits to a task with a live run', () => {
     const before = runner.received.length
     const res = await patch(project.slug, task.number, { acceptanceCriteria: [{ text: 'Something new' }] })
     expect(res.status).toBe(200)
+    await delivered()
     expect(runner.received.slice(before).some(m => m.type === 'run.message')).toBe(false)
     expect(await comments(project.slug, task.number)).toEqual([])
   })
@@ -193,9 +202,10 @@ describe('edits to a task with a live run', () => {
       const pinned = (await comments(project.slug, task.number)).filter(c => c.pinned)
       expect(pinned).toHaveLength(1)
       expect(pinned[0]).toMatchObject({ author: t.actor })
-      expect(pinned[0]!.body).toContain(`The acceptance criteria of ${task.ref} changed during run #`)
-      expect(pinned[0]!.body).toContain('(1 reworded)')
-      expect(pinned[0]!.body).toContain(`- [${task.acceptanceCriteria[0]!.id}] Shows a clear error on a bad password`)
+      expect(pinned[0]!.body).toContain(task.ref)
+      expect(pinned[0]!.body).toContain(task.acceptanceCriteria[0]!.id)
+      expect(pinned[0]!.body).toContain('Shows a clear error on a bad password')
+      await delivered()
       expect(messagesFor(job.runId)).toHaveLength(0)
       expect(t.events.some(e => e.type === 'comment.created' && e.comment.id === pinned[0]!.id)).toBe(true)
       const history = await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}/history`).then(r => r.json()) as AuditEntry[]

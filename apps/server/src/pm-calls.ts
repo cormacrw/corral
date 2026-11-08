@@ -1,307 +1,244 @@
-import { humanTransitionInput, isPmGatedTool, neutralPmCall, pmActionTools, pmDirectTools, requiresPmConfirmation, storedProjectFields, type PmGatedTool } from '@corral/contracts'
-import { canChangeType, isActiveRun, markdownToRichText, requiresHumanReview, taskRef, type Actor } from '@corral/core'
-import { schema } from '@corral/db'
-import { and, eq, isNull } from 'drizzle-orm'
-import { z } from 'zod'
-import { appendAudit, auditEvent } from './audit.ts'
+import { storedProjectFields, toolName } from '@corral/contracts'
+import { canChangeType, clip, isActiveRun, isPrFree, optionalMarkdownToRichText, statusWords, taskRef } from '@corral/core'
+import { schema, type Database, type TaskRow } from '@corral/db'
+import { eq } from 'drizzle-orm'
+import type { Commands } from './commands.ts'
+import type { Controls } from './controls.ts'
+import { getEpic } from './epics.ts'
 import { ApiFailure } from './errors.ts'
-import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-state.ts'
-import { getEpic, patchEpic, setEpicDependencies } from './epics.ts'
-import type { Orchestrator } from './orchestrator.ts'
-import { humanApprovalSummary } from './pm-approval-summary.ts'
+import type { HumanActions } from './human-actions.ts'
+import { heldHumanChecks, humanApprovalSummary } from './pm-approval-summary.ts'
 import { resetNote } from './pm-decisions.ts'
-import type { PreparedPmAction } from './pm-actions.ts'
-import type { PmDecisions } from './pm-decisions.ts'
-import { ToolError, type RunCore } from './run-context.ts'
-import { findProjectBySlug, patchProject } from './projects.ts'
-import { lostHumanChecks, lowersMode, taskReview } from './review-gates.ts'
-import { addComment, createTask, loadTask, lockTask, patchTask, transitionTask } from './tasks.ts'
+import { type PmToolCall, type PmToolHandlers, type PreparedPmAction } from './pm-tools.ts'
+import { findProjectBySlug } from './projects.ts'
+import { newTaskLowersReview, PROJECT_GATES, projectGatesLowered, reviewModeName, lowersMode, taskGatesLowered } from './review-gates.ts'
+import type { RunContexts } from './run-context.ts'
+import { ToolError } from './tool-error.ts'
+import { isProjectRef, taskByRef } from './task-rows.ts'
 
-const { acceptanceCriteria, projects, tasks } = schema
+// The PM's calls that change tasks, parents, projects and the factory: what a
+// confirm card proposes and does once the human agrees, and the gated edits
+// that act directly unless they lower a gate (D30).
+
+const { epics, projects } = schema
 
 // A card shows what will change, so a clipped value still shows its start
 const VALUE_MAX = 80
 const shown = (value: unknown) => {
   const text = typeof value === 'string' ? `"${value}"` : JSON.stringify(value)
-  return text.length > VALUE_MAX ? `${text.slice(0, VALUE_MAX)}…` : text
+  return clip(text, VALUE_MAX)
 }
 
-// The stored mode `epic` is parent-level review
-const modeName = (mode: string | undefined) => mode === 'epic' ? 'task' : mode
+// The other changes an edit makes, which the card also names
+const others = (changes: Record<string, unknown>, gates: readonly string[]) => Object.entries(changes).filter(([key, value]) => value !== undefined && !gates.includes(key)).map(([key, value]) => `${key} to ${shown(value)}`)
 
-// The PM's markdown plan as stored rich text; blank or null clears it
-function planDoc(markdown: string | null | undefined) {
-  return markdown ? markdownToRichText(markdown) : null
-}
-
-export type PmEditTool = 'create_task' | 'update_task' | 'update_parent'
-
-export interface PmEdit {
-  result: unknown
-  projectId: string
-  target?: { taskId: string, taskRef: string }
-  summary: string
+function gateCard(subject: string, lowered: string[], also: string[], target: { id: string, taskId: string | null, projectId: string }): Omit<PreparedPmAction, 'input'> | null {
+  if (lowered.length === 0) return null
+  return { summary: `Lower the gates on ${subject}: ${lowered.join('; ')}${also.length ? `. Also changes ${also.join(', ')}` : ''}`, targetId: target.id, taskId: target.taskId, projectId: target.projectId }
 }
 
 // Deleting a task takes its human gates with it, so the card says which
-async function lostByDeleting(db: RunCore['d']['db'], task: typeof tasks.$inferSelect): Promise<string> {
-  const checks = await db.select({ text: acceptanceCriteria.text }).from(acceptanceCriteria).where(and(eq(acceptanceCriteria.taskId, task.id), eq(acceptanceCriteria.checkedByHuman, true)))
-  const lost = [...(task.humanReview ? ['its human review'] : []), ...checks.map(c => `the human check "${c.text}"`)]
+async function lostByDeleting(db: Database, task: TaskRow): Promise<string> {
+  const lost = [...(task.humanReview ? ['its human review'] : []), ...(await heldHumanChecks(db, task.id)).map(c => `the human check "${c.text}"`)]
   return lost.length ? `. This drops ${lost.join(', ')}` : ''
 }
 
-// The PM's calls that change tasks, epics and the factory: what a confirm card
-// proposes and does once the human agrees, and the direct edits.
-export class PmCalls {
-  #c: RunCore
-  #o: Orchestrator
+export interface PmCallsDeps {
+  db: Database
+  runs: Pick<RunContexts, 'load'>
+  human: Pick<HumanActions, 'deleteTask' | 'deleteProject' | 'stopRun'>
+  controls: Pick<Controls, 'holdForUpdate' | 'stopAll' | 'resumeAll' | 'status'>
+  commands: Pick<Commands, 'createTask' | 'patchTask' | 'transitionTask' | 'approveTask' | 'addComment' | 'updateParent' | 'patchProject'>
+}
 
-  constructor(core: RunCore, orchestrator: Orchestrator) {
-    this.#c = core
-    this.#o = orchestrator
-  }
+type CallTool = 'create_task' | 'update_task' | 'update_parent' | 'update_project' | 'move_task' | 'approve_task' | 'delete_task' | 'delete_project' | 'stop_run' | 'set_update_hold' | 'stop_all' | 'resume_all'
 
-  async execute(sessionId: string, storedTool: string, stored: PreparedPmAction, actor: Actor): Promise<unknown> {
-    // A card saved before D31 keeps its old names
-    const { tool, input: neutral } = neutralPmCall(storedTool, stored.input)
-    const prepared = { ...stored, input: neutral as PreparedPmAction['input'] }
-    const { db, events } = this.#c.d
-    const o = this.#o
-    switch (tool) {
-      case 'create_task':
-      case 'update_task':
-      case 'update_parent':
-        return (await this.editEntity(sessionId, tool, prepared.input, actor)).summary
-      case 'update_project': {
-        const { project: slug, ...changes } = z.object(pmDirectTools.update_project.input).strict().parse(prepared.input)
-        const updated = await patchProject(db, await findProjectBySlug(db, slug), storedProjectFields(changes), actor)
-        events.publish({ type: 'project.updated', project: updated })
-        this.#c.scheduler.poke()
-        return `Changed ${updated.name}.`
-      }
-      case 'delete_task':
-        await o.deleteTask(prepared.targetId!, actor, prepared.input.reason as string | undefined ?? null)
-        return `Deleted ${String(prepared.input.taskRef)}.`
-      case 'delete_project':
-        await o.deleteProject(prepared.targetId!, actor)
-        return 'The project was removed.'
-      case 'stop_run':
-        await o.stopRun(prepared.targetId!, actor)
-        return 'The run was stopped.'
-      case 'set_update_hold': {
-        const busy = await o.holdForUpdate()
-        return { ...o.status, busy }
-      }
-      case 'stop_all':
-        await o.stopAll(actor)
-        return 'Corral is stopped.'
-      case 'resume_all':
-        await o.resumeAll(actor)
-        return 'Corral is running again.'
-    }
-    if (prepared.taskId && (tool === 'approve_task' || tool === 'move_task')) {
-      if (tool === 'approve_task') await this.#c.merges.humanApprove(prepared.taskId, actor)
-      else {
-        const event = humanTransitionInput.parse(prepared.input.transition)
-        const invalidatedEpics: InvalidatedEpics = new Map()
-        await transitionTask(db, prepared.taskId, event, actor, { invalidatedEpics })
-        await publishInvalidatedEpics(db, events, invalidatedEpics)
-        if (prepared.input.reason) await addComment(db, prepared.taskId, { body: String(prepared.input.reason), pinned: false }, actor)
-      }
-      const task = await loadTask(db, prepared.taskId)
-      events.publish({ type: 'task.updated', task })
-      this.#c.scheduler.poke([task.id])
-      return tool === 'approve_task' ? `Approved ${task.ref}.` : `Moved ${task.ref} to ${task.status.replaceAll('_', ' ')}.`
-    }
-    return this.#c.pmDecisions.execute(tool as Parameters<PmDecisions['execute']>[0], prepared, actor)
-  }
+export function pmCalls(deps: PmCallsDeps): Pick<PmToolHandlers, CallTool> {
+  const { db, human, controls, commands } = deps
 
-  async editEntity(sessionId: string, tool: PmEditTool, input: unknown, actor: Actor): Promise<PmEdit> {
-    const { db, events } = this.#c.d
-    if (!this.#c.plans) throw new ToolError('Planning is unavailable')
-    const project = await this.#c.plans.toolProject(sessionId, input)
-    const scopedInput = z.record(z.string(), z.unknown()).parse(input)
-    delete scopedInput.project
-    if (tool === 'update_parent') {
-      const { parentId: epicId, dependsOn, summary, ...fields } = z.object(pmActionTools.update_parent.input).strict().parse(scopedInput)
-      const current = await getEpic(db, epicId)
-      if (current.projectId !== project.id) throw new ToolError('Use a task with subtasks from this conversation’s project')
-      await db.transaction(async (tx) => {
-        await patchEpic(tx, epicId, { ...fields, ...(summary !== undefined && { description: summary }) }, actor)
-        if (dependsOn !== undefined) await setEpicDependencies(tx, epicId, dependsOn, actor)
-      })
-      const epic = await getEpic(db, epicId)
-      events.publish({ type: 'epic.updated', epic })
-      for (const task of epic.tasks) events.publish({ type: 'task.updated', task })
-      this.#c.scheduler.poke(epic.tasks.map(t => t.id))
-      return { result: epic, projectId: project.id, summary: `Updated task ${epic.title}` }
-    }
-    if (tool === 'create_task') {
-      const { parentId, implementationPlan, ...parsed } = z.object(pmActionTools.create_task.input).strict().parse(scopedInput)
-      const task = await loadTask(db, await createTask(db, project, { ...parsed, implementationPlan: planDoc(implementationPlan), epicId: parentId ?? null }, actor))
-      events.publish({ type: 'task.created', task })
-      return { result: task, projectId: project.id, target: { taskId: task.id, taskRef: task.ref }, summary: `Created ${task.ref}: ${task.title}` }
-    }
-    const { taskRef: ref, paused, parentId, implementationPlan, ...edits } = z.object(pmActionTools.update_task.input).strict().parse(scopedInput)
-    const fields = { ...edits, ...parentId !== undefined && { epicId: parentId }, ...implementationPlan !== undefined && { implementationPlan: planDoc(implementationPlan) } }
-    const match = /^([A-Za-z]+)-(\d+)$/.exec(ref)
-    if (!match || match[1]!.toUpperCase() !== project.prefix.toUpperCase()) throw new ToolError('Use a task ref from this conversation’s project')
-    const [row] = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
+  const updateTask = async ({ input, project, actor }: PmToolCall<'update_task'>) => {
+    const { taskRef: ref, paused, parentId, implementationPlan, ...edits } = input
+    if (!isProjectRef(project, ref)) throw new ToolError('Use a task ref from this conversation’s project')
+    const row = await taskByRef(db, project, ref)
     if (!row) throw new ToolError('Task no longer exists')
-    const invalidatedEpics: InvalidatedEpics = new Map()
-    const edit = await db.transaction(async (tx) => {
-      const { task } = await lockTask(tx, row.id)
-      if (paused && task.leaseRunId) throw new ToolError('Use stop_run to stop a leased task with human confirmation')
-      if (fields.type && !canChangeType(task, fields.type)) throw new ToolError('A task’s type is fixed once it is approved or awaiting merge, and it can’t enter or leave the spike or design type once it has left Draft or Backlog')
-      const edit = await patchTask(tx, project, row.id, fields, actor, invalidatedEpics)
-      if (paused !== undefined) {
-        await tx.update(tasks).set({ paused, updatedAt: this.#c.now() }).where(eq(tasks.id, row.id))
-        await appendAudit(tx, { projectId: project.id, taskId: row.id, actor }, paused ? auditEvent('task.paused', {}) : auditEvent('task.resumed', {}))
+    const fields = { ...edits, ...parentId !== undefined && { epicId: parentId }, ...implementationPlan !== undefined && { implementationPlan: optionalMarkdownToRichText(implementationPlan) } }
+    const task = await commands.patchTask(project, row.id, fields, actor, {
+      paused,
+      check: (locked) => {
+        if (paused && locked.leaseRunId) throw new ToolError(`Use ${toolName('stop_run')} to stop a leased task with human confirmation`)
+        if (fields.type && !canChangeType(locked, fields.type)) throw new ToolError('A task’s type is fixed once it is approved or awaiting merge, and it can’t enter or leave the spike or design type once it has left Draft or Backlog')
       }
-      return edit
     })
-    await publishInvalidatedEpics(db, events, invalidatedEpics)
-    if (edit) await this.#c.human.noticeTaskEdit(row.id, edit, actor).catch(error => console.error('Telling the run about the PM edit failed', error))
-    const task = await loadTask(db, row.id)
-    events.publish({ type: 'task.updated', task })
-    this.#c.scheduler.poke([row.id])
     return { result: task, projectId: project.id, target: { taskId: task.id, taskRef: task.ref }, summary: `Updated ${task.ref}: ${task.title}` }
   }
 
-  // Whether this edit lowers a gate. Input the tool would refuse lowers
-  // nothing: the direct path reports it.
-  async lowersGate(sessionId: string, tool: string, input: unknown): Promise<boolean> {
-    if (!isPmGatedTool(tool)) return false
-    return await this.#gateChange(sessionId, tool, input).then(change => change !== null, (error: unknown) => {
-      if (error instanceof ToolError || error instanceof ApiFailure || error instanceof z.ZodError) return false
-      throw error
-    })
+  const createTask = async ({ input, project, actor }: PmToolCall<'create_task'>) => {
+    const { parentId, implementationPlan, ...fields } = input
+    const task = await commands.createTask(project, { ...fields, implementationPlan: optionalMarkdownToRichText(implementationPlan), epicId: parentId ?? null }, actor)
+    return { result: task, projectId: project.id, target: { taskId: task.id, taskRef: task.ref }, summary: `Created ${task.ref}: ${task.title}` }
   }
 
-  // D30: a tool never gets around a gate. What this edit lowers, in the words
-  // the card uses, or null when it only raises gates or leaves them alone.
-  async #gateChange(sessionId: string, tool: PmGatedTool, input: unknown): Promise<PreparedPmAction | null> {
-    const { db } = this.#c.d
-    const lowered: string[] = []
-    const others = (changes: Record<string, unknown>, gates: readonly string[]) => Object.entries(changes).filter(([key, value]) => value !== undefined && !gates.includes(key)).map(([key, value]) => `${key} to ${shown(value)}`)
-    const card = (subject: string, also: string[], target: { id: string, taskId: string | null, projectId: string }): PreparedPmAction | null => lowered.length === 0
-      ? null
-      : { input: input as Record<string, unknown>, summary: `Lower the gates on ${subject}: ${lowered.join('; ')}${also.length ? `. Also changes ${also.join(', ')}` : ''}`, targetId: target.id, taskId: target.taskId, projectId: target.projectId }
-
-    if (tool === 'update_project') {
-      const { project: slug, ...neutral } = z.object(pmDirectTools.update_project.input).strict().parse(input)
-      const changes = storedProjectFields(neutral)
-      const [project] = await db.select().from(projects).where(eq(projects.slug, slug))
-      if (!project) return null
-      const removed = changes.requiredChecks ? project.requiredChecks.filter(check => !changes.requiredChecks!.includes(check)) : []
-      if (removed.length) lowered.push(`stop requiring ${removed.join(', ')}`)
-      if (changes.humanReviewDefault === false && project.humanReviewDefault) lowered.push('turn off human review by default')
-      if (lowersMode(project.epicReviewModeDefault, changes.epicReviewModeDefault)) lowered.push(`change the default task review mode from ${modeName(project.epicReviewModeDefault)} to ${modeName(changes.epicReviewModeDefault)}`)
-      if (changes.reviewRoundCap !== undefined && changes.reviewRoundCap > project.reviewRoundCap) lowered.push(`raise the review round cap from ${project.reviewRoundCap} to ${changes.reviewRoundCap}`)
-      if (changes.failedRunCap !== undefined && changes.failedRunCap > project.failedRunCap) lowered.push(`raise the failed run cap from ${project.failedRunCap} to ${changes.failedRunCap}`)
-      if (changes.paused === false && project.paused) lowered.push('resume the paused project, which restarts its runs and merges')
-      return card(project.name, others(changes, ['humanReviewDefault', 'epicReviewModeDefault', 'reviewRoundCap', 'failedRunCap', 'paused']), { id: project.id, taskId: null, projectId: project.id })
-    }
-
-    if (!this.#c.plans) return null
-    const project = await this.#c.plans.toolProject(sessionId, input)
-    const scoped = z.record(z.string(), z.unknown()).parse(input)
-    delete scoped.project
-    if (tool === 'create_task') {
-      const task = z.object(pmActionTools.create_task.input).strict().parse(scoped)
-      if (task.humanReview === false && project.humanReviewDefault && !requiresHumanReview(task.type, false)) lowered.push(`create it without human review, which ${project.name} has by default`)
-      return card(`new task "${task.title}"`, [], { id: project.id, taskId: null, projectId: project.id })
-    }
-    if (tool === 'update_parent') {
-      const { parentId: epicId, ...changes } = z.object(pmActionTools.update_parent.input).strict().parse(scoped)
-      const epic = await getEpic(db, epicId)
-      if (epic.projectId !== project.id) return null
-      if (!epic.reviewModeLocked && lowersMode(epic.reviewMode, changes.reviewMode)) lowered.push(`change its review mode from ${modeName(epic.reviewMode)} to ${modeName(changes.reviewMode)}`)
-      return card(`task ${epic.title}`, others(changes, ['reviewMode']), { id: epic.id, taskId: null, projectId: project.id })
-    }
-
-    const { taskRef: ref, paused, parentId, ...edits } = z.object(pmActionTools.update_task.input).strict().parse(scoped)
-    const changes = { ...edits, ...parentId !== undefined && { epicId: parentId } }
-    const match = /^([A-Za-z]+)-(\d+)$/.exec(ref)
-    if (!match || match[1]!.toUpperCase() !== project.prefix.toUpperCase()) return null
-    const [task] = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
-    // Merged work refuses the edit outright
-    if (!task || task.status === 'merged') return null
-    if (paused === false && task.paused) lowered.push('resume the paused task')
-    const next = { type: changes.type ?? task.type, humanReview: changes.humanReview ?? task.humanReview }
-    if (requiresHumanReview(task.type, task.humanReview) && !requiresHumanReview(next.type, next.humanReview)) lowered.push('turn off human review')
-    if (changes.epicId !== undefined && changes.epicId !== task.epicId && task.prNumber === null && task.integrationProtocol === 0) {
-      const modeOf = async (id: string | null) => id ? (await db.select({ mode: schema.epics.reviewMode }).from(schema.epics).where(eq(schema.epics.id, id)))[0]?.mode ?? null : null
-      if (taskReview(next, await modeOf(changes.epicId)) < taskReview(task, await modeOf(task.epicId))) lowered.push('move it somewhere with less human review')
-    }
-    if (changes.acceptanceCriteria) {
-      const held = await db.select().from(acceptanceCriteria).where(and(eq(acceptanceCriteria.taskId, task.id), eq(acceptanceCriteria.checkedByHuman, true)))
-      for (const criterion of lostHumanChecks(held, changes.acceptanceCriteria)) {
-        lowered.push(changes.acceptanceCriteria.some(c => c.id === criterion.id) ? `stop requiring a human for "${criterion.text}"` : `remove the human check "${criterion.text}"`)
-      }
-      for (const criterion of held) {
-        const reworded = changes.acceptanceCriteria.find(c => c.id === criterion.id && c.text !== criterion.text && c.checkedByHuman !== false)
-        if (reworded) lowered.push(`reword the human check "${criterion.text}" to "${reworded.text}"`)
-      }
-    }
-    return card(`${taskRef(project.prefix, task.number)}: ${task.title}`, others({ ...changes, paused: paused || undefined }, ['humanReview']), { id: task.id, taskId: task.id, projectId: project.id })
+  const updateParent = async ({ input, project, actor }: PmToolCall<'update_parent'>) => {
+    const { parentId: epicId, dependsOn, summary, ...fields } = input
+    if ((await getEpic(db, epicId)).projectId !== project.id) throw new ToolError('Use a task with subtasks from this conversation’s project')
+    const epic = await commands.updateParent(epicId, { fields: { ...fields, ...(summary !== undefined && { description: summary }) }, dependsOn }, actor)
+    return { result: epic, projectId: project.id, summary: `Updated task ${epic.title}` }
   }
 
-  async prepare(sessionId: string, storedTool: string, storedInput: unknown): Promise<PreparedPmAction> {
-    const { tool, input } = neutralPmCall(storedTool, storedInput)
-    if (isPmGatedTool(tool)) {
-      const change = await this.#gateChange(sessionId, tool, input)
-      if (!change) throw new ToolError('The target of this action has changed')
-      return change
-    }
-    if (!requiresPmConfirmation(tool, input)) throw new ToolError(`Unknown confirm-required tool ${tool}`)
-    if (tool === 'act_on_inbox' || tool === 'approve_design' || tool === 'request_design_changes') return this.#c.pmDecisions.prepare(tool, input)
-    if (!this.#c.plans) throw new ToolError('Planning is unavailable')
-    const { db } = this.#c.d
-    const [session] = await db.select().from(schema.planSessions).where(eq(schema.planSessions.id, sessionId))
-    if (!session) throw new ToolError('The conversation no longer exists')
-    const strict = <T extends z.ZodRawShape>(shape: T) => z.object(shape).strict().parse(input)
-    if (tool === 'delete_task' || tool === 'approve_task' || tool === 'move_task') {
-      const project = await this.#c.plans.toolProject(sessionId, input)
-      const parsed = z.object({ taskRef: z.string().trim().min(1), reason: z.string().optional(), transition: humanTransitionInput.optional(), project: z.string().optional() }).strict().parse(strict({ ...pmActionTools[tool].input, project: z.string().trim().min(1).optional() }))
-      const match = /^([A-Za-z]+)-(\d+)$/.exec(parsed.taskRef)
-      if (!match || match[1]!.toUpperCase() !== project.prefix.toUpperCase()) throw new ToolError(`Use a task ref from ${project.name}`)
-      const [task] = await db.select().from(tasks).where(and(eq(tasks.projectId, project.id), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
-      if (!task) throw new ToolError(`Task ${parsed.taskRef} no longer exists`)
-      if (tool === 'delete_task' && task.status === 'merged') throw new ToolError('Merged tasks cannot be deleted')
-      if (tool === 'approve_task' && task.type === 'design') throw new ToolError('Use approve_design to approve a design')
-      if (tool === 'approve_task' && task.status !== 'human_review') throw new ToolError('Task must be in Human review')
-      const event = parsed.transition
-      const destination = event?.type === 'resolve' ? event.to : event?.type === 'approve' ? 'ready' : event?.type === 'human_request_changes' ? 'in_progress' : 'backlog'
-      const verb = tool === 'delete_task' ? 'Delete' : tool === 'approve_task' ? 'Approve' : 'Move'
-      let summary = `${verb} ${taskRef(project.prefix, task.number)}${tool === 'move_task' ? ` to ${destination.replaceAll('_', ' ')}` : ''}: ${task.title}${tool === 'approve_task' ? ` (${task.prNumber ? `PR #${task.prNumber} at ` : 'head: '}${task.headSha ?? 'none'})` : ''}${event?.type === 'human_request_changes' && event.feedback ? ` — Feedback: ${event.feedback}` : ''}`
-      if (tool === 'approve_task') summary += await humanApprovalSummary(db, task.id)
-      if (tool === 'delete_task') summary += await lostByDeleting(db, task)
-      if (event?.type === 'resolve') summary += resetNote(task)
-      return { input: { ...parsed, project: project.slug, taskRef: taskRef(project.prefix, task.number) }, summary: parsed.reason ? `${summary} — ${parsed.reason}` : summary, targetId: task.id, taskId: task.id, projectId: project.id }
-    }
-    switch (tool) {
-      case 'delete_project': {
-        const parsed = strict(pmActionTools.delete_project.input)
-        const [target] = await db.select().from(projects).where(eq(projects.slug, parsed.project))
-        if (!target) throw new ToolError(`Project ${parsed.project} no longer exists`)
-        return { input: parsed, summary: `Remove project ${target.name} (${target.repository}) with all its tasks, runs and Plan sessions`, targetId: target.id, taskId: null, projectId: target.id }
+  const updateProject = async ({ input: { project: slug, ...neutral }, actor }: PmToolCall<'update_project'>) => {
+    const changes = storedProjectFields(neutral)
+    const fields = Object.entries(changes).filter(([, value]) => value !== undefined)
+    if (fields.length === 0) throw new Error('Nothing to change: pass at least one setting')
+    const updated = await commands.patchProject(await findProjectBySlug(db, slug), changes, actor)
+    const list = fields.map(([key, value]) => `${key} to ${JSON.stringify(value)}`).join(', ')
+    return { result: updated, projectId: updated.id, summary: `Set ${list} on ${updated.name}` }
+  }
+
+  // A card for one of the conversation project's tasks
+  const taskCard = async ({ input, project }: PmToolCall<'delete_task' | 'approve_task' | 'move_task'>, verb: string, check: (task: TaskRow) => void, detail: (task: TaskRow, ref: string) => Promise<string>): Promise<PreparedPmAction> => {
+    if (!isProjectRef(project, input.taskRef)) throw new ToolError(`Use a task ref from ${project.name}`)
+    const task = await taskByRef(db, project, input.taskRef)
+    if (!task) throw new ToolError(`Task ${input.taskRef} no longer exists`)
+    check(task)
+    const ref = taskRef(project.prefix, task.number)
+    const summary = `${verb} ${ref}${await detail(task, ref)}`
+    return { input: { ...input, project: project.slug, taskRef: ref }, summary: 'reason' in input && input.reason ? `${summary} — ${input.reason}` : summary, targetId: task.id, taskId: task.id, projectId: project.id }
+  }
+
+  const factoryCard = (summary: string) => async ({ input, session }: PmToolCall<'set_update_hold' | 'stop_all' | 'resume_all'>): Promise<PreparedPmAction> =>
+    ({ input, summary, targetId: null, taskId: null, projectId: session.projectId })
+
+  return {
+    create_task: {
+      goal: 'create a task',
+      run: createTask,
+      async lowers({ input, project }) {
+        const lowered = newTaskLowersReview(project, input) ? [`create it without human review, which ${project.name} has by default`] : []
+        return gateCard(`new task "${input.title}"`, lowered, [], { id: project.id, taskId: null, projectId: project.id })
+      },
+      execute: async call => (await createTask(call)).summary
+    },
+    update_task: {
+      goal: 'change a task',
+      run: updateTask,
+      async lowers({ input, project }) {
+        const { taskRef: ref, paused, parentId, ...edits } = input
+        const changes = { ...edits, ...parentId !== undefined && { epicId: parentId } }
+        const task = await taskByRef(db, project, ref)
+        // Merged work refuses the edit outright
+        if (!task || task.status === 'merged') return null
+        const modeOf = async (id: string | null) => id ? (await db.select({ mode: epics.reviewMode }).from(epics).where(eq(epics.id, id)))[0]?.mode ?? null : null
+        // A task with a PR or submitting to its parent's branch can't move: the edit refuses that itself
+        const moves = changes.epicId !== undefined && changes.epicId !== task.epicId && task.prNumber === null && !isPrFree(task)
+        const lowered = taskGatesLowered(
+          { ...task, mode: await modeOf(task.epicId), criteria: changes.acceptanceCriteria ? await heldHumanChecks(db, task.id) : [] },
+          { ...changes, paused, ...(moves && { movesTo: { mode: await modeOf(changes.epicId ?? null) } }) }
+        )
+        return gateCard(`${taskRef(project.prefix, task.number)}: ${task.title}`, lowered, others({ ...changes, paused: paused || undefined }, ['humanReview']), { id: task.id, taskId: task.id, projectId: project.id })
+      },
+      execute: async call => (await updateTask(call)).summary
+    },
+    update_parent: {
+      goal: 'change a task with subtasks',
+      run: updateParent,
+      async lowers({ input, project }) {
+        const { parentId: epicId, ...changes } = input
+        const epic = await getEpic(db, epicId).catch((error: unknown) => {
+          if (error instanceof ApiFailure && error.status === 404) return null
+          throw error
+        })
+        if (epic?.projectId !== project.id) return null
+        const lowered = !epic.reviewModeLocked && lowersMode(epic.reviewMode, changes.reviewMode) ? [`change its review mode from ${reviewModeName(epic.reviewMode)} to ${reviewModeName(changes.reviewMode)}`] : []
+        return gateCard(`task ${epic.title}`, lowered, others(changes, ['reviewMode']), { id: epic.id, taskId: null, projectId: project.id })
+      },
+      execute: async call => (await updateParent(call)).summary
+    },
+    update_project: {
+      goal: 'change a project',
+      run: updateProject,
+      async lowers({ input }) {
+        const { project: slug, ...neutral } = input
+        const changes = storedProjectFields(neutral)
+        const [project] = await db.select().from(projects).where(eq(projects.slug, slug))
+        if (!project) return null
+        return gateCard(project.name, projectGatesLowered(project, changes), others(changes, PROJECT_GATES), { id: project.id, taskId: null, projectId: project.id })
+      },
+      execute: async call => `Changed ${(await updateProject(call)).result.name}.`
+    },
+    move_task: {
+      prepare: call => taskCard(call, 'Move', () => undefined, async (task) => {
+        const event = call.input.transition
+        const destination = event.type === 'resolve' ? event.to : event.type === 'approve' ? 'ready' : event.type === 'human_request_changes' ? 'in_progress' : 'backlog'
+        return ` to ${statusWords(destination)}: ${task.title}${event.type === 'human_request_changes' && event.feedback ? ` — Feedback: ${event.feedback}` : ''}${event.type === 'resolve' ? resetNote(task) : ''}`
+      }),
+      async execute({ input, actor }, prepared) {
+        const task = await commands.transitionTask(prepared.taskId!, input.transition, actor)
+        if (input.reason) await commands.addComment(task.id, { body: input.reason, pinned: false }, actor)
+        return `Moved ${task.ref} to ${statusWords(task.status)}.`
       }
-      case 'stop_run': {
-        const parsed = strict(pmActionTools.stop_run.input)
-        const ctx = await this.#c.runs.load(parsed.runId)
+    },
+    approve_task: {
+      prepare: call => taskCard(call, 'Approve', (task) => {
+        if (task.type === 'design') throw new ToolError(`Use ${toolName('approve_design')} to approve a design`)
+        if (task.status !== 'human_review') throw new ToolError('Task must be in Human review')
+      }, async task => `: ${task.title} (${task.prNumber ? `PR #${task.prNumber} at ` : 'head: '}${task.headSha ?? 'none'})${await humanApprovalSummary(db, task.id)}`),
+      async execute({ actor }, prepared) {
+        return `Approved ${(await commands.approveTask(prepared.taskId!, actor)).ref}.`
+      }
+    },
+    delete_task: {
+      prepare: call => taskCard(call, 'Delete', (task) => {
+        if (task.status === 'merged') throw new ToolError('Merged tasks cannot be deleted')
+      }, async task => `: ${task.title}${await lostByDeleting(db, task)}`),
+      async execute({ input, actor }, prepared) {
+        await human.deleteTask(prepared.targetId!, actor, input.reason ?? null)
+        return `Deleted ${input.taskRef}.`
+      }
+    },
+    delete_project: {
+      async prepare({ input }) {
+        const [target] = await db.select().from(projects).where(eq(projects.slug, input.project))
+        if (!target) throw new ToolError(`Project ${input.project} no longer exists`)
+        return { input, summary: `Remove project ${target.name} (${target.repository}) with all its tasks, runs and Plan sessions`, targetId: target.id, taskId: null, projectId: target.id }
+      },
+      async execute({ actor }, prepared) {
+        await human.deleteProject(prepared.targetId!, actor)
+        return 'The project was removed.'
+      }
+    },
+    stop_run: {
+      async prepare({ input }) {
+        const ctx = await deps.runs.load(input.runId)
         if (!ctx) throw new ToolError('This run no longer exists')
         if (!isActiveRun(ctx.run.state)) throw new ToolError(`Run #${ctx.run.number} isn't live: it's ${ctx.run.state}`)
         const about = ctx.task ? ` on ${taskRef(ctx.project!.prefix, ctx.task.number)}: ${ctx.task.title}` : ctx.project ? ` in ${ctx.project.name}` : ' in a global conversation'
-        return { input: parsed, summary: `Stop run #${ctx.run.number}, the ${ctx.run.role} run${about}`, targetId: ctx.run.id, taskId: ctx.task?.id ?? null, projectId: ctx.project?.id ?? null }
+        return { input, summary: `Stop run #${ctx.run.number}, the ${ctx.run.role} run${about}`, targetId: ctx.run.id, taskId: ctx.task?.id ?? null, projectId: ctx.project?.id ?? null }
+      },
+      async execute({ actor }, prepared) {
+        await human.stopRun(prepared.targetId!, actor)
+        return 'The run was stopped.'
       }
-      case 'set_update_hold':
-        return { input: strict(pmActionTools.set_update_hold.input), summary: 'Hold Corral for an update; after running work drains, all new turns wait until you Lift the hold in the app banner', targetId: null, taskId: null, projectId: session.projectId }
-      case 'stop_all':
-        return { input: strict(pmActionTools.stop_all.input), summary: 'Stop every run in Corral and start no new ones', targetId: null, taskId: null, projectId: session.projectId }
-      case 'resume_all':
-        return { input: strict(pmActionTools.resume_all.input), summary: 'Resume Corral so runs start again', targetId: null, taskId: null, projectId: session.projectId }
+    },
+    set_update_hold: {
+      prepare: factoryCard('Hold Corral for an update; after running work drains, all new turns wait until you Lift the hold in the app banner'),
+      async execute() {
+        const busy = await controls.holdForUpdate()
+        return { ...controls.status, busy }
+      }
+    },
+    stop_all: {
+      prepare: factoryCard('Stop every run in Corral and start no new ones'),
+      async execute({ actor }) {
+        await controls.stopAll(actor)
+        return 'Corral is stopped.'
+      }
+    },
+    resume_all: {
+      prepare: factoryCard('Resume Corral so runs start again'),
+      async execute({ actor }) {
+        await controls.resumeAll(actor)
+        return 'Corral is running again.'
+      }
     }
-    throw new ToolError(`Unknown confirm-required tool ${tool}`)
   }
 }

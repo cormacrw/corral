@@ -4,7 +4,7 @@ import { cn } from 'cn'
 
 // One page column in the app shell: optional header, a scrolling body, footer.
 // `data-slot="root"` is what the shell's scrolling rules select.
-const props = defineProps<{ bodyClass?: HTMLAttributes['class'], class?: HTMLAttributes['class'] }>()
+const props = defineProps<{ class?: HTMLAttributes['class'] }>()
 </script>
 
 <template>
@@ -14,7 +14,7 @@ const props = defineProps<{ bodyClass?: HTMLAttributes['class'], class?: HTMLAtt
   >
     <slot name="header" />
     <slot>
-      <div :class="cn('flex flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 sm:gap-6 sm:p-6', bodyClass)">
+      <div :class="'flex flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 sm:gap-6 sm:p-6'">
         <slot name="body" />
       </div>
     </slot>

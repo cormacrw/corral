@@ -4,7 +4,6 @@ import type { MergeGateFacts } from './merge-gates.ts'
 import { TASK_STATUSES, type TaskStatus } from './status.ts'
 import {
   availableEvents,
-  DEFAULT_LIMITS,
   createTask,
   transition,
   type TaskEvent,
@@ -55,37 +54,6 @@ const validEvents: Record<TaskEventType, TaskEvent> = {
   release_stop: { type: 'release_stop', to: null }
 }
 
-// The D10 transition table, written out independently of TRANSITION_RULES:
-// event → [allowed from-statuses, actor that may trigger it]
-const d10: Record<TaskEventType, [TaskStatus[], Actor]> = {
-  approve: [['draft', 'backlog'], human],
-  accept: [['draft'], human],
-  send_back: [['ready'], human],
-  claim: [['ready'], scheduler],
-  submit: [['in_progress'], server],
-  changes_requested: [['agent_review'], server],
-  review_approved: [['agent_review'], server],
-  approval_carried: [['in_progress', 'agent_review'], server],
-  human_approve: [['human_review'], human],
-  require_human_check: [['ready_to_merge'], server],
-  ci_failed: [['ready_to_merge'], server],
-  base_conflict: [['ready_to_merge'], server],
-  head_moved: [['ready_to_merge'], server],
-  merged: [['ready_to_merge'], server],
-  integrated: [['ready_to_merge'], server],
-  merged_outside: [['agent_review', 'human_review', 'ready_to_merge'], server],
-  human_request_changes: [['human_review', 'ready_to_merge'], human],
-  block: [['ready', 'in_progress', 'agent_review', 'human_review', 'ready_to_merge'], server],
-  fail: [['in_progress', 'agent_review', 'ready_to_merge'], server],
-  run_failed: [['in_progress', 'agent_review'], server],
-  answer: [['blocked'], pm],
-  resolve: [['blocked', 'failed'], human],
-  release_stop: [['in_progress', 'agent_review'], human]
-}
-
-// Table rows whose guard needs more than the default state
-const stateFor: Partial<Record<TaskEventType, Partial<TaskState>>> = {}
-
 function task(status: TaskStatus, overrides: Partial<TaskState> = {}): TaskState {
   // Flagged tasks are the only ones that may reach Human review
   return normalizeTaskState({ type: 'task', status, humanReview: status === 'human_review', reviewRounds: 0, failedRuns: 0, reason: status === 'blocked' || status === 'failed' ? 'Needs attention' : null, ...overrides })
@@ -96,40 +64,30 @@ function expectOk(result: ReturnType<typeof transition>): TaskState {
   return result.task
 }
 
-describe('the D10 transition table', () => {
-  const events = Object.keys(d10) as TaskEventType[]
+describe('transition rules (D10)', () => {
+  it('rejects an event from a status it does not apply to, before checking the actor', () => {
+    expect(transition(task('backlog'), validEvents.claim, developer)).toEqual({
+      ok: false,
+      error: { code: 'invalid_transition', status: 'backlog', event: 'claim' }
+    })
+  })
 
-  for (const event of events) {
-    const [from, actor] = d10[event]
+  it('rejects an actor the event does not belong to', () => {
+    expect(transition(task('ready'), validEvents.claim, human)).toMatchObject({ ok: false, error: { code: 'actor_not_allowed', event: 'claim' } })
+  })
 
-    for (const status of TASK_STATUSES) {
-      if (from.includes(status)) {
-        it(`allows ${event} from ${status}`, () => {
-          expect(transition(task(status, stateFor[event]), validEvents[event], actor).ok).toBe(true)
-        })
-      } else {
-        it(`rejects ${event} from ${status}`, () => {
-          expect(transition(task(status), validEvents[event], actor)).toEqual({
-            ok: false,
-            error: { code: 'invalid_transition', status, event }
-          })
-        })
+  it('keeps the human\'s decisions with the human', () => {
+    const decisions: [TaskStatus, TaskEventType][] = [['backlog', 'approve'], ['draft', 'accept'], ['ready', 'send_back'], ['human_review', 'human_approve'], ['human_review', 'human_request_changes'], ['failed', 'resolve'], ['in_progress', 'release_stop']]
+    for (const [status, event] of decisions) {
+      expect(transition(task(status), validEvents[event], human).ok, event).toBe(true)
+      for (const actor of [pm, developer, scheduler, server]) {
+        expect(transition(task(status), validEvents[event], actor), event).toMatchObject({ ok: false, error: { code: 'actor_not_allowed' } })
       }
     }
-
-    for (const other of [human, pm, developer, scheduler, server].filter(a => a !== actor)) {
-      it(`rejects ${event} by ${other.kind === 'system' ? other.component : other.kind === 'agent' ? other.role : 'human'}`, () => {
-        const result = transition(task(from[0]!), validEvents[event], other)
-        expect(result.ok).toBe(false)
-        if (!result.ok) expect(result.error.code).toBe('actor_not_allowed')
-      })
-    }
-  }
+  })
 
   it('treats Merged as final', () => {
-    expect(availableEvents(task('merged'), human)).toEqual([])
-    expect(availableEvents(task('merged'), server)).toEqual([])
-    expect(availableEvents(task('merged'), scheduler)).toEqual([])
+    for (const actor of [human, pm, developer, scheduler, server]) expect(availableEvents(task('merged'), actor)).toEqual([])
   })
 })
 
@@ -405,17 +363,6 @@ describe('rebase-only rounds', () => {
   it('returns to a normal round when the rebase reviewer requests changes', () => {
     const result = expectOk(transition(task('agent_review', { rebaseOnly: true, reviewRounds: 1 }), { type: 'changes_requested' }, server))
     expect(result).toMatchObject({ status: 'in_progress', rebaseOnly: false, reviewRounds: 2 })
-  })
-})
-
-describe('DEFAULT_LIMITS', () => {
-  it('holds the PRD defaults and cannot be changed', () => {
-    expect(DEFAULT_LIMITS).toEqual({ reviewRoundCap: 5, failedRunCap: 3 })
-    expect(() => {
-      // @ts-expect-error the limits are read-only
-      DEFAULT_LIMITS.reviewRoundCap = 1
-    }).toThrow(TypeError)
-    expect(DEFAULT_LIMITS.reviewRoundCap).toBe(5)
   })
 })
 

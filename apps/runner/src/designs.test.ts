@@ -2,7 +2,8 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, truncate, 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { MAX_BUNDLE_BYTES, MAX_SCREENSHOT_BYTES, MAX_SCREENSHOTS_BYTES, MAX_SPEC_BYTES, packDesign, saveDesign } from './designs.ts'
+import { DESIGN_TOO_LARGE, DESIGN_VERSION_MAX_BYTES, RUNNER_MAX_MESSAGE_BYTES } from '@corral/contracts'
+import { MAX_SCREENSHOT_BYTES, MAX_SPEC_BYTES, packDesign, saveDesign } from './designs.ts'
 import { exec } from './exec.ts'
 
 describe('saveDesign', () => {
@@ -16,6 +17,8 @@ describe('saveDesign', () => {
     await exec('chmod', ['-R', 'u+w', root])
     await rm(root, { recursive: true, force: true })
   })
+
+  const versionFields = { title: 'Login', status: 'approved', branch: 'corral/COR-7', commitSha: 'abc', pinnedScreens: null } as const
 
   async function bundle(files: Record<string, string>): Promise<string> {
     const src = join(root, 'src')
@@ -31,6 +34,7 @@ describe('saveDesign', () => {
   it('writes the spec and screenshots and extracts the bundle into the scratch folder', async () => {
     const scratch = join(root, 'scratch')
     const saved = await saveDesign(scratch, {
+      ...versionFields,
       taskRef: 'COR-7',
       version: 2,
       spec: '# Login\n\n## Screens\n- login\n',
@@ -42,8 +46,9 @@ describe('saveDesign', () => {
     })
     expect(saved.ok).toBe(true)
     const dir = join(scratch, 'designs', 'COR-7-v2')
-    const result = (saved as { result: Record<string, unknown> }).result
+    const result = (saved as { result: unknown }).result
     expect(result).toEqual({
+      ...versionFields,
       taskRef: 'COR-7',
       version: 2,
       spec: '# Login\n\n## Screens\n- login\n',
@@ -67,7 +72,7 @@ describe('saveDesign', () => {
 
   it('replaces an earlier read-only copy of the same version', async () => {
     const scratch = join(root, 'scratch')
-    const design = (spec: string) => ({ taskRef: 'COR-7', version: 1, spec, screenshots: [], bundle: { dataBase64: '' } })
+    const design = (spec: string) => ({ ...versionFields, taskRef: 'COR-7', version: 1, spec, screenshots: [], bundle: { dataBase64: '' } })
     const archive = await bundle({ 'index.html': '<h1>Login</h1>' })
     expect(await saveDesign(scratch, { ...design('first'), bundle: { dataBase64: archive } })).toMatchObject({ ok: true })
     expect(await saveDesign(scratch, { ...design('second'), bundle: { dataBase64: archive } })).toMatchObject({ ok: true })
@@ -75,7 +80,7 @@ describe('saveDesign', () => {
   })
 
   it('reports a bundle that isn\'t a tar', async () => {
-    const saved = await saveDesign(join(root, 'scratch'), { taskRef: 'COR-7', version: 1, spec: '', screenshots: [], bundle: { dataBase64: Buffer.from('not a tar').toString('base64') } })
+    const saved = await saveDesign(join(root, 'scratch'), { ...versionFields, taskRef: 'COR-7', version: 1, spec: '', screenshots: [], bundle: { dataBase64: Buffer.from('not a tar').toString('base64') } })
     expect(saved).toMatchObject({ ok: false, error: expect.stringContaining('could not extract the design bundle') })
   })
 })
@@ -104,7 +109,7 @@ describe('packDesign', () => {
 
     it('refuses an oversized bundle before running tar', async () => {
       await writeFile(join(root, 'dist', 'huge.bin'), '')
-      await sized(join(root, 'dist', 'huge.bin'), MAX_BUNDLE_BYTES + 1)
+      await sized(join(root, 'dist', 'huge.bin'), DESIGN_VERSION_MAX_BYTES + 1)
       // Sparse, so a tar of it would take no time: tar failing proves it never ran
       await writeFile(join(root, 'tar'), '#!/bin/sh\ntouch "$0.ran"\nexit 1\n')
       await chmod(join(root, 'tar'), 0o755)
@@ -122,14 +127,14 @@ describe('packDesign', () => {
       expect(await packDesign(root, input())).toEqual({ ok: false, error: expect.stringContaining('over 10 MB') })
     })
 
-    it('refuses screenshots that come to too much together', async () => {
+    it('refuses a version whose screenshots take it over the server\'s limit', async () => {
       const screenshots: string[] = []
       for (let i = 0; i < 5; i++) {
         screenshots.push(join(root, `s${i}.png`))
         await writeFile(screenshots[i]!, '')
         await sized(screenshots[i]!, MAX_SCREENSHOT_BYTES)
       }
-      expect(await packDesign(root, input({ screenshots }))).toEqual({ ok: false, error: expect.stringContaining('over 40 MB') })
+      expect(await packDesign(root, input({ screenshots }))).toEqual({ ok: false, error: DESIGN_TOO_LARGE })
     })
 
     it('refuses an oversized spec', async () => {
@@ -139,7 +144,7 @@ describe('packDesign', () => {
 
     it('stays under the socket limit at every maximum at once', () => {
       const base64 = (bytes: number) => bytes * 4 / 3
-      expect(base64(MAX_BUNDLE_BYTES) + base64(MAX_SCREENSHOTS_BYTES) + MAX_SPEC_BYTES).toBeLessThan(100 * 1024 * 1024)
+      expect(base64(DESIGN_VERSION_MAX_BYTES) + MAX_SPEC_BYTES).toBeLessThan(RUNNER_MAX_MESSAGE_BYTES)
     })
   })
 
@@ -157,13 +162,10 @@ describe('packDesign', () => {
     expect(await packDesign(root, input({ bundleDir: 'dist', specPath: 'design.md', screenshots: ['login-desktop.png'] }))).toMatchObject({ ok: true })
   })
 
-  it('rejects a bundle without index.html at its root with a clear error', async () => {
+  it('rejects a bundle without index.html at its root, naming where it looked', async () => {
     await mkdir(join(root, 'nested', 'dist'), { recursive: true })
     await writeFile(join(root, 'nested', 'dist', 'index.html'), '<h1>Login</h1>')
-    expect(await packDesign(root, input({ bundleDir: join(root, 'nested') }))).toEqual({
-      ok: false,
-      error: `Not submitted. The bundle has no index.html at its root (${join(root, 'nested', 'index.html')}). Pass the folder that holds index.html and its assets, with relative paths.`
-    })
+    expect(await packDesign(root, input({ bundleDir: join(root, 'nested') }))).toEqual({ ok: false, error: expect.stringContaining(join(root, 'nested', 'index.html')) })
   })
 
   it('rejects a missing folder, symlinks, a missing spec and non-image screenshots', async () => {

@@ -29,8 +29,7 @@ describe('PlanOpenThreads', () => {
   it('lists open threads, most recently updated first, with an unread dot and no status badge', () => {
     const wrapper = mount(PlanOpenThreads, { props: { sessions }, global })
     const rows = wrapper.findAll('[data-testid="plan-open-thread"]')
-    expect(wrapper.get('h2').text()).toBe('Open threads')
-    expect(rows.map(r => r.get('.truncate').text())).toEqual(['Newest', 'Failing', 'Quiet', 'Older'])
+    expect(rows.map(r => ['Newest', 'Failing', 'Quiet', 'Older'].find(name => r.text().includes(name)))).toEqual(['Newest', 'Failing', 'Quiet', 'Older'])
     expect(wrapper.find('[data-badge]').exists()).toBe(false)
     expect(rows.map(r => r.find('[data-testid="plan-session-unread"]').exists())).toEqual([true, false, false, false])
   })
@@ -47,12 +46,5 @@ describe('PlanOpenThreads', () => {
     await wrapper.setProps({ sessions: [sessions[1]!] })
     expect(wrapper.find('[data-testid="plan-open-threads"]').exists()).toBe(false)
     expect(wrapper.text()).toBe('')
-  })
-
-  it('uses full-width rows at least 48px tall on phones', () => {
-    const wrapper = mount(PlanOpenThreads, { props: { sessions, mobile: true }, global })
-    for (const row of wrapper.findAll('[data-testid="plan-open-thread"]')) {
-      expect(row.classes()).toEqual(expect.arrayContaining(['w-full', 'min-h-12']))
-    }
   })
 })

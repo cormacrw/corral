@@ -1,5 +1,6 @@
 import {
   AGENT_ROLES,
+  DEPLOYMENT_NOTES_STATUSES,
   DESIGN_VERSION_STATUSES,
   EVIDENCE_KINDS,
   EPIC_REVIEW_MODES,
@@ -34,4 +35,4 @@ export const planChange = pgEnum('plan_change', PLAN_CHANGES)
 export const reviewVerdict = pgEnum('review_verdict', REVIEW_VERDICTS)
 export const evidenceKind = pgEnum('evidence_kind', EVIDENCE_KINDS)
 export const designVersionStatus = pgEnum('design_version_status', DESIGN_VERSION_STATUSES)
-export const deploymentNotesStatus = pgEnum('deployment_notes_status', ['pending', 'ready', 'failed'])
+export const deploymentNotesStatus = pgEnum('deployment_notes_status', DEPLOYMENT_NOTES_STATUSES)

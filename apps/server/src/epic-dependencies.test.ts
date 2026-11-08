@@ -2,10 +2,11 @@ import type { Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { complete, epicBoard } from './epic-prs.ts'
 import { claimNextTask } from './claim.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
+import { boardComplete } from '@corral/core'
+import { epicBoard } from './parents.ts'
 
 const { agents, epics, epicDependencies, tasks } = schema
 
@@ -18,7 +19,7 @@ describe('epic scheduling', () => {
   afterEach(async () => {
     runner?.close()
     runner = undefined
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     await t.db.delete(schema.projects)
   })
   afterAll(async () => {
@@ -76,9 +77,9 @@ describe('epic scheduling', () => {
     await t.db.insert(schema.designVersions).values({ taskId: first.id, version: 1, bundleBlob: blob, specBlob: blob, branch: `design/${first.ref}`, commitSha: 'design-head' })
     runner = await FakeRunner.connect(t.server!.url)
     expect(await t.request('GET', `/api/tasks/${second.ref}`).then(r => r.json())).toMatchObject({ waitingOnEpics: [{ id: a.id }] })
-    expect(complete(await epicBoard(t.db, a.id))).toBe(false)
+    expect(boardComplete(await epicBoard(t.db, a.id))).toBe(false)
     expect((await t.request('POST', `/api/inbox/${first.id}/actions`, { action: 'approve' })).status).toBe(200)
-    expect(complete(await epicBoard(t.db, a.id))).toBe(true)
+    expect(boardComplete(await epicBoard(t.db, a.id))).toBe(true)
     expect(await t.request('GET', `/api/tasks/${second.ref}`).then(r => r.json())).toMatchObject({ waitingOnEpics: [] })
     expect(t.events).toContainEqual(expect.objectContaining({ type: 'task.updated', task: expect.objectContaining({ id: second.id, waitingOnEpics: [] }) }))
     expect(await t.request('GET', `/api/epics/${a.id}`).then(r => r.json())).toMatchObject({ taskCount: 1, mergedCount: 1 })
@@ -232,7 +233,7 @@ describe('epic scheduling', () => {
     runner = await FakeRunner.connect(t.server!.url)
     await t.db.update(agents).set({ wakeIntervalSeconds: 3600 }).where(eq(agents.id, dev.id))
     await t.db.insert(schema.runs).values({ agentId: dev.id, projectId: project.id, taskId: first.id, role: 'developer', state: 'completed', endedAt: new Date(), queuedAt: t.clock.now })
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     expect((await t.db.select().from(tasks).where(eq(tasks.id, second.id)))[0]?.leaseRunId).toBeNull()
     const response = await t.request('PUT', `/api/epics/${b.id}/dependencies`, { dependsOn: [] })
     expect(response.status).toBe(200)
@@ -287,7 +288,7 @@ describe('epic scheduling', () => {
     live.merged = true
     live.mergeCommitSha = 'merged'
     await t.db.update(tasks).set({ status: 'ready_to_merge', statusReason: null, prNumber: pr.number, prUrl: pr.url, headSha: 'abc' }).where(eq(tasks.id, first.id))
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     expect((await t.db.select().from(tasks).where(eq(tasks.id, second.id)))[0]?.leaseRunId).toBeNull()
     t.events.length = 0
     await t.mergePass()

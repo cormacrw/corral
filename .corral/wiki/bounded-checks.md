@@ -57,7 +57,10 @@ and is not covered by the receipt. Delete a receipt to deliberately recheck a
 head (for example after a toolchain or external service change).
 
 `scripts/check.ts` owns orchestration and receipts; `scripts/check-cpus.ts` is
-shared by all six Vitest configs. `apps/runner/src/check-command.test.ts` covers
+shared by every Vitest config. `scripts/` is the `@corral/scripts` workspace
+package, so Turbo lints, typechecks and tests it like the others; its lint also
+runs `check-cycles.ts`, which fails on any import cycle except the documented
+db schema one. `scripts/check.test.ts` covers
 orchestration failure propagation and receipt eligibility using real subprocesses
 and temporary git repositories with a recording pnpm stand-in.
 
@@ -82,7 +85,7 @@ environments also omit `NODE_ENV`, keeping dependency installs and direct test
 commands independent of the runner service mode. The Git origin push guard is
 still inherited: deployment tests push directly to their temporary bare repo's
 path, never by clearing the guard or changing the real origin's configuration.
-`agent.test.ts` proves named-origin pushes fail while a local fixture push works.
+The runner's `agent-env.test.ts` proves named-origin pushes fail while a local fixture push works.
 
 The task review-state retry case waits for the Inbox fallback to persist before
 closing its database. Retry publishes an `epic.updated` arrival whose Inbox

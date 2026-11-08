@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { shellTitle } from '~/features/shell/utils/shell'
+import { provideFlyoutHost } from '~/composables/useTaskFlyout'
+import { shellTitle } from '~/utils/routes'
 
 // The app shell (design/app-shell.md). The sidebar sits beside the page, under
 // any status banner, rather than covering the viewport and hiding it.
@@ -11,6 +12,7 @@ const currentSlug = computed(() => typeof route.params.slug === 'string' ? route
 // slot from page state, and the Inbox swaps it with the selected item.
 const missing = useProjectMissing(currentSlug)
 const flyoutHosted = computed(() => Boolean(route.meta.taskFlyout) && !missing.value)
+provideFlyoutHost({ docked: () => flyoutHosted.value })
 const searchOpen = ref(false)
 // Below the sidebar's breakpoint it is an overlay, and this bar names the page
 const title = computed(() => shellTitle(route.path, shell.projects, shell.agents))

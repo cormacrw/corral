@@ -9,12 +9,9 @@ import InboxItemRow from '~/features/inbox/components/InboxItemRow.vue'
 // and scroll.
 const router = useRouter()
 const prefetch = useTaskPrefetch()
-const { list, inbox, error, tab, search, items, count, emptyText, selectedId, itemRoute } = useInboxView()
+const { list, inbox, error, tab, tabItems, search, items, emptyText, selectedId, itemRoute } = useInboxView()
 
-const tabs = computed(() => [
-  { label: `Inbox (${count.value})`, value: 'needsYou', icon: 'i-hugeicons-inbox' },
-  { label: `Resolved (${inbox.value?.resolved.length ?? 0})`, value: 'resolved', icon: 'i-hugeicons-checkmark-circle-02' }
-])
+const tabs = computed(() => tabItems.value.map(t => ({ ...t, label: `${t.label} (${t.count})` })))
 function select(item: InboxItem) {
   void router.push(itemRoute(item))
 }
@@ -72,12 +69,7 @@ const hover = (item: InboxItem) => isTaskItem(item) ? prefetch({ ref: item.taskR
           v-bind="hover(item)"
           @click="select(item)"
         >
-          <PlanThreadRow
-            v-if="item.type === 'plan_thread'"
-            :item="item"
-          />
           <InboxItemRow
-            v-else
             :item="item"
           />
         </button>

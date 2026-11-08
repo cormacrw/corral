@@ -1,7 +1,8 @@
 import { requiresHumanReview, type EpicReviewMode, type TaskType } from '@corral/core'
 
-// What counts as lowering a gate, shared by the PM's edits and plan revisions
-// so neither can take a route the other refuses (D30).
+// What counts as lowering a gate (D30), shared by the PM's edits and plan
+// revisions so neither can take a route the other refuses. Each lowered gate
+// comes back in the words a confirm card and a refusal both use.
 
 // Most human review first: each_task sends every task to the human, epic only
 // its epic PR, and direct leaves it to each task's flag
@@ -16,8 +17,79 @@ export function taskReview(task: { type: TaskType, humanReview: boolean }, mode:
   return requiresHumanReview(task.type, task.humanReview) ? REVIEW_MODE_RANK.each_task : REVIEW_MODE_RANK[mode ?? 'direct']
 }
 
-interface HeldCriterion { id: string, text: string, checkedByHuman: boolean }
-interface NextCriterion { id?: string | undefined, text: string, checkedByHuman?: boolean | undefined }
+export interface HeldCriterion { id: string, text: string, checkedByHuman: boolean }
+export interface NextCriterion { id?: string | undefined, text: string, checkedByHuman?: boolean | undefined }
+
+// The stored mode `epic` is review at the level of the task with subtasks
+export function reviewModeName(mode: EpicReviewMode | undefined): string | undefined {
+  return mode === 'epic' ? 'task' : mode
+}
+
+export interface TaskGates {
+  type: TaskType
+  humanReview: boolean
+  paused: boolean
+  // The review mode of the task it's a subtask of
+  mode: EpicReviewMode | null
+  criteria: readonly HeldCriterion[]
+}
+
+export interface TaskGateChange {
+  type?: TaskType | undefined
+  humanReview?: boolean | undefined
+  paused?: boolean | undefined
+  // Set when it moves: the review mode of where it goes
+  movesTo?: { mode: EpicReviewMode | null }
+  acceptanceCriteria?: readonly NextCriterion[] | undefined
+}
+
+export function taskGatesLowered(task: TaskGates, change: TaskGateChange): string[] {
+  const lowered: string[] = []
+  if (change.paused === false && task.paused) lowered.push('resume the paused task')
+  const next = { type: change.type ?? task.type, humanReview: change.humanReview ?? task.humanReview }
+  if (requiresHumanReview(task.type, task.humanReview) && !requiresHumanReview(next.type, next.humanReview)) lowered.push('turn off human review')
+  if (change.movesTo && taskReview(next, change.movesTo.mode) < taskReview(task, task.mode)) lowered.push('move it somewhere with less human review')
+  const criteria = change.acceptanceCriteria
+  if (criteria) {
+    for (const lost of lostHumanChecks(task.criteria, criteria)) {
+      lowered.push(criteria.some(c => c.id === lost.id) ? `stop requiring a human for "${lost.text}"` : `remove the human check "${lost.text}"`)
+    }
+    for (const held of task.criteria.filter(c => c.checkedByHuman)) {
+      const reworded = criteria.find(c => c.id === held.id && c.text !== held.text && c.checkedByHuman !== false)
+      if (reworded) lowered.push(`reword the human check "${held.text}" to "${reworded.text}"`)
+    }
+  }
+  return lowered
+}
+
+// A new task left without human review where its project reviews by default
+export function newTaskLowersReview(project: { humanReviewDefault: boolean }, task: { type: TaskType, humanReview?: boolean | undefined }): boolean {
+  return task.humanReview === false && project.humanReviewDefault && !requiresHumanReview(task.type, false)
+}
+
+interface ProjectGates {
+  requiredChecks: string[]
+  humanReviewDefault: boolean
+  epicReviewModeDefault: EpicReviewMode
+  reviewRoundCap: number
+  failedRunCap: number
+  paused: boolean
+}
+
+export function projectGatesLowered(project: ProjectGates, change: { [K in keyof ProjectGates]?: ProjectGates[K] | undefined }): string[] {
+  const lowered: string[] = []
+  const removed = change.requiredChecks ? project.requiredChecks.filter(check => !change.requiredChecks!.includes(check)) : []
+  if (removed.length) lowered.push(`stop requiring ${removed.join(', ')}`)
+  if (change.humanReviewDefault === false && project.humanReviewDefault) lowered.push('turn off human review by default')
+  if (lowersMode(project.epicReviewModeDefault, change.epicReviewModeDefault)) lowered.push(`change the default task review mode from ${reviewModeName(project.epicReviewModeDefault)} to ${reviewModeName(change.epicReviewModeDefault)}`)
+  if (change.reviewRoundCap !== undefined && change.reviewRoundCap > project.reviewRoundCap) lowered.push(`raise the review round cap from ${project.reviewRoundCap} to ${change.reviewRoundCap}`)
+  if (change.failedRunCap !== undefined && change.failedRunCap > project.failedRunCap) lowered.push(`raise the failed run cap from ${project.failedRunCap} to ${change.failedRunCap}`)
+  if (change.paused === false && project.paused) lowered.push('resume the paused project, which restarts its runs and merges')
+  return lowered
+}
+
+// The project settings the gates above cover
+export const PROJECT_GATES = ['humanReviewDefault', 'epicReviewModeDefault', 'reviewRoundCap', 'failedRunCap', 'paused'] as const
 
 // A task's new criteria, each with the ID of an existing one that has the same
 // text, so evidence and verdicts stay attached to it. A human check whose text

@@ -7,8 +7,8 @@
     "dev:demo": "node scripts/dev.ts --demo",
     "seed:demo": "node apps/server/src/demo/seed.ts --force",
     "build": "turbo run build",
-    "lint": "turbo run lint && eslint scripts",
-    "typecheck": "turbo run typecheck && tsc",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
     "test": "turbo run test --concurrency=1",
     "test:exit-codes": "node scripts/test-exit-codes.ts",
     "check": "node scripts/check.ts"

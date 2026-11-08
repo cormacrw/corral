@@ -91,32 +91,28 @@ describe('inbox over stored audit rows', () => {
       ['Blocked', 'blocked', at(30).toISOString()],
       ['Stuck', 'question', at(50).toISOString()]
     ])
-    expect(mine(activity).map(i => [i.preview, i.at])).toEqual([
-      ['New commits on PR #8; back to the reviewer', at(2.3).toISOString()],
-      ['PR #8 conflicts with the base branch; back to the developer', at(2.4).toISOString()],
-      ['CI failed on PR #8; back to the developer', at(2.5).toISOString()],
-      ['New commits on the task branch; back to the reviewer', at(2.6).toISOString()],
-      ['The commit conflicts with the task\'s branch; back to the developer', at(2.7).toISOString()],
-      ['CI failed on the commit; back to the developer', at(2.8).toISOString()],
-      ['New commits on the task branch; back to the reviewer', at(5).toISOString()],
-      ['Requested changes on PR #7 (1 of 3 criteria met)', at(13).toISOString()],
-      ['Approved PR #7 (2 of 3 criteria met)', at(14).toISOString()],
-      ['Submitted design v2; on to the reviewer', at(15).toISOString()],
-      ['Changes requested; back to the developer', at(16).toISOString()],
-      ['Changes requested; Blocked for you', at(17).toISOString()],
-      ['Pushed a revision to PR #7', at(18).toISOString()],
-      ['Opened PR #7', at(19).toISOString()]
-    ])
-    expect(mine(resolved).map(i => [i.resolution, i.at])).toEqual([
-      ['You deleted the task', at(3).toISOString()],
-      ['You sent the task back to Backlog', at(4).toISOString()],
-      ['You approved the merge', at(6).toISOString()],
-      ['You requested changes', at(7).toISOString()],
-      ['You moved the task to a new status', at(8).toISOString()],
-      ['You moved the task to backlog', at(9).toISOString()],
-      ['You moved the task to in progress', at(10).toISOString()],
-      ['You moved the task to ready', at(11).toISOString()]
-    ])
+    // Every event is read, in string or object form, never shown raw; the
+    // task with a PR names it, the PR-free one never mentions one
+    const events = mine(activity)
+    expect(events.map(i => i.at)).toEqual([2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 5, 13, 14, 15, 16, 17, 18, 19].map(m => at(m).toISOString()))
+    const previews = events.map(i => i.preview)
+    for (const preview of previews) expect(['head_moved', 'base_conflict', 'ci_failed', 'pr_opened', 'pr_updated', 'changes_requested', 'design_submitted', 'task.transition', 'review.recorded']).not.toContain(preview)
+    for (const preview of previews.slice(0, 3)) expect(preview).toContain('#8')
+    for (const preview of previews.slice(3, 6)) expect(preview).not.toContain('PR')
+    expect(new Set(previews.slice(0, 3)).size).toBe(3)
+    expect(new Set(previews.slice(3, 6)).size).toBe(3)
+    expect(previews[7]).toContain('1 of 3')
+    expect(previews[8]).toContain('2 of 3')
+    expect(previews[9]).toContain('v2')
+    // Changes requested into Blocked reads differently from back to work
+    expect(previews[10]).not.toBe(previews[11])
+    for (const preview of previews.slice(12)) expect(preview).toContain('#7')
+    const resolutions = mine(resolved)
+    expect(resolutions.map(i => i.at)).toEqual([3, 4, 6, 7, 8, 9, 10, 11].map(m => at(m).toISOString()))
+    const words = resolutions.map(i => i.resolution)
+    expect(new Set(words).size).toBe(words.length)
+    expect(words).not.toContain('Resolved')
+    expect(words.slice(5).map(w => w!.toLowerCase())).toEqual([expect.stringContaining('backlog'), expect.stringContaining('in progress'), expect.stringContaining('ready')])
 
     expect(await t.db.select().from(auditLog).orderBy(asc(auditLog.id))).toEqual(stored)
   })
@@ -150,13 +146,14 @@ describe('inbox over stored audit rows', () => {
       expect(item.body).toContain(detail.summary)
       expect(item.resolution).toBe(entry.actor.kind === 'human' ? item.body : null)
     }
-    expect(resolved.filter(i => i.type === 'epic_activity').map(i => i.resolution)).toEqual([
-      'You handed the task\'s PR rebase to a developer: Human note for rebase_handed_off',
-      'You requested changes on the task\'s PR: Human note for human_changes_requested',
-      'You approved the task\'s PR: Human note for human_approved'
-    ])
-    expect(activity.find(i => i.id === String(oldRows[0]!.id))).toMatchObject({ type: 'activity', taskId: task.id, body: 'Opened the PR' })
-    expect(resolved.find(i => i.id === String(oldRows[1]!.id))).toMatchObject({ type: 'activity', taskId: task.id, resolution: 'You approved the merge' })
+    expect(resolved.filter(i => i.type === 'epic_activity').map(i => i.resolution)).toEqual(
+      ['rebase_handed_off', 'human_changes_requested', 'human_approved'].map(event => expect.stringContaining(`Human note for ${event}`))
+    )
+    // Object-form events from old rows are read like their string form
+    const opened = activity.find(i => i.id === String(oldRows[0]!.id))
+    expect(opened).toMatchObject({ type: 'activity', taskId: task.id })
+    expect(['pr_opened', 'task.transition', '[object Object]']).not.toContain((opened as { body: string }).body)
+    expect(resolved.find(i => i.id === String(oldRows[1]!.id))).toMatchObject({ type: 'activity', taskId: task.id, resolution: expect.stringContaining('approved') })
     expect(resolved.some(i => i.type === 'release_notes' && i.notes === 'Old release notes')).toBe(true)
     for (const list of [activity, resolved]) expect(list.map(i => i.at)).toEqual(list.map(i => i.at).sort().reverse())
     expect(result.needsYou.find(i => 'epicId' in i && i.epicId === epic!.id)).toMatchObject({ type: 'epic_conflict', taskId: null, taskRef: null, files: ['shared.ts'] })

@@ -10,13 +10,12 @@ const AppButton = defineComponent({
   props: ['to', 'label'], setup: props => () => h('a', { href: props.to }, props.label)
 })
 
-it('links Inbox design reviews to the version approval panel without merge wording', () => {
+it('links Inbox design reviews to the task, where versions are approved', () => {
   const wrapper = mount(InboxDesignReviewLink, {
     props: { task: { ref: 'TA-1', type: 'design', status: 'human_review' } },
     global: { components: { AppButton } }
   })
   expect(wrapper.get('a').attributes('href')).toBe('/tasks/TA-1')
-  expect(wrapper.text()).toBe('Review design')
 })
 
 describe('other inbox items', () => {

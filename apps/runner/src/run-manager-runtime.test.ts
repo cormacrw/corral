@@ -2,15 +2,15 @@ import type { RunnerMessage } from '@corral/contracts'
 import { chmod, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createRuntimeRegistry, type AgentRuntime, type RuntimeOptions } from './agent-runtime.ts'
+import type { AgentLauncher, RuntimeOptions } from './agent-runtime.ts'
 import type { RunnerConfig } from './config.ts'
-import type { ServerConnection } from './connection.ts'
 import type { ToolServer } from './mcp.ts'
 import { RunManager } from './run-manager.ts'
-import { createTestDataDir, pmJob } from './test-repo.ts'
+import { createRuntimes } from './runtimes.ts'
+import { createTestDataDir, pmJob, testConfig, testConnection } from './test-repo.ts'
 
 // A runtime that answers at once without starting a process
-function fakeRuntime(id: string, calls: RuntimeOptions[]): AgentRuntime {
+function fakeRuntime(id: string, calls: RuntimeOptions[]): AgentLauncher {
   return {
     id,
     spawn(options) {
@@ -25,13 +25,13 @@ describe('RunManager runtimes', () => {
   let dataDir: string
   let config: RunnerConfig
   let sent: RunnerMessage[]
-  const connection = { send: (message: RunnerMessage) => sent.push(message) > 0 } as unknown as ServerConnection
+  const connection = testConnection((message: RunnerMessage) => sent.push(message) > 0)
   const tools = { register: () => () => {}, url: () => 'http://127.0.0.1:9/mcp' } as unknown as ToolServer
 
   beforeEach(async () => {
     dataDir = await createTestDataDir()
     // A binary that doesn't exist: nothing here may start `claude`
-    config = { dataDir, claudeBin: '/nonexistent/claude', codexBin: '/nonexistent/codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 300, titleModel: 'haiku', slots: 4, roles: ['pm', 'developer', 'reviewer', 'design'] }
+    config = testConfig(dataDir, { claudeBin: '/nonexistent/claude', pmWarmSeconds: 300 })
     sent = []
   })
 
@@ -45,7 +45,7 @@ describe('RunManager runtimes', () => {
   }
 
   it('registers Claude Code as claude-code and Codex as codex', () => {
-    const registry = createRuntimeRegistry(config)
+    const registry = createRuntimes(config).registry
     expect([...registry.keys()]).toEqual(['claude-code', 'codex'])
     expect(registry.get('claude-code')?.spawnSession).toBeTypeOf('function')
     // No streaming session: a Codex PM turn is a one-shot resume
@@ -58,7 +58,7 @@ describe('RunManager runtimes', () => {
     // Stands in for `codex`: logs its arguments and prints the fixture
     await writeFile(codexBin, `#!/bin/sh\nprintf '%s\\n' "$@" > "$0.args"\ncat > "$0.stdin"\ncat ${JSON.stringify(fixture)}\nexit 1\n`)
     await chmod(codexBin, 0o755)
-    const manager = new RunManager({ ...config, codexBin }, connection, tools)
+    const manager = new RunManager(config, connection, tools, createRuntimes({ ...config, codexBin }).registry)
     manager.assign(pmJob({ runId: 'r1', runtime: 'codex', prompt: 'Plan it', model: 'gpt-5.5-codex' }))
     const messages = await finish('r1')
 
@@ -87,7 +87,7 @@ describe('RunManager runtimes', () => {
     const codexBin = join(dirname(dataDir), 'codex')
     await writeFile(codexBin, `#!/bin/sh\ncat ${JSON.stringify(fixture)}\n`)
     await chmod(codexBin, 0o755)
-    const manager = new RunManager({ ...config, codexBin }, connection, tools)
+    const manager = new RunManager(config, connection, tools, createRuntimes({ ...config, codexBin }).registry)
     manager.assign(pmJob({ runId: 'r1', runtime: 'codex' }))
     const ended = (await finish('r1')).find(m => m.type === 'run.ended')!
     const timings = (ended as Extract<RunnerMessage, { type: 'run.ended' }>).timings!
@@ -117,14 +117,14 @@ describe('RunManager runtimes', () => {
   })
 
   it('still sends timings for a run that never started an agent', async () => {
-    const manager = new RunManager(config, connection, tools)
+    const manager = new RunManager(config, connection, tools, createRuntimes(config).registry)
     manager.assign(pmJob({ runId: 'r1', runtime: 'nope' }))
     const ended = (await finish('r1')).find(m => m.type === 'run.ended') as Extract<RunnerMessage, { type: 'run.ended' }>
     expect(ended.timings).toMatchObject({ phases: [{ phase: 'other' }], tools: [] })
   })
 
   it('ends a job with an unknown runtime with an error that names it', async () => {
-    const manager = new RunManager(config, connection, tools)
+    const manager = new RunManager(config, connection, tools, createRuntimes(config).registry)
     manager.assign(pmJob({ runId: 'r1', runtime: 'nope' }))
     const ended = (await finish('r1')).find(m => m.type === 'run.ended')
 

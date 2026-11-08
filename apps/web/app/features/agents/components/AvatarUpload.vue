@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { errorMessage } from '~/lib/errors'
 import { squareImage } from '~/utils/image'
+import { IMAGE_ACCEPT } from '~/utils/attachments'
 
 // Pick, resize and upload a profile picture, or remove it. The parent does
 // the saving (the human's or an agent's endpoint) and the live state updates
@@ -53,7 +54,7 @@ async function clear() {
       <input
         ref="input"
         type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif"
+        :accept="IMAGE_ACCEPT"
         class="hidden"
         :aria-label="`Choose a picture for ${props.name}`"
         @change="upload"

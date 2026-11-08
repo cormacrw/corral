@@ -1,6 +1,4 @@
-import type { MergeGate, ReviewVerdict, TaskStatus } from '@corral/core'
-
-// ── Pull requests ───────────────────────────────────────────────────────────
+import type { MergeGate, PullRequestGuideStatus, PullRequestGuideStep, ReviewVerdict, TaskStatus } from '@corral/core'
 
 // A task's open PR and where it stands against the merge gates, read live
 // from GitHub (GET /projects/:slug/pull-requests). `merge` comes from the
@@ -73,7 +71,20 @@ export interface PullRequestFile {
 }
 
 export const PULL_REQUEST_FILE_LIMIT = 20
-export { PULL_REQUEST_LINE_LIMIT, splitPatchHunks } from './client.ts'
+export const PULL_REQUEST_LINE_LIMIT = 1000
+
+// A file's patch split into its `@@` hunks, each a list of lines starting with
+// its `@@` header. A guide's `{ path, hunk }` refs index into this, on the
+// server and in the web app alike (COR-525).
+export function splitPatchHunks(patch: string): string[][] {
+  if (!patch) return []
+  const hunks: string[][] = []
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('@@') || hunks.length === 0) hunks.push([])
+    hunks.at(-1)!.push(line)
+  }
+  return hunks
+}
 
 export type CheckConclusion = 'success' | 'failure' | 'pending' | 'neutral' | 'skipped'
 
@@ -81,22 +92,8 @@ export type CheckConclusion = 'success' | 'failure' | 'pending' | 'neutral' | 's
 // hunks into steps that tell the story of the change. It's made only when a
 // reviewer asks, for the PR's head commit at the time. Hunks the model leaves
 // out aren't listed: the client gathers them into a final "Other changes" step.
-export interface PullRequestGuideHunk {
-  path: string
-  // The hunk's position in the file's patch: the nth `@@` block, from 0
-  hunk: number
-}
-export interface PullRequestGuideStep {
-  id: string
-  title: string
-  // One or two sentences tied to the task's goal or criteria
-  why: string
-  // The acceptance criteria this step works towards, by id
-  criterionIds: string[]
-  hunks: PullRequestGuideHunk[]
-}
 export interface PullRequestGuide {
-  status: 'none' | 'generating' | 'ready' | 'failed'
+  status: 'none' | PullRequestGuideStatus
   // The head commit the guide was made for; a later push makes it stale
   headSha: string | null
   steps: PullRequestGuideStep[]

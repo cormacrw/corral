@@ -1,52 +1,63 @@
-import { ACTIVE_RUN_STATES, type Actor } from '@corral/core'
-import { schema } from '@corral/db'
-import { and, asc, eq, inArray, isNotNull, ne } from 'drizzle-orm'
-import { appendAudit, auditEvent, type EpicPrDetail } from './audit.ts'
+import type { EpicPrDetail } from '@corral/contracts'
+import { boardComplete, errorText, SERVER_ACTOR } from '@corral/core'
+import { schema, type Database, type EpicRow, type ProjectRow } from '@corral/db'
+import { and, asc, eq, isNotNull, ne } from 'drizzle-orm'
+import { appendAudit, auditEvent } from './audit.ts'
+import { failedCheckLine, requiredChecks } from './checks.ts'
 import { publishEpicDependents } from './dependent-tasks.ts'
-import { loadEpic } from './epics.ts'
 import { openEpicFix } from './epic-fixes.ts'
-import { complete, epicBoard } from './epic-prs.ts'
-import { activeRebase, recordSyncFailure } from './epic-sync.ts'
-import { isTransient, requiredChecks, type CheckResult, type PullRequest } from './github.ts'
-import type { MergeDeps } from './merge.ts'
-import { Backoff, HeadAttempts, MAX_MERGE_ATTEMPTS } from './retries.ts'
-import { runEndValues } from './run-lifecycle.ts'
-import type { ProjectRow } from './tasks.ts'
+import { awaitsReview } from './epic-review.ts'
+import { publishEpic } from './epics.ts'
+import type { EventBus } from './events.ts'
+import { isTransient, type CheckResult, type GitHubClient, type PullRequest } from './github.ts'
+import { activeRebase, recordSyncFailure } from './operations.ts'
+import { epicBoard } from './parents.ts'
+import { Backoff, HeadAttempts, LONGEST_POLL_MS, MAX_MERGE_ATTEMPTS, RETRY_MAX_MS } from './retries.ts'
+import { endActiveRuns } from './run-lifecycle.ts'
+import type { RunnerHub } from './runner-hub.ts'
 
 const { epics, projects, runs } = schema
-const server: Actor = { kind: 'system', component: 'server' }
-type EpicRow = typeof epics.$inferSelect
 
 // How often an epic that isn't merging is looked at, and one waiting on CI at
 // first and at most: only a hand merge, a close or a moved head can matter
-const IDLE_POLL_MS = 120_000
+const IDLE_POLL_MS = LONGEST_POLL_MS
 const CI_POLL_MS = 30_000
 // After GitHub or the runner failed to answer
 const RETRY_MS = 30_000
-const RETRY_MAX_MS = 5 * 60_000
 
 // flows.md §4 steps 6–7. An approved epic PR must sit on top of the target
 // branch, which the synchronizer sees to in the integration pass before this
 // one, then waits for its gates and squash-merges: one commit on the target
 // branch, whatever the project's method for task PRs. `mergeable_state` only
 // says `behind` when branch protection requires it, so this compares commits.
+export interface EpicMergeDeps {
+  db: Database
+  events: EventBus
+  github: GitHubClient
+  runner: RunnerHub
+  gate: { readonly halted: boolean }
+  now: () => Date
+  wake: (taskIds: string[]) => void
+  // An epic PR's head moved while it wasn't waiting on Corral's own rebase
+  headMoved: (epicId: string) => Promise<void>
+}
+
 export class EpicMerger {
-  #d: MergeDeps
+  #d: EpicMergeDeps
   #attempts = new HeadAttempts()
   #poll: Backoff
   #retry: Backoff
-  #stopped: () => boolean = () => false
   // Epics being advanced right now: a slow pass can overlap the next one
   #busy = new Set<string>()
 
-  constructor(deps: MergeDeps) {
+  constructor(deps: EpicMergeDeps) {
     this.#d = deps
     this.#poll = new Backoff(CI_POLL_MS, IDLE_POLL_MS, () => this.#now())
     this.#retry = new Backoff(RETRY_MS, RETRY_MAX_MS, () => this.#now())
   }
 
   #now(): Date {
-    return this.#d.now?.() ?? new Date()
+    return this.#d.now()
   }
 
   get inFlight(): number {
@@ -54,14 +65,13 @@ export class EpicMerger {
   }
 
   // Every state is read, so a PR merged by hand on GitHub still counts
-  async tick(stopped: () => boolean): Promise<void> {
-    this.#stopped = stopped
+  async tick(): Promise<void> {
     const open = await this.#d.db.select({ epic: epics, project: projects }).from(epics)
       .innerJoin(projects, eq(projects.id, epics.projectId))
       .where(and(ne(epics.reviewState, 'merged'), isNotNull(epics.prNumber), eq(projects.paused, false)))
       .orderBy(asc(epics.updatedAt))
     for (const { epic, project } of open) {
-      if (stopped()) return
+      if (this.#d.gate.halted) return
       if (this.#busy.has(epic.id) || !this.#poll.due(epic.id) || !this.#retry.due(epic.id)) continue
       this.#busy.add(epic.id)
       try {
@@ -86,14 +96,14 @@ export class EpicMerger {
     }
     if (epic.reviewState !== 'ready_to_merge') {
       // The reconcile pass only reads PRs that may need a review started
-      if (pr.headSha !== epic.prHeadSha && epic.reviewState !== 'open' && epic.reviewState !== 'changes_requested') await this.#d.epicHeadMoved?.(epic.id)
+      if (pr.headSha !== epic.prHeadSha && !awaitsReview(epic)) await this.#d.headMoved(epic.id)
       return this.#poll.later(epic.id)
     }
     this.#poll.clear(epic.id)
 
     if (pr.headSha !== epic.prHeadSha) {
       // Any other new head starts a fresh review
-      await this.#d.epicHeadMoved?.(epic.id)
+      await this.#d.headMoved(epic.id)
       return
     }
     if (await activeRebase(db, epic.id)) return this.#poll.later(epic.id)
@@ -105,7 +115,7 @@ export class EpicMerger {
       // Up to date and still unmergeable: no rebase can fix that
       if (epic.syncError) return this.#poll.later(epic.id)
       await recordSyncFailure(db, project, epic.id, 'GitHub reports the task\'s PR can\'t merge, though it is up to date with the target branch', this.#now())
-      this.#d.events.publish({ type: 'epic.updated', epic: await loadEpic(db, epic.id) })
+      await publishEpic(db, this.#d.events, epic.id)
       return this.#poll.later(epic.id)
     }
 
@@ -123,8 +133,8 @@ export class EpicMerger {
     const [moved] = await db.update(epics).set({ reviewState, ...values, updatedAt: this.#now() })
       .where(and(eq(epics.id, epic.id), eq(epics.reviewState, from))).returning({ id: epics.id })
     if (!moved) return false
-    await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, ...detail }))
-    this.#d.events.publish({ type: 'epic.updated', epic: await loadEpic(db, epic.id) })
+    await appendAudit(db, { projectId: project.id, actor: SERVER_ACTOR }, auditEvent('epic.pr', { epicId: epic.id, ...detail }))
+    await publishEpic(db, this.#d.events, epic.id)
     return true
   }
 
@@ -134,25 +144,24 @@ export class EpicMerger {
   async #closed(epic: EpicRow, project: ProjectRow): Promise<void> {
     const left = await this.#leave(epic, project, 'open', { approvedHeadSha: null, approvedBaseSha: null, conflictFiles: null }, { event: 'closed' }, epic.reviewState!)
     if (!left) return
-    await this.#d.db.update(runs).set(runEndValues({ state: 'interrupted', error: 'The task\'s PR closed' }, this.#now()))
-      .where(and(eq(runs.epicId, epic.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
+    await this.#d.db.transaction(tx => endActiveRuns(tx, eq(runs.epicId, epic.id), { state: 'interrupted', error: 'The task\'s PR closed' }, this.#now()))
   }
 
   // Like a task's CI failure, but on the epic: a developer run under the writer
   // lock, which holds the epic here until its candidate is published (D29)
   async #ciFailed(epic: EpicRow, project: ProjectRow, failed: CheckResult[]): Promise<void> {
     const { db, events } = this.#d
-    const lines = failed.map(c => `${c.name}: failed${c.url ? ` (${c.url})` : ''}`).join('; ')
+    const lines = failed.map(failedCheckLine).join('; ')
     const fix = await db.transaction(async (tx) => {
       // The pass's copy may be old: one failure makes one fix
       const [locked] = await tx.select().from(epics).where(eq(epics.id, epic.id)).for('update')
       if (locked?.reviewState !== 'ready_to_merge' || locked.prHeadSha !== epic.prHeadSha || locked.syncError) return null
-      return openEpicFix(tx, project, locked, { fix: 'ci', brief: `CI failed on the task's PR. ${lines}`, headSha: epic.prHeadSha!, checks: failed.map(c => ({ name: c.name, url: c.url })) }, server, this.#now())
+      return openEpicFix(tx, project, locked, { fix: 'ci', brief: `CI failed on the task's PR. ${lines}`, headSha: epic.prHeadSha!, checks: failed.map(c => ({ name: c.name, url: c.url })) }, SERVER_ACTOR, this.#now())
     })
     if (!fix) return
-    await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'ci_failed', summary: lines }))
-    events.publish({ type: 'epic.updated', epic: await loadEpic(db, epic.id) })
-    this.#d.wake?.([])
+    await appendAudit(db, { projectId: project.id, actor: SERVER_ACTOR }, auditEvent('epic.pr', { epicId: epic.id, event: 'ci_failed', summary: lines }))
+    await publishEpic(db, events, epic.id)
+    this.#d.wake([])
   }
 
   // Never records a merge without GitHub showing it, as for tasks. The lock
@@ -165,14 +174,14 @@ export class EpicMerger {
       failure = await db.transaction(async (tx) => {
         const [locked] = await tx.select().from(epics).where(eq(epics.id, epic.id)).for('update')
         const [current] = await tx.select({ paused: projects.paused }).from(projects).where(eq(projects.id, project.id))
-        if (this.#stopped() || current?.paused !== false || locked?.reviewState !== 'ready_to_merge' || locked.prHeadSha !== pr.headSha || await activeRebase(tx, epic.id) || !complete(await epicBoard(tx, epic.id))) return null
+        if (this.#d.gate.halted || current?.paused !== false || locked?.reviewState !== 'ready_to_merge' || locked.prHeadSha !== pr.headSha || await activeRebase(tx, epic.id) || !boardComplete(await epicBoard(tx, epic.id))) return null
         // CI passed on an older target. The next pass waits for the rebase.
         if (await github.behindBy(project.repository, project.defaultBranch, pr.headSha) > 0) return null
         const result = await github.merge(project.repository, pr.number, 'squash', pr.headSha)
         return result.merged ? null : result.message
       })
     } catch (error) {
-      failure = error instanceof Error ? error.message : String(error)
+      failure = errorText(error)
       transient = isTransient(error)
     }
     const again = await github.getPullRequest(project.repository, pr.number).catch(() => null)
@@ -182,7 +191,7 @@ export class EpicMerger {
     // answer from GitHub counts towards handing it back.
     if (transient) return this.#retry.later(epic.id)
     const attempt = this.#attempts.next(epic.id, pr.headSha)
-    await appendAudit(db, { projectId: project.id, actor: server }, auditEvent('merge.refused', { epicId: epic.id, pr: pr.number, message: failure, attempt }))
+    await appendAudit(db, { projectId: project.id, actor: SERVER_ACTOR }, auditEvent('merge.refused', { epicId: epic.id, pr: pr.number, message: failure, attempt }))
     if (attempt < MAX_MERGE_ATTEMPTS) return
     // Approving again retries the merge
     this.#attempts.clear(epic.id)
@@ -193,17 +202,16 @@ export class EpicMerger {
     const { db, events, github, runner } = this.#d
     await db.transaction(async (tx) => {
       await tx.update(epics).set({ reviewState: 'merged', mergeCommitSha: pr.mergeCommitSha, mergedAt: this.#now(), prHeadSha: pr.headSha, conflictFiles: null, syncError: null, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
-      await tx.update(runs).set({ state: 'interrupted', endedAt: this.#now(), error: 'The task\'s PR merged' })
-        .where(and(eq(runs.epicId, epic.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
-      await appendAudit(tx, { projectId: project.id, actor: server }, auditEvent('epic.pr', { epicId: epic.id, event: 'merged', pr: pr.number, mergeCommitSha: pr.mergeCommitSha }))
+      await endActiveRuns(tx, eq(runs.epicId, epic.id), { state: 'interrupted', error: 'The task\'s PR merged' }, this.#now())
+      await appendAudit(tx, { projectId: project.id, actor: SERVER_ACTOR }, auditEvent('epic.pr', { epicId: epic.id, event: 'merged', pr: pr.number, mergeCommitSha: pr.mergeCommitSha }))
     })
     this.#attempts.clear(epic.id)
     this.#poll.clear(epic.id)
     this.#retry.clear(epic.id)
-    events.publish({ type: 'epic.updated', epic: await loadEpic(db, epic.id) })
-    this.#d.wake?.(await publishEpicDependents(db, events, epic.id))
+    await publishEpic(db, events, epic.id)
+    this.#d.wake(await publishEpicDependents(db, events, epic.id))
     await github.deleteBranch(project.repository, epic.branch!).catch(error => console.error(`Deleting ${epic.branch} failed`, error))
-    await runner.request({ kind: 'cleanup_worktrees', repository: project.repository, taskId: `epic-${epic.id}` })
+    await runner.cleanupWorktrees({ kind: 'cleanup_worktrees', repository: project.repository, epicId: epic.id })
       .catch(error => console.error(`Worktree cleanup for epic ${epic.id} failed`, error))
   }
 }

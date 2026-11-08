@@ -1,6 +1,6 @@
 # PM run diagnostics
 
-`list_runs` and `get_run` (`apps/server/src/pm-tools.ts`, definitions in `packages/contracts/src/pm-tools.ts`) and `get_agent_activity` let the PM look into any run. The number shown in the app is `runs.number`, unique across projects, so `get_run` takes it with no task or project. Task reviews have an `epicId` and no `taskId`, so `get_run_outcomes` never finds them; `list_runs` with role `reviewer` and status `failed` does.
+`list_runs` and `get_run` (`apps/server/src/pm-direct-tools.ts`, definitions in `packages/contracts/src/pm-tools.ts`) and `get_agent_activity` let the PM look into any run. The number shown in the app is `runs.number`, unique across projects, so `get_run` takes it with no task or project. Task reviews have an `epicId` and no `taskId`, so `get_run_outcomes` never finds them; `list_runs` with role `reviewer` and status `failed` does.
 
 `get_agent_activity` includes projectless PM turns in both active and recent runs. It labels their project `Global` and leaves task/task null, so the PM can see its own global turn.
 

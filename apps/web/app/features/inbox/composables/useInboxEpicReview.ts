@@ -1,11 +1,11 @@
 import type { EpicReviewTaskRow } from '@corral/contracts'
 import { isTaskDone } from '@corral/core'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import type { InboxItemKind } from '~/features/inbox/composables/useInboxPanel'
+import { inboxKind, RESOLVED_KIND, type InboxItemKind } from '~/utils/inbox-kinds'
 import type { EpicInboxItem } from '~/features/inbox/composables/useInboxView'
 import { epicReviewQuery } from '~/queries/epics'
 import { keys } from '~/queries/keys'
-import { plural } from '~/utils/labels'
+import { epicStoppedLabel, plural } from '~/utils/labels'
 
 // What an epic in the Inbox shows (design/inbox.md): its review, falling back on
 // what the item itself carries while the review loads or if it can't.
@@ -38,15 +38,10 @@ export function useInboxEpicReview(props: { item: EpicInboxItem }) {
 
   const kind = computed<InboxItemKind>(() => {
     const { item } = props
-    if (item.resolution) return { label: 'Resolved', icon: 'i-hugeicons-checkmark-circle-02', color: 'text-success' }
-    if (item.type === 'epic_review') return { label: 'Task review', icon: 'i-hugeicons-git-pull-request', color: 'text-brand' }
-    if (item.type === 'epic_conflict') {
-      if (item.stopped) return { label: item.stopped.fix === 'ci' || item.stopped.fix === 'review' ? 'Fix stopped' : 'Rebase stopped', icon: 'i-hugeicons-stop-circle', color: 'text-destructive' }
-      return item.decision
-        ? { label: 'Rebase decision', icon: 'i-hugeicons-help-circle', color: 'text-info' }
-        : { label: 'Task conflict', icon: 'i-hugeicons-git-merge', color: 'text-destructive' }
-    }
-    return { label: 'Task\'s PR', icon: 'i-hugeicons-pulse-01', color: 'text-muted-foreground' }
+    if (item.resolution) return RESOLVED_KIND
+    if (item.type === 'epic_conflict' && item.stopped) return { label: epicStoppedLabel(item.stopped.fix), icon: 'i-hugeicons-stop-circle', color: 'text-destructive' }
+    if (item.type === 'epic_conflict' && item.decision) return { label: 'Rebase decision', icon: 'i-hugeicons-help-circle', color: 'text-info' }
+    return inboxKind(item)
   })
 
   const target = computed(() => review.value?.targetBranch ?? (props.item.type === 'epic_conflict' ? props.item.targetBranch : null))

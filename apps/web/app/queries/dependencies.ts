@@ -1,9 +1,10 @@
 import type { Query, QueryClient, QueryKey } from '@tanstack/vue-query'
 import { partialMatchKey } from '@tanstack/vue-query'
 import { ACTIVE_RUN_STATES } from '@corral/core'
-import type { Agent, Comment, Epic, EpicDetail, Inbox, PlanSession, PlanSessionDetail, Project, Run, RunEvent, ServerEvent, ServerEventType, Task } from '@corral/contracts'
+import type { Agent, Comment, Epic, EpicDetail, Inbox, Plan, PlanMessage, PlanSession, PlanSessionDetail, Project, Run, RunEvent, ServerEvent, ServerEventType, Task } from '@corral/contracts'
 import { runnerItemId, runnerUpdateProblem } from '@corral/contracts/client'
-import { keys, type RunFilter } from './keys'
+import { ApiError } from './client'
+import { isPendingId, keys, projectData, type RunFilter } from './keys'
 
 // What depends on what: the single place that says which queries an event or
 // a mutation affects (wiki: query-layer).
@@ -41,6 +42,26 @@ const upsert = <T extends { id: string }>(list: T[], item: T): T[] =>
 const upsertInto = <T extends { id: string }>(item: T): Update<T[]> => list => list && upsert(list, item)
 const merge = <T>(patch: Partial<T>): Update<T> => current => current && { ...current, ...patch }
 
+// The one way to change cached data in place. A fetch already in flight
+// started before the change and would overwrite it, so the change is applied
+// again to what that fetch returns.
+export function writeQuery<T>(client: QueryClient, key: QueryKey, update: Update<T>): void {
+  client.setQueryData<T>(key, update)
+  const cache = client.getQueryCache()
+  const query = cache.find({ queryKey: key, exact: true })
+  if (query?.state.fetchStatus !== 'fetching') return
+  const stop = cache.subscribe((event) => {
+    if (event.type !== 'updated' || event.query !== query) return
+    const { action } = event
+    if (action.type === 'success') {
+      // Another write, perhaps an earlier one replaying
+      if (action.manual) return
+      client.setQueryData<T>(key, update)
+    } else if (action.type !== 'error' && query.state.fetchStatus !== 'idle') return
+    stop()
+  })
+}
+
 // A fetch can already hold lines whose event is still on its way, so a line
 // counts by where it sits. Undefined when there is nothing to add: writing
 // would mark the transcript fresh.
@@ -52,7 +73,36 @@ const addLines = (offset: number, events: RunEvent[]): Update<RunEvent[]> => (li
 // A posted comment's event can beat its response, so either one replaces the
 // temporary entry
 export const withComment = (comments: Comment[], comment: Comment): Comment[] =>
-  upsert(comments.filter(c => !(c.id.startsWith('pending-') && c.body === comment.body)), comment)
+  upsert(comments.filter(c => !(isPendingId(c.id) && c.body === comment.body)), comment)
+
+// A Plan thread started here, shown before the server has it (optimistic-plan-starts.md)
+export interface PlanStart {
+  session: PlanSessionDetail
+  message: string
+  taskRef?: string
+  state: 'starting' | 'accepted' | 'failed'
+  error: string | null
+  sending: boolean
+  // A plan.session event arrived, whose metadata is newer than the POST response
+  sessionReceived: boolean
+}
+export type PlanStarts = Record<string, PlanStart>
+
+const withPlanMessage = (message: PlanMessage): Update<PlanSessionDetail> => detail => detail && {
+  ...detail, messages: upsert(message.role === 'human' ? detail.messages.filter(m => !isPendingId(m.id)) : detail.messages, message)
+}
+const withPlan = (plan: Plan): Update<PlanSessionDetail> => detail => detail && { ...detail, plans: upsert(detail.plans, plan) }
+
+// A session event changes its thread, and the start still showing it. Any
+// event but a plan revision proves the server has the thread.
+function writeSession(cache: EventCache, id: string, update: Update<PlanSessionDetail>, proof: Partial<PlanStart> | null): void {
+  cache.set<PlanSessionDetail>(keys.plan.session(id), update)
+  cache.set<PlanStarts>(keys.plan.starts(), (starts) => {
+    const start = starts?.[id]
+    if (!start) return starts
+    return { ...starts, [id]: { ...start, session: update(start.session)!, ...(proof && { state: 'accepted', error: null, ...proof }) } }
+  })
+}
 
 // Keeps a filtered list as the server would return it, newest first. The server
 // returns the latest 50, so one that's full can't say what fell off the end.
@@ -72,6 +122,8 @@ const taskEpics = (task: Task, cache: EventCache): string[] =>
   [...new Set([...(task.epicId ? [task.epicId] : []), ...cache.epicsWith(task.id)])]
 
 // Drafts live only in their plan, not in the project's task list
+export const inTaskList = (task: Pick<Task, 'status'>): boolean => task.status !== 'draft'
+
 function writeTask(task: Task, cache: EventCache): void {
   cache.set<Task>(keys.tasks.detail(task.ref), current => current && task)
   for (const id of taskEpics(task, cache)) {
@@ -79,7 +131,7 @@ function writeTask(task: Task, cache: EventCache): void {
   }
   const slug = cache.slug(task.projectId)
   if (!slug) return
-  cache.set<Task[]>(keys.tasks.list(slug), list => list && (task.status === 'draft' ? list.filter(t => t.id !== task.id) : upsert(list, task)))
+  cache.set<Task[]>(keys.tasks.list(slug), list => list && (inTaskList(task) ? upsert(list, task) : list.filter(t => t.id !== task.id)))
 }
 
 // Reading changes one row, so it needs no refetch. It never changes what's
@@ -111,9 +163,7 @@ function taskStale(task: Task, cache: EventCache): QueryKey[] {
   ]
 }
 
-// What refetches once a project is gone. The list is here because a fetch in
-// flight started before the removal and would bring the project back.
-export const removedProjectStale = [keys.projects.list(), keys.inbox(), keys.tasks.lists(), keys.epics.lists(), keys.plan.all(), keys.runs.lists(), keys.setup.repos()]
+export const removedProjectStale = projectData.listing
 
 // Typed by event, so a ServerEvent without an entry here doesn't compile
 export const eventDependencies: EventDependencies = {
@@ -181,7 +231,6 @@ export const eventDependencies: EventDependencies = {
   },
   'run.updated': {
     write: ({ run }, cache) => {
-      cache.set<Run>(keys.runs.detail(run.id), current => current && run)
       for (const key of cache.runLists()) cache.set<Run[]>(key, placeRun(run, key.at(-1) as RunFilter))
     },
     // Lists take the run above. Lease changes show as counts on agents, a run's
@@ -224,16 +273,16 @@ export const eventDependencies: EventDependencies = {
         // Read echoes keep the timestamp: preserve order for acknowledgements.
         return previous?.updatedAt === session.updatedAt ? upsert(list, session) : [session, ...list.filter(s => s.id !== session.id)]
       })
-      cache.set<PlanSessionDetail>(keys.plan.session(session.id), merge<PlanSessionDetail>(session))
+      writeSession(cache, session.id, merge<PlanSessionDetail>(session), { sessionReceived: true })
     },
     invalidates: ({ markedRead }) => markedRead ? [] : [keys.inbox()]
   },
   'plan.message': {
-    write: ({ message }, cache) => cache.set<PlanSessionDetail>(keys.plan.session(message.sessionId), detail => detail && { ...detail, messages: upsert(message.role === 'human' ? detail.messages.filter(m => !m.id.startsWith('pending-')) : detail.messages, message) }),
+    write: ({ message }, cache) => writeSession(cache, message.sessionId, withPlanMessage(message), {}),
     invalidates: () => []
   },
   'plan.updated': {
-    write: ({ plan }, cache) => cache.set<PlanSessionDetail>(keys.plan.session(plan.sessionId), detail => detail && { ...detail, plans: upsert(detail.plans, plan) }),
+    write: ({ plan }, cache) => writeSession(cache, plan.sessionId, withPlan(plan), null),
     invalidates: () => []
   },
   'plan.drafts': {
@@ -283,33 +332,27 @@ export function clearProject(client: QueryClient, projectId: string): void {
   const owned = (queryKey: QueryKey) => client.getQueriesData<{ projectId?: string | null }>({ queryKey })
     .filter(([, data]) => data?.projectId === projectId)
     .map(([key]) => key)
+  const runs = client.getQueriesData<Run[]>({ queryKey: keys.runs.lists() }).flatMap(([, list]) => list ?? [])
   const removed = [
-    ...(slug ? [keys.projects.detail(slug), keys.tasks.list(slug), keys.epics.list(slug), keys.plan.drafts(slug)] : []),
+    ...(slug ? projectData.bySlug(slug) : []),
     ...cachedTasks(client).filter(task => task.projectId === projectId).map(task => keys.tasks.detail(task.ref)),
-    ...owned(keys.epics.details()),
-    ...owned(keys.runs.all()),
-    ...owned(keys.plan.sessions())
+    ...runs.filter(run => run.projectId === projectId).map(run => keys.runs.transcript(run.id)),
+    ...projectData.owned.flatMap(owned)
   ]
   const isRemoved = (query: Query) => removed.some(key => partialMatchKey(query.queryKey, key))
   client.removeQueries({ predicate: query => isRemoved(query) && !query.isActive() })
   // A mounted observer keeps showing a removed query's data, so one still on
   // screen loses it and refetches to the server's 404
   void client.resetQueries({ predicate: isRemoved })
-  // These lists span projects, so they lose its rows and stay
-  const others = <T extends { projectId: string | null }>(list: T[] | undefined) => list?.filter(item => item.projectId !== projectId)
-  client.setQueriesData<Run[]>({ queryKey: keys.runs.lists() }, others)
-  client.setQueryData<PlanSession[]>(keys.plan.sessions(), others)
+  // Only the lists themselves, not the entries keyed under them
+  const others = <T extends { projectId: string | null }>(list: T[] | undefined) => Array.isArray(list) ? list.filter(item => item.projectId !== projectId) : list
+  for (const queryKey of projectData.spanning) client.setQueriesData<{ projectId: string | null }[]>({ queryKey }, others)
   client.setQueryData<Project[]>(keys.projects.list(), list => list?.filter(p => p.id !== projectId))
 }
 
-function eventCache(client: QueryClient, raced: QueryKey[]): EventCache {
+function eventCache(client: QueryClient): EventCache {
   return {
-    set: (key, update) => {
-      client.setQueryData(key, update)
-      // A fetch already in flight started before this change and would
-      // overwrite it, so the key needs a fetch that starts after
-      if (client.getQueryState(key)?.fetchStatus === 'fetching') raced.push(key)
-    },
+    set: (key, update) => writeQuery(client, key, update),
     get: key => client.getQueryData(key),
     slug: projectId => client.getQueryData<Project[]>(keys.projects.list())?.find(p => p.id === projectId)?.slug,
     taskRef: taskId => cachedTasks(client).find(t => t.id === taskId)?.ref,
@@ -321,22 +364,21 @@ function eventCache(client: QueryClient, raced: QueryKey[]): EventCache {
   }
 }
 
-// Writes the event's entity and returns the keys it leaves stale. The keys are
-// read first: a write can remove what they're looked up from.
 // A mutation's response, written everywhere the task shows, as its event will
 // be. The event can arrive first, so a response older than the cache is dropped.
 export function writeTaskResponse(client: QueryClient, task: Task): void {
   if (cachedTasks(client).some(known => known.id === task.id && known.updatedAt > task.updatedAt)) return
-  writeTask(task, eventCache(client, []))
+  writeTask(task, eventCache(client))
 }
 
-export function applyEvent(client: QueryClient, event: ServerEvent): QueryKey[] {
-  const raced: QueryKey[] = []
-  const cache = eventCache(client, raced)
+// Writes the event's entity and returns the keys it leaves stale. The keys are
+// read first: a write can remove what they're looked up from.
+export function applyEvent(client: QueryClient, event: ServerEvent): readonly QueryKey[] {
+  const cache = eventCache(client)
   const effect = eventDependencies[event.type] as EventEffect<ServerEvent>
   const stale = effect.invalidates(event, cache)
   effect.write?.(event, cache)
-  return [...stale, ...raced]
+  return stale
 }
 
 type Stale<TData, TVariables> = readonly QueryKey[] | ((data: TData, variables: TVariables) => readonly QueryKey[])
@@ -349,13 +391,16 @@ export interface MutationDefinition<TData, TVariables> {
   invalidates: Stale<TData, TVariables>
   // The same, without holding up the caller: data the screen isn't waiting on
   refreshes?: Stale<TData, TVariables>
+  // Refetched before the caller hears of a 409: the server refused because
+  // what the human saw had changed
+  onConflict?: (variables: TVariables) => readonly QueryKey[]
 }
 
 // Options for useMutation. A mutation says what it changes; nothing reloads by
 // hand. Invalidation runs only on success, and `invalidates` waits for the
 // refetch, so a caller's pending state ends once the screen is current. A
 // failure rejects mutateAsync and sets `error`.
-export function defineMutation<TData, TVariables = void>({ mutationFn, write, invalidates, refreshes = [] }: MutationDefinition<TData, TVariables>) {
+export function defineMutation<TData, TVariables = void>({ mutationFn, write, invalidates, refreshes = [], onConflict }: MutationDefinition<TData, TVariables>) {
   const stale = (keys: Stale<TData, TVariables>, data: TData, variables: TVariables) => typeof keys === 'function' ? keys(data, variables) : keys
   return {
     mutationFn,
@@ -363,6 +408,8 @@ export function defineMutation<TData, TVariables = void>({ mutationFn, write, in
       write?.(client, data, variables)
       void invalidateKeys(client, stale(refreshes, data, variables))
       return invalidateKeys(client, stale(invalidates, data, variables))
-    }
+    },
+    onError: (error: Error, variables: TVariables, _result: unknown, { client }: { client: QueryClient }) =>
+      onConflict && error instanceof ApiError && error.status === 409 ? invalidateKeys(client, onConflict(variables)) : undefined
   }
 }

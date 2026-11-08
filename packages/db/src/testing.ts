@@ -8,7 +8,7 @@ import { join, relative } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import pg from 'pg'
 import { beforeAll, beforeEach, type TestContext } from 'vitest'
-import { migrationsFolder, openDatabase, type DatabaseHandle } from './client.ts'
+import { migrationsFolder, openDatabase, type DatabaseHandle, type OpenOptions } from './client.ts'
 import { attemptAll, operationError, runAll } from './failures.ts'
 
 // A fresh, migrated, throwaway database for one test file.
@@ -22,11 +22,11 @@ import { attemptAll, operationError, runAll } from './failures.ts'
 // so both drivers start from a copy of a migrated database instead. Nothing
 // writes to the copied original, and its name hashes the migrations, so a new
 // migration builds a new one. `openDatabase` still runs on each copy.
-export async function createTestDatabase(driver: 'pglite'): Promise<DatabaseHandle>
-export async function createTestDatabase(driver: 'postgres'): Promise<DatabaseHandle | null>
-export async function createTestDatabase(driver: 'pglite' | 'postgres'): Promise<DatabaseHandle | null> {
+export async function createTestDatabase(driver: 'pglite', options?: OpenOptions): Promise<DatabaseHandle>
+export async function createTestDatabase(driver: 'postgres', options?: OpenOptions): Promise<DatabaseHandle | null>
+export async function createTestDatabase(driver: 'pglite' | 'postgres', options: OpenOptions = {}): Promise<DatabaseHandle | null> {
   if (driver === 'pglite') {
-    return openDatabase({ driver: 'pglite', dataDir: null, loadDataDir: await migratedPglite() })
+    return openDatabase({ driver: 'pglite', dataDir: null, loadDataDir: await migratedPglite() }, options)
   }
 
   const adminUrl = process.env.CORRAL_DATABASE_URL
@@ -51,7 +51,7 @@ export async function createTestDatabase(driver: 'pglite' | 'postgres'): Promise
       created = true
     })
 
-    const handle = await openDatabase({ driver: 'postgres', url: url.href })
+    const handle = await openDatabase({ driver: 'postgres', url: url.href }, options)
     return {
       db: handle.db,
       close: () => runAll(`Closing test database ${name}`, adminUrl, [() => handle.close(), drop])
@@ -84,7 +84,6 @@ export function databaseFixture(driver: 'pglite' | 'postgres', setup: () => Prom
   beforeEach(({ skip }) => requireDatabase(driver, { skip }))
 }
 
-// A hash of every migration file
 async function migrationsKey(): Promise<string> {
   const entries = await readdir(migrationsFolder, { recursive: true, withFileTypes: true })
   const files = entries.filter(entry => entry.isFile()).map(entry => join(entry.parentPath, entry.name)).sort()

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { taskPath } from '~/utils/routes'
 import type { InboxPanel, InboxPanelContext } from '~/features/inbox/composables/useInboxPanel'
 
 // The links out of the panel: the PR or a design's preview in a new tab, the
@@ -51,7 +52,7 @@ defineProps<{ ctx: InboxPanelContext, p: InboxPanel, mobile?: boolean }>()
     />
     <AppButton
       v-else-if="mobile && ctx.item.type === 'activity' && ctx.task"
-      :to="`/tasks/${ctx.item.taskRef}`"
+      :to="taskPath(ctx.task.ref)"
       label="Open task"
       color="neutral"
       variant="outline"

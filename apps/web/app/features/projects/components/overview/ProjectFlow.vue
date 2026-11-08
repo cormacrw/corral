@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { taskPath } from '~/utils/routes'
+import { ROLE_LABELS } from '@corral/core'
 import { useQuery } from '@tanstack/vue-query'
 import type { FlowMetricsQuery } from '@corral/contracts'
 import { DEFAULT_FLOW_WINDOW, flowQuery } from '~/queries/projects'
-import { QUEUE_WAIT_LABEL, ROLE, RUN_SESSION_LABELS, STATUS, dollars, formatMs } from '~/utils/labels'
+import { QUEUE_WAIT_LABEL, RUN_SESSION_LABELS, STATUS, dollars, formatMs, tokens } from '~/utils/labels'
 
 const WINDOWS = ['7d', '30d', '90d'] as const
 const props = defineProps<{ slug: string }>()
@@ -10,7 +12,6 @@ const window = ref<FlowMetricsQuery['window']>(DEFAULT_FLOW_WINDOW)
 // The project parent route keeps the default window current; events invalidate the rest
 const { data: metrics, error, isPending, isPlaceholderData, refetch } = useQuery(computed(() => ({ ...flowQuery(props.slug, window.value), refetchOnMount: false })))
 const maxStatus = computed(() => Math.max(1, ...metrics.value?.timeInStatus.map(s => s.medianMs) ?? []))
-const formatTokens = (tokens: number) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(tokens)
 function category(status: string) {
   if (status === 'human_review') return 'Human wait'
   if (status === 'in_progress' || status === 'agent_review') return 'Agent time'
@@ -96,7 +97,7 @@ function category(status: string) {
                 Tokens: first build vs follow-up
               </dt>
               <dd class="tabular-nums">
-                {{ formatTokens(metrics.tokens.firstBuild) }} vs {{ formatTokens(metrics.tokens.followUp) }}
+                {{ tokens(metrics.tokens.firstBuild) }} vs {{ tokens(metrics.tokens.followUp) }}
               </dd>
             </div>
           </dl>
@@ -145,16 +146,16 @@ function category(status: string) {
                     {{ row.runs }}
                   </td>
                   <td class="pr-3">
-                    {{ formatTokens(row.inputTokens) }}
+                    {{ tokens(row.inputTokens) }}
                   </td>
                   <td class="pr-3">
-                    {{ formatTokens(row.cacheWriteTokens) }}
+                    {{ tokens(row.cacheWriteTokens) }}
                   </td>
                   <td class="pr-3">
-                    {{ formatTokens(row.cacheReadTokens) }}
+                    {{ tokens(row.cacheReadTokens) }}
                   </td>
                   <td class="pr-3">
-                    {{ formatTokens(row.outputTokens) }}
+                    {{ tokens(row.outputTokens) }}
                   </td>
                   <td>
                     {{ row.costedRuns ? `${dollars(row.weightedCost / row.costedRuns)} (${row.costedRuns} ${row.costedRuns === 1 ? 'run' : 'runs'})` : 'Not reported' }}
@@ -234,7 +235,7 @@ function category(status: string) {
                   class="text-sm"
                 >
                   <dt class="font-medium">
-                    {{ ROLE[row.role] }}
+                    {{ ROLE_LABELS[row.role] }}
                   </dt>
                   <dd class="mt-1 text-xs text-muted-foreground">
                     Run duration: {{ formatMs(row.duration.medianMs) }} · p90 {{ formatMs(row.duration.p90Ms) }}
@@ -259,7 +260,7 @@ function category(status: string) {
                   :key="task.ref"
                 >
                   <NuxtLink
-                    :to="`/tasks/${task.ref}`"
+                    :to="taskPath(task.ref)"
                     class="flex flex-wrap justify-between gap-2 py-2 text-sm hover:text-brand hover:underline"
                   >
                     <span class="font-mono">{{ task.ref }}</span>

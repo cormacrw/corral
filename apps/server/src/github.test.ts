@@ -1,6 +1,8 @@
 import type { SetupJob, SetupJobResult } from '@corral/contracts'
 import { describe, expect, it } from 'vitest'
-import { GitHubError, isTransient, requiredChecks, RunnerGitHub, type CheckResult } from './github.ts'
+import { requiredChecks } from './checks.ts'
+import { GitHubError, isTransient, type CheckResult } from './github.ts'
+import { RunnerGitHub } from './runner-github.ts'
 import type { RunnerHub } from './runner-hub.ts'
 
 // RunnerGitHub against a stub runner that answers each `gh api` job

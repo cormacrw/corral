@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { runPath } from '~/utils/routes'
 import type { Run, Task } from '@corral/contracts'
 
 defineProps<{ runs: Run[], taskOf: (run: Run) => Task | undefined, mobile?: boolean }>()
@@ -43,7 +44,7 @@ const verb = (run: Run) => run.role === 'reviewer' ? 'reviewing' : run.role === 
             </p>
           </div>
           <NuxtLink
-            :to="`/agents/${run.agentName.toLowerCase()}/${run.id}`"
+            :to="runPath(run.agentName, run.id)"
             :aria-label="`${run.agentName}, run #${run.number}`"
             :class="['absolute inset-0 rounded-lg', !mobile && 'outline-primary']"
           />

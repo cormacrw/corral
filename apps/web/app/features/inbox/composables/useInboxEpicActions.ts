@@ -1,6 +1,6 @@
 import { errorMessage } from '~/lib/errors'
 import type { EpicReviewActionInput, InboxActionInput } from '@corral/contracts'
-import { useMutation, useQueryClient } from '@tanstack/vue-query'
+import { useMutation } from '@tanstack/vue-query'
 import { reactive } from 'vue'
 import { useDraft } from '~/composables/useDraft'
 import type { InboxEpicReview } from '~/features/inbox/composables/useInboxEpicReview'
@@ -9,7 +9,6 @@ import type { EpicInboxItem } from '~/features/inbox/composables/useInboxView'
 import { ApiError } from '~/queries/client'
 import { reviewEpic } from '~/queries/epics'
 import { holdsInbox } from '~/queries/inbox'
-import { keys } from '~/queries/keys'
 import { plural } from '~/utils/labels'
 
 type Action = InboxActionInput['action']
@@ -30,8 +29,6 @@ export function useInboxEpicActions(
   { viewedHead }: Pick<InboxEpicReview, 'viewedHead'>,
   { showTasks, resolved }: { showTasks: () => void, resolved: () => void }
 ) {
-  const client = useQueryClient()
-
   // Local to the item, like task human checks: the server wants them on approval
   const confirmedCriteria = ref<string[]>([])
   const confirmedTasks = ref<string[]>([])
@@ -68,7 +65,6 @@ export function useInboxEpicActions(
       const constraint = stale ? (e.body as { constraint?: string } | null)?.constraint : undefined
       refused.value = (constraint && REFUSED[constraint]) ?? (errorMessage(e))
       if (constraint === 'human_checks_unconfirmed') showTasks()
-      if (stale) await Promise.all([client.invalidateQueries({ queryKey: keys.inbox() }), client.invalidateQueries({ queryKey: keys.epics.detail(props.item.epicId) })])
       return false
     }
   }

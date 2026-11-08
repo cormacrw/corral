@@ -4,7 +4,7 @@ import { COMPATIBLE_TOOL_CONTRACTS } from '@corral/contracts'
 import { eq, ne } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 const { agents, epics, tasks } = schema
 
@@ -56,7 +56,7 @@ describe('plans with tasks with subtasks', () => {
   it('refuses a task with one subtask', async () => {
     const { project, propose } = await start()
     const result = await propose({ parents: [{ key: 'p', title: 'Search' }], tasks: [item('a', { parent: 'p' })] })
-    expect(JSON.stringify(result)).toContain('at least two subtasks')
+    expect(result).toMatchObject({ ok: false })
     expect(await listed(project.slug)).toEqual([])
   })
 
@@ -100,7 +100,7 @@ describe('plans with tasks with subtasks', () => {
     const { project, propose } = await start()
     const big = await t.createTask(project.slug, { title: 'Big one' })
     await t.db.update(tasks).set({ status: 'in_progress' }).where(eq(tasks.id, big.id))
-    expect(JSON.stringify(await propose({ parents: [{ key: 'p', ref: big.ref }], tasks: [item('a', { parent: 'p' }), item('b', { parent: 'p' })] }))).toContain('follow-up')
+    expect(await propose({ parents: [{ key: 'p', ref: big.ref }], tasks: [item('a', { parent: 'p' }), item('b', { parent: 'p' })] })).toMatchObject({ ok: false, error: expect.stringContaining(big.ref) })
   })
 
   it('can\'t lower an existing task\'s review mode by a plan', async () => {

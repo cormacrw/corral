@@ -1,4 +1,4 @@
-import { AGENT_ROLES, TASK_STATUSES, type TaskStatus } from '@corral/core'
+import { AGENT_ROLES, DEVELOPER_RUN_OUTCOMES, isCommitOutcome, isNotStarted, REVIEW_VERDICTS, TASK_STATUSES, taskRef, type TaskStatus } from '@corral/core'
 import type { FlowMetrics, FlowMetricsQuery, FlowPercentiles, WorkspaceFlow } from '@corral/contracts'
 import { weightedRunCost } from '@corral/contracts/client'
 import { schema, type Executor } from '@corral/db'
@@ -17,11 +17,11 @@ export function percentiles(values: number[]): FlowPercentiles {
   return { medianMs: at(0.5), p90Ms: at(0.9) }
 }
 
-// A developer's outcomes that hand work over for review
-const SUBMISSIONS = ['pr_opened', 'commit_submitted', 'findings_reported', 'design_submitted'] as const
+// A developer's outcomes that first hand work over for review: an updated or
+// rebased PR follows its pr_opened
+const SUBMISSIONS = DEVELOPER_RUN_OUTCOMES.filter(outcome => (isCommitOutcome(outcome) || outcome === 'findings_reported') && outcome !== 'pr_updated' && outcome !== 'pr_rebased')
 
 const validStatus = (value: unknown): value is TaskStatus => TASK_STATUSES.includes(value as TaskStatus)
-const waiting = (status: TaskStatus) => status === 'draft' || status === 'backlog' || status === 'ready'
 
 type Transition = { createdAt: Date, from: unknown, to: unknown }
 
@@ -32,11 +32,11 @@ type Transition = { createdAt: Date, from: unknown, to: unknown }
 export function cycleStart(created: number, history: Transition[]): number | null {
   const from = history[0]?.from
   let status: TaskStatus = validStatus(from) ? from : 'backlog'
-  if (!waiting(status)) return created
+  if (!isNotStarted(status)) return created
   for (const entry of history) {
     const { to } = entry
     if (!validStatus(to)) continue
-    if (waiting(status) && !waiting(to) && to !== 'merged') return entry.createdAt.getTime()
+    if (isNotStarted(status) && !isNotStarted(to) && to !== 'merged') return entry.createdAt.getTime()
     status = to
   }
   return null
@@ -122,7 +122,7 @@ export async function flowMetrics(db: Executor, project: Pick<typeof schema.proj
     cycles.push(start === null ? 0 : Math.max(0, merged - start))
     for (const [key, duration] of spent) statusSamples.get(key)!.push(duration)
     const dominantStatus = [...spent].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'backlog'
-    slowest.push({ ref: `${project.prefix}-${task.number}`, leadTimeMs, dominantStatus })
+    slowest.push({ ref: taskRef(project.prefix, task.number), leadTimeMs, dominantStatus })
     developerRuns += (taskRuns.get(task.id) ?? []).filter(run => run.role === 'developer' && run.queuedAt.getTime() <= merged).length
   }
 
@@ -172,7 +172,7 @@ export async function flowMetrics(db: Executor, project: Pick<typeof schema.proj
       cacheReadTokens: sum(run => run.cacheReadTokens), outputTokens: sum(run => run.outputTokens), costedRuns: costs.length, weightedCost: costs.reduce((total, cost) => total + cost, 0)
     })
   }
-  const epicReviews = ended.filter(run => run.role === 'reviewer' && run.epicId && (run.outcome === 'approved' || run.outcome === 'changes_requested'))
+  const epicReviews = ended.filter(run => run.role === 'reviewer' && run.epicId && REVIEW_VERDICTS.some(verdict => verdict === run.outcome))
   const reviewedEpics = new Set(epicReviews.map(run => run.epicId)).size
   return {
     fixes: {

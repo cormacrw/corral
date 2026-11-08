@@ -18,7 +18,8 @@ taskType, designPinned and baseBranch remain optional for older servers.
 Hello's `toolContract` is compared separately; see
 [runner versions](runner-updates.md#tool-contracts-cor-435).
 Older hello metadata remains decodable so protocol-version mismatches still
-close with 4000 and the server's protocol/commit details. Schema validation does
+close with `RUNNER_CLOSE_CODES.protocol` (4000) and the server's protocol and
+commit as a `RunnerRefusal` reason. Schema validation does
 not replace the existing run ownership and lease fencing checks.
 
 ## Outcome reports

@@ -10,7 +10,7 @@ import { keys } from '~/queries/keys'
 import { PULL_REQUESTS_POLL_MS } from '~/queries/projects'
 
 const api = vi.hoisted(() => ({ projects: { list: vi.fn(), pullRequests: vi.fn(async () => []), flow: vi.fn(async () => ({})) } }))
-vi.mock('~/composables/useApi', () => ({ api }))
+vi.mock('~/queries/api', () => ({ api }))
 for (const [name, value] of Object.entries({
   watch,
   useProjectLists: () => ({ tasks: computed(() => []), epics: computed(() => []), loading: computed(() => false), error: computed(() => null) }),

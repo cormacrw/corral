@@ -1,11 +1,23 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { TabItem } from '~/components/app/AppTabs.vue'
+import type { InboxItemKind } from '~/utils/inbox-kinds'
+import InboxPanelMeta, { type InboxMetaItem } from '~/features/inbox/components/InboxPanelMeta.vue'
 
-// The frame every panel shares (design/inbox.md, Option D): what's needed to
-// decide up front, then tabs for the rest. On a phone (design/mobile.md) the
-// footer is the bottom bar.
-withDefaults(defineProps<{ tabs: readonly TabItem[], openTab: string, mobile?: boolean, as?: string, bodyClass?: string }>(), { as: 'div', bodyClass: undefined })
+// The frame every panel shares (design/inbox.md, Option D): the item's subject
+// and what it is, what's needed to decide up front, then tabs for the rest. On
+// a phone (design/mobile.md) the footer is the bottom bar. `titleTo` links the
+// subject to its page.
+withDefaults(defineProps<{
+  item: InboxMetaItem & { subject: string }
+  kind: InboxItemKind
+  titleTo?: string
+  tabs: readonly TabItem[]
+  openTab: string
+  mobile?: boolean
+  as?: string
+  bodyClass?: string
+}>(), { as: 'div', bodyClass: undefined, titleTo: undefined })
 defineEmits<{ select: [value: string], scroll: [] }>()
 // The body's scroller, for a panel that manages its own scroll position
 const scroller = ref<HTMLElement | null>(null)
@@ -18,6 +30,25 @@ defineExpose({ scroller })
     class="flex min-h-0 min-w-0 flex-1 flex-col"
   >
     <div :class="['flex max-h-[60%] shrink-0 flex-col gap-2 overflow-y-auto border-b border-border', mobile ? 'p-3' : 'px-5 pt-4 pb-3']">
+      <div class="min-w-0">
+        <h1 :class="['text-lg leading-tight font-semibold text-foreground', titleTo && 'break-words']">
+          <NuxtLink
+            v-if="titleTo"
+            :to="titleTo"
+            class="hover:underline"
+          >
+            {{ item.subject }}
+          </NuxtLink>
+          <template v-else>
+            {{ item.subject }}
+          </template>
+        </h1>
+        <InboxPanelMeta
+          class="mt-1"
+          :kind="kind"
+          :item="item"
+        />
+      </div>
       <slot name="header" />
     </div>
     <!-- One tab has nothing to switch to -->

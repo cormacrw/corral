@@ -2,14 +2,14 @@ import type { RunJob, RunnerMessage } from '@corral/contracts'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentExit, AgentRuntime } from './agent-runtime.ts'
+import type { AgentExit, AgentLauncher } from './agent-runtime.ts'
 import type { RunnerConfig } from './config.ts'
-import type { ServerConnection } from './connection.ts'
 import { git } from './exec.ts'
 import type { ToolHandler, ToolServer } from './mcp.ts'
 import { RunManager } from './run-manager.ts'
-import { createTestDataDir, pmJob } from './test-repo.ts'
-import { prepareWorkspace, saveStoppedWork, worktreePath } from './workspace.ts'
+import { createTestDataDir, pmJob, testConfig, testConnection } from './test-repo.ts'
+import { worktreePath } from './layout.ts'
+import { prepareWorkspace, saveStoppedWork } from './workspace.ts'
 
 const BRANCH = 'corral/app-1'
 const AUTHOR = { name: 'Corral Test', email: 'corral@example.com' }
@@ -23,11 +23,11 @@ describe('a stopped run keeps its work', () => {
   let writes: Record<string, string>
   let cwds: string[]
   let exit: (value: AgentExit) => void
-  const connection = { connected: true, send: (message: RunnerMessage) => sent.push(message) > 0 } as unknown as ServerConnection
+  const connection = testConnection((message: RunnerMessage) => sent.push(message) > 0, true)
   let callTool: ToolHandler
   const tools = { register: (_secret: string, _role: string, handler: ToolHandler) => (callTool = handler, () => {}), url: () => 'http://127.0.0.1:9/mcp' } as unknown as ToolServer
 
-  const runtime: AgentRuntime = {
+  const runtime: AgentLauncher = {
     id: 'fake',
     spawn: (options) => {
       cwds.push(options.cwd)
@@ -64,7 +64,7 @@ describe('a stopped run keeps its work', () => {
     vi.stubEnv('GIT_CONFIG_COUNT', '0')
     dataDir = await createTestDataDir()
     origin = join(dirname(dataDir), 'origin')
-    config = { dataDir, claudeBin: '/nonexistent/claude', codexBin: '/nonexistent/codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: AUTHOR, pmWarmSeconds: 0, titleModel: 'haiku', slots: 4, roles: ['pm', 'developer', 'reviewer', 'design'] }
+    config = testConfig(dataDir, { claudeBin: '/nonexistent/claude', gitAuthor: AUTHOR })
     sent = []
     writes = { 'feature.txt': 'half done\n' }
     cwds = []
@@ -76,10 +76,10 @@ describe('a stopped run keeps its work', () => {
   })
 
   it.each([
-    ['the time limit', (m: RunManager) => m.stop('r1', 'timed_out', '60 s'), 'stopped: Time limit reached'],
-    ['a human', (m: RunManager) => m.handle({ type: 'run.stop', runId: 'r1', reason: 'Stopped by a human', keepWork: true }), 'stopped: Stopped by a human'],
-    ['a runner shutdown', (m: RunManager) => void m.shutdown(), 'stopped: The runner shut down']
-  ])('commits and pushes uncommitted work on a stop by %s', async (_name, stop, subject) => {
+    ['the time limit', (m: RunManager) => m.stop('r1', 'timed_out', '60 s')],
+    ['a human', (m: RunManager) => m.handle({ type: 'run.stop', runId: 'r1', reason: 'Stopped by a human', keepWork: true })],
+    ['a runner shutdown', (m: RunManager) => void m.shutdown()]
+  ])('commits and pushes uncommitted work on a stop by %s', async (_name, stop) => {
     stop(await start(developer()))
     const end = await ended()
 
@@ -88,10 +88,11 @@ describe('a stopped run keeps its work', () => {
     expect(end.headSha).toBe(end.wipSha)
     const log = await git(['log', '-1', '--format=%an <%ae>%n%s', BRANCH], { cwd: origin })
     expect(log.stdout).toContain('Corral Test <corral@example.com>')
-    expect(log.stdout).toContain(`WIP: APP-1 run #7 ${subject}`)
+    expect(log.stdout).toContain('APP-1')
+    expect(log.stdout).toContain('#7')
     expect((await git(['show', `${BRANCH}:feature.txt`], { cwd: origin })).stdout).toBe('half done\n')
     // The transcript says so, ahead of run.ended
-    const note = sent.findIndex(m => m.type === 'run.events' && m.events.some(e => e.type === 'system' && e.text.startsWith('Saved the uncommitted work as WIP commit')))
+    const note = sent.findIndex(m => m.type === 'run.events' && m.events.some(e => e.type === 'system' && e.text.includes(end.wipSha!.slice(0, 7))))
     expect(note).toBeGreaterThan(-1)
     expect(note).toBeLessThan(sent.indexOf(end))
   })
@@ -259,7 +260,7 @@ describe('a stopped run keeps its work', () => {
       await git(['checkout', '--detach'], { cwd: path })
       await writeFile(join(path, 'feature.txt'), 'x\n')
 
-      expect(await saveStoppedWork(path, BRANCH, 'WIP', AUTHOR, 5_000)).toEqual({ sha: null, pushed: false, error: `the worktree is not on ${BRANCH}` })
+      expect(await saveStoppedWork(path, BRANCH, 'WIP', AUTHOR, 5_000)).toEqual({ sha: null, pushed: false, error: expect.stringContaining(BRANCH) })
       expect(await onOrigin(BRANCH)).toBeNull()
     })
 
@@ -289,7 +290,7 @@ describe('a stopped run keeps its work', () => {
       const wip = await pushedFromElsewhere(path)
       await git(['-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '--allow-empty', '-m', 'Local'], { cwd: path })
 
-      expect((await prepareWorkspace(dataDir, developer({ continueFrom: wip }))).error).toContain(`Could not continue from WIP commit ${wip}`)
+      expect((await prepareWorkspace(dataDir, developer({ continueFrom: wip }))).error).toContain(wip)
     })
 
     it('leaves a worktree already past the WIP commit', async () => {

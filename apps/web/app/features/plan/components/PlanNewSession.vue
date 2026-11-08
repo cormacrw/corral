@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, provide } from 'vue'
+import { computed } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
-import type { AgentRuntime } from '@corral/contracts'
-import { FLYOUT_SHEETS } from '~/features/tasks/composables/useTaskFlyout'
+import type { AgentRuntime } from '@corral/core'
+import { provideFlyoutHost } from '~/composables/useTaskFlyout'
 import { planDraftsQuery, planSessionsQuery } from '~/queries/plan'
 import { projectColor } from '~/utils/labels'
 import { usePlanRunner } from '~/features/plan/composables/usePlanRunner'
@@ -17,7 +17,7 @@ const { pm, offline, unavailable } = usePlanRunner()
 const { projectId, project, runtime, runtimeItems, lastRuntime, restoredImages, text, taskRef, busy, start } = usePlanStart(() => props.initialProjectId)
 // The attached task and its epic open beside the composer, or over it on
 // phones, which keeps the draft that going to the task's page would lose
-provide(FLYOUT_SHEETS, true)
+provideFlyoutHost({ sheets: true, docked: () => !device.isMobile.value })
 
 const projectItems = computed(() => [{ label: 'Global', value: 'global', project: null }, ...shell.projects.map(p => ({ label: p.name, value: p.id, project: p }))])
 const sessions = useQuery(planSessionsQuery()).data

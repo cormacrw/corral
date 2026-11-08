@@ -1,4 +1,4 @@
-import { RUNNER_PATH, RUNNER_PROTOCOL_VERSION } from '@corral/contracts'
+import { RUNNER_CLOSE_CODES, RUNNER_MAX_MESSAGE_BYTES, RUNNER_PATH, RUNNER_PROTOCOL_VERSION } from '@corral/contracts'
 import { serve, type ServerType } from '@hono/node-server'
 import { createNodeWebSocket } from '@hono/node-ws'
 import { Hono } from 'hono'
@@ -13,7 +13,6 @@ export interface RunningServer {
 
 // Both listeners share the runner hub; the external listener never mounts the API (D25).
 export function startServer(deps: AppDeps, options: { host: string, port: number, runnerToken?: string | undefined, runnerOnly?: boolean | undefined }): Promise<RunningServer> {
-  if (options.runnerOnly && !options.runnerToken) throw new Error('CORRAL_RUNNER_TOKEN is required for CORRAL_RUNNER_LISTEN')
   const { app: root, injectWebSocket } = createServerApp(deps, options)
 
   return new Promise((resolve, reject) => {
@@ -39,7 +38,9 @@ export function startServer(deps: AppDeps, options: { host: string, port: number
 // PM coverage check so WebSocket and future wrapper routes cannot escape it.
 export function createServerApp(deps: AppDeps, options: { runnerToken?: string | undefined, runnerOnly?: boolean | undefined } = {}) {
   const root = new Hono()
-  const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app: root })
+  const { injectWebSocket, upgradeWebSocket, wss } = createNodeWebSocket({ app: root })
+  // @hono/node-ws builds the ws server without options; ws reads this on each upgrade
+  wss.options.maxPayload = RUNNER_MAX_MESSAGE_BYTES
 
   // Host updaters obtain the release target directly, independently of agent-writable files.
   root.get(`${RUNNER_PATH}/version`, (context) => {
@@ -55,7 +56,7 @@ export function createServerApp(deps: AppDeps, options: { runnerToken?: string |
       onOpen: (_event, ws) => {
         if (!authenticated) {
           console.warn('Runner authentication rejected: missing or invalid runner token')
-          ws.close(4003, 'Missing or invalid runner token')
+          ws.close(RUNNER_CLOSE_CODES.token, 'Missing or invalid runner token')
           return
         }
         connection = deps.runner.connect({

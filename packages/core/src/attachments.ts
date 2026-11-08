@@ -1,8 +1,9 @@
+import { UUID_SOURCE } from './ids.ts'
+
 // Images in task text are attachments: markdown writes them as
 // ![name](attachment:<id>), and the editor's image nodes carry either that
 // or the URL the server serves them from.
-const ID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
-const REFERENCE = new RegExp(`^(?:attachment:(${ID})|(?:[a-z][a-z0-9+.-]*://[^/]+)?/api/attachments/(${ID})/file(?:[?#].*)?)$`, 'i')
+const REFERENCE = new RegExp(`^(?:attachment:(${UUID_SOURCE})|(?:[a-z][a-z0-9+.-]*://[^/]+)?/api/attachments/(${UUID_SOURCE})/file(?:[?#].*)?)$`, 'i')
 const MARKDOWN_IMAGE = /!\[[^\]]*\]\(\s*<?([^\s)>]+)>?(?:\s+(?:"[^"]*"|'[^']*'))?\s*\)/g
 
 export function attachmentUrl(id: string): string {

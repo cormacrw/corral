@@ -1,9 +1,9 @@
 import { schema, type Executor } from '@corral/db'
 import { and, eq, isNull } from 'drizzle-orm'
-import { holdsEpicOpen } from './epic-review-state.ts'
+import { holdsEpicOpen } from './delivery-sql.ts'
 import type { EventBus } from './events.ts'
 import { markDelivered, parentDependents } from './parents.ts'
-import { loadTasks } from './tasks.ts'
+import { loadTasks } from './task-views.ts'
 
 const { epics, epicDependencies, taskDependencies, tasks } = schema
 

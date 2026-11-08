@@ -1,6 +1,5 @@
-import type { AgentRole, TaskStatus } from '@corral/core'
+import type { AgentRole, RunSessionStart, TaskStatus } from '@corral/core'
 import { z } from 'zod'
-import type { RunSessionStart } from './agents.ts'
 
 // Flow durations are milliseconds; an empty sample has both percentiles zero.
 export const flowMetricsQuery = z.object({ window: z.enum(['7d', '30d', '90d']).default('30d') })

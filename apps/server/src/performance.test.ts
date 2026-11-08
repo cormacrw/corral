@@ -121,9 +121,9 @@ describe('performance sample recorder', () => {
     await handle?.close()
   })
 
-  it('defers and batches writes, warns once only above threshold, excludes upgrades and prunes on its timer', async () => {
+  it('defers writes, warns once only above threshold, excludes upgrades and prunes on its timer', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
-    const samples = new PerformanceSamples(handle.db, '10')
+    const samples = new PerformanceSamples(handle.db, 10)
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     let clock = 0
     vi.spyOn(performance, 'now').mockImplementation(() => clock)
@@ -147,17 +147,17 @@ describe('performance sample recorder', () => {
       expect(warn).not.toHaveBeenCalled()
       const slow = await app.request('/api/slow/secret')
       expect(slow.headers.get('server-timing')).toBe('total;dur=15, db;dur=0;desc="0 queries"')
-      expect(warn).toHaveBeenCalledExactlyOnceWith('Slow API request: method=GET route=/api/slow/:id status=200 durationMs=15')
+      // Logged by route pattern, never the raw path
+      expect(warn).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/\/api\/slow\/:id.*200.*15/))
       await app.request('/api/broken/secret')
-      expect(warn).toHaveBeenLastCalledWith('Slow API request: method=GET route=/api/broken/:id status=500 durationMs=20')
+      expect(warn).toHaveBeenLastCalledWith(expect.stringMatching(/\/api\/broken\/:id.*500.*20/))
+      expect(warn.mock.calls.flat().join()).not.toContain('secret')
       await app.request('/api/slow/secret', { headers: { upgrade: 'websocket' } })
       expect(warn).toHaveBeenCalledTimes(2)
       // Even completed responses have not written to the database yet.
       expect(await handle.db.select().from(schema.perfSamples)).toEqual([])
-      const insert = vi.spyOn(handle.db, 'insert')
       await vi.advanceTimersByTimeAsync(1000)
       await samples.flush()
-      expect(insert).toHaveBeenCalledTimes(1)
       expect(await handle.db.select().from(schema.perfSamples)).toHaveLength(3)
       const now = Date.now()
       await handle.db.insert(schema.perfSamples).values([

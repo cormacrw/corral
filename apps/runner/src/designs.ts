@@ -1,28 +1,25 @@
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { DESIGN_TOO_LARGE, DESIGN_VERSION_MAX_BYTES, megabytes, RUNNER_MAX_MESSAGE_BYTES, type DesignForAgent } from '@corral/contracts'
 import { exec } from './exec.ts'
 
-// What the server's get_design returns (D20): the files travel as base64
-interface DesignFiles {
-  taskRef: string
-  version: number
-  spec: string
-  screenshots: { fileName: string, contentType: string, dataBase64: string }[]
-  bundle: { dataBase64: string }
+// What get_design returns once saved: the file contents swapped for their paths
+export interface SavedDesign extends Omit<DesignForAgent, 'screenshots' | 'bundle'> {
+  dir: string
+  specPath: string
+  screenshots: { fileName: string, contentType: string, path: string }[]
+  bundle: { archive: string, dir: string, index: string }
 }
 
 // Writes a design version into the agent's scratch folder, outside the
 // repository: design.md, the screenshots and the static bundle, extracted,
 // all read-only, since they're a reference and not the agent's to change.
-// Returns what the server sent with the file contents swapped for their
-// paths. The bundle is untrusted (D20): it's only unpacked here, never run
-// by Corral.
-export async function saveDesign(scratchDir: string, design: DesignFiles): Promise<{ ok: true, result: unknown } | { ok: false, error: string }> {
+// The bundle is untrusted (D20): it's only unpacked here, never run by Corral.
+export async function saveDesign(scratchDir: string, design: DesignForAgent): Promise<{ ok: true, result: SavedDesign } | { ok: false, error: string }> {
   const dir = join(scratchDir, 'designs', `${basename(design.taskRef)}-v${design.version}`)
-  // An earlier copy is read-only, so make it writable to replace it
-  if (await stat(dir).catch(() => null)) await exec('chmod', ['-R', 'u+w', dir])
-  await rm(dir, { recursive: true, force: true })
+  // An earlier copy is read-only
+  await removeScratch(dir)
   const shots = join(dir, 'screenshots')
   const bundleDir = join(dir, 'bundle')
   await mkdir(shots, { recursive: true })
@@ -30,7 +27,7 @@ export async function saveDesign(scratchDir: string, design: DesignFiles): Promi
 
   const specPath = join(dir, 'design.md')
   await writeFile(specPath, design.spec)
-  const screenshots = []
+  const screenshots: SavedDesign['screenshots'] = []
   for (const [i, shot] of design.screenshots.entries()) {
     // Two screenshots may share a name; neither may leave the folder
     const path = join(shots, `${String(i + 1).padStart(2, '0')}-${basename(shot.fileName)}`)
@@ -47,21 +44,26 @@ export async function saveDesign(scratchDir: string, design: DesignFiles): Promi
   return { ok: true, result: { ...design, dir, specPath, screenshots, bundle: { archive, dir: bundleDir, index: join(bundleDir, 'index.html') } } }
 }
 
+// Removes a folder that may hold a read-only design copy, which plain rm
+// can't empty: a run's or session's scratch folder, or an earlier copy
+export async function removeScratch(path: string): Promise<void> {
+  await exec('chmod', ['-R', 'u+w', path])
+  await rm(path, { recursive: true, force: true })
+}
+
 // What submit_design sends the server (D20): the bundle as a tar,
 // design.md as text and the screenshots, all as base64
-export interface DesignSubmission {
+interface DesignSubmission {
   bundle: { dataBase64: string, files: number }
   spec: string
   screenshots: { fileName: string, contentType: string, dataBase64: string }[]
 }
 
-export const MAX_BUNDLE_BYTES = 25 * 1024 * 1024
-// With the bundle, these keep the base64 message under the socket's 100 MiB: a
-// larger one would close the connection, and with it every run on this runner
-export const MAX_SPEC_BYTES = 5 * 1024 * 1024
-export const MAX_SCREENSHOT_BYTES = 10 * 1024 * 1024
-export const MAX_SCREENSHOTS_BYTES = 40 * 1024 * 1024
-const BUNDLE_TOO_BIG = 'Not submitted. The packed bundle is over 25 MB; leave out what the prototype doesn\'t need.'
+// With the design version's limit, these keep the base64 message under the
+// socket's limit
+export const MAX_SPEC_BYTES = RUNNER_MAX_MESSAGE_BYTES / 20
+export const MAX_SCREENSHOT_BYTES = RUNNER_MAX_MESSAGE_BYTES / 10
+const BUNDLE_TOO_BIG = `Not submitted. The packed bundle is over ${megabytes(DESIGN_VERSION_MAX_BYTES)}; leave out what the prototype doesn't need.`
 const SCREENSHOT_TYPES: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' }
 
 // Reads what the designer passed to submit_design and packs the bundle.
@@ -82,12 +84,12 @@ export async function packDesign(baseDir: string, input: Record<string, unknown>
   let bundleBytes = 0
   for (const entry of entries.filter(e => e.isFile())) {
     bundleBytes += (await stat(join(entry.parentPath, entry.name)).catch(() => null))?.size ?? 0
-    if (bundleBytes > MAX_BUNDLE_BYTES) return { ok: false, error: BUNDLE_TOO_BIG }
+    if (bundleBytes > DESIGN_VERSION_MAX_BYTES) return { ok: false, error: BUNDLE_TOO_BIG }
   }
 
   const specPath = at(input.specPath ?? '')
   const specSize = input.specPath ? (await stat(specPath).catch(() => null))?.size ?? 0 : 0
-  if (specSize > MAX_SPEC_BYTES) return { ok: false, error: `Not submitted. ${specPath} is over 5 MB; design.md is a spec, not a place for assets.` }
+  if (specSize > MAX_SPEC_BYTES) return { ok: false, error: `Not submitted. ${specPath} is over ${megabytes(MAX_SPEC_BYTES)}; design.md is a spec, not a place for assets.` }
   const spec = input.specPath ? await readFile(specPath, 'utf8').catch(() => null) : null
   if (!spec?.trim()) return { ok: false, error: `Not submitted. No design.md at ${specPath}. Write the spec and pass its path.` }
 
@@ -100,8 +102,9 @@ export async function packDesign(baseDir: string, input: Record<string, unknown>
     if (!contentType) return { ok: false, error: `Not submitted. ${path} isn't a PNG, JPEG or WebP screenshot.` }
     const size = (await stat(path).catch(() => null))?.size ?? 0
     screenshotBytes += size
-    if (size > MAX_SCREENSHOT_BYTES) return { ok: false, error: `Not submitted. ${path} is over 10 MB; capture a smaller screenshot.` }
-    if (screenshotBytes > MAX_SCREENSHOTS_BYTES) return { ok: false, error: 'Not submitted. The screenshots come to over 40 MB; capture smaller ones.' }
+    if (size > MAX_SCREENSHOT_BYTES) return { ok: false, error: `Not submitted. ${path} is over ${megabytes(MAX_SCREENSHOT_BYTES)}; capture a smaller screenshot.` }
+    // The server takes a version only up to this, bundle and screenshots together
+    if (bundleBytes + screenshotBytes > DESIGN_VERSION_MAX_BYTES) return { ok: false, error: DESIGN_TOO_LARGE }
     const data = await readFile(path).catch(() => null)
     if (!data) return { ok: false, error: `Not submitted. No screenshot at ${path}.` }
     screenshots.push({ fileName: basename(path), contentType, dataBase64: data.toString('base64') })
@@ -112,7 +115,9 @@ export async function packDesign(baseDir: string, input: Record<string, unknown>
     const archive = join(scratch, 'bundle.tar')
     const tar = await exec('tar', ['-cf', archive, '-C', bundleDir, '.'])
     if (tar.code !== 0) return { ok: false, error: `Corral could not pack the bundle: ${tar.stderr.trim() || 'tar is missing'}` }
-    if ((await stat(archive)).size > MAX_BUNDLE_BYTES) return { ok: false, error: BUNDLE_TOO_BIG }
+    const packed = (await stat(archive)).size
+    if (packed > DESIGN_VERSION_MAX_BYTES) return { ok: false, error: BUNDLE_TOO_BIG }
+    if (packed + screenshotBytes > DESIGN_VERSION_MAX_BYTES) return { ok: false, error: DESIGN_TOO_LARGE }
     const data = await readFile(archive)
     return { ok: true, result: { bundle: { dataBase64: data.toString('base64'), files: entries.filter(e => e.isFile()).length }, spec, screenshots } }
   } finally {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { Agent, AgentRuntime } from '@corral/contracts'
+import type { Agent } from '@corral/contracts'
+import type { AgentRuntime } from '@corral/core'
 import type { AgentSettings } from '~/features/settings/composables/useAgentSettings'
 
 // The fields both layouts edit. `compact` sizes them for the desktop row;

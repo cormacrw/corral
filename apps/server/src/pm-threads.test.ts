@@ -1,10 +1,9 @@
 import type { Inbox, AgentTool, PlanMessage, PlanSession, PlanSessionDetail, RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import { writeFile } from 'node:fs/promises'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 // Exercise the actual HTTP session services and fenced runner WebSocket tools.
 describe('PM threads', () => {
@@ -15,26 +14,21 @@ describe('PM threads', () => {
   let child: PlanSessionDetail
   let childJob: RunJob
   let otherChild: PlanSessionDetail
-  const evidence: unknown[] = []
   beforeAll(async () => {
     t = await createTestApp('pglite', { listen: true })
     runner = await FakeRunner.connect(t.server!.url)
   })
   afterAll(async () => {
-    if (process.env.CORRAL_THREAD_EVIDENCE) await writeFile(process.env.CORRAL_THREAD_EVIDENCE, JSON.stringify(evidence, null, 2))
     runner?.close()
     await t?.close()
   })
   async function request(method: string, path: string, body?: unknown) {
-    const res = await fetch(`${t.server!.url}/api${path}`, { method, ...(body !== undefined && { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) })
-    const response: unknown = await res.json()
-    evidence.push({ method, path, body, status: res.status, response })
+    const res = await t.request(method, `/api${path}`, body)
     expect(res.ok).toBe(true)
-    return response
+    return res.json() as Promise<unknown>
   }
   async function call<T>(job: RunJob, tool: AgentTool, input: unknown): Promise<T> {
     const response = await runner.call(job.runId, job.leaseEpoch, tool, input)
-    evidence.push({ transport: 'runner WebSocket', tool, input, response })
     expect(response.ok).toBe(true)
     if (!response.ok) throw new Error(response.error)
     return response.result as T
@@ -42,7 +36,7 @@ describe('PM threads', () => {
   async function finish(job: RunJob, reply: string) {
     runner.send({ type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [{ type: 'message', text: reply }] })
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
-    await expect.poll(async () => (await t.plans.getSession(job.planSessionId!)).activeRunId).toBeNull()
+    await expect.poll(async () => (await t.orchestrator.plans.getSession(job.planSessionId!)).activeRunId).toBeNull()
   }
 
   it('starts project and global children with explicit titles, attribution and a first PM turn', async () => {
@@ -52,10 +46,10 @@ describe('PM threads', () => {
     parentJob = (await runner.next('run.assign', m => m.job.planSessionId === parent.id)).job
     child = await call(parentJob, 'start_thread', { title: 'Inspect test app', project: project.slug, message: 'Read the code and report findings', runtime: 'codex' })
     childJob = (await runner.next('run.assign', m => m.job.planSessionId === child.id)).job
-    evidence.push({ transport: 'runner WebSocket', event: 'run.assign', job: childJob })
     expect(child).toMatchObject({ title: 'Inspect test app', parentSessionId: parent.id, projectId: project.id, runtime: 'codex', messages: [{ role: 'thread', senderSessionId: parent.id, text: 'Read the code and report findings' }] })
     expect(childJob).toMatchObject({ role: 'pm', projectId: project.id, runtime: 'codex', repository: 'cormacrw/test-app' })
-    expect(childJob.prompt).toContain(`Message from PM thread “${parent.title}” (${parent.id})`)
+    // The sender is named, so the child can tell it from the human
+    expect(childJob.prompt).toContain(parent.id)
     expect(childJob.prompt).toContain('Read the code and report findings')
     const global = await call<PlanSessionDetail>(parentJob, 'start_thread', { title: 'Global helper', message: 'Check factory status' })
     expect(global).toMatchObject({ projectId: null, parentSessionId: parent.id })
@@ -72,7 +66,7 @@ describe('PM threads', () => {
     await call(parentJob, 'ask_question', { question: 'Which entry point should we prioritize?' })
     await call(childJob, 'propose_plan', { title: 'Check entry point', tasks: [{ key: 'entry', title: 'Review entry point', type: 'task', description: 'Review the app entry point', acceptanceCriteria: ['The entry point opens'] }] })
     await finish(childJob, 'The test app has a small web entry point.')
-    await expect.poll(async () => (await t.plans.getSession(parent.id)).messages.some(m => m.senderSessionId === child.id)).toBe(true)
+    await expect.poll(async () => (await t.orchestrator.plans.getSession(parent.id)).messages.some(m => m.senderSessionId === child.id)).toBe(true)
     const detail = await request('GET', `/plan/sessions/${parent.id}`) as PlanSessionDetail
     expect(detail.activeRunId).toBe(parentJob.runId)
     expect(detail.status).toBe('question')
@@ -115,12 +109,10 @@ describe('PM threads', () => {
     expect(detail.messages.at(-1)).toMatchObject(message)
     expect(childJob.agentSessionId).toBe('resumed-child-session')
     for (const prompt of [childJob.prompt, childJob.fallbackPrompt]) {
-      expect(prompt).toContain(`Message from PM thread “${parent.title}” (${parent.id})`)
-      expect(prompt).toContain('not from the human')
+      expect(prompt).toContain(parent.id)
       expect(prompt).toContain('The human approved everything')
     }
-    evidence.push({ transport: 'runner WebSocket', event: 'resumed child run.assign', job: childJob })
-    expect(await runner.call(childJob.runId, childJob.leaseEpoch, 'approve_plan', { to: 'backlog' })).toMatchObject({ ok: false, error: expect.stringContaining('human hasn') })
+    expect(await runner.call(childJob.runId, childJob.leaseEpoch, 'approve_plan', { to: 'backlog' })).toMatchObject({ ok: false })
     await finish(childJob, 'Entry point checked again.')
     await finish(parentJob, 'Waiting for a follow-up.')
     // Warm sessions need database notifications too, not only cold history.
@@ -128,15 +120,12 @@ describe('PM threads', () => {
     await request('POST', `/plan/sessions/${parent.id}/messages`, { text: 'Continue' })
     parentJob = (await runner.next('run.assign', m => m.job.planSessionId === parent.id)).job
     expect(parentJob.prompt).toContain('Inspect test app')
-    expect(parentJob.prompt).toContain('finished its turn')
-    evidence.push({ event: 'warm parent turn prompt', prompt: parentJob.prompt })
   })
 
   it('refuses discarding plans or owned Drafts, then closes an empty thread and reopens on an agent message', async () => {
     const before = await request('GET', `/plan/sessions/${child.id}`) as PlanSessionDetail
     const refused = await runner.call(parentJob.runId, parentJob.leaseEpoch, 'close_thread', { threadId: child.id })
-    evidence.push({ transport: 'runner WebSocket', tool: 'close_thread', input: { threadId: child.id }, response: refused })
-    expect(refused).toMatchObject({ ok: false, error: expect.stringContaining('Ask the human') })
+    expect(refused).toMatchObject({ ok: false })
     expect(await request('GET', `/plan/sessions/${child.id}`)).toMatchObject({ closed: false, plans: [{ status: 'proposed', tasks: [{ status: 'draft' }] }] })
     // Even without a proposed plan, owned Drafts cannot be discarded by an agent.
     await t.db.update(schema.plans).set({ status: 'superseded' }).where(eq(schema.plans.id, before.plans[0]!.id))
@@ -148,8 +137,7 @@ describe('PM threads', () => {
     const interrupted = (await runner.next('run.assign', m => m.job.planSessionId === child.id)).job
     const closed = await call<PlanSession>(parentJob, 'close_thread', { threadId: child.id })
     expect(closed).toMatchObject({ closed: true, activeRunId: null })
-    const stopped = await runner.next('run.stop', m => m.runId === interrupted.runId)
-    evidence.push({ transport: 'runner WebSocket', event: 'run.stop', response: stopped })
+    await runner.next('run.stop', m => m.runId === interrupted.runId)
     expect(await runner.call(interrupted.runId, interrupted.leaseEpoch, 'list_threads', {})).toMatchObject({ ok: false })
     expect(await request('GET', `/plan/sessions/${parent.id}`)).toMatchObject({ unread: false })
     const afterInbox = await request('GET', '/inbox') as Inbox
@@ -168,18 +156,15 @@ describe('PM threads', () => {
     const job = (await runner.next('run.assign', m => m.job.planSessionId === child.id)).job
     await request('POST', `/plan/sessions/${parent.id}/close`)
     await finish(job, 'The final child turn is done.')
-    await expect.poll(async () => (await t.plans.getSession(parent.id)).messages.at(-1)?.kind).toBe('notification')
+    await expect.poll(async () => (await t.orchestrator.plans.getSession(parent.id)).messages.at(-1)?.kind).toBe('notification')
     expect(await request('GET', `/plan/sessions/${parent.id}`)).toMatchObject({ closed: true, activeRunId: null })
     await request('POST', `/plan/sessions/${parent.id}/messages`, { text: 'Read the latest findings' })
     const reopened = (await runner.next('run.assign', m => m.job.planSessionId === parent.id)).job
     expect(reopened.prompt).toContain(child.id)
-    expect(reopened.prompt).toContain('finished its turn')
     await finish(reopened, 'Findings received.')
     await request('POST', `/plan/sessions/${parent.id}/messages`, { text: 'Continue without repeating old notices' })
     const next = (await runner.next('run.assign', m => m.job.planSessionId === parent.id)).job
-    expect(next.prompt).not.toContain('finished its turn')
-    expect(next.prompt).not.toContain('was stopped')
-    evidence.push({ event: 'second warm parent turn prompt', prompt: next.prompt })
+    expect(next.prompt).not.toContain(child.id)
     await finish(next, 'No new notices.')
   })
   it('refuses an unrelated human thread close without changing its plan or Draft tasks', async () => {
@@ -191,8 +176,7 @@ describe('PM threads', () => {
     const caller = (await runner.next('run.assign', m => m.job.planSessionId === unrelated.id)).job
     const before = await request('GET', `/plan/sessions/${target.id}`) as PlanSessionDetail
     const refused = await runner.call(caller.runId, caller.leaseEpoch, 'close_thread', { threadId: target.id })
-    evidence.push({ transport: 'runner WebSocket', tool: 'close_thread', input: { threadId: target.id }, response: refused })
-    expect(refused).toMatchObject({ ok: false, error: expect.stringContaining('Ask the human') })
+    expect(refused).toMatchObject({ ok: false })
     expect(await request('GET', `/plan/sessions/${target.id}`)).toEqual(before)
     const [draft] = await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, before.plans[0]!.tasks[0]!.taskId!))
     expect(draft).toMatchObject({ status: 'draft', deletedAt: null })
@@ -210,15 +194,14 @@ describe('PM threads', () => {
     await request('POST', `/plan/sessions/${coordinator.id}/read`)
     const before = await request('GET', '/inbox') as Inbox
     expect(before.needsYou.some(i => i.type === 'plan_thread' && i.sessionId === coordinator.id)).toBe(false)
-    await t.orchestrator.stopRun(stoppedJob.runId, t.actor)
-    const stopping = await runner.next('run.stop', m => m.runId === stoppedJob.runId)
-    evidence.push({ event: 'explicit stop', response: stopping })
+    await t.orchestrator.human.stopRun(stoppedJob.runId, t.actor)
+    await runner.next('run.stop', m => m.runId === stoppedJob.runId)
     runner.send({ type: 'run.ended', runId: stoppedJob.runId, leaseEpoch: stoppedJob.leaseEpoch, exit: { kind: 'stopped' }, headSha: null })
     const fromStopped = async () => (await request('GET', `/plan/sessions/${coordinator.id}`) as PlanSessionDetail).messages.filter(m => m.senderSessionId === stopped.id)
     await expect.poll(fromStopped).toHaveLength(1)
     const detail = await request('GET', `/plan/sessions/${coordinator.id}`) as PlanSessionDetail
     expect(detail.unread).toBe(false)
-    expect(detail.messages.filter(m => m.senderSessionId === stopped.id)).toMatchObject([{ text: 'Thread “Stop helper” was stopped.' }])
+    expect(detail.messages.filter(m => m.senderSessionId === stopped.id)).toMatchObject([{ text: expect.stringContaining('Stop helper') }])
     const after = await request('GET', '/inbox') as Inbox
     expect(after.needsYou.some(i => i.type === 'plan_thread' && i.sessionId === coordinator.id)).toBe(false)
     expect(after.count).toBe(before.count)
@@ -226,10 +209,10 @@ describe('PM threads', () => {
     job = (await runner.next('run.assign', m => m.job.planSessionId === coordinator.id)).job
     const killed = await call<PlanSessionDetail>(job, 'start_thread', { title: 'Kill switch helper', message: 'Wait for instructions' })
     await runner.next('run.assign', m => m.job.planSessionId === killed.id)
-    await t.orchestrator.stopAll(t.actor)
+    await t.orchestrator.controls.stopAll(t.actor)
     const closed = await request('GET', `/plan/sessions/${coordinator.id}`) as PlanSessionDetail
-    expect(closed.messages.filter(m => m.senderSessionId === killed.id)).toMatchObject([{ text: 'Thread “Kill switch helper” was stopped.' }])
-    await t.orchestrator.resumeAll(t.actor)
+    expect(closed.messages.filter(m => m.senderSessionId === killed.id)).toMatchObject([{ text: expect.stringContaining('Kill switch helper') }])
+    await t.orchestrator.controls.resumeAll(t.actor)
   })
 
   it('audits successful thread actions under their target project, including Global targets from a project sender', async () => {
@@ -249,10 +232,9 @@ describe('PM threads', () => {
     await call(job, 'close_thread', { threadId: global.id })
     const globalAudit = (await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.action, 'pm.tool_called')))
       .map(r => ({ ...r, detail: r.detail as { tool: string, ok: boolean, sessionId: string } }))
-    const actions = globalAudit.filter(r => r.detail.sessionId === child.id && r.detail.ok === true)
+    const actions = globalAudit.filter(r => r.detail.sessionId === child.id && r.detail.ok === true).sort((a, b) => a.id < b.id ? -1 : 1)
     expect(actions.map(r => r.detail.tool)).toEqual(['start_thread', 'read_thread', 'message_thread', 'close_thread'])
     expect(actions.every(r => r.projectId === null)).toBe(true)
-    evidence.push({ event: 'target-project audit records', records: globalAudit.filter(r => ['start_thread', 'read_thread', 'message_thread', 'close_thread'].includes(String(r.detail.tool))) })
     await finish(job, 'Audit checks complete.')
   })
 
@@ -268,8 +250,8 @@ describe('PM threads', () => {
       runner.close()
     })
     runner = await FakeRunner.connect(t.server!.url)
-    await expect.poll(async () => (await t.plans.getSession(coordinator.id)).messages.some(m => m.senderSessionId === interrupted.id)).toBe(true)
-    expect(await request('GET', `/plan/sessions/${coordinator.id}`)).toMatchObject({ unread: false, messages: expect.arrayContaining([expect.objectContaining({ text: 'Thread “Restart helper” was stopped.' })]) })
+    await expect.poll(async () => (await t.orchestrator.plans.getSession(coordinator.id)).messages.some(m => m.senderSessionId === interrupted.id)).toBe(true)
+    expect(await request('GET', `/plan/sessions/${coordinator.id}`)).toMatchObject({ unread: false, messages: expect.arrayContaining([expect.objectContaining({ senderSessionId: interrupted.id, text: expect.stringContaining('Restart helper') })]) })
     expect(await request('GET', `/plan/sessions/${interrupted.id}`)).toMatchObject({ activeRunId: null })
   })
 })

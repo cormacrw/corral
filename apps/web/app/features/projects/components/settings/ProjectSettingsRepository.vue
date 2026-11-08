@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import type { Project } from '@corral/contracts'
 import type { ProjectSettings } from '~/features/projects/composables/useProjectSettings'
-import { EPIC_REVIEW_MODE } from '~/utils/labels'
+import { EPIC_REVIEW_MODE, MERGE_METHOD } from '~/utils/labels'
 
 const props = defineProps<{ project: Project, settings: ProjectSettings }>()
 const { form } = props.settings
 const epicReviewModes = Object.entries(EPIC_REVIEW_MODE).map(([value, mode]) => ({ value, label: mode.label, description: mode.description }))
-const MERGE_METHODS = [{ label: 'Squash and merge', value: 'squash' }, { label: 'Merge commit', value: 'merge' }, { label: 'Rebase and merge', value: 'rebase' }]
+const mergeMethods = Object.entries(MERGE_METHOD).map(([value, label]) => ({ label, value }))
 const CHECK_CHOICES = ['lint', 'typecheck', 'test', 'build']
 
 const checks = computed(() => [...new Set([...CHECK_CHOICES, ...form.requiredChecks])])
@@ -56,7 +56,7 @@ function addCustomCheck() {
     <ProjectSettingsRow label="Merge method">
       <AppSelectMenu
         v-model="form.mergeMethod"
-        :items="MERGE_METHODS"
+        :items="mergeMethods"
       />
     </ProjectSettingsRow>
     <ProjectSettingsRow

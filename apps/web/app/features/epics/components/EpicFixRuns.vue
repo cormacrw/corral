@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { runPath } from '~/utils/routes'
 import type { EpicFixRun } from '@corral/contracts'
-import { EPIC_FIX, epicFixResult, runPath } from '~/utils/labels'
+import { EPIC_FIX, epicFixResult } from '~/utils/labels'
 
 // The developer runs this epic has had, newest first (D29)
 defineProps<{ runs: EpicFixRun[] }>()

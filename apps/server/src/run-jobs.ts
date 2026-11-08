@@ -1,57 +1,56 @@
 import { TASK_INTEGRATION_PROTOCOL, type RunJob } from '@corral/contracts'
-import { taskRef, type Actor } from '@corral/core'
-import { schema, type Executor } from '@corral/db'
+import { actorLabel, AUTHORING_ROLES, isPrFree, taskRef } from '@corral/core'
+import { schema, type Database, type Executor, type AgentRow, type TaskRow } from '@corral/db'
 import { and, asc, desc, eq, gt, inArray, isNotNull, ne, or } from 'drizzle-orm'
 import { listTaskAttachments } from './attachments.ts'
 import { readCiFailures } from './ci-output.ts'
 import { resolutionContext } from './epic-rebase-approval.ts'
 import { targetFileChanges } from './epic-sync.ts'
-import { slugify } from './projects.ts'
+import type { GitHubClient } from './github.ts'
+import { feedbackComment } from './outcome-text.ts'
+import { describeRunner } from './placement.ts'
+import { branchSlug } from './projects.ts'
 import { cappedBranchDiff, designerPrompt, designerRevisionPrompt, developerCheckScope, developerPrompt, developerRevisionPrompt, reviewerPrompt, type PinnedDesign } from './prompts.ts'
 import { latestRebaseCheckFailures } from './rebase-review.ts'
-import { RUN_TIMEOUT_SECONDS } from './run-lifecycle.ts'
+import type { RunContext } from './run-context.ts'
+import type { RunEnding } from './run-ending.ts'
+import { workerJob } from './run-job.ts'
+import type { RunnerHub } from './runner-hub.ts'
 import { listEvidence } from './runs.ts'
 import { isEpicRebaseTask, isEpicResolution, taskBase } from './task-base.ts'
 import { listTaskSubmissions, selectPrFreeProtocol } from './task-submissions.ts'
-import type { TaskRow } from './tasks.ts'
-import { type AgentRow, type RunContext, type RunCore } from './run-context.ts'
-import { feedbackComment } from './run-outcomes.ts'
+import { taskCriteria } from './criteria.ts'
 
-const { acceptanceCriteria, comments, designVersions, epics, reviews, runs, taskDesignPins, tasks } = schema
+const { comments, designVersions, epics, reviews, runs, taskDesignPins, tasks } = schema
 
-export function actorLabel(actor: Actor): string {
-  switch (actor.kind) {
-    case 'human': return 'Human'
-    case 'agent': return actor.role === 'pm' ? 'PM' : actor.role === 'developer' ? 'Developer' : actor.role === 'designer' ? 'Designer' : 'Reviewer'
-    case 'system': return 'Corral'
-  }
+export interface RunJobsDeps {
+  db: Database
+  github: GitHubClient
+  runner: RunnerHub
+  now(): Date
+  ending: Pick<RunEnding, 'note'>
 }
 
 // Prompt caches are written for an hour; this leaves room for the run to start
 const WARM_SESSION_MS = 55 * 60 * 1000
 
 export class RunJobs {
-  #c: RunCore
+  #d: RunJobsDeps
 
-  constructor(core: RunCore) {
-    this.#c = core
-  }
-
-  runnerName(runnerId: string | null): string {
-    const name = this.#c.d.runner.status().runners.find(r => r.id === runnerId)?.name
-    return name ? `runner ${name}` : 'a runner this server no longer knows'
+  constructor(deps: RunJobsDeps) {
+    this.#d = deps
   }
 
   async developerJob(ctx: RunContext): Promise<RunJob> {
     return this.#authorJob(ctx, {
-      branch: ref => `corral/${ref.toLowerCase()}-${slugify(ctx.task!.title).slice(0, 40).replace(/-+$/, '')}`,
+      branch: ref => `corral/${ref.toLowerCase()}-${branchSlug(ctx.task!.title)}`,
       prompt: developerPrompt,
       revision: developerRevisionPrompt
     })
   }
 
   async designerJob(ctx: RunContext): Promise<RunJob> {
-    const [latest] = await this.#c.d.db.select({ version: designVersions.version, createdAt: designVersions.createdAt }).from(designVersions)
+    const [latest] = await this.#d.db.select({ version: designVersions.version, createdAt: designVersions.createdAt }).from(designVersions)
       .where(eq(designVersions.taskId, ctx.task!.id)).orderBy(desc(designVersions.version)).limit(1)
     return this.#authorJob(ctx, {
       branch: ref => `design/${ref}`,
@@ -67,35 +66,35 @@ export class RunJobs {
     prompt: typeof developerPrompt
     revision: typeof developerRevisionPrompt
   }): Promise<RunJob> {
-    const { db } = this.#c.d
+    const { db } = this.#d
     let task = ctx.task!
     const ref = taskRef(ctx.project!.prefix, task.number)
     // A spike delivers findings, not a PR (D19), so it never gets a branch.
     // A design is built on design/<ref>, pushed but never merged (D20).
-    const baseBranch = await taskBase(db, task, ctx.project!, this.#c.d.github)
+    const baseBranch = await taskBase(db, task, ctx.project!, this.#d.github)
     const spike = task.type === 'spike'
     const resumingBranch = task.branch !== null
     if (!task.branch && !spike) {
       const branch = author.branch(ref)
       ;[task] = await db.update(tasks).set({ branch }).where(eq(tasks.id, task.id)).returning() as [TaskRow]
     }
-    if (ctx.run.role === 'developer' && !task.integrationProtocol && await this.#canSkipTaskPr(ctx, task, resumingBranch)) {
+    if (ctx.run.role === 'developer' && !isPrFree(task) && await this.#canSkipTaskPr(ctx, task, resumingBranch)) {
       task = await selectPrFreeProtocol(db, task.id)
     }
-    const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
+    const criteria = await taskCriteria(db, task.id)
     const notes = await this.comments(task.id)
     const attached = await listTaskAttachments(db, ctx.project!.id, task, notes)
     const pin = await this.#pinnedDesign(ctx.project!.prefix, task.id)
     const previous = await this.previousAuthorRun(db, task.id, ctx.agent.id, ctx.run.role, ctx.run.id)
     const [lastRun] = await db.select().from(runs)
-      .where(and(eq(runs.taskId, task.id), inArray(runs.role, ['developer', 'designer']), ne(runs.id, ctx.run.id)))
+      .where(and(eq(runs.taskId, task.id), inArray(runs.role, [...AUTHORING_ROLES]), ne(runs.id, ctx.run.id)))
       .orderBy(desc(runs.number)).limit(1)
     const stoppedRun = lastRun && (lastRun.state === 'interrupted' || (lastRun.state === 'failed' && lastRun.summary === null))
       // A head that never moved isn't saved work
       ? { number: lastRun.number, reason: lastRun.error ?? 'Stopped', wipSha: lastRun.headSha === lastRun.retryContext?.head ? null : lastRun.headSha }
       : null
     // The server reads what developers can't (D8, D29). This never fails a job.
-    const ciFailures = task.ciFix ? await readCiFailures(this.#c.d.github, ctx.project!.repository, task.ciFix) : null
+    const ciFailures = task.ciFix ? await readCiFailures(this.#d.github, ctx.project!.repository, task.ciFix) : null
     const epicRebase = await isEpicRebaseTask(db, task)
     const checkScope = ctx.run.role === 'developer' ? developerCheckScope(ctx.project!.requiredChecks, epicRebase) : null
     const promptTask = {
@@ -108,7 +107,7 @@ export class RunJobs {
       design: author.design ?? null,
       pin,
       defaultBranch: baseBranch,
-      prFree: task.integrationProtocol > 0,
+      prFree: isPrFree(task),
       reviewRounds: task.reviewRounds,
       rebaseOnly: task.rebaseOnly,
       // A resolution has a brief of its own, on a candidate branch
@@ -131,9 +130,9 @@ export class RunJobs {
     // prompt on another runner, which starts fresh from the pushed branch.
     const local = previous !== null && (previous.runnerId === null || previous.runnerId === ctx.run.runnerId)
     const lastActive = previous?.endedAt ?? previous?.startedAt ?? previous?.queuedAt
-    const idleMinutes = lastActive ? Math.round((this.#c.now().getTime() - lastActive.getTime()) / 60_000) : 0
+    const idleMinutes = lastActive ? Math.round((this.#d.now().getTime() - lastActive.getTime()) / 60_000) : 0
     const idle = `${previous?.endedAt ? 'it ended' : 'it was last active'} ${idleMinutes} ${idleMinutes === 1 ? 'minute' : 'minutes'} ago`
-    const warm = lastActive !== undefined && this.#c.now().getTime() - lastActive.getTime() < WARM_SESSION_MS
+    const warm = lastActive !== undefined && this.#d.now().getTime() - lastActive.getTime() < WARM_SESSION_MS
     // Resuming costs a full cache write once the cache has expired, so a
     // developer's revision starts fresh instead. Rebase rounds and designers
     // keep their session whatever its age: it holds what they need. So does a
@@ -144,24 +143,18 @@ export class RunJobs {
     const resume = local && !expired ? previous.agentSessionId : null
     const fresh = expired ? author.prompt({ ...promptTask, coldRevision: { feedback, diff: spike ? null : await this.#branchDiff(ctx, task, baseBranch) } }, ctx.agent.name) : prompt
     if (resume) {
-      await this.#c.ending.note(ctx.run.id, warm
-        ? `Resuming the agent session of run #${previous!.number} on ${this.runnerName(ctx.run.runnerId)}: ${idle}, so its prompt cache is still warm`
-        : `Resuming the agent session of run #${previous!.number} on ${this.runnerName(ctx.run.runnerId)}: ${idle}, so its prompt cache has expired, but this kind of round keeps its session`)
+      await this.#d.ending.note(ctx.run.id, warm
+        ? `Resuming the agent session of run #${previous!.number} on ${describeRunner(this.#d.runner, ctx.run.runnerId)}: ${idle}, so its prompt cache is still warm`
+        : `Resuming the agent session of run #${previous!.number} on ${describeRunner(this.#d.runner, ctx.run.runnerId)}: ${idle}, so its prompt cache has expired, but this kind of round keeps its session`)
     } else if (expired) {
-      await this.#c.ending.note(ctx.run.id, `Starting a fresh session on ${this.runnerName(ctx.run.runnerId)} after run #${previous!.number}: ${idle}, so resuming it would rewrite an expired prompt cache`)
+      await this.#d.ending.note(ctx.run.id, `Starting a fresh session on ${describeRunner(this.#d.runner, ctx.run.runnerId)} after run #${previous!.number}: ${idle}, so resuming it would rewrite an expired prompt cache`)
     } else if (previous) {
-      await this.#c.ending.note(ctx.run.id, `Run #${previous.number} ran on ${this.runnerName(previous.runnerId)}, which is offline: starting a fresh session on ${this.runnerName(ctx.run.runnerId)}${spike ? '' : ` from the pushed branch ${task.branch}`}`)
+      await this.#d.ending.note(ctx.run.id, `Run #${previous.number} ran on ${describeRunner(this.#d.runner, previous.runnerId)}, which is offline: starting a fresh session on ${describeRunner(this.#d.runner, ctx.run.runnerId)}${spike ? '' : ` from the pushed branch ${task.branch}`}`)
     }
     await db.update(runs).set({ sessionStart: !resume ? 'fresh' : warm ? 'resumed_warm' : 'resumed_cold' }).where(eq(runs.id, ctx.run.id))
     return {
-      runId: ctx.run.id,
-      runNumber: ctx.run.number,
-      leaseEpoch: ctx.run.leaseEpoch!,
+      ...workerJob(ctx.run, ctx.agent.runtime, ctx.project!),
       role: ctx.run.role,
-      runtime: ctx.agent.runtime,
-      projectId: ctx.project!.id,
-      repository: ctx.project!.repository,
-      defaultBranch: ctx.project!.defaultBranch,
       baseBranch,
       taskId: task.id,
       taskRef: ref,
@@ -172,11 +165,8 @@ export class RunJobs {
       headSha: spike ? null : task.headSha,
       continueFrom: stoppedRun?.wipSha ?? null,
       checkScope,
-      planSessionId: null,
       agentSessionId: resume,
       fallbackPrompt: resume ? prompt : null,
-      model: null,
-      timeoutSeconds: RUN_TIMEOUT_SECONDS,
       prompt: !resume ? fresh : author.revision(promptTask, feedback)
     } as RunJob
   }
@@ -185,7 +175,7 @@ export class RunJobs {
   // This never fails a job: the developer can still read the branch.
   async #branchDiff(ctx: RunContext, task: TaskRow, baseBranch: string): Promise<string | null> {
     if (!task.branch) return null
-    const comparison = await this.#c.d.github.compare(ctx.project!.repository, baseBranch, task.branch).catch(() => null)
+    const comparison = await this.#d.github.compare(ctx.project!.repository, baseBranch, task.branch).catch(() => null)
     return comparison ? cappedBranchDiff(comparison.files) : null
   }
 
@@ -193,16 +183,16 @@ export class RunJobs {
   // branch that already has a PR (one whose number was never recorded after a
   // crash) finishes on the legacy path. When GitHub can't say, it stays legacy.
   async #canSkipTaskPr(ctx: RunContext, task: TaskRow, resumingBranch: boolean): Promise<boolean> {
-    const runner = this.#c.d.runner.status().runners.find(r => r.id === ctx.run.runnerId)
+    const runner = this.#d.runner.status().runners.find(r => r.id === ctx.run.runnerId)
     if (!runner?.taskIntegrationProtocols?.includes(TASK_INTEGRATION_PROTOCOL)) return false
     if (!resumingBranch || !task.branch) return true
-    const pr = await this.#c.d.github.findOpenPullRequest(ctx.project!.repository, task.branch).catch(() => undefined)
+    const pr = await this.#d.github.findOpenPullRequest(ctx.project!.repository, task.branch).catch(() => undefined)
     return pr === null
   }
 
   // The design version a build task is pinned to (D20), for its prompt
   async #pinnedDesign(prefix: string, taskId: string): Promise<PinnedDesign | null> {
-    const [pin] = await this.#c.d.db.select({ screens: taskDesignPins.screens, version: designVersions.version, branch: designVersions.branch, commitSha: designVersions.commitSha, number: tasks.number })
+    const [pin] = await this.#d.db.select({ screens: taskDesignPins.screens, version: designVersions.version, branch: designVersions.branch, commitSha: designVersions.commitSha, number: tasks.number })
       .from(taskDesignPins).innerJoin(designVersions, eq(designVersions.id, taskDesignPins.designVersionId)).innerJoin(tasks, eq(tasks.id, designVersions.taskId))
       .where(eq(taskDesignPins.taskId, taskId))
     return pin ? { designRef: taskRef(prefix, pin.number), version: pin.version, screens: pin.screens, branch: pin.branch, commitSha: pin.commitSha } : null
@@ -226,10 +216,10 @@ export class RunJobs {
 
   // flows.md step 6: the reviewer checks out the submitted commit
   async reviewerJob(ctx: RunContext): Promise<RunJob> {
-    const { db } = this.#c.d
+    const { db } = this.#d
     const task = ctx.task!
     const ref = taskRef(ctx.project!.prefix, task.number)
-    const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
+    const criteria = await taskCriteria(db, task.id)
     const items = (await listEvidence(db, task.id)).filter(e => e.round === task.reviewRounds)
     const [previous] = await db.select().from(reviews).where(eq(reviews.taskId, task.id)).orderBy(desc(reviews.createdAt)).limit(1)
     const notes = await this.comments(task.id)
@@ -256,19 +246,13 @@ export class RunJobs {
     const resolution = isEpicResolution(task) && task.epicId ? await resolutionContext(db, task.id, task.epicId) : null
     const epicResolution = resolution && {
       ...resolution,
-      targetFiles: await targetFileChanges(this.#c.d.runner, { repository: ctx.project!.repository, targetBranch: ctx.project!.defaultBranch, expectedHeadSha: resolution.oldHead, candidateSha: task.headSha! })
+      targetFiles: await targetFileChanges(this.#d.runner, { repository: ctx.project!.repository, targetBranch: ctx.project!.defaultBranch, expectedHeadSha: resolution.oldHead, candidateSha: task.headSha! })
     }
-    const prFree = task.integrationProtocol > 0
+    const prFree = isPrFree(task)
     const submissions = prFree ? await listTaskSubmissions(db, task.id) : []
     return {
-      runId: ctx.run.id,
-      runNumber: ctx.run.number,
-      leaseEpoch: ctx.run.leaseEpoch!,
+      ...workerJob(ctx.run, ctx.agent.runtime, ctx.project!),
       role: 'reviewer',
-      runtime: ctx.agent.runtime,
-      projectId: ctx.project!.id,
-      repository: ctx.project!.repository,
-      defaultBranch: ctx.project!.defaultBranch,
       baseBranch,
       taskId: task.id,
       taskRef: ref,
@@ -277,11 +261,6 @@ export class RunJobs {
       designPinned: pin !== null,
       branch: spike ? null : task.branch,
       headSha: spike ? null : task.headSha,
-      planSessionId: null,
-      agentSessionId: null,
-      fallbackPrompt: null,
-      model: null,
-      timeoutSeconds: RUN_TIMEOUT_SECONDS,
       prompt: reviewerPrompt({
         ref,
         title: task.title,
@@ -317,7 +296,7 @@ export class RunJobs {
 
   // A sub-task's run also reads what a human pinned on its parent (D31)
   async comments(taskId: string) {
-    const { db } = this.#c.d
+    const { db } = this.#d
     const [parent] = await db.select({ id: epics.taskId }).from(tasks).innerJoin(epics, eq(epics.id, tasks.epicId)).where(eq(tasks.id, taskId))
     const rows = await db.select().from(comments).where(or(eq(comments.taskId, taskId), parent?.id ? and(eq(comments.taskId, parent.id), eq(comments.pinned, true)) : undefined)).orderBy(asc(comments.createdAt))
     return rows.map(c => ({ author: actorLabel(c.author), body: c.body, pinned: c.pinned, createdAt: c.createdAt }))

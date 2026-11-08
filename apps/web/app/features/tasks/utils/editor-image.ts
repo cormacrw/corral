@@ -1,23 +1,7 @@
 import Image from '@tiptap/extension-image'
 import { NodeSelection } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
-import { attachmentIdFromSrc, attachmentUrl } from '@corral/core'
-
-// The src an image node stores: attachment:<id> for an attachment, however
-// it arrived (pasted from another description, copied as a host URL), so
-// saved descriptions don't depend on where Corral is served from
-export function storedImageSrc(src: string | null): string | null {
-  if (!src) return src
-  const id = attachmentIdFromSrc(src)
-  return id ? `attachment:${id}` : src
-}
-
-// The src the browser loads
-export function shownImageSrc(src: string | null): string | null {
-  if (!src) return src
-  const id = attachmentIdFromSrc(src)
-  return id ? attachmentUrl(id) : src
-}
+import { shownImageSrc, storedImageSrc } from '~/utils/attachments'
 
 // The editor's image node, reading and writing attachment references. Used
 // in place of Nuxt UI's own in the description editor. Read-only descriptions

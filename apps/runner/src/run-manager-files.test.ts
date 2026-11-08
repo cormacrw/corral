@@ -2,12 +2,12 @@ import type { RunnerMessage } from '@corral/contracts'
 import { chmod, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentExit, AgentRuntime, AgentSession, ParsedLine } from './agent-runtime.ts'
+import type { AgentExit, AgentLauncher, AgentSession } from './agent-runtime.ts'
+import type { ParsedLine } from './parsed-line.ts'
 import type { RunnerConfig } from './config.ts'
-import type { ServerConnection } from './connection.ts'
 import type { ToolServer } from './mcp.ts'
 import { RunManager } from './run-manager.ts'
-import { createTestDataDir, pmJob } from './test-repo.ts'
+import { createTestDataDir, pmJob, testConfig, testConnection } from './test-repo.ts'
 
 describe('RunManager and the files a run leaves', () => {
   let dataDir: string
@@ -17,7 +17,7 @@ describe('RunManager and the files a run leaves', () => {
   let scratch: string | null
   let line: ((raw: string, parsed: ParsedLine) => void) | null
   let unregistered: number
-  const connection = { send: (message: RunnerMessage) => up && sent.push(message) > 0 } as unknown as ServerConnection
+  const connection = testConnection((message: RunnerMessage) => up && sent.push(message) > 0)
   const tools = {
     register: () => () => void unregistered++,
     url: () => 'http://127.0.0.1:9/mcp'
@@ -25,10 +25,10 @@ describe('RunManager and the files a run leaves', () => {
   const parsed: ParsedLine = { events: [], sessionId: 'fake-session', rateLimit: null, result: null }
 
   // Leaves a read-only design copy in its scratch folder, as saveDesign does
-  const runtime: AgentRuntime = {
+  const runtime: AgentLauncher = {
     id: 'fake',
     spawn: (options) => {
-      scratch = dirname(options.mcpConfigPath)
+      scratch = options.scratchDir
       line = options.onLine
       options.onLine('{}', parsed)
       const design = join(scratch, 'designs', 'APP-1-v1')
@@ -42,14 +42,14 @@ describe('RunManager and the files a run leaves', () => {
     }
   }
 
-  const manager = (runtimes: AgentRuntime = runtime, pmWarmSeconds = 0) => new RunManager({ ...config, pmWarmSeconds }, connection, tools, new Map([['fake', runtimes]]))
+  const manager = (runtimes: AgentLauncher = runtime, pmWarmSeconds = 0) => new RunManager({ ...config, pmWarmSeconds }, connection, tools, new Map([['fake', runtimes]]))
   const developer = () => pmJob({ runId: 'r1', role: 'reviewer', runtime: 'fake', planSessionId: null, taskId: 'task-1', taskRef: 'APP-1', branch: 'corral/app-1', headSha: 'HEAD' })
   const present = (path: string) => stat(path).then(() => true, () => false)
   const spool = (runId: string) => join(dataDir, 'spool', `${runId}.jsonl`)
 
   beforeEach(async () => {
     dataDir = await createTestDataDir()
-    config = { dataDir, claudeBin: '/nonexistent/claude', codexBin: '/nonexistent/codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0, titleModel: 'haiku', slots: 4, roles: ['pm', 'developer', 'reviewer', 'design'] }
+    config = testConfig(dataDir, { claudeBin: '/nonexistent/claude' })
     sent = []
     up = true
     scratch = null
@@ -85,11 +85,11 @@ describe('RunManager and the files a run leaves', () => {
   })
 
   it('keeps a warm session\'s scratch folder for its next turn', async () => {
-    const session: AgentRuntime = {
+    const session: AgentLauncher = {
       id: 'fake',
       spawn: () => { throw new Error('Not used') },
       spawnSession: (options) => {
-        scratch = dirname(options.mcpConfigPath)
+        scratch = options.scratchDir
         return {
           pid: -1,
           exited: new Promise<AgentExit>(() => {}),
@@ -107,7 +107,6 @@ describe('RunManager and the files a run leaves', () => {
     await expect.poll(() => sent.some(m => m.type === 'run.ended'), { timeout: 10_000 }).toBe(true)
     await new Promise(resolve => setTimeout(resolve, 100))
 
-    expect(scratch).toContain('pm-project-1-s1')
     expect(await present(scratch!)).toBe(true)
     expect(await present(spool('r1'))).toBe(false)
   })
@@ -118,7 +117,7 @@ describe('RunManager and the files a run leaves', () => {
       // A folder in the way fails the open, as a full disk would
       await mkdir(spool('r1'), { recursive: true })
       let exit!: (value: AgentExit) => void
-      const quiet: AgentRuntime = {
+      const quiet: AgentLauncher = {
         id: 'fake',
         spawn: (options) => {
           line = options.onLine
@@ -127,21 +126,20 @@ describe('RunManager and the files a run leaves', () => {
         }
       }
       manager(quiet).assign(pmJob({ runId: 'r1', role: 'pm', runtime: 'fake', planSessionId: 's1' }))
-      await expect.poll(() => line, { timeout: 10_000 }).toBeTruthy()
-      await new Promise(resolve => setTimeout(resolve, 100))
+      const spoolNotes = () => sent.flatMap(m => m.type === 'run.events' ? m.events : []).flatMap(e => e.type === 'system' && /local copy/i.test(e.text) ? [e.text] : [])
+      await expect.poll(spoolNotes, { timeout: 10_000 }).toHaveLength(1)
+      // Said once, however many lines follow
       line!('{"more":1}', { ...parsed, sessionId: null })
       exit({ code: 0, signal: null })
       await expect.poll(() => sent.some(m => m.type === 'run.ended'), { timeout: 10_000 }).toBe(true)
-
-      const notes = sent.flatMap(m => m.type === 'run.events' ? m.events : []).flatMap(e => e.type === 'system' ? [e.text] : [])
-      expect(notes.filter(n => n.startsWith('The runner stopped keeping a local copy'))).toHaveLength(1)
+      expect(spoolNotes()).toHaveLength(1)
     } finally {
       warnings.mockRestore()
     }
   })
 
   it('unregisters the tools of a warm process that could not be started', async () => {
-    const broken: AgentRuntime = {
+    const broken: AgentLauncher = {
       id: 'fake',
       spawn: () => { throw new Error('Not used') },
       spawnSession: () => { throw new Error('spawn E2BIG') }

@@ -3,15 +3,12 @@ import { useQuery } from '@tanstack/vue-query'
 import { inboxQuery } from '~/queries/inbox'
 import { reloadShell } from '~/queries/shell'
 import { projectCardSummary, projectNeedsYou } from '~/features/projects/utils/projects'
+import { ADD_PROJECT_PATH, PROJECT_PAGES, projectPath, type ProjectPage } from '~/utils/routes'
 
 // The mobile Projects tab (design/mobile.md, frame "Projects"): a card per
 // project that opens its overview, with shortcuts to Board, Backlog and Settings
-const PAGES = [
-  { label: 'Board', icon: 'i-hugeicons-layout-03', to: 'board' },
-  { label: 'Backlog', icon: 'i-hugeicons-left-to-right-list-bullet', to: 'backlog' },
-  { label: 'PRs', icon: 'i-hugeicons-git-pull-request', to: 'pull-requests' },
-  { label: 'Settings', icon: 'i-hugeicons-sliders-horizontal', to: 'settings' }
-] as const
+const ICONS: Record<ProjectPage, string> = { 'board': 'i-hugeicons-layout-03', 'backlog': 'i-hugeicons-left-to-right-list-bullet', 'pull-requests': 'i-hugeicons-git-pull-request', 'settings': 'i-hugeicons-sliders-horizontal' }
+const PAGES = PROJECT_PAGES.map(({ page, short }) => ({ label: short, icon: ICONS[page], page }))
 const shell = useShell()
 const lists = useAllProjectLists(() => shell.projects)
 // The shell keeps the Inbox current, so mounting here never asks again. The
@@ -45,7 +42,7 @@ const cards = computed(() => shell.projects.map((project) => {
       :data-testid="`project-${card.project.slug}`"
     >
       <NuxtLink
-        :to="`/projects/${card.project.slug}`"
+        :to="projectPath(card.project.slug)"
         class="flex items-center gap-3 p-3.5 pb-2"
       >
         <ProjectThumbnail
@@ -89,8 +86,8 @@ const cards = computed(() => shell.projects.map((project) => {
       >
         <NuxtLink
           v-for="link in PAGES"
-          :key="link.to"
-          :to="`/projects/${card.project.slug}/${link.to}`"
+          :key="link.page"
+          :to="projectPath(card.project.slug, link.page)"
           class="flex flex-col items-center gap-0.5 py-2.5 text-sm font-medium text-foreground active:bg-muted"
         >
           <Icon
@@ -98,14 +95,14 @@ const cards = computed(() => shell.projects.map((project) => {
             class="size-4.5 text-muted-foreground"
           />
           <span>{{ link.label }}<span
-            v-if="(link.to === 'board' || link.to === 'backlog') && card.loaded"
+            v-if="(link.page === 'board' || link.page === 'backlog') && card.loaded"
             class="ms-1 font-normal text-muted-foreground"
-          >{{ card[link.to] }}</span></span>
+          >{{ card[link.page] }}</span></span>
         </NuxtLink>
       </nav>
     </article>
     <AppButton
-      to="/setup?step=repo&add=1"
+      :to="ADD_PROJECT_PATH"
       icon="i-hugeicons-add-01"
       label="Add project"
       variant="outline"

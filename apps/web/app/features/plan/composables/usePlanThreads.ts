@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/vue-query'
-import { planSessionsQuery } from '~/queries/plan'
+import { planSessionsQuery, usePlanStarts } from '~/queries/plan'
 import type { Ref } from 'vue'
 import type { PlanSession } from '@corral/contracts'
 
@@ -18,7 +18,6 @@ export function usePlanThreads() {
   function remove(id: string): void {
     threads.value = threads.value.filter(x => x !== id)
   }
-  // Sessions that no longer exist lose their thread
   function prune(existing: string[]): void {
     const keep = new Set(existing)
     if (threads.value.some(id => !keep.has(id))) threads.value = threads.value.filter(id => keep.has(id))
@@ -33,7 +32,7 @@ export function usePlanThreads() {
 export function useOpenPlanSessions() {
   const query = useQuery(planSessionsQuery())
   const planSessions = computed(() => query.data.value ?? [])
-  const pending = usePendingPlan()
+  const pending = usePlanStarts()
   const route = useRoute()
   const { threads, add, remove, prune } = usePlanThreads()
 
@@ -52,10 +51,6 @@ export function useOpenPlanSessions() {
     return threads.value.map(id => byId.get(id)).filter((s): s is PlanSession => s !== undefined)
   })
 
-  function close(session: PlanSession) {
-    remove(session.id)
-  }
-
   // Compare snapshots so read acknowledgements for a reopened, still-closed
   // session don't remove it again. Only the transition to closed removes it.
   watch(() => planSessions.value, (next, previous) => {
@@ -68,5 +63,5 @@ export function useOpenPlanSessions() {
     }
   }, { flush: 'sync' })
 
-  return { active, sessions, close }
+  return { active, sessions, remove }
 }

@@ -2,12 +2,11 @@
 import type { BoardFilters } from '~/features/board/utils/board'
 import { boardFilterGroups } from '~/features/board/utils/board'
 
-// The mobile Board's filters (design/board.md): Parent, Status, Priority and
+// The mobile Board's filters (design/board.md): Task with subtasks, Status, Priority and
 // Agent multi-selects
 const props = defineProps<{
   epics: { id: string, label: string }[]
   agents: { id: string, name: string }[]
-  // Classes for each dropdown
   itemClass?: string
 }>()
 const filters = defineModel<BoardFilters>({ required: true })

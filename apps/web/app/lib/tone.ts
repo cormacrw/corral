@@ -67,7 +67,6 @@ export function buttonToneClass(tone: Tone, appearance: ButtonAppearance): strin
   return `${TONE_CLASSES[tone][appearance]} ${appearance === 'solid' ? HOVER[tone].fill : HOVER[tone].wash}`
 }
 
-// Plain coloured text for a status or priority
 export const TONE_TEXT: Record<Tone, string> = {
   primary: 'text-brand', neutral: 'text-muted-foreground', info: 'text-info', warning: 'text-warning', success: 'text-success', error: 'text-destructive'
 }

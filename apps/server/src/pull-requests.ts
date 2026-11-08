@@ -1,51 +1,16 @@
 import { PULL_REQUEST_FILE_LIMIT, PULL_REQUEST_LINE_LIMIT, type PullRequestDetail, type PullRequestFile, type PullRequestStatus } from '@corral/contracts'
-import { failedMergeGates, requiresHumanReview, taskRef } from '@corral/core'
-import { schema, type Database } from '@corral/db'
+import { errorText, failedMergeGates, humanReviewFlag, requiresHumanReview, taskRef } from '@corral/core'
+import { schema, type Database, type ProjectRow } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm'
+import { checkRows, requiredChecks } from './checks.ts'
 import { ApiFailure } from './errors.ts'
-import { GitHubError, type CheckResult, type GitHubClient } from './github.ts'
-import type { GateReads, MergeOrchestrator } from './merge.ts'
-import type { ProjectRow } from './tasks.ts'
+import { GitHubError, type GitHubClient } from './github.ts'
+import type { MergeOrchestrator } from './merge.ts'
 
-const { reviews, tasks } = schema
+const { epics, reviews, tasks } = schema
 
-// The page refetches on every task event and on a timer, so requests overlap.
-// Overlapping reads of one PR share a call; each still reads GitHub live
-// (design/pull-requests.md).
+// Gate checks run this many PRs at a time
 const CONCURRENT_PULL_REQUESTS = 5
-
-export class SharedReads implements GateReads {
-  #github: GateReads
-  #reads = new Map<string, Promise<unknown>>()
-
-  constructor(github: GateReads) {
-    this.#github = github
-  }
-
-  getPullRequest(repository: string, number: number): ReturnType<GitHubClient['getPullRequest']> {
-    return this.#read(`pr ${repository} ${number}`, () => this.#github.getPullRequest(repository, number))
-  }
-
-  checks(repository: string, sha: string): ReturnType<GitHubClient['checks']> {
-    return this.#read(`checks ${repository} ${sha}`, () => this.#github.checks(repository, sha))
-  }
-
-  #read<T>(key: string, load: () => Promise<T>): Promise<T> {
-    const shared = this.#reads.get(key)
-    if (shared) return shared as Promise<T>
-    const value = load().finally(() => this.#reads.delete(key))
-    this.#reads.set(key, value)
-    return value
-  }
-}
-
-// The project's required checks as `results` has them, for any commit
-export function requiredChecks(project: ProjectRow, results: CheckResult[]): PullRequestStatus['ci']['checks'] {
-  return project.requiredChecks.map((name) => {
-    const check = results.find(c => c.name === name)
-    return { name, conclusion: check?.conclusion ?? 'missing' as const, url: check?.url ?? null }
-  })
-}
 
 async function mapLimit<T, R>(items: T[], limit: number, map: (item: T) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length)
@@ -60,7 +25,7 @@ async function mapLimit<T, R>(items: T[], limit: number, map: (item: T) => Promi
 // merge gates. The gate facts come from the merge orchestrator and the
 // verdict from core's failedMergeGates, so this answers exactly as a merge
 // attempt would; everything is read live from GitHub.
-export async function listPullRequests(db: Database, merges: MergeOrchestrator, project: ProjectRow): Promise<PullRequestStatus[]> {
+export async function listPullRequests(db: Database, merges: Pick<MergeOrchestrator, 'gates' | 'displayReads'>, project: ProjectRow): Promise<PullRequestStatus[]> {
   const rows = await db.select().from(tasks)
     .where(and(eq(tasks.projectId, project.id), isNotNull(tasks.prNumber), isNull(tasks.deletedAt), ne(tasks.status, 'merged')))
     .orderBy(asc(tasks.number))
@@ -69,12 +34,15 @@ export async function listPullRequests(db: Database, merges: MergeOrchestrator, 
         .where(inArray(reviews.taskId, rows.map(t => t.id))).orderBy(reviews.taskId, desc(reviews.createdAt))
     : []
   const reviewOf = new Map(latestReviews.map(r => [r.taskId, r]))
+  const epicIds = [...new Set(rows.flatMap(t => t.epicId ? [t.epicId] : []))]
+  const modes = new Map(epicIds.length > 0 ? (await db.select({ id: epics.id, reviewMode: epics.reviewMode }).from(epics).where(inArray(epics.id, epicIds))).map(e => [e.id, e.reviewMode]) : [])
   const statuses = await mapLimit(rows, CONCURRENT_PULL_REQUESTS, async (task): Promise<PullRequestStatus | null> => {
     const report = await merges.gates(task, project, undefined, merges.displayReads)
     const { pr } = report
     if (pr.state !== 'open' || pr.merged) return null
     const review = reviewOf.get(task.id)
-    const checks = requiredChecks(project, report.checks)
+    const checks = checkRows(project.requiredChecks, report.checks)
+    const ci = requiredChecks(project.requiredChecks, report.checks)
     const failed = failedMergeGates(report.facts)
     return {
       taskRef: taskRef(project.prefix, task.number),
@@ -87,7 +55,7 @@ export async function listPullRequests(db: Database, merges: MergeOrchestrator, 
       // As the orchestrator reads CI: a failed required check sends the task
       // back; one that hasn't passed yet is waited on
       ci: {
-        status: checks.some(c => c.conclusion === 'failure') ? 'failing' : checks.every(c => c.conclusion === 'success') ? 'passing' : 'pending',
+        status: ci.failed.length > 0 ? 'failing' : ci.pending.length > 0 ? 'pending' : 'passing',
         checks
       },
       branch: {
@@ -101,7 +69,7 @@ export async function listPullRequests(db: Database, merges: MergeOrchestrator, 
       },
       evidenceComplete: report.facts.evidenceComplete,
       // Human review also covers tasks a human check sent there (D27)
-      humanReviewOutstanding: task.status === 'human_review' || (requiresHumanReview(task.type, task.humanReview) && task.status !== 'ready_to_merge'),
+      humanReviewOutstanding: task.status === 'human_review' || (requiresHumanReview(task.type, humanReviewFlag(task, task.epicId ? modes.get(task.epicId) ?? null : null)) && task.status !== 'ready_to_merge'),
       merge: { eligible: failed.length === 0, failingGate: failed[0] ?? null, failedGates: failed }
     }
   })
@@ -142,17 +110,21 @@ export function capDiff(all: PullRequestFile[]): { files: PullRequestFile[], tot
 }
 
 // Any PR on the project's repository, not just a task's: the epic panel reads
-// epic PRs through this too. Failures come back as API errors because a PR
-// GitHub can't return is an expected answer here, not a server fault; a
-// runner that's offline stays `runner_offline`.
+// epic PRs through this too
 export async function readPullRequest(github: GitHubClient, project: ProjectRow, number: number): Promise<PullRequestDetail> {
   try {
     const { changedFiles, ...pr } = await github.getPullRequestDiff(project.repository, number, PULL_REQUEST_FILE_LIMIT)
     const { files, cut } = capFiles(pr.files)
     return { ...pr, files, totalFiles: changedFiles, truncated: cut || files.length < changedFiles }
   } catch (error) {
-    if (error instanceof ApiFailure) throw error
-    const message = error instanceof Error ? error.message : String(error)
-    throw new ApiFailure(error instanceof GitHubError && error.status === 404 ? 404 : 502, { code: 'pull_request_unavailable', number, message })
+    throw pullRequestUnavailable(error, number)
   }
+}
+
+// A PR GitHub can't return is an expected answer, not a server fault: a 404
+// for one it doesn't have, a 502 otherwise. An API error, such as a runner
+// that's offline, stays as it is.
+export function pullRequestUnavailable(error: unknown, number: number): unknown {
+  if (error instanceof ApiFailure) return error
+  return new ApiFailure(error instanceof GitHubError && error.status === 404 ? 404 : 502, { code: 'pull_request_unavailable', number, message: errorText(error) })
 }

@@ -1,70 +1,26 @@
-import type { Agent, Epic, PlanSession, Project, Task } from '@corral/contracts'
-import { ROLE } from '~/utils/labels'
+import { ROLE_LABELS } from '@corral/core'
+import type { Agent, Project } from '@corral/contracts'
+import { agentPath, PROJECT_PAGES, projectPath, SECTIONS, settingsPath, type ProjectPage } from '~/utils/routes'
 
-// What the search lists (design/app-shell.md's command palette, and the
-// mobile Search screen in design/mobile.md). The web palette and mobile
-// share the pages, so both go to the same places.
+// What the command palette lists (design/app-shell.md)
 export interface SearchPage {
   label: string
   icon: string
   to: string
 }
 
+// A project's pages that search offers: not its settings
+const PROJECT_ICONS: Partial<Record<ProjectPage, string>> = { 'board': 'i-hugeicons-kanban', 'backlog': 'i-hugeicons-left-to-right-list-bullet', 'pull-requests': 'i-hugeicons-git-pull-request' }
+
 export function searchPages(projects: Project[], agents: Agent[]): SearchPage[] {
   return [
-    { label: 'Plan', icon: 'i-hugeicons-message-01', to: '/plan' },
-    { label: 'Inbox', icon: 'i-hugeicons-inbox', to: '/inbox' },
-    { label: 'Settings', icon: 'i-hugeicons-settings-01', to: '/settings/profile' },
+    { label: SECTIONS.plan.label, icon: 'i-hugeicons-message-01', to: SECTIONS.plan.to },
+    { label: SECTIONS.inbox.label, icon: 'i-hugeicons-inbox', to: SECTIONS.inbox.to },
+    { label: SECTIONS.settings.label, icon: 'i-hugeicons-settings-01', to: settingsPath('profile') },
     ...projects.flatMap(p => [
-      { label: `${p.name} · Overview`, icon: 'i-hugeicons-dashboard-square-01', to: `/projects/${p.slug}` },
-      { label: `${p.name} · Board`, icon: 'i-hugeicons-kanban', to: `/projects/${p.slug}/board` },
-      { label: `${p.name} · Backlog`, icon: 'i-hugeicons-left-to-right-list-bullet', to: `/projects/${p.slug}/backlog` },
-      { label: `${p.name} · Pull requests`, icon: 'i-hugeicons-git-pull-request', to: `/projects/${p.slug}/pull-requests` }
+      { label: `${p.name} · Overview`, icon: 'i-hugeicons-dashboard-square-01', to: projectPath(p.slug) },
+      ...PROJECT_PAGES.flatMap(({ page, label }) => PROJECT_ICONS[page] ? [{ label: `${p.name} · ${label}`, icon: PROJECT_ICONS[page], to: projectPath(p.slug, page) }] : [])
     ]),
-    ...agents.map(a => ({ label: `${a.name} · ${ROLE[a.role]}`, icon: 'i-hugeicons-robot-01', to: `/agents/${a.name.toLowerCase()}` }))
+    ...agents.map(a => ({ label: `${a.name} · ${ROLE_LABELS[a.role]}`, icon: 'i-hugeicons-robot-01', to: agentPath(a.name) }))
   ]
-}
-
-export interface SearchData {
-  projects: Project[]
-  agents: Agent[]
-  tasks: Task[]
-  epics: Epic[]
-  planSessions: PlanSession[]
-}
-
-export interface MobileSearchResults {
-  pages: SearchPage[]
-  epics: Epic[]
-  tasks: Task[]
-  sessions: PlanSession[]
-}
-
-// Each group is capped so a short query stays one screen of results
-export const SEARCH_LIMIT = 8
-
-const matches = (query: string, ...texts: string[]) => texts.some(text => text.toLowerCase().includes(query))
-
-// The mobile Search screen: with no query it offers only the pages to go
-// to; a query matches labels, titles and task refs, case-insensitively
-export function mobileSearch(query: string, data: SearchData, limit = SEARCH_LIMIT): MobileSearchResults {
-  const q = query.trim().toLowerCase()
-  const pages = searchPages(data.projects, data.agents)
-  if (!q) return { pages: pages.slice(0, limit), epics: [], tasks: [], sessions: [] }
-  return {
-    pages: pages.filter(p => matches(q, p.label)).slice(0, limit),
-    // Parents are tasks; only a collapsed epic has nothing else to find it by
-    epics: [],
-    tasks: data.tasks.filter(t => matches(q, t.title, t.ref)).slice(0, limit),
-    sessions: data.planSessions.filter(s => matches(q, s.title)).slice(0, limit)
-  }
-}
-
-// Splits text around the first case-insensitive match, so the matched part
-// can be bold
-export function highlight(text: string, query: string): { before: string, match: string, after: string } {
-  const q = query.trim().toLowerCase()
-  const at = q ? text.toLowerCase().indexOf(q) : -1
-  if (at < 0) return { before: text, match: '', after: '' }
-  return { before: text.slice(0, at), match: text.slice(at, at + q.length), after: text.slice(at + q.length) }
 }

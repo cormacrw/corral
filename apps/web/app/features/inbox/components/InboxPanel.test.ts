@@ -6,14 +6,14 @@ import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import type { InboxPanelContext } from '~/features/inbox/composables/useInboxPanel'
 import { testQueryClient } from '~/queries/mount-with-query'
-import { inbox } from '~/prototype/fixtures'
+import { taskItem } from '~/features/inbox/test-items'
 import InboxPanel from '~/features/inbox/components/InboxPanel.vue'
-import TaskRefText from '~/features/tasks/components/TaskRefText.vue'
+import TaskRefText from '~/components/shared/TaskRefText.vue'
 
 enableAutoUnmount(afterEach)
 
-vi.mock('~/queries/shell', () => ({ shell: () => ({ projects: { data: { value: [{ prefix: 'COR' }] } } }) }))
-vi.mock('~/features/tasks/components/TaskLink.vue', () => ({ default: { props: ['taskRef'], template: '<a :href="`/tasks/${taskRef}`"><slot /></a>' } }))
+vi.mock('~/queries/shell', () => ({ useShell: () => ({ projects: [{ prefix: 'COR' }], agents: [] }) }))
+vi.mock('~/components/shared/TaskLink.vue', () => ({ default: { props: ['taskRef'], template: '<a :href="`/tasks/${taskRef}`"><slot /></a>' } }))
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -22,7 +22,7 @@ afterEach(() => {
 it('links known refs in the TL;DR of an item with no message', () => {
   for (const name of ['ref', 'computed'] as const) vi.stubGlobal(name, vue[name])
   vi.stubGlobal('useRouter', () => ({ resolve: (path: string) => ({ href: path }) }))
-  const item = { ...inbox().needsYou.find(i => i.taskRef)!, message: undefined, body: '## Why\n\nBlocked on COR-12, not XX-3.\n\nMore detail.' } as TaskInboxItem
+  const item: TaskInboxItem = { ...taskItem('COR-5', 'blocked'), message: undefined, body: '## Why\n\nBlocked on COR-12, not XX-3.\n\nMore detail.' }
   const ctx = { item, task: null, evidence: [], reviews: [], actions: [], tab: 'overview' } as unknown as InboxPanelContext
   const wrapper = mount(InboxPanel, {
     props: { ctx },

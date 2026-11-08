@@ -1,3 +1,4 @@
+import { errorText } from '@corral/core'
 import { mkdirSync } from 'node:fs'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -42,7 +43,7 @@ export class UpdateStatus {
     if (this.behind && this.autoUpdate && this.updateState !== 'failed') this.draining = true
   }
 
-  // A protocol refusal (4000) means no work until this runner has updated, so it
+  // A protocol refusal means no work until this runner has updated, so it
   // asks the host updater itself, whatever autoUpdate says. A failed attempt at
   // this target stays failed for a human, rather than retrying on each refusal.
   refused(commit: string): void {
@@ -57,7 +58,6 @@ export class UpdateStatus {
     this.updateRequested ||= updateRequested
   }
 
-  // Reads the host updater's feedback, then writes the status
   async refresh(activeRunCount: number): Promise<void> {
     try {
       const raw = await readFile(join(this.dataDir, 'updater-result.json'), 'utf8')
@@ -97,7 +97,7 @@ export class UpdateStatus {
         this.#writeFailed = false
       } catch (error) {
         // The next poll tries again; once is enough to say so
-        if (!this.#writeFailed) console.warn(`Could not write update-status.json: ${error instanceof Error ? error.message : String(error)}`)
+        if (!this.#writeFailed) console.warn(`Could not write update-status.json: ${errorText(error)}`)
         this.#writeFailed = true
         return
       }

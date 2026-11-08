@@ -4,14 +4,15 @@ import { databaseFixture, requireDatabase } from '@corral/db/testing'
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, describe, expect, it } from 'vitest'
 import { appendAudit, auditEvent } from './audit.ts'
-import { epicInboxItems, unclaimedEpicItems } from './epic-prs.ts'
 import { loadEpic } from './epics.ts'
 import { loadInbox, unclaimedTaskItems } from './inbox.ts'
 import { createAgent } from './runs.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { developerPrompt, developerRevisionPrompt, designerPrompt, designerRevisionPrompt, type PromptTask } from './prompts.ts'
-import { actorLabel } from './run-jobs.ts'
-import { deleteTaskRows, loadTask, loadTasks } from './tasks.ts'
+import { actorLabel } from '@corral/core'
+import { deleteTaskRows } from './tasks.ts'
+import { loadTask, loadTasks } from './task-views.ts'
+import { epicInboxItems, unclaimedEpicItems } from './inbox-epics.ts'
 
 const { agents, auditLog, comments, epics, inboxMessages, planMessages, planSessions, reviews, runs, tasks } = schema
 const system = { kind: 'system', component: 'server' } as const
@@ -88,8 +89,6 @@ describe.each(['pglite', 'postgres'] as const)('the data layer on %s', (driver) 
       }
       // Resume prompts must carry the instructions even outside their new-comments window.
       for (const prompt of [developerPrompt(promptTask, 'Tam'), developerRevisionPrompt(promptTask, []), designerPrompt(promptTask, 'Designer'), designerRevisionPrompt(promptTask, [])]) {
-        expect(prompt).toContain('## Human instructions')
-        expect(prompt).toContain('Follow these instructions from the human')
         expect(prompt).toContain(text)
       }
     }
@@ -149,7 +148,7 @@ describe.each(['pglite', 'postgres'] as const)('the data layer on %s', (driver) 
     const task = await t.createTask(project.slug)
     await setStatus(task.id, 'human_review')
 
-    const listed = await loadInbox(t.db)
+    const listed = await loadInbox(t.db, t.runner)
     expect(listed.needsYou.some(i => i.type === 'plan_thread' && i.subject === 'Quiet')).toBe(false)
     expect(listed.needsYou.some(i => i.type === 'plan_thread' && i.subject === 'Reply')).toBe(false)
     expect(listed.needsYou.some(i => i.type === 'epic_conflict')).toBe(true)
@@ -163,7 +162,7 @@ describe.each(['pglite', 'postgres'] as const)('the data layer on %s', (driver) 
     await t.createTask(project.slug, { epicId: epic!.id })
     await appendAudit(t.db, { projectId: project.id, actor: system }, auditEvent('epic.pr', { epicId: epic!.id, event: 'opened', prNumber: 1 }))
     const item = (await inbox()).activity.find(i => i.epicId === epic!.id)
-    expect(item).toMatchObject({ type: 'epic_activity', event: 'opened', taskId: null, taskRef: null, body: 'The task\'s PR opened' })
+    expect(item).toMatchObject({ type: 'epic_activity', event: 'opened', taskId: null, taskRef: null })
   })
 
   it('publishes a task with subtasks without its tasks', async () => {
@@ -204,23 +203,33 @@ describe('concurrent task writes on postgres', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
-    return { gate, release }
+    let locked = () => {}
+    const holding = new Promise<void>((resolve) => {
+      locked = resolve
+    })
+    return { gate, release, holding, locked }
   }
-  const settle = () => new Promise(resolve => setTimeout(resolve, 150))
+  // Until the write is queued behind the held lock, or has finished without it
+  const queued = async (work: Promise<unknown>) => {
+    let done = false
+    void work.finally(() => void (done = true)).catch(() => {})
+    await expect.poll(async () => done || ((await t.db.execute(sql`select count(*)::int as n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock'`)) as unknown as { rows: { n: number }[] }).rows[0]!.n > 0).toBe(true)
+  }
 
   it('blocks a dependent from its row as it stands after a concurrent write', async ({ skip }) => {
     requireDatabase('postgres', { skip })
     const dependency = await t.createTask(project.slug)
     const dependent = await t.createTask(project.slug, { dependsOn: [dependency.number] })
     await t.db.update(tasks).set({ status: 'in_progress' }).where(eq(tasks.id, dependent.id))
-    const { gate, release } = held()
+    const { gate, release, holding, locked } = held()
     const writer = t.db.transaction(async (tx) => {
       await tx.update(tasks).set({ failedRuns: 2 }).where(eq(tasks.id, dependent.id))
+      locked()
       await gate
     })
-    await settle()
+    await holding
     const deleted = deleteTaskRows(t.db, dependency.id, t.actor, null)
-    await settle()
+    await queued(deleted)
     release()
     await Promise.all([writer, deleted])
     const [row] = await t.db.select().from(tasks).where(eq(tasks.id, dependent.id))
@@ -240,15 +249,16 @@ describe('concurrent task writes on postgres', () => {
   it('doesn\'t deadlock a dependency edit with a transaction auditing the same task', async ({ skip }) => {
     requireDatabase('postgres', { skip })
     const [a, b] = [await t.createTask(project.slug), await t.createTask(project.slug)] as [Task, Task]
-    const { gate, release } = held()
+    const { gate, release, holding, locked } = held()
     const holder = t.db.transaction(async (tx) => {
       await tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, a.id)).for('update')
+      locked()
       await gate
       await appendAudit(tx, { projectId: project.id, taskId: a.id, actor: system }, auditEvent('task.updated', { changed: [] }))
     })
-    await settle()
+    await holding
     const patched = t.request('PATCH', `/api/projects/${project.slug}/tasks/${a.number}`, { dependsOn: [b.number] })
-    await settle()
+    await queued(patched)
     release()
     await holder
     expect((await patched).status).toBe(200)

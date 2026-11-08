@@ -1,22 +1,17 @@
 <script setup lang="ts">
+import { inboxPath } from '~/utils/routes'
 import { useInboxView } from '~/features/inbox/composables/useInboxView'
 import InboxItemRow from '~/features/inbox/components/InboxItemRow.vue'
 
 // The Inbox list on a phone (design/inbox.md, design/mobile.md), a screen of
 // its own at /inbox. The item is InboxMobileItem.
-const { list, inbox, error, tab, search, items, count, emptyText, deleteThread } = useInboxView()
+const { list, inbox, error, tab, tabItems, search, items, emptyText, deleteThread } = useInboxView()
 
 const searching = ref(Boolean(search.value))
 function toggleSearch() {
   searching.value = !searching.value
   if (!searching.value) search.value = ''
 }
-
-// Server order: newest first, task items and threads together (D11)
-const tabs = computed(() => [
-  { label: 'Inbox', value: 'needsYou', icon: 'i-hugeicons-inbox', count: count.value },
-  { label: 'Resolved', value: 'resolved', icon: 'i-hugeicons-checkmark-circle-02', count: inbox.value?.resolved.length ?? 0 }
-])
 </script>
 
 <template>
@@ -35,7 +30,7 @@ const tabs = computed(() => [
       <div class="flex items-center gap-2">
         <AppTabs
           v-model="tab"
-          :items="tabs"
+          :items="tabItems"
           :content="false"
           class="min-w-0 flex-1"
           list-class="w-full"
@@ -88,11 +83,11 @@ const tabs = computed(() => [
           @delete="deleteThread(item)"
         >
           <NuxtLink
-            :to="`/inbox/${item.id}`"
+            :to="inboxPath(item.id)"
             draggable="false"
             class="flex gap-3 border-b border-border px-4 py-3 active:bg-muted"
           >
-            <PlanThreadRow
+            <InboxItemRow
               :item="item"
               mobile
             />
@@ -100,7 +95,7 @@ const tabs = computed(() => [
         </SwipeToDelete>
         <NuxtLink
           v-else
-          :to="`/inbox/${item.id}`"
+          :to="inboxPath(item.id)"
           class="flex gap-3 border-b border-border px-4 py-3 active:bg-muted"
         >
           <InboxItemRow

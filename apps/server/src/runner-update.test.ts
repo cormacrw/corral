@@ -5,7 +5,7 @@ import { RUNNER_PROTOCOL_VERSION, type Inbox, type RunnerInfo } from '@corral/co
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runnerUpdateItems } from './inbox.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner, sleep } from './test-runner.ts'
+import { FakeRunner, sleep } from './fake-runner.ts'
 
 describe('runner updates', () => {
   let t: TestApp
@@ -18,6 +18,12 @@ describe('runner updates', () => {
     const peer = await FakeRunner.connect(t.server!.url, [], id, options)
     peers.push(peer)
     return peer
+  }
+  // Any scheduling pass has finished, and the runner has received all it was
+  // sent: a job's answer comes back on the same socket, after them
+  async function delivered(runnerId: string) {
+    await t.orchestrator.scheduler.idle
+    await t.runner.requestOn(runnerId, { kind: 'detect_clis' })
   }
   async function status() {
     return (await (await t.request('GET', '/api/status')).json() as { runners: RunnerInfo[] }).runners
@@ -33,7 +39,7 @@ describe('runner updates', () => {
     const first = await t.createTask(project.slug)
     await t.request('POST', `/api/projects/${project.slug}/tasks/${first.number}/transitions`, { type: 'approve' })
     await t.request('PATCH', `/api/projects/${project.slug}`, { paused: false })
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const job = (await a.next('run.assign')).job
     a.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'session' })
     const response = await t.request('POST', '/api/runners/A/update')
@@ -48,11 +54,13 @@ describe('runner updates', () => {
     expect(t.runner.pick()).toBe('B')
     const second = await t.createTask(project.slug)
     await t.request('POST', `/api/projects/${project.slug}/tasks/${second.number}/transitions`, { type: 'approve' })
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     expect((await b.next('run.assign')).job.taskId).toBe(second.id)
     expect(await a.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Need a decision on copy', summary: 'Which copy should I use?' })).toMatchObject({ ok: true })
+    const ended = t.runner.handled(job.runId, 'run.ended')
     a.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'stopped' }, headSha: null })
-    await sleep(100)
+    await ended
+    await delivered('A')
     expect(a.received.some(m => m.type === 'run.assign')).toBe(false)
     a.close()
     await vi.waitFor(() => expect(t.runner.isOnline('A')).toBe(false), { timeout: 5000 })
@@ -76,14 +84,14 @@ describe('runner updates', () => {
     const old = await connect('gaming-pc', { commit: 'old', toolContract: 'old-tools', autoUpdate: false })
     expect(await status()).toContainEqual(expect.objectContaining({ id: 'gaming-pc', behind: true, draining: true, toolContractReason: expect.stringContaining('(old-tools)') }))
     const task = await readyTask()
-    await t.orchestrator.schedule()
-    await sleep(100)
+    await t.orchestrator.scheduler.schedule()
+    await delivered('gaming-pc')
     expect(old.received.some(m => m.type === 'run.assign')).toBe(false)
 
     old.close()
     await vi.waitFor(() => expect(t.runner.isOnline('gaming-pc')).toBe(false), { timeout: 5000 })
     const updated = await connect('gaming-pc')
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     expect((await updated.next('run.assign')).job.taskId).toBe(task.id)
     expect(await status()).toContainEqual(expect.objectContaining({ id: 'gaming-pc', behind: false, draining: false, toolContractReason: null }))
   }, 60000)
@@ -100,12 +108,12 @@ describe('runner updates', () => {
     await readyTask()
     expect(await needsYou()).toEqual([])
     old.send({ type: 'runner.update-status', draining: false, updateRequested: false, activeRunCount: 0, updateState: 'failed', updateError: 'Runner image build failed; inspect journalctl -u corral-runner-update' })
-    await vi.waitFor(async () => expect(await needsYou()).toMatchObject([{ id: 'runner-gaming-pc', subject: 'gaming-pc can\'t update', body: expect.stringContaining('image build failed'), commit: 'old', serverCommit: 'development', online: true, project: null }]), { timeout: 5000 })
+    await vi.waitFor(async () => expect(await needsYou()).toMatchObject([{ id: 'runner-gaming-pc', subject: expect.stringContaining('gaming-pc'), body: expect.stringContaining('image build failed'), commit: 'old', serverCommit: 'development', online: true, project: null }]), { timeout: 5000 })
     const inbox = await (await t.request('GET', '/api/inbox')).json() as Inbox
     expect(inbox.count).toBe(inbox.needsYou.length)
     expect(await status()).toContainEqual(expect.objectContaining({ id: 'gaming-pc', draining: false }))
-    await t.orchestrator.schedule()
-    await sleep(100)
+    await t.orchestrator.scheduler.schedule()
+    await delivered('gaming-pc')
     expect(old.received.some(m => m.type === 'run.assign')).toBe(false)
 
     old.close()

@@ -1,5 +1,15 @@
-import type { Agent, Comment, Deployment, DraftSession, Epic, GlobalStatus, Plan, PlanMessage, PlanSession, Profile, Project, Run, Task } from './api.ts'
-import type { RunEvent, RunnerStatus } from './runner.ts'
+import type { Agent, GlobalStatus, Run } from './agents.ts'
+import type { Deployment } from './deployments.ts'
+import type { Epic } from './epics.ts'
+import type { DraftSession, Plan, PlanMessage, PlanSession } from './plans.ts'
+import type { Profile } from './profile.ts'
+import type { Project } from './projects.ts'
+import type { RunEvent } from './runner.ts'
+import type { RunnerStatus } from './runner-status.ts'
+import type { Comment, Task } from './tasks.ts'
+
+// Sent well inside Cloudflare's ~100 s idle timeout (D12)
+export const SSE_HEARTBEAT_MS = 25_000
 
 // Live updates the server streams to web over SSE (GET /api/events).
 // The event name is `type`; the data is the whole event as JSON.
@@ -34,5 +44,3 @@ export type ServerEvent =
   | { type: 'inbox.read', itemType: string, id: string }
 
 export type ServerEventType = ServerEvent['type']
-
-export { SSE_HEARTBEAT_MS } from './client.ts'

@@ -1,17 +1,17 @@
 <script setup lang="ts">
 import type { ReleaseNotesItem } from '@corral/contracts'
 import { useMutation } from '@tanstack/vue-query'
-import { dismissDeployment, readDeployment } from '~/queries/inbox'
+import { dismissDeployment, markRead } from '~/queries/inbox'
 import TimeAgo from '~/components/shared/TimeAgo.vue'
 
 const props = defineProps<{ item: ReleaseNotesItem }>()
-const read = useMutation(readDeployment)
+const read = useMutation(markRead)
 const dismiss = useMutation(dismissDeployment)
 const error = computed(() => (dismiss.error.value ?? read.error.value)?.message ?? null)
 // By deployment, not its unread flag: a failed read restores the flag, and
 // must not try again in a loop
 watch(() => props.item.deploymentId, (id) => {
-  if (props.item.unread) read.mutate(id)
+  if (props.item.unread) read.mutate({ type: 'release_notes', id })
 }, { immediate: true })
 </script>
 

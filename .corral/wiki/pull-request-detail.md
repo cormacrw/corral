@@ -14,4 +14,4 @@ Errors: a task with no PR is 404 `no_pull_request`. GitHub answering 404 is 404 
 
 The query waits for the task, because only the task says whether the item is a design or spike. A task that failed to load therefore hides the tabs until its Retry works. Each open item fetches its PR straight away, for the N in Code diff N, even if neither tab is opened. N is `totalFiles`, not `files.length`.
 
-The prototype's `mock-api.ts` serves both routes from `pullRequestDetails` in its fixtures.
+The prototype's `mock-api.ts` serves the by-number route from `pullRequestDetails` in its fixtures. Web never calls the by-task route, so the prototype doesn't answer it.

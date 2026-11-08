@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { claimNextTask } from './claim.ts'
 import { publishDependents } from './dependent-tasks.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 const { agents, comments, epics, epicDependencies, tasks, taskDependencies } = schema
 
@@ -129,10 +129,11 @@ describe('delivery dependencies', () => {
     })
 
     it('refuses at propose time a promotion that would make a cycle', async () => {
-      const { project, propose } = await start()
+      const { project, propose, plans } = await start()
       const big = await t.createTask(project.slug)
       const result = await propose({ parents: [{ key: 'p', ref: big.ref }], tasks: [item('a', { parent: 'p', dependsOn: [big.ref] }), item('b', { parent: 'p' })] })
-      expect(JSON.stringify(result)).toContain('The plan was not saved')
+      expect(result).toMatchObject({ ok: false })
+      expect(await plans()).toEqual([])
     })
 
     it('refuses a second plan promoting the same task in words', async () => {
@@ -141,7 +142,8 @@ describe('delivery dependencies', () => {
       const two = [item('a', { parent: 'p' }), item('b', { parent: 'p' })]
       expect(await propose({ parents: [{ key: 'p', ref: big.ref }], tasks: two })).toMatchObject({ ok: true })
       const other = await turn(project.id)
-      expect(JSON.stringify(await other.propose({ parents: [{ key: 'p', ref: big.ref }], tasks: two }))).toContain('another plan already gives')
+      expect(await other.propose({ parents: [{ key: 'p', ref: big.ref }], tasks: two })).toMatchObject({ ok: false })
+      expect(await other.plans()).toEqual([])
     })
 
     it('never deletes a commented task because its plan was discarded', async () => {
@@ -241,7 +243,7 @@ describe('delivery dependencies', () => {
       await t.db.insert(comments).values([{ taskId: parent.id, author: t.actor, body: 'Pinned on the task', pinned: true }, { taskId: parent.id, author: t.actor, body: 'Not pinned' }])
       await t.request('PATCH', `/api/projects/${project.slug}`, { paused: false })
       await t.db.update(tasks).set({ status: 'ready' }).where(eq(tasks.id, a.id))
-      await t.orchestrator.schedule()
+      await t.orchestrator.scheduler.schedule()
       const { job } = await runner.next('run.assign', m => m.job.taskId === a.id)
       expect(job.prompt).toContain('Pinned on the task')
       expect(job.prompt).not.toContain('Not pinned')

@@ -3,8 +3,8 @@ import { checkDependencies, type DependencyProblem } from './dependencies.ts'
 import type { DesignVersionStatus } from './design.ts'
 import type { EpicReviewMode } from './project.ts'
 import { checkDefinitionOfReady, type ReadyProblem } from './ready.ts'
-import type { TaskStatus } from './status.ts'
-import type { TaskPriority, TaskType } from './task.ts'
+import { isNotStarted, type TaskStatus } from './status.ts'
+import { TASK_REF_PATTERN, type TaskPriority, type TaskType } from './task.ts'
 
 // A plan version's lifecycle (design/plan.md)
 export const PLAN_STATUSES = ['proposed', 'approved', 'superseded', 'discarded'] as const
@@ -46,9 +46,8 @@ export interface ProposedTask extends PlanTaskContent {
   // The ref of an existing task this one revises (e.g. COR-4), instead of
   // creating a new one
   ref?: string | undefined
-  // The key of the epic it belongs to (or its existing id when reconstructing
-  // edited Drafts for approval). A task without one has no
-  // epic.
+  // The key of the epic it belongs to, or its existing id when reconstructing
+  // edited Drafts for approval
   epic?: string | undefined
   dependsOn: string[]
   // The approved design version this task builds, and the screens (ids
@@ -109,10 +108,6 @@ export function designPinKey(pin: Pick<DesignPin, 'taskRef' | 'version'>): strin
   return `${pin.taskRef.toUpperCase()}@v${pin.version}`
 }
 
-// Only tasks nobody has started can be revised by a plan, so a Ready task
-// also has to be unclaimed
-const REVISABLE_STATUSES: readonly TaskStatus[] = ['backlog', 'draft', 'ready']
-
 // Identity maps match proposed keys to rows reused by a revision.
 export interface PlanDependencyContext {
   epics: ReadonlyMap<string, readonly string[]>
@@ -146,7 +141,7 @@ export function checkPlan(plan: ProposedPlan, refs: ReadonlyMap<string, PlanRef>
     if (task.epic && !epicKeys.has(task.epic)) problems.push({ code: 'unknown_epic', key: task.key, epic: task.epic })
     if (seen.has(task.key)) problems.push({ code: 'duplicate_key', key: task.key })
     seen.add(task.key)
-    if (/^[a-z]+-\d+$/i.test(task.key)) problems.push({
+    if (TASK_REF_PATTERN.test(task.key)) problems.push({
       code: 'key_shaped_like_ref', key: task.key,
       message: `Task key "${task.key}" looks like a task ref. Choose a key such as "task-setup" so dependencies on existing tasks stay unambiguous.`
     })
@@ -233,7 +228,7 @@ function refProblem(key: string, ref: string, found: PlanRef, revising: boolean)
     case 'task':
       if (!revising) return null
       if (found.status === 'ready' && found.pickedUp) return { code: 'ref_not_revisable', key, ref, status: found.status, message: `${ref} has already been picked up, so a plan can't revise it. Use update_task to edit it directly, or depend on it instead.` }
-      if (REVISABLE_STATUSES.includes(found.status)) return null
+      if (isNotStarted(found.status)) return null
       return { code: 'ref_not_revisable', key, ref, status: found.status, message: `${ref} is ${found.status}; only Backlog and unclaimed Ready tasks can be revised by a plan. Leave out its ref to propose a new task, or depend on it instead.` }
   }
 }
@@ -251,6 +246,10 @@ function designProblem(key: string, pin: DesignPin, found: DesignPinTarget): Pla
       return null
   }
 }
+
+// Approving a plan puts its Drafts on the board (Ready) or in the Backlog
+export const PLAN_APPROVAL_TARGETS = ['ready', 'backlog'] as const satisfies readonly TaskStatus[]
+export type PlanApprovalTarget = typeof PLAN_APPROVAL_TARGETS[number]
 
 export const PLAN_CHANGES = ['added', 'changed', 'unchanged', 'removed'] as const
 export type PlanChange = typeof PLAN_CHANGES[number]

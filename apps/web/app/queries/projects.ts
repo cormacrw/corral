@@ -1,6 +1,6 @@
 import { partialMatchKey, queryOptions } from '@tanstack/vue-query'
 import type { CreateProjectInput, FlowMetricsQuery, PatchProjectInput, Project } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { api } from '~/queries/api'
 import { clearProject, defineMutation, removedProjectStale } from './dependencies'
 import { keys } from './keys'
 
@@ -38,7 +38,7 @@ export const setProjectThumbnail = defineMutation<Project, { slug: string, image
   mutationFn: ({ slug, image }) => image ? api.projects.setThumbnail(slug, image) : api.projects.clearThumbnail(slug),
   invalidates: (_, { slug }) => [keys.projects.list(), keys.projects.detail(slug)]
 })
-export const removeProject = defineMutation<null, { id: string, slug: string, confirm: string }>({
+export const removeProject = defineMutation<unknown, { id: string, slug: string, confirm: string }>({
   mutationFn: ({ slug, confirm }) => api.projects.remove(slug, confirm),
   write: (client, _, { id }) => clearProject(client, id),
   invalidates: removedProjectStale

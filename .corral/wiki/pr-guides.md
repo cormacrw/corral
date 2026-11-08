@@ -8,8 +8,8 @@ wrote; Files is the raw diff.
 claims the `pull_request_guides` row (one per project PR, with the head SHA it's
 for) as `generating` and returns at once; a POST while one is generating returns
 it instead of starting another. A row stuck generating for over 5 minutes counts
-as failed. The server sends a `pr_guide` setup job: the runner runs `claude -p`
-with `config.titleModel`, no tools and no MCP, like Plan session titles, so
+as failed. The server sends a `pr_guide` setup job: the runner asks the default
+runtime's adapter (`AgentRuntime.ask`, so `claude -p`) with `config.smallModel`, no tools and no MCP, like Plan session titles, so
 Corral never handles a model credential (D1, D2, D18). The prompt
 (`guidePrompt` in `apps/server/src/pull-request-guides.ts`) carries the task's
 title, goal and criteria with their IDs, and each file's hunks numbered from 0

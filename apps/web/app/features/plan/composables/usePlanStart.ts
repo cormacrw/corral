@@ -1,18 +1,25 @@
 import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
-import type { AgentRuntime } from '@corral/contracts'
+import { DEFAULT_AGENT_RUNTIME, type AgentRuntime } from '@corral/core'
 import { useDraft } from '~/composables/useDraft'
+import type { PlanStart } from '~/queries/dependencies'
+import { usePlanStarts } from '~/queries/plan'
 import { clisQuery } from '~/queries/setup'
 import { detectedRuntimes, runtimeLabel } from '~/utils/labels'
+import { planThreadPath } from '~/utils/routes'
 
 const ATTACHED_IMAGE = /!\[([^\]]*)\]\(attachment:([^)]*)\)/g
+
+// A failed start sent back to the prompt, which takes it up once
+export const useRestoredStart = () => useState<PlanStart | null>('restored-plan', () => null)
 
 // A new Plan session before it starts (design/plan.md): the project, runtime,
 // draft and attached task, restored when a failed start comes back to the prompt.
 export function usePlanStart(initialProjectId: () => string | undefined) {
   const shell = useShell()
   const router = useRouter()
-  const pending = usePendingPlan()
+  const pending = usePlanStarts()
+  const restoredStart = useRestoredStart()
 
   const lastProject = useLocalStorage<string | null>('corral.plan.project', null)
   const projectId = ref<string | null>(initialProjectId() ?? lastProject.value)
@@ -26,14 +33,14 @@ export function usePlanStart(initialProjectId: () => string | undefined) {
   const { data: clis } = useQuery(computed(() => ({ ...clisQuery(), enabled: Boolean(shell.runner?.online) })))
   const runtimes = computed(() => {
     const found = detectedRuntimes(clis.value ?? [])
-    return found.length > 0 ? found : ['claude-code' as const]
+    return found.length > 0 ? found : [DEFAULT_AGENT_RUNTIME]
   })
   const runtimeItems = computed(() => runtimes.value.map(r => ({ label: runtimeLabel(r), value: r })))
-  const lastRuntime = useLocalStorage<AgentRuntime>('corral.plan.runtime', 'claude-code')
+  const lastRuntime = useLocalStorage<AgentRuntime>('corral.plan.runtime', DEFAULT_AGENT_RUNTIME)
   const runtime = computed<AgentRuntime>(() => runtimes.value.includes(lastRuntime.value) ? lastRuntime.value : runtimes.value[0]!)
 
-  const restored = pending.restored.value
-  pending.restored.value = null
+  const restored = restoredStart.value
+  restoredStart.value = null
   if (restored) {
     projectId.value = restored.session.projectId
     lastRuntime.value = restored.session.runtime
@@ -54,7 +61,7 @@ export function usePlanStart(initialProjectId: () => string | undefined) {
     const id = pending.seed(project.value?.id ?? null, message, runtime.value, taskRef.value ?? undefined)
     usePlanThreads().add(id)
     text.value = ''
-    await router.push(`/plan/${id}`)
+    await router.push(planThreadPath(id))
     void pending.start(id)
     return true
   }

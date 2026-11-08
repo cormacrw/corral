@@ -2,11 +2,11 @@ import { schema, type Database } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import type { EventBus } from './events.ts'
 import type { RunnerHub } from './runner-hub.ts'
-import { unclaimedTaskItems } from './inbox.ts'
-import { loadTask } from './tasks.ts'
-import { loadEpic } from './epics.ts'
-import { unclaimedEpicItems } from './epic-prs.ts'
+import { INBOX_CANDIDATE_STATUSES, unclaimedTaskItems } from './inbox.ts'
+import { publishEpic } from './epics.ts'
 import { cleanMessage, fallbackMessage, messageFacts, messagePrompt, type MessageItem, type PreparedItem } from './inbox-message.ts'
+import { loadTask } from './task-views.ts'
+import { unclaimedEpicItems } from './inbox-epics.ts'
 
 // Runs on arrivals, never on reads. The durable insert is also the claim:
 // duplicate events and server restarts cannot dispatch a second job.
@@ -22,8 +22,10 @@ export class InboxMessages {
     this.#events = events
     this.#runner = runner
     events.subscribe((event) => {
-      if (event.type === 'task.updated' && ['human_review', 'blocked', 'failed', 'in_progress', 'agent_review'].includes(event.task.status)) this.refresh(event.task.id, 'task')
-      if (event.type === 'epic.updated' && ['human_review', 'conflict'].includes(event.epic.reviewState ?? '')) this.refresh(event.epic.id, 'epic')
+      if (event.type === 'task.updated' && INBOX_CANDIDATE_STATUSES.includes(event.task.status)) this.refresh(event.task.id, 'task')
+      // What puts an epic in the Inbox (a sync error, a fix's question) isn't
+      // all on the event, so the Inbox's own query decides
+      if (event.type === 'epic.updated') this.refresh(event.epic.id, 'epic')
     })
     this.refresh()
   }
@@ -46,7 +48,7 @@ export class InboxMessages {
 
   async #generate(item: MessageItem, arrival: string, prompt: string): Promise<void> {
     try {
-      const result = await this.#runner.request({ kind: 'inbox_message', prompt }, 40_000)
+      const result = await this.#runner.request({ kind: 'inbox_message', prompt })
       const message = cleanMessage(result.message)
       if (!message) throw new Error('Unusable Inbox message')
       await this.#db.update(schema.inboxMessages).set({ message }).where(eq(schema.inboxMessages.arrival, arrival))
@@ -55,7 +57,7 @@ export class InboxMessages {
       if (item.taskId) {
         this.#events.publish({ type: 'task.updated', task: await loadTask(this.#db, item.taskId) })
       } else if (item.epicId) {
-        this.#events.publish({ type: 'epic.updated', epic: await loadEpic(this.#db, item.epicId) })
+        await publishEpic(this.#db, this.#events, item.epicId)
       }
     } catch (error) {
       console.error(`Generating Inbox message ${arrival} failed; keeping fallback`, error instanceof Error ? error.message : error)

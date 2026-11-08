@@ -8,8 +8,13 @@ Prompts and delivery messages say “the task's PR” and “the task's branch�
 
 A task with subtasks is a `tasks` row with status `parent`;
 `epics.task_id` points at it and each subtask's `tasks.epicId` points at that
-delivery record. `apps/server/src/parents.ts` owns the rollup and synchronises
-the title and description between the two rows.
+delivery record. `apps/server/src/parents.ts` is the only module that reads
+that encoding: promotion, creating and deleting delivery records, the rollup,
+syncing title and description between the two rows, and the dependency-cycle
+check. Deleting either row keeps it while it has comments. The delivery rules
+themselves are core's (`hasPrToLand`, `holdsDeliveryOpen`, `parentHolds`,
+`boardComplete` in `packages/core/src/parent.ts`); `delivery-sql.ts` has their
+SQL forms, held to them by `delivery-sql.test.ts`.
 
 - `ensureParent` runs whenever a task joins a delivery record. Its second
   subtask creates the task row, including when Corral adds an internal fix.
@@ -26,6 +31,7 @@ the title and description between the two rows.
 - `COMPATIBLE_TOOL_CONTRACTS` keeps runners on the previous build taking runs.
   PM arguments keep `update_parent`, `parentId`, `parents` and
   `defaultReviewMode`; `neutralPmCall` translates older calls and saved cards.
-- Stored operation errors are compared by text. `epic-sync.ts` and
-  `task-integration.ts` accept legacy errors using both older vocabularies,
-  while newly generated messages use task/subtask wording (COR-520).
+- Stored operation errors are compared by text. `ENDINGS` in `operations.ts`
+  names each ending once with its stored text and the legacy wordings of both
+  older vocabularies; newly generated messages use task/subtask wording
+  (COR-520).

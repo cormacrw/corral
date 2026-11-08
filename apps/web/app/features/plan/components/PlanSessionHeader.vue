@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { planPath } from '~/utils/routes'
 import type { PlanSession, Project } from '@corral/contracts'
 import { projectColor, runtimeLabel } from '~/utils/labels'
 
@@ -29,7 +30,7 @@ defineProps<{ session: PlanSession | null, project: Project | null, closable: bo
         :session="session"
       />
       <AppButton
-        to="/plan"
+        :to="planPath()"
         label="New session"
         variant="ghost"
         color="neutral"

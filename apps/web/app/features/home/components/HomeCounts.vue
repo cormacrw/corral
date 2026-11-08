@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { DashboardCounts } from '~/features/home/utils/dashboard'
+import type { DashboardCounts } from '~/features/home/utils/figures'
 
 const props = defineProps<{ counts: DashboardCounts, loading: boolean }>()
 const tiles = computed(() => [

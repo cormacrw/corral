@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { planThreadPath } from '~/utils/routes'
 import type { PlanSession } from '@corral/contracts'
 import { computed } from 'vue'
 import PlanSessionRow from '~/features/plan/components/PlanSessionRow.vue'
@@ -32,7 +33,7 @@ const open = computed(() => props.sessions
           :key="session.id"
         >
           <PlanSessionRow
-            :to="`/plan/${session.id}`"
+            :to="planThreadPath(session.id)"
             :title="session.title"
             :updated-at="session.updatedAt"
             :unread="session.unread"

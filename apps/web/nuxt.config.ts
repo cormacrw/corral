@@ -1,5 +1,6 @@
 import tailwindcss from '@tailwindcss/vite'
-import { darkNeutralInit } from './app/features/settings/utils/dark-neutral'
+import { DEFAULT_SERVER_URL } from '@corral/contracts/client'
+import { darkNeutralInit } from './app/utils/dark-neutral'
 
 // https://nuxt.com/docs/api/configuration/nuxt-config
 
@@ -7,7 +8,6 @@ import { darkNeutralInit } from './app/features/settings/utils/dark-neutral'
 // files with relative paths and hash routes, so it runs from any sub-path in
 // a sandboxed iframe with no server. Off for dev and production builds.
 const prototype = process.env.CORRAL_PROTOTYPE === '1'
-// Match app.vue before hydration: this app serves a client-only HTML shell.
 const viewport = { name: 'viewport', content: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover' }
 
 export default defineNuxtConfig({
@@ -28,7 +28,7 @@ export default defineNuxtConfig({
     { path: '~/components/shared', pathPrefix: false },
     { path: '~/features', pattern: '*/components/**/*.{vue,ts}', ignore: ['**/*.test.ts'], pathPrefix: false }
   ],
-  imports: { dirs: ['features/*/composables'] },
+  imports: { dirs: ['features/*/composables'], presets: [{ from: '~/queries/shell', imports: ['useShell'] }] },
 
   devtools: {
     enabled: true
@@ -72,7 +72,7 @@ export default defineNuxtConfig({
   routeRules: prototype
     ? {}
     : {
-        '/api/**': { proxy: `${process.env.CORRAL_SERVER_URL || 'http://127.0.0.1:4100'}/api/**` }
+        '/api/**': { proxy: `${process.env.CORRAL_SERVER_URL || DEFAULT_SERVER_URL}/api/**` }
       },
 
   // Set by scripts/dev.ts so several checkouts can run at once
@@ -106,14 +106,6 @@ export default defineNuxtConfig({
   // rendering as an empty unknown element
   typescript: {
     tsConfig: { vueCompilerOptions: { checkUnknownComponents: true } }
-  },
-
-  hooks: {
-    // Lint can't see an auto-import, so what only app/queries may use isn't one
-    'imports:extend': (imports) => {
-      const restricted = imports.filter(i => /\/composables\/useApi(\.ts)?$/.test(i.from) || ['subscribeLive', 'subscribeReconnect'].includes(i.name))
-      for (const entry of restricted) imports.splice(imports.indexOf(entry), 1)
-    }
   },
 
   eslint: {

@@ -1,4 +1,5 @@
 import type { Comment, Evidence, InboxArtifact, InboxNote } from '@corral/contracts'
+import { isAuthoringRole } from '@corral/core'
 
 // What an Inbox item shows as changed since the human last acted (design/inbox.md).
 // Compared by time, never by round: resolving a task resets `reviewRounds`, so
@@ -18,6 +19,6 @@ export function fileArtifacts(evidence: Evidence[], since: string | null, taskRe
 // agent comments can run to several lines, like a spike's findings.
 export function workNotes(comments: Comment[], since: string, taskRef: string | null = null): InboxNote[] {
   return comments
-    .filter(c => c.author.kind === 'agent' && ['developer', 'designer'].includes(c.author.role) && !c.pinned && !/[\r\n]/.test(c.body) && c.createdAt > since)
+    .filter(c => c.author.kind === 'agent' && isAuthoringRole(c.author.role) && !c.pinned && !/[\r\n]/.test(c.body) && c.createdAt > since)
     .map(c => ({ text: c.body, taskRef, at: c.createdAt }))
 }

@@ -1,5 +1,5 @@
-import type { AgentTool, RunJob } from '@corral/contracts'
-import { outcomesFor, ROLE_TOOLS, toolDefinition, toolDefinitions } from '@corral/contracts/agent-tools'
+import { CORRAL_MCP_SERVER, isDefinedTool, toolDefinition, toolRefusal, type AgentTool, type DefinedTool } from '@corral/contracts'
+import { errorText } from '@corral/core'
 import type { AgentRole } from '@corral/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
@@ -9,7 +9,7 @@ import type { AddressInfo } from 'node:net'
 // The per-run MCP server (architecture.md, "Per-run MCP server for agent
 // tools"). One HTTP listener on the loopback interface; each run gets a
 // secret path. The agent only ever sees these tools, and every call is
-// forwarded to the server with the run's lease epoch by the run manager.
+// forwarded to the server with the run's lease epoch by RunTools.
 
 export type ToolOutcome =
   | { ok: true, result: unknown }
@@ -22,21 +22,9 @@ interface ImageResult {
   images?: { mimeType: string, dataBase64: string }[]
 }
 
-// The tools a run gets: its role's alone. Only a designer submits designs (D23)
-export function toolsFor(job: Pick<RunJob, 'role'> & Partial<Pick<RunJob, 'taskId'>>): AgentTool[] {
-  // A developer on a parent's delivery run has no task to comment on, attach evidence to or
-  // read attachments from (D29)
-  if (job.role === 'developer' && job.taskId === null) return ['get_task', 'report_outcome']
-  return ROLE_TOOLS[job.role] ?? []
-}
-
-export function toolRefusal(role: AgentRole, tool: string): string {
-  return `The ${role} can't use ${tool}${tool === 'submit_design' ? ': only a designer submits a design' : ''}`
-}
-
 interface Route {
   role: AgentRole
-  tools: readonly AgentTool[]
+  tools: readonly DefinedTool[]
   handler: ToolHandler
 }
 
@@ -63,9 +51,8 @@ export class ToolServer {
     return `http://127.0.0.1:${this.#port}/runs/${secret}`
   }
 
-  // Exposes the role's tools (or the given ones) at a secret path until the
-  // returned function is called
-  register(secret: string, role: AgentRole, handler: ToolHandler, tools: readonly AgentTool[] = ROLE_TOOLS[role]): () => void {
+  // Exposes the given tools at a secret path until the returned function is called
+  register(secret: string, role: AgentRole, handler: ToolHandler, tools: readonly DefinedTool[]): () => void {
     this.#routes.set(secret, { role, tools, handler })
     return () => this.#routes.delete(secret)
   }
@@ -95,18 +82,18 @@ export class ToolServer {
     // The SDK only says an unlisted tool wasn't found; name the role instead
     const call = body as { id?: unknown, method?: unknown, params?: { name?: unknown } } | undefined
     const name = call?.method === 'tools/call' ? String(call.params?.name) : null
-    if (name && name in toolDefinitions && !route.tools.includes(name as AgentTool)) {
+    if (name && isDefinedTool(name) && !route.tools.includes(name)) {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ jsonrpc: '2.0', id: call!.id, result: toContent({ ok: false, error: toolRefusal(route.role, name) }, 2) }))
       return
     }
     // Stateless: a fresh server per request, so a resumed agent process can
     // initialise again without a session clash
-    const server = new McpServer({ name: 'corral', version: '1' })
+    const server = new McpServer({ name: CORRAL_MCP_SERVER, version: '1' })
     for (const name of route.tools) {
       const definition = toolDefinition(route.role, name)
       server.registerTool(name, { description: definition.description, inputSchema: definition.input }, async (input: Record<string, unknown>) => {
-        const outcome = await route.handler(name, input).catch((error: unknown): ToolOutcome => ({ ok: false, error: error instanceof Error ? error.message : String(error) }))
+        const outcome = await route.handler(name, input).catch((error: unknown): ToolOutcome => ({ ok: false, error: errorText(error) }))
         return toContent(outcome, name === 'list_tasks' ? undefined : 2)
       })
     }
@@ -144,5 +131,3 @@ function toContent(outcome: ToolOutcome, indent: number | undefined) {
     ]
   }
 }
-
-export { outcomesFor, ROLE_TOOLS }

@@ -2,7 +2,7 @@
 import { enableAutoUnmount, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
-import { runs } from '~/prototype/fixtures'
+import type { Run } from '@corral/contracts'
 import AgentDetail from '~/features/agents/components/AgentDetail.vue'
 import AgentRunPanel from '~/features/agents/components/AgentRunPanel.vue'
 import MobileAgentRun from '~/features/agents/components/MobileAgentRun.vue'
@@ -12,6 +12,14 @@ import AgentRunPage from './[name]/[[runId]].vue'
 
 enableAutoUnmount(afterEach)
 afterEach(() => vi.unstubAllGlobals())
+
+const run = (id: string, number: number): Run => ({
+  runnerId: 'runner-1', runnerName: 'home', id, number, agentId: 'a-1', agentName: 'Juno', agentRuntime: 'claude', role: 'pm', projectId: 'p-1',
+  planSessionId: null, taskId: null, taskRef: null, taskTitle: null, epicId: null, epicTitle: null, state: 'completed', outcome: null, summary: null,
+  error: null, headSha: null, inputTokens: null, cacheReadTokens: null, outputTokens: null, rateLimitResetAt: null,
+  queuedAt: '2026-11-04T11:00:00Z', startedAt: '2026-11-04T11:01:00Z', endedAt: '2026-11-04T11:10:00Z', timings: null
+} as Run)
+const runs = [run('run-1', 2), run('run-2', 1)]
 
 // RunComposer's draft and RunTranscript's expanded steps live in their
 // instances; these stand-ins hold some state the same way
@@ -80,7 +88,7 @@ it('keeps the runs list beside the transcript with no run in the URL on the web,
   const items = wrapper.findAll('li button')
   expect(items).toHaveLength(runs.length)
   await items[1]!.trigger('click')
-  expect(push).toHaveBeenCalledWith(`/agents/Juno/${runs[1]!.id}`)
+  expect(push).toHaveBeenCalledWith(`/agents/juno/${runs[1]!.id}`)
 })
 
 it('gives each run its own composer and transcript on mobile', async () => {

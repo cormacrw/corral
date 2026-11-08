@@ -2,7 +2,8 @@ import { DEVELOPER_RUN_OUTCOMES, PM_RUN_OUTCOMES, REVIEWER_RUN_OUTCOMES, RUN_OUT
 import { describe, expect, it } from 'vitest'
 import type { z } from 'zod'
 import { runLifecycleSchema } from './agents.ts'
-import { epicReviewReportSchema, outcomeReportSchema, rebaseReviewReportSchema, reportOutcomeInput, runJobSchema, runnerMessageSchema, serverMessageSchema, type RunJob } from './runner.ts'
+import { epicReviewReportSchema, outcomeReportSchema, rebaseReviewReportSchema, reportOutcomeInput } from './outcome-report.ts'
+import { runJobSchema, runnerMessageSchema, serverMessageSchema, type RunJob } from './runner.ts'
 
 const common = {
   runId: 'run', runNumber: 1, leaseEpoch: 3, runtime: 'codex',
@@ -78,6 +79,13 @@ describe('runner protocol schemas', () => {
       expect(runnerMessageSchema.parse({ type: 'job.result', jobId: 'job', ok: true, result })).toMatchObject({ result })
     }
     expect(serverMessageSchema.parse({ type: 'tool.result', callId: 'call', ok: false, error: 'stale fence' })).toMatchObject({ error: 'stale fence' })
+  })
+  it('names a cleanup by task or by epic, but not both or neither', () => {
+    const cleanup = (ids: object) => serverMessageSchema.safeParse({ type: 'job.request', jobId: 'job', job: { kind: 'cleanup_worktrees', repository: 'a/b', ...ids } }).success
+    expect(cleanup({ taskId: 'task' })).toBe(true)
+    expect(cleanup({ epicId: 'epic' })).toBe(true)
+    expect(cleanup({})).toBe(false)
+    expect(cleanup({ taskId: 'task', epicId: 'epic' })).toBe(false)
   })
 })
 

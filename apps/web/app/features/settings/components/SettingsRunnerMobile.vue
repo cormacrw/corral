@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { reloadShell } from '~/queries/shell'
-import { cliLoginCommand } from '~/utils/labels'
+import { cliLoginCommand, GH_LOGIN_COMMAND } from '@corral/contracts/client'
 import { useCopy } from '~/composables/useCopy'
 
 // Settings · Runner on mobile (design/settings.md, design/mobile.md): every
@@ -20,7 +20,6 @@ async function reconnect() {
   }
 }
 
-const GH_LOGIN = 'docker exec -it corral-runner gh auth login'
 // The commands for the CLIs that need signing in, or the claude one to sign in again
 const commands = computed(() => {
   const signedOut = (clis.value ?? []).filter(cli => cli.version && !cli.signedIn).map(cli => cliLoginCommand(cli.id))
@@ -99,7 +98,7 @@ const copy = useCopy()
         To sign in, run this on the server:
       </p>
       <div
-        v-for="command in [...commands, GH_LOGIN]"
+        v-for="command in [...commands, GH_LOGIN_COMMAND]"
         :key="command"
         class="flex items-center gap-2 rounded-lg bg-muted/50 py-2 ps-3 pe-1"
       >

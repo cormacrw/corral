@@ -8,7 +8,6 @@ import { runBadge } from '~/utils/labels'
 const props = defineProps<{ comments: Comment[], runs: Run[], history: AuditEntry[], authorName: (actor: Comment['author']) => string }>()
 
 const FEED_ACTIONS = ['task.created', 'task.updated', 'task.transition', 'task.paused', 'task.resumed', 'task.deleted']
-// Task mutations, comments and runs that ended with an error, oldest first
 const items = computed(() => [
   ...props.comments.map(comment => ({ id: comment.id, at: comment.createdAt, comment, run: null, audit: null })),
   ...props.runs.filter(run => run.error && run.endedAt).map(run => ({ id: run.id, at: run.endedAt!, comment: null, run, audit: null })),

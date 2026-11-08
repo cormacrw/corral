@@ -5,7 +5,7 @@ import { and, eq, ne } from 'drizzle-orm'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { RunJobs } from './run-jobs.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner, sleep } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 const { agents, auditLog, epics, runs, tasks } = schema
 
@@ -30,10 +30,17 @@ describe('stopping work that is being claimed', () => {
   // A test that fails halfway must not leave the switch on for the next one
   afterEach(async () => {
     vi.restoreAllMocks()
-    if (t?.orchestrator.stopped) await t.orchestrator.resumeAll(t.actor)
+    if (t?.orchestrator.gate.stopped) await t.orchestrator.controls.resumeAll(t.actor)
   })
 
   const assignments = (taskId: string) => runner.received.filter(m => m.type === 'run.assign' && m.job.taskId === taskId)
+
+  // Any pass still running has finished, and the runner has received all it
+  // was sent: a job's answer comes back on the same socket, after them
+  async function delivered() {
+    await t.orchestrator.scheduler.idle
+    await t.runner.requestOn('r1', { kind: 'detect_clis' })
+  }
 
   async function pause(project: Project) {
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
@@ -69,10 +76,10 @@ describe('stopping work that is being claimed', () => {
       await vi.waitFor(async () => expect((await t.db.select().from(runs).where(eq(runs.id, runId)))[0]).toMatchObject({ state: 'interrupted' }), { timeout: 20_000 })
     }, task)
     await approve(project, task)
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     expect((await stopped!).status).toBe(200)
     restore()
-    await sleep(50)
+    await delivered()
     expect(assignments(task.id)).toEqual([])
     await pause(project)
     await t.request('POST', '/api/resume-all')
@@ -86,15 +93,15 @@ describe('stopping work that is being claimed', () => {
     // inside it: agents can come in any order, and each checks for a free slot.
     const live = RunJobs.prototype.previousAuthorRun
     const spy = vi.spyOn(RunJobs.prototype, 'previousAuthorRun').mockImplementation(function (this: RunJobs, ...args) {
-      if (args[1] === task.id) stopped ??= t.orchestrator.stopAll(t.actor)
+      if (args[1] === task.id) stopped ??= t.orchestrator.controls.stopAll(t.actor)
       return live.apply(this, args)
     })
     await approve(project, task)
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     expect(stopped).toBeDefined()
     await stopped
     spy.mockRestore()
-    await sleep(50)
+    await delivered()
     expect(assignments(task.id)).toEqual([])
     const taskRuns = await t.db.select().from(runs).where(eq(runs.taskId, task.id))
     expect(taskRuns.map(r => r.state)).toEqual(['interrupted'])
@@ -105,11 +112,11 @@ describe('stopping work that is being claimed', () => {
 
   it('sends nothing for a queued run a human stopped while its job was being prepared', async () => {
     const { project, task } = await approvedInEpic()
-    const restore = await whilePreparing(runId => t.orchestrator.stopRun(runId, t.actor), task)
+    const restore = await whilePreparing(runId => t.orchestrator.human.stopRun(runId, t.actor), task)
     await approve(project, task)
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     restore()
-    await sleep(50)
+    await delivered()
     expect(assignments(task.id)).toEqual([])
     await pause(project)
   })
@@ -118,9 +125,9 @@ describe('stopping work that is being claimed', () => {
     const project = await t.createProject()
     const task = await t.createTask(project.slug)
     await approve(project, task)
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const { job } = await runner.next('run.assign', m => m.job.taskId === task.id)
-    await t.orchestrator.stopAll(t.actor)
+    await t.orchestrator.controls.stopAll(t.actor)
     expect((await runner.next('run.stop', m => m.runId === job.runId)).keepWork).toBe(true)
     await t.orchestrator.onHeartbeat([{ runId: job.runId, leaseEpoch: job.leaseEpoch }], 'r1')
     expect((await runner.next('run.stop', m => m.runId === job.runId)).keepWork).toBeUndefined()
@@ -132,7 +139,7 @@ describe('stopping work that is being claimed', () => {
     const project = await t.createProject()
     const task = await t.createTask(project.slug)
     await approve(project, task)
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const { job } = await runner.next('run.assign', m => m.job.taskId === task.id)
     await t.db.update(tasks).set({ leaseExpiresAt: new Date(t.clock.now.getTime() - 1000) }).where(eq(tasks.id, task.id))
     // The sweep has read the run as live; the outcome commits just before its write
@@ -141,7 +148,7 @@ describe('stopping work that is being claimed', () => {
       await t.db.update(runs).set({ state: 'completed', endedAt: new Date(), outcome: 'pr_opened', summary: 'Done' }).where(eq(runs.id, job.runId))
       return transaction(...args)
     })
-    await t.orchestrator.sweepLeases()
+    await t.orchestrator.leases.sweepLeases()
     spy.mockRestore()
     expect((await t.db.select().from(runs).where(eq(runs.id, job.runId)))[0]).toMatchObject({ state: 'completed', outcome: 'pr_opened', error: null })
     expect(await t.db.select().from(auditLog).where(and(eq(auditLog.taskId, task.id), eq(auditLog.action, 'run.ended')))).toEqual([])

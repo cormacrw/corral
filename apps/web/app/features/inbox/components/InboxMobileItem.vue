@@ -1,22 +1,22 @@
 <script setup lang="ts">
 import type { InboxPanelContext } from '~/features/inbox/composables/useInboxPanel'
 import { useInboxView, type EpicInboxItem } from '~/features/inbox/composables/useInboxView'
+import { isOwnPane } from '~/utils/inbox-kinds'
 import { inboxItemLink } from '~/utils/labels'
 
 // An Inbox item on a phone (design/inbox.md, design/mobile.md), a screen of its
 // own at /inbox/:itemId. useInboxItem owns the data and the actions; task items
 // are the Option D panel under the focused header.
 const props = defineProps<{ epicItem: EpicInboxItem | null, epicGone?: boolean, ctx: InboxPanelContext }>()
-const { list, inbox, error, selected, moveToNext } = useInboxView()
+const { list, inbox, error, selected } = useInboxView()
 const panel = ref<{ send: () => Promise<boolean> } | null>(null)
 defineExpose({ send: () => panel.value?.send() ?? Promise.resolve(false) })
 
-// Epics, runners and release notes have panes of their own; the rest are task items
-const ownPane = computed(() => !!props.epicItem || selected.value?.type === 'runner_update' || selected.value?.type === 'release_notes')
+const ownPane = computed(() => !!props.epicItem || isOwnPane(selected.value))
 const taskLink = computed(() => {
   const link = selected.value && !ownPane.value ? inboxItemLink(selected.value) : null
   // An item can outlive its task, and then there's no task page to open
-  return link?.label === 'Task' && !props.ctx.task ? null : link
+  return link && !props.ctx.task ? null : link
 })
 </script>
 
@@ -43,26 +43,12 @@ const taskLink = computed(() => {
         />
       </template>
     </MobilePageHeader>
-    <InboxEpicPanel
-      v-if="epicItem"
-      :key="epicItem.id"
-      :item="epicItem"
-      :gone="epicGone"
-      mobile
-      @resolved="moveToNext"
-    />
-    <InboxRunnerUpdate
-      v-else-if="selected?.type === 'runner_update'"
-      :item="selected"
-    />
-    <InboxReleaseNotes
-      v-else-if="selected?.type === 'release_notes'"
-      :item="selected"
-    />
-    <InboxPanel
-      v-else-if="selected"
+    <InboxItemPane
+      v-if="selected || epicItem"
       ref="panel"
       :ctx="ctx"
+      :epic-item="epicItem"
+      :epic-gone="epicGone"
       mobile
     />
     <AppLoadError

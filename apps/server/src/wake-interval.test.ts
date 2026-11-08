@@ -1,9 +1,9 @@
 import type { Project } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 const { agents, projects, runs } = schema
 
@@ -26,6 +26,9 @@ describe('agent wake interval', () => {
     runner?.close()
     await t?.close()
   })
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
 
   function minutes(n: number) {
     t.clock.now = new Date(t.clock.now.getTime() + n * 60_000)
@@ -43,7 +46,7 @@ describe('agent wake interval', () => {
       const task = await t.createTask(project.slug)
       expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })).status).toBe(200)
     }
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     return project
   }
 
@@ -100,18 +103,17 @@ describe('agent wake interval', () => {
 
       // The run's exit pokes the scheduler; waiting work still waits
       minutes(2)
+      const ended = t.runner.handled(job.runId, 'run.ended')
       runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 1 }, headSha: null })
-      await vi.waitFor(async () => {
-        const [run] = await t.db.select().from(runs).where(eq(runs.id, job.runId))
-        expect(run!.endedAt).not.toBeNull()
-      }, { timeout: 5000 })
-      await t.orchestrator.schedule()
+      await ended
+      expect((await t.db.select().from(runs).where(eq(runs.id, job.runId)))[0]!.endedAt).not.toBeNull()
+      await t.orchestrator.scheduler.schedule()
       expect(await runsIn(project)).toBe(1)
 
       // So does saving the agent's settings
       minutes(2)
       await setInterval(600)
-      await t.orchestrator.schedule()
+      await t.orchestrator.scheduler.schedule()
       await t.orchestrator.tick()
       expect(await runsIn(project)).toBe(1)
 
@@ -137,7 +139,7 @@ describe('agent wake interval', () => {
       const project = await t.createProject()
       const task = await t.createTask(project.slug)
       expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })).status).toBe(200)
-      await t.orchestrator.schedule()
+      await t.orchestrator.scheduler.schedule()
       const { job } = await runner.next('run.assign', m => m.job.taskId === task.id)
       expect(job.role).toBe('developer')
       // Only the approved task skips the interval, not the agent's other waiting work
@@ -161,12 +163,12 @@ describe('agent wake interval', () => {
       const task = await t.createTask(project.slug)
       const full = vi.spyOn(t.runner, 'available').mockReturnValue([])
       await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })
-      await t.orchestrator.schedule()
+      await t.orchestrator.scheduler.schedule()
       full.mockRestore()
       expect(await runsIn(project)).toBe(1)
 
       // Still inside the interval: only the event can start it
-      await t.orchestrator.schedule()
+      await t.orchestrator.scheduler.schedule()
       expect(await runsIn(project)).toBe(2)
       await setPaused(project, true)
     } finally {

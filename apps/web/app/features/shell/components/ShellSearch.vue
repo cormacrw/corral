@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { taskPath } from '~/utils/routes'
 import { searchPages } from '~/features/shell/utils/search'
 
 const open = defineModel<boolean>('open', { default: false })
@@ -9,7 +10,7 @@ const lists = useAllProjectLists(() => shell.projects)
 const groups = computed(() => open.value
   ? [
       { id: 'pages', label: 'Go to', items: searchPages(shell.projects, shell.agents) },
-      { id: 'tasks', label: 'Tasks', items: Object.values(lists.searchable.value).flatMap(tasks => tasks ?? []).map(t => ({ label: `${t.ref} ${t.title}`, icon: 'i-hugeicons-checkmark-square-02', to: `/tasks/${t.ref}` })) }
+      { id: 'tasks', label: 'Tasks', items: Object.values(lists.searchable.value).flatMap(tasks => tasks ?? []).map(t => ({ label: `${t.ref} ${t.title}`, icon: 'i-hugeicons-checkmark-square-02', to: taskPath(t.ref) })) }
     ]
   : [])
 

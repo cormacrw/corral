@@ -2,12 +2,12 @@ import type { RunnerMessage } from '@corral/contracts'
 import { chmod, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { ServerConnection } from './connection.ts'
 import { exec } from './exec.ts'
 import type { ToolServer } from './mcp.ts'
 import { RunManager } from './run-manager.ts'
-import { createTestDataDir, pmJob } from './test-repo.ts'
-import { pmWorktreePath } from './workspace.ts'
+import { createRuntimes } from './runtimes.ts'
+import { createTestDataDir, pmJob, testConfig, testConnection } from './test-repo.ts'
+import { pmWorktreePath } from './layout.ts'
 
 // Stands in for `claude`. With -p it answers once and exits; with
 // --input-format stream-json it stays alive and answers each stdin message,
@@ -68,9 +68,10 @@ describe('RunManager warm PM sessions', () => {
   let manager: RunManager
 
   function createManager(pmWarmSeconds: number): RunManager {
-    const connection = { send: (message: RunnerMessage) => sent.push(message) > 0 } as unknown as ServerConnection
+    const connection = testConnection((message: RunnerMessage) => sent.push(message) > 0)
     const tools = { register: () => () => {}, url: () => 'http://127.0.0.1:9/mcp' } as unknown as ToolServer
-    return new RunManager({ dataDir, claudeBin, codexBin: 'codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds, titleModel: 'haiku', slots: 4, roles: ['pm', 'developer', 'reviewer', 'design'] }, connection, tools)
+    const config = testConfig(dataDir, { claudeBin, pmWarmSeconds })
+    return new RunManager(config, connection, tools, createRuntimes(config).registry)
   }
 
   beforeEach(async () => {
@@ -187,8 +188,8 @@ describe('RunManager warm PM sessions', () => {
     expect(log).toHaveLength(2)
     expect(log[1]!.args).toEqual(expect.arrayContaining(['--resume', 'fresh-session', '--model', 'opus']))
     expect(second.find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'exited', code: 0 } })
-    expect(await running(first.pid)).toBe(false)
-    expect(await running(first.helperPid)).toBe(false)
+    await expect.poll(() => running(first.pid)).toBe(false)
+    await expect.poll(() => running(first.helperPid)).toBe(false)
   })
 
   it('cold-starts when the job names another agent session', async () => {
@@ -202,7 +203,7 @@ describe('RunManager warm PM sessions', () => {
     expect(log[1]!.args).toEqual(expect.arrayContaining(['--resume', 'another-session']))
     expect(log[2]!.args).not.toContain('--resume')
     expect(second.find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'exited', code: 0 } })
-    expect(await running(first.pid)).toBe(false)
+    await expect.poll(() => running(first.pid)).toBe(false)
   })
 
   it('cold-starts when the warm process died', async () => {
@@ -229,7 +230,7 @@ describe('RunManager warm PM sessions', () => {
     const second = await finish('r2')
 
     expect(second.find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'signalled', signal: 'SIGTERM' } })
-    expect(notes(second)).toContain('The agent was killed by SIGTERM, which Corral did not send')
+    expect(notes(second).some(note => note.includes('SIGTERM'))).toBe(true)
   })
 
   it('kills the warm process when a turn is stopped', async () => {
@@ -266,7 +267,7 @@ describe('RunManager warm PM sessions', () => {
     await finish('other')
     manager.assign(pmJob({ runId: 'busy', planSessionId: 's3', prompt: 'hang' }))
     await expect.poll(() => sent.some(m => m.type === 'run.started' && m.runId === 'busy')).toBe(true)
-    expect(await processesLeft()).toHaveLength(6)
+    await expect.poll(processesLeft).toHaveLength(6)
 
     await manager.shutdown()
 

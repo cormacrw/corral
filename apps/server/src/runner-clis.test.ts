@@ -1,6 +1,6 @@
 import { AGENT_TOOL_CONTRACT } from '@corral/contracts/agent-tools'
 import { RUNNER_PROTOCOL_VERSION, type ServerMessage } from '@corral/contracts'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EventBus } from './events.ts'
 import { RunnerHub } from './runner-hub.ts'
 
@@ -17,6 +17,10 @@ function connection(hub: RunnerHub, runnerId = 'r1') {
 }
 
 describe('runner CLI cache', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('shares connection detection, uses the last result during refresh, and refreshes on reconnect', async () => {
     const hub = new RunnerHub(new EventBus())
     const first = connection(hub)
@@ -62,12 +66,14 @@ describe('runner CLI cache', () => {
 
   it('falls back to a live check after connection detection fails', async () => {
     const hub = new RunnerHub(new EventBus())
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     const c = connection(hub)
     await c.hello()
     const failed = hub.detectClis()
     const rejected = expect(failed).rejects.toThrow('Detection unavailable')
     await c.peer.onMessage(JSON.stringify({ type: 'job.result', jobId: c.detections()[0]!.jobId, ok: false, error: 'Detection unavailable' }))
     await rejected
+    expect(logged).toHaveBeenCalled()
     const retry = hub.detectClis()
     expect(c.detections()).toHaveLength(2)
     await c.answer('3.0')

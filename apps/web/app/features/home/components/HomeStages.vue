@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { DashboardCounts } from '~/features/home/utils/dashboard'
+import { inboxPath } from '~/utils/routes'
+import type { DashboardCounts } from '~/features/home/utils/figures'
 
 // In progress by stage, and what's waiting on the human
 defineProps<{
@@ -50,7 +51,7 @@ defineProps<{
     </ul>
     <NuxtLink
       v-if="attention"
-      to="/inbox"
+      :to="inboxPath()"
       :class="['flex items-center gap-2 rounded-md border px-3 py-2 text-sm', counts.blocked ? 'border-destructive/30 bg-destructive/10' : 'border-warning/30 bg-warning/10']"
       data-testid="home-attention"
     >

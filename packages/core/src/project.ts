@@ -2,6 +2,7 @@
 
 // Each project's task ID prefix: 2–5 letters, unique across projects
 export const PROJECT_PREFIX_PATTERN = /^[A-Z]{2,5}$/
+export const PROJECT_PREFIX_HINT = 'Use 2–5 letters, A–Z.'
 
 export const MERGE_METHODS = ['squash', 'merge', 'rebase'] as const
 export type MergeMethod = typeof MERGE_METHODS[number]

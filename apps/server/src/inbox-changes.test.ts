@@ -4,7 +4,7 @@ import type { EpicReviewItem, Inbox, TaskInboxItem } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createEpicFixTask } from './epic-prs.ts'
+import { createFixTask } from './tasks.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
 const { agents, auditLog, comments, designVersions, epics, evidence, projects, runs, tasks } = schema
@@ -140,13 +140,13 @@ describe('inbox changes since the last review', () => {
 
     const [projectRow] = await t.db.select().from(projects).where(eq(projects.id, project.id))
     const [epic] = await t.db.insert(epics).values({ projectId: project.id, title: 'Conflict fixture', createdBy: t.actor, branch: 'corral/epic-conflict', prNumber: 1, prHeadSha: 'reviewed-head', reviewState: 'conflict' }).returning()
-    const fixId = await t.db.transaction(tx => createEpicFixTask(tx, projectRow!, epic!, 'Align the API and UI', { kind: 'agent', role: 'reviewer', runId: run }))
+    const fixId = await t.db.transaction(tx => createFixTask(tx, projectRow!, epic!.id, 'Align the API and UI', { kind: 'agent', role: 'reviewer', runId: run }))
     const fix = (await t.db.select().from(tasks).where(eq(tasks.id, fixId)))[0]!
     const fixPath = `/api/projects/${project.slug}/tasks/${fix.number}`
     const fixResponse = await t.request('GET', fixPath)
     const fixBody = await fixResponse.json()
     expect(fixBody).toMatchObject({ id: fixId, kind: 'fix', status: 'ready' })
-    await capture('reviewer-fix-kind.json', { setup: 'createEpicFixTask called with reviewer feedback in isolated PGlite fixture', request: { method: 'GET', path: fixPath }, status: fixResponse.status, response: fixBody })
+    await capture('reviewer-fix-kind.json', { setup: 'createFixTask called with reviewer feedback in isolated PGlite fixture', request: { method: 'GET', path: fixPath }, status: fixResponse.status, response: fixBody })
   })
 
   it('carries an epic\'s feedback and fix tasks, and labels new files with their task', async () => {
@@ -169,7 +169,7 @@ describe('inbox changes since the last review', () => {
     const requested = await t.request('POST', path, body)
     expect(requested.status).toBe(200)
     const response = await requested.json()
-    const [fix] = await t.db.select().from(tasks).where(eq(tasks.epicId, epic!.id)).then(rows => rows.filter(r => r.title.startsWith('Fix integration:')))
+    const [fix] = await t.db.select().from(tasks).where(eq(tasks.epicId, epic!.id)).then(rows => rows.filter(r => r.kind === 'fix'))
     expect(fix!.kind).toBe('fix')
     const feedback = (await t.db.select().from(auditLog).where(eq(auditLog.action, 'epic.pr'))).find(row => (row.detail as { epicId?: string }).epicId === epic!.id)
     expect(feedback!.detail).toMatchObject({ event: 'human_changes_requested', headSha: 'head-1', summary: body.text, fixTasks: [{ id: fix!.id, ref: `${project.prefix}-${fix!.number}`, title: fix!.title }] })

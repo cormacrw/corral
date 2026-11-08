@@ -1,36 +1,52 @@
 import type { RunEvent, RunExit, RunnerMessage } from '@corral/contracts'
-import { isActiveRun } from '@corral/core'
-import { schema } from '@corral/db'
+import { isActiveRun, isUuid } from '@corral/core'
+import { schema, type Database, type RunRow } from '@corral/db'
 import { and, eq, inArray, isNull, lt, or } from 'drizzle-orm'
-import { LAST_ACTIVITY, runExitError, withLastActivity } from './run-exit.ts'
-import { runEndValues } from './run-lifecycle.ts'
+import type { EventBus } from './events.ts'
+import type { LeaseReconcile } from './lease-reconcile.ts'
+import type { PlanService } from './plan.ts'
+import type { RunContext, RunContexts } from './run-context.ts'
+import { failAttempt, lastPmReply, type RunEnding } from './run-ending.ts'
+import { runExitError } from './run-exit.ts'
+import { restoreRunEnd } from './run-lifecycle.ts'
+import { hasLastActivity, STOP, stoppedBy, withLastActivity } from './run-stops.ts'
 import { listAgents } from './runs.ts'
-import { applyTransition, lockTask } from './tasks.ts'
-import { RUNNER_RESTARTED, UUID, server, type RunContext, type RunCore, type RunRow } from './run-context.ts'
-import { stopRepeated } from './retry-recovery.ts'
-import { lastPmReply } from './run-ending.ts'
+import type { Transcripts } from './transcripts.ts'
+import { lockLiveTask } from './task-rows.ts'
 
-const { agents, runs, tasks } = schema
+const { agents, runs } = schema
+
+export interface RunExitsDeps {
+  db: Database
+  events: EventBus
+  transcripts: Pick<Transcripts, 'append' | 'read' | 'finish'>
+  now(): Date
+  runs: Pick<RunContexts, 'load' | 'fenced'>
+  ending: Pick<RunEnding, 'endRun' | 'failRun' | 'publish'>
+  leases: Pick<LeaseReconcile, 'confirmLease'>
+  plans: Pick<PlanService, 'onRunStarted' | 'onRunEnded'>
+  wake(): void
+}
 
 // How long to wait after a usage limit with no known reset time (D3)
 const RATE_LIMIT_BACKOFF_MS = 30 * 60 * 1000
 
 // Whether this run was ended as lost when its runner reconnected
 function reconciled(run: RunRow, leaseEpoch: number): boolean {
-  return run.state === 'interrupted' && run.leaseEpoch === leaseEpoch && (run.error ?? '').startsWith(RUNNER_RESTARTED)
+  return run.state === 'interrupted' && run.leaseEpoch === leaseEpoch && stoppedBy(run.error, STOP.runnerRestarted)
 }
 
 export class RunExits {
-  #c: RunCore
+  #d: RunExitsDeps
 
-  constructor(core: RunCore) {
-    this.#c = core
+  constructor(deps: RunExitsDeps) {
+    this.#d = deps
   }
 
   async onRunMessage(message: Extract<RunnerMessage, { type: 'run.started' | 'run.events' | 'run.ended' }>, runnerId: string): Promise<void> {
-    const { db, events, transcripts } = this.#c.d
+    const { db, events, transcripts } = this.#d
     // IDs come from the runner; a malformed one is simply unknown
-    const owner = UUID.test(message.runId) ? await this.#c.runs.load(message.runId) : null
+    const owner = isUuid(message.runId) ? await this.#d.runs.load(message.runId) : null
     if (!owner || owner.run.runnerId !== runnerId) return
     if (message.type === 'run.events') {
       // A replay after the transcript was stored would only start a new spool
@@ -46,39 +62,39 @@ export class RunExits {
     }
 
     if (message.type === 'run.started') {
-      const ctx = await this.#c.runs.fenced(message.runId, message.leaseEpoch)
+      const ctx = await this.#d.runs.fenced(message.runId, message.leaseEpoch)
       if (!ctx) {
         // Sent while the socket was down: the run really did start, and a
         // retry resumes its session
         if (reconciled(owner.run, message.leaseEpoch)) {
-          await db.update(runs).set({ startedAt: owner.run.startedAt ?? this.#c.now(), agentSessionId: message.agentSessionId, ...(message.resumeFailed && owner.run.sessionStart ? { sessionStart: 'fresh' as const } : {}) }).where(eq(runs.id, owner.run.id))
-          if (owner.run.role === 'pm' && owner.run.planSessionId) await this.#c.plans?.onRunStarted(owner.run.planSessionId, message.agentSessionId)
+          await db.update(runs).set({ startedAt: owner.run.startedAt ?? this.#d.now(), agentSessionId: message.agentSessionId, ...(message.resumeFailed && owner.run.sessionStart ? { sessionStart: 'fresh' as const } : {}) }).where(eq(runs.id, owner.run.id))
+          if (owner.kind === 'pm' && owner.run.planSessionId) await this.#d.plans.onRunStarted(owner.run.planSessionId, message.agentSessionId)
         }
         return
       }
       // Only from before it started: a replay must not move a run back or
       // restart its clock. Still active: the server may have ended the run
       // since it was fenced.
-      await db.update(runs).set({ state: 'running', startedAt: this.#c.now(), agentSessionId: message.agentSessionId,
+      await db.update(runs).set({ state: 'running', startedAt: this.#d.now(), agentSessionId: message.agentSessionId,
         // Only runs that record how their session began
         ...(message.resumeFailed && ctx.run.sessionStart ? { sessionStart: 'fresh' as const } : {}),
         ...(message.initialHeadSha && ctx.run.retryContext ? { retryContext: { ...ctx.run.retryContext, head: message.initialHeadSha } } : {}) })
         .where(and(eq(runs.id, ctx.run.id), inArray(runs.state, ['queued', 'starting'])))
-      this.#c.leases.confirmLease(ctx, message.sentAt)
-      if (ctx.run.role === 'pm' && ctx.run.planSessionId) await this.#c.plans?.onRunStarted(ctx.run.planSessionId, message.agentSessionId)
-      await this.#c.ending.publish(ctx)
+      this.#d.leases.confirmLease(ctx, message.sentAt)
+      if (ctx.kind === 'pm' && ctx.run.planSessionId) await this.#d.plans.onRunStarted(ctx.run.planSessionId, message.agentSessionId)
+      await this.#d.ending.publish(ctx)
       return
     }
 
     // run.ended
-    const ctx = await this.#c.runs.load(message.runId)
+    const ctx = await this.#d.runs.load(message.runId)
     if (!ctx) return
     const live = isActiveRun(ctx.run.state) && ctx.run.leaseEpoch === message.leaseEpoch
-    if (live && ctx.run.role === 'pm') await this.#pmExited(ctx, message.exit, message.lastActivityAt)
+    if (live && ctx.kind === 'pm') await this.#pmExited(ctx, message.exit, message.lastActivityAt)
     else if (live) await this.#runExited(ctx, message.exit, message.lastActivityAt, message.wipSha ?? null, message.headSha ?? null)
     else if (reconciled(ctx.run, message.leaseEpoch)) await this.#restoreExit(ctx, message.exit, message.lastActivityAt)
     // The server already ended a run it stopped; only the runner knows the agent's last activity
-    else if (ctx.run.state === 'interrupted' && ctx.run.error && ctx.run.leaseEpoch === message.leaseEpoch && !ctx.run.error.includes(LAST_ACTIVITY)) {
+    else if (ctx.run.state === 'interrupted' && ctx.run.error && ctx.run.leaseEpoch === message.leaseEpoch && !hasLastActivity(ctx.run.error)) {
       await db.update(runs).set({ error: withLastActivity(ctx.run.error, message.lastActivityAt) }).where(eq(runs.id, ctx.run.id))
     }
     // The commit that saved a stopped run's work, for the retry's prompt
@@ -89,8 +105,8 @@ export class RunExits {
     if (blob) await db.update(runs).set({ transcriptBlob: blob }).where(eq(runs.id, ctx.run.id))
     // Kept whether or not the run is live: an accepted outcome already ended it
     if (message.timings) await db.update(runs).set({ timings: message.timings }).where(eq(runs.id, ctx.run.id))
-    await this.#c.ending.publish(ctx)
-    this.#c.scheduler.poke()
+    await this.#d.ending.publish(ctx)
+    this.#d.wake()
   }
 
   // A run.ended replayed after reconnecting (the runner's outbox), for a run
@@ -98,90 +114,80 @@ export class RunExits {
   // where it's safe: facts about the agent always are, but the task only
   // counts the failure if no newer run has claimed it since.
   async #restoreExit(ctx: RunContext, exit: RunExit, lastActivityAt: string | null | undefined): Promise<void> {
-    const { db, transcripts } = this.#c.d
-    const ended = ctx.run.endedAt ?? this.#c.now()
-    const reconciledRun = and(eq(runs.id, ctx.run.id), eq(runs.state, 'interrupted'))
-    if (ctx.run.role === 'pm' && exit.kind !== 'rate_limited') {
+    const { db, transcripts } = this.#d
+    const ended = ctx.run.endedAt ?? this.#d.now()
+    if (exit.kind === 'rate_limited') {
+      await this.#rateLimited(ctx, exit, end => restoreRunEnd(db, ctx.run.id, end, ended, { error: null }))
+      return
+    }
+    if (ctx.kind === 'pm') {
       const reply = lastPmReply(await transcripts.read(ctx.run.id, null))
       if (reply) {
-        await db.update(runs).set({ ...runEndValues({ state: 'completed', summary: reply }, ended), error: null }).where(reconciledRun)
-        if (ctx.run.planSessionId) await this.#c.plans?.onRunEnded(ctx.run.planSessionId, ctx.run.id, reply, null)
+        await restoreRunEnd(db, ctx.run.id, { state: 'completed', summary: reply }, ended, { error: null })
+        if (ctx.run.planSessionId) await this.#d.plans.onRunEnded(ctx.run.planSessionId, ctx.run.id, reply, null)
       }
       return
     }
-    switch (exit.kind) {
-      case 'rate_limited': {
-        const resetsAt = this.#limitResetsAt(exit)
-        await db.update(runs).set({ ...runEndValues({ state: 'completed', outcome: 'rate_limited', rateLimitResetAt: resetsAt, summary: 'Hit a usage limit' }, ended), error: null }).where(reconciledRun)
-        await this.#pauseAgent(ctx, resetsAt)
-        return
-      }
-      case 'stopped':
-      case 'runner_shutdown':
-        await db.update(runs).set({ error: runExitError(exit, lastActivityAt) }).where(reconciledRun)
-        return
-      default: {
-        // An epic fix spent its attempt when the reconnect interrupted it.
-        // Restore the exit facts without charging the replay a second time.
-        const error = runExitError(exit, lastActivityAt)
-        await db.transaction(async (tx) => {
-          const locked = ctx.task ? await lockTask(tx, ctx.task.id).catch(() => null) : null
-          if (locked && !locked.task.leaseRunId && locked.task.leaseEpoch === ctx.run.leaseEpoch && ['in_progress', 'agent_review'].includes(locked.task.status)) {
-            await applyTransition(tx, locked.task, locked.project, { type: 'run_failed' }, server, { event: 'run_failed', runId: ctx.run.id, error })
-            const [failed] = await tx.select().from(tasks).where(eq(tasks.id, locked.task.id))
-            await stopRepeated(tx, { ...ctx, run: { ...ctx.run, retryContext: null } }, failed!, null)
-          }
-          await tx.update(runs).set({ ...runEndValues({ state: 'failed', outcome: 'failed', error }, ended), retryContext: null }).where(reconciledRun)
-        })
-      }
+    const error = runExitError(exit, lastActivityAt)
+    if (exit.kind === 'stopped' || exit.kind === 'runner_shutdown') {
+      await db.update(runs).set({ error }).where(and(eq(runs.id, ctx.run.id), eq(runs.state, 'interrupted')))
+      return
     }
+    // An epic fix spent its attempt when the reconnect interrupted it.
+    // Restore the exit facts without charging the replay a second time.
+    await db.transaction(async (tx) => {
+      // A soft-deleted task has nothing to count against
+      const locked = ctx.task ? await lockLiveTask(tx, ctx.task.id) : null
+      if (locked && !locked.task.leaseRunId && locked.task.leaseEpoch === ctx.run.leaseEpoch) {
+        await failAttempt(tx, locked, { ...ctx, run: { ...ctx.run, retryContext: null } }, error, null)
+      }
+      await restoreRunEnd(tx, ctx.run.id, { state: 'failed', outcome: 'failed', error }, ended, { retryContext: null })
+    })
   }
 
-  #limitResetsAt(exit: Extract<RunExit, { kind: 'rate_limited' }>): Date {
-    return exit.resetsAt ? new Date(exit.resetsAt) : new Date(this.#c.now().getTime() + RATE_LIMIT_BACKOFF_MS)
-  }
-
-  // D3: a pause, not a failure. The agent waits until the limit resets.
-  async #pauseAgent(ctx: RunContext, resetsAt: Date): Promise<void> {
-    const { db, events } = this.#c.d
+  // D3: a usage limit is a pause, not a failure. The run completes and its
+  // agent waits until the limit resets. `end` writes the run's end.
+  async #rateLimited(ctx: RunContext, exit: Extract<RunExit, { kind: 'rate_limited' }>, end: (end: { state: 'completed', outcome: 'rate_limited', summary: string, rateLimitResetAt: Date }) => Promise<unknown>): Promise<Date> {
+    const resetsAt = exit.resetsAt ? new Date(exit.resetsAt) : new Date(this.#d.now().getTime() + RATE_LIMIT_BACKOFF_MS)
+    await end({ state: 'completed', outcome: 'rate_limited', rateLimitResetAt: resetsAt, summary: 'Hit a usage limit' })
+    const { db, events } = this.#d
     await db.update(agents).set({ pausedUntil: resetsAt }).where(and(eq(agents.id, ctx.agent.id), or(isNull(agents.pausedUntil), lt(agents.pausedUntil, resetsAt))))
     const agent = (await listAgents(db)).find(a => a.id === ctx.agent.id)
     if (agent) events.publish({ type: 'agent.updated', agent })
+    return resetsAt
   }
 
   // A PM turn has no outcome to report: its reply is the last thing it said
   async #pmExited(ctx: RunContext, exit: RunExit, lastActivityAt: string | null | undefined): Promise<void> {
-    const events = await this.#c.d.transcripts.read(ctx.run.id, null)
+    const events = await this.#d.transcripts.read(ctx.run.id, null)
     const reply = lastPmReply(events)
     let error: string | null = null
     switch (exit.kind) {
       case 'rate_limited': {
-        const resetsAt = this.#limitResetsAt(exit)
-        await this.#c.ending.endRun(ctx, { state: 'completed', outcome: 'rate_limited', rateLimitResetAt: resetsAt, summary: 'Hit a usage limit' })
-        await this.#pauseAgent(ctx, resetsAt)
+        const resetsAt = await this.#rateLimited(ctx, exit, end => this.#d.ending.endRun(ctx, end))
         error = `${ctx.agent.name} hit a usage limit; try again after ${resetsAt.toISOString()}`
         break
       }
       case 'exited':
       case 'signalled':
         if ((exit.kind === 'exited' && exit.code === 0) || reply) {
-          await this.#c.ending.endRun(ctx, { state: 'completed', summary: reply })
+          await this.#d.ending.endRun(ctx, { state: 'completed', summary: reply })
         } else {
           error = exit.kind === 'exited' ? `The PM exited with code ${exit.code}` : runExitError(exit, lastActivityAt)
-          await this.#c.ending.endRun(ctx, { state: 'failed', outcome: 'failed', error })
+          await this.#d.ending.endRun(ctx, { state: 'failed', outcome: 'failed', error })
         }
         break
       case 'stopped':
       case 'runner_shutdown':
-        await this.#c.ending.endRun(ctx, { state: 'interrupted', error: runExitError(exit, lastActivityAt) })
+        await this.#d.ending.endRun(ctx, { state: 'interrupted', error: runExitError(exit, lastActivityAt) })
         error = 'The turn was stopped'
         break
       case 'timed_out':
-        await this.#c.ending.endRun(ctx, { state: 'failed', outcome: 'failed', error: runExitError(exit, lastActivityAt) })
+        await this.#d.ending.endRun(ctx, { state: 'failed', outcome: 'failed', error: runExitError(exit, lastActivityAt) })
         error = 'The turn hit its time limit'
         break
       case 'error':
-        await this.#c.ending.endRun(ctx, { state: 'failed', outcome: 'failed', error: exit.message })
+        await this.#d.ending.endRun(ctx, { state: 'failed', outcome: 'failed', error: exit.message })
         error = exit.message
         break
     }
@@ -191,21 +197,18 @@ export class RunExits {
       const note = events.filter((e): e is Extract<RunEvent, { type: 'system' }> => e.type === 'system').at(-1)?.text
       error = note ?? `${ctx.agent.name} finished without replying`
     }
-    if (ctx.run.planSessionId) await this.#c.plans?.onRunEnded(ctx.run.planSessionId, ctx.run.id, reply, error)
+    if (ctx.run.planSessionId) await this.#d.plans.onRunEnded(ctx.run.planSessionId, ctx.run.id, reply, error)
   }
 
   // The agent process ended without its outcome having been accepted
   async #runExited(ctx: RunContext, exit: RunExit, lastActivityAt: string | null | undefined, wipSha: string | null, head: string | null): Promise<void> {
     switch (exit.kind) {
-      case 'rate_limited': {
-        const resetsAt = this.#limitResetsAt(exit)
-        await this.#c.ending.endRun(ctx, { state: 'completed', outcome: 'rate_limited', rateLimitResetAt: resetsAt, summary: 'Hit a usage limit' })
-        await this.#pauseAgent(ctx, resetsAt)
+      case 'rate_limited':
+        await this.#rateLimited(ctx, exit, end => this.#d.ending.endRun(ctx, end))
         return
-      }
       case 'stopped':
       case 'runner_shutdown':
-        await this.#c.ending.endRun(ctx, { state: 'interrupted', error: runExitError(exit, lastActivityAt), headSha: wipSha })
+        await this.#d.ending.endRun(ctx, { state: 'interrupted', error: runExitError(exit, lastActivityAt), headSha: wipSha })
         return
       case 'error':
       case 'signalled':
@@ -213,14 +216,14 @@ export class RunExits {
         // A runtime or infrastructure cut still respects the failed-run cap,
         // but cannot establish a completed no-progress attempt.
         ctx.run.retryContext = null
-        await this.#c.d.db.update(runs).set({ retryContext: null }).where(eq(runs.id, ctx.run.id))
-        await this.#c.ending.failRun(ctx, runExitError(exit, lastActivityAt), { headSha: wipSha ?? ctx.run.headSha })
+        await this.#d.db.update(runs).set({ retryContext: null }).where(eq(runs.id, ctx.run.id))
+        await this.#d.ending.failRun(ctx, runExitError(exit, lastActivityAt), { headSha: wipSha ?? ctx.run.headSha })
         return
       default:
         // An ordinary exit without an outcome is still a failed attempt, and
         // its local head is what repetition compares.
         // Epic review caps continue to count against their claimed head.
-        await this.#c.ending.failRun(ctx, runExitError(exit, lastActivityAt), { headSha: wipSha ?? head ?? ctx.run.headSha })
+        await this.#d.ending.failRun(ctx, runExitError(exit, lastActivityAt), { headSha: wipSha ?? head ?? ctx.run.headSha })
     }
   }
 }

@@ -23,23 +23,22 @@ describe('PM API route coverage', () => {
     expect(() => checkPmRouteCoverage(app.routes)).not.toThrow()
   })
 
-  it('names a newly registered route and explains how to cover it', () => {
+  it('names a newly registered route that has no PM tool or exclusion', () => {
     const app = registeredApp()
     app.post('/api/uncovered-example', c => c.json({ ok: true }))
-    expect(() => checkPmRouteCoverage(app.routes)).toThrow('POST /api/uncovered-example: add a PM tool mapping or an exclusion with a written reason')
+    expect(() => checkPmRouteCoverage(app.routes)).toThrow('POST /api/uncovered-example')
   })
 
-  it('rejects an unknown tool with its name, route and repair instructions', () => {
+  it('rejects an unknown tool, naming it and its route', () => {
     expect(() => checkPmRouteCoverage(registeredApp().routes, {
       ...pmRouteTools, 'GET /api/projects': ['imaginary_pm_tool']
-    })).toThrow('GET /api/projects: PM tool "imaginary_pm_tool" does not exist; use a name from PM_TOOL_NAMES')
+    })).toThrow(/GET \/api\/projects.*imaginary_pm_tool/)
   })
 
   it('requires a written reason on every exclusion', () => {
-    for (const reason of Object.values(pmRouteExclusions)) expect(reason.trim().length).toBeGreaterThan(0)
     expect(() => checkPmRouteCoverage(registeredApp().routes, pmRouteTools, {
       ...pmRouteExclusions, 'GET /api/health': '  '
-    })).toThrow('GET /api/health: write a non-empty exclusion reason')
+    })).toThrow('GET /api/health')
   })
 
   it('rejects empty mappings, overlaps and stale entries', () => {

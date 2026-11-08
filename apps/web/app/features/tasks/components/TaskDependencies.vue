@@ -1,21 +1,21 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { PatchTaskInput, Task } from '@corral/contracts'
+import { taskNumber } from '~/utils/labels'
 
 const props = defineProps<{ task: Task, projectTasks: Task[], readonly: boolean }>()
 const emit = defineEmits<{ patch: [input: PatchTaskInput] }>()
 
-const numberOf = (ref: string) => Number(ref.split('-')[1])
 const dependencyTask = (ref: string) => props.projectTasks.find(t => t.ref === ref)
 const choices = computed(() => props.projectTasks
   .filter(t => t.id !== props.task.id && !props.task.dependsOn.includes(t.ref))
   .map(t => ({ label: `${t.ref} ${t.title}`, value: t.number })))
 
 function add(n: number | null) {
-  if (n !== null) emit('patch', { dependsOn: [...props.task.dependsOn.map(numberOf), n] })
+  if (n !== null) emit('patch', { dependsOn: [...props.task.dependsOn.map(taskNumber), n] })
 }
 function remove(ref: string) {
-  emit('patch', { dependsOn: props.task.dependsOn.filter(r => r !== ref).map(numberOf) })
+  emit('patch', { dependsOn: props.task.dependsOn.filter(r => r !== ref).map(taskNumber) })
 }
 </script>
 

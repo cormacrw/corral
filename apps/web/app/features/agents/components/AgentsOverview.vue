@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { settingsPath } from '~/utils/routes'
 import { TIMELINE_HOURS } from '~/features/agents/composables/useAgentsOverview'
 
 // The Agents page (design/agent.md, Agents): headline numbers, a swimlane of
@@ -19,7 +20,7 @@ const { failed, error, retry, stats, runner, bars, tokens, agents } = useAgentsO
         <AppButton
           label="Add agent"
           icon="i-hugeicons-add-01"
-          to="/settings/agents"
+          :to="settingsPath('agents')"
           variant="outline"
           size="sm"
         />

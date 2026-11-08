@@ -1,13 +1,13 @@
 <script setup lang="ts">
+import { epicPath } from '~/utils/routes'
 import { useInboxEpicActions } from '~/features/inbox/composables/useInboxEpicActions'
 import { useInboxEpicReview } from '~/features/inbox/composables/useInboxEpicReview'
 import type { EpicInboxItem } from '~/features/inbox/composables/useInboxView'
 import InboxEpicDiff from '~/features/inbox/components/InboxEpicDiff.vue'
 import InboxEpicVerdict from '~/features/inbox/components/InboxEpicVerdict.vue'
 import InboxItemSummary from '~/features/inbox/components/InboxItemSummary.vue'
-import InboxPanelActions from '~/features/inbox/components/InboxPanelActions.vue'
 import InboxPanelLayout from '~/features/inbox/components/InboxPanelLayout.vue'
-import InboxPanelMeta from '~/features/inbox/components/InboxPanelMeta.vue'
+import { FOR_INFORMATION, shownTab } from '~/features/inbox/composables/useInboxPanel'
 import InboxPrDescription from '~/features/inbox/components/InboxPrDescription.vue'
 
 // An epic in the Inbox, Option D (design/inbox.md): what's needed to decide up
@@ -47,7 +47,7 @@ const tabs = computed(() => {
     { label: 'Message', value: 'message' }
   ]
 })
-const openTab = computed(() => tabs.value.some(t => t.value === tab.value) ? tab.value : 'overview')
+const openTab = computed(() => shownTab(tabs.value, tab.value))
 const skeleton = computed(() => loading.value && (['pr', 'diff'].includes(openTab.value)
   || (openTab.value === 'overview' && props.item.type !== 'epic_conflict')
   || (openTab.value === 'tasks' && !rows.value.length)
@@ -59,6 +59,9 @@ const skeleton = computed(() => loading.value && (['pr', 'diff'].includes(openTa
     as="section"
     aria-label="Task review"
     data-testid="inbox-epic-panel"
+    :item="item"
+    :kind="r.kind.value"
+    :title-to="epicPath(item.epicId)"
     :tabs="tabs"
     :open-tab="openTab"
     :mobile="mobile"
@@ -66,21 +69,6 @@ const skeleton = computed(() => loading.value && (['pr', 'diff'].includes(openTa
     @select="tab = $event as Tab"
   >
     <template #header>
-      <div class="min-w-0">
-        <h1 class="text-lg leading-tight font-semibold break-words text-foreground">
-          <NuxtLink
-            :to="`/epics/${item.epicId}`"
-            class="hover:underline"
-          >
-            {{ item.subject }}
-          </NuxtLink>
-        </h1>
-        <InboxPanelMeta
-          class="mt-1"
-          :kind="r.kind.value"
-          :item="item"
-        />
-      </div>
       <InboxItemSummary
         :key="item.id"
         :item="item"
@@ -99,7 +87,7 @@ const skeleton = computed(() => loading.value && (['pr', 'diff'].includes(openTa
           class="text-sm text-muted-foreground"
           data-testid="inbox-read-only"
         >
-          {{ item.resolution ?? 'For your information. Nothing to do.' }}
+          {{ item.resolution ?? FOR_INFORMATION }}
         </p>
         <AppButton
           v-if="item.prUrl"
@@ -184,14 +172,12 @@ const skeleton = computed(() => loading.value && (['pr', 'diff'].includes(openTa
     />
 
     <template #footer>
-      <InboxPanelThumbBar
-        v-if="canAct && mobile"
+      <InboxPanelFooter
+        v-if="canAct"
         :ctx="ctx"
+        :mobile="mobile"
+        :composer="ctx.composerChosen"
         approve-label="Approve task"
-      />
-      <div
-        v-else-if="canAct"
-        class="flex shrink-0 flex-col gap-2 border-t border-border p-3"
       >
         <p
           v-if="item.type === 'epic_review'"
@@ -200,21 +186,7 @@ const skeleton = computed(() => loading.value && (['pr', 'diff'].includes(openTa
         >
           {{ r.approvalNote.value }}
         </p>
-        <InboxPanelActions
-          :ctx="ctx"
-          can-act
-        />
-        <InboxPanelTray
-          v-if="ctx.composerChosen"
-          :ctx="ctx"
-        />
-        <AppAlert
-          v-else-if="ctx.actionError"
-          color="error"
-          variant="subtle"
-          :title="ctx.actionError"
-        />
-      </div>
+      </InboxPanelFooter>
     </template>
   </InboxPanelLayout>
 </template>

@@ -1,15 +1,10 @@
 import type { RunExit } from '@corral/contracts'
+import { withLastActivity } from './run-stops.ts'
 
 // What a run's error says about how its agent process ended, so the run shows
 // who stopped it. A runner that hasn't been updated sends no details.
 export function runExitError(exit: Exclude<RunExit, { kind: 'rate_limited' }>, lastActivityAt: string | null | undefined): string {
   return withLastActivity(exitMessage(exit), lastActivityAt)
-}
-
-export const LAST_ACTIVITY = 'Last transcript activity:'
-
-export function withLastActivity(error: string, lastActivityAt: string | null | undefined): string {
-  return lastActivityAt ? `${error}. ${LAST_ACTIVITY} ${lastActivityAt}` : error
 }
 
 function exitMessage(exit: Exclude<RunExit, { kind: 'rate_limited' }>): string {

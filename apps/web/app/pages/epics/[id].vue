@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { SECTIONS, taskPath } from '~/utils/routes'
 import { useQuery } from '@tanstack/vue-query'
 import { epicQuery } from '~/queries/epics'
 
@@ -10,14 +11,14 @@ const id = computed(() => String(route.params.id))
 const device = useDevice()
 // A shared link has nothing to go back to
 const router = useRouter()
-const back = () => window.history.state?.back ? router.back() : navigateTo('/projects')
+const back = () => window.history.state?.back ? router.back() : navigateTo(SECTIONS.projects.to)
 useSeoMeta({ title: 'Task · Corral' })
 
 // Old links open the parent task, or the task itself for a collapsed epic (D31)
 const { data: epic } = useQuery(computed(() => epicQuery(id.value)))
 const target = computed(() => epic.value ? epic.value.taskRef ?? epic.value.tasks[0]?.ref ?? null : null)
 watch(target, (ref) => {
-  if (ref) void navigateTo(`/tasks/${ref}`, { replace: true })
+  if (ref) void navigateTo(taskPath(ref), { replace: true })
 }, { immediate: true })
 </script>
 

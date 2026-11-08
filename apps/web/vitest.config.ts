@@ -6,7 +6,7 @@ import { defineConfig } from 'vitest/config'
 // Nuxt's `~` alias, so tests can import app code that uses it. Component
 // tests compile .vue files and opt into a DOM with @vitest-environment.
 export default defineConfig({
-  test: { maxWorkers: checkCpus() },
+  test: { maxWorkers: checkCpus(), setupFiles: ['./vitest.setup.ts'] },
   plugins: [vue()],
   resolve: {
     alias: { '~': fileURLToPath(new URL('./app', import.meta.url)), '@': fileURLToPath(new URL('./app', import.meta.url)) }

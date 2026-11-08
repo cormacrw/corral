@@ -1,22 +1,28 @@
 # Worktree sweep
 
 The `sweep_worktrees` setup job (`sweepWorktrees` in
-`apps/runner/src/workspace.ts`) removes folders under `<dataDir>/worktrees/`
-outside the job's keep list. Only `<uuid>`, `<uuid>-review`,
+`apps/runner/src/sweep.ts`) removes folders under `<dataDir>/worktrees/`
+outside the job's keep list. Only `<uuid>`, `<uuid>-review`, `epic-<uuid>`,
 `epic-<uuid>-review` and `pm-<uuid>-<uuid>` names are candidates; a looser
-pattern can't tell a task folder from anything else. `keepEpicIds` is optional
-for older servers, and without it task checkouts are left alone.
+pattern can't tell a task folder from anything else. Each folder kind's path
+builder and the pattern the sweep matches it by sit side by side in
+`apps/runner/src/layout.ts`, with `discardsChanges`, which says whose
+uncommitted changes go: review and PM checkouts', never a developer's (task or
+epic). `cleanup_worktrees` uses it too. `keepEpicIds` is optional for older servers, and
+without it epic checkouts are left alone. A global Plan session's folder,
+`sessions/<uuid>`, goes once its session is off the keep list and has no turn
+running.
 
 The job also clears `scratch/` and `spool/`, which it doesn't report: a Plan
-session's scratch folder goes with its session, and a `<uuid>` run's files go
-when `runIsHere` says the runner no longer has that run. Runs normally delete
-their own once `run.ended` has gone out, so these are what a crash left.
-`runIsHere` defaults to true, so a caller that can't tell removes nothing. Design
-copies are read-only, so `removeScratch` runs `chmod -R u+w` first.
+session's scratch folder (`pm-<projectId|global>-<uuid>`, and `pm-null-<uuid>`
+from older runners) goes with its session, and a `<uuid>` run's files go when
+`LocalRuns.hasRun` says the runner no longer has that run. Runs normally delete
+their own once `run.ended` has gone out, so these are what a crash left. Design
+copies are read-only, so `removeScratch` (`designs.ts`) runs `chmod -R u+w` first.
 
 Clones are found with `git worktree list` in each bare clone rather than from a
-worktree's `.git` file, so the clone path matches `barePath` and `removeWorktree`
-takes the lock the runs use. If a clone can't answer, the job fails and removes
+worktree's `.git` file, and each is opened as a `Repo` by its repository name
+(`openRepo` in `repos.ts`), so `removeWorktree` takes the lock the runs use. If a clone can't answer, the job fails and removes
 nothing, because its worktrees would otherwise look like orphans.
 
 An orphan's status is only read when it has a `.git` that git accepts. Under a

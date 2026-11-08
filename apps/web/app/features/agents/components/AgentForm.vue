@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { errorMessage } from '~/lib/errors'
 import { useMutation } from '@tanstack/vue-query'
-import type { AgentRuntime, CliStatus, CreateAgentInput } from '@corral/contracts'
+import type { CliStatus, CreateAgentInput } from '@corral/contracts'
+import type { AgentRuntime } from '@corral/core'
 import { createAgent } from '~/queries/agents'
 import { detectedRuntimes, RUNTIME } from '~/utils/labels'
 
@@ -20,7 +21,6 @@ const runtimes = computed(() => detectedRuntimes(props.clis ?? []).map(value => 
 const form = reactive<{ name: string, role: CreateAgentInput['role'], runtime: AgentRuntime | undefined, concurrency: number }>({
   name: '', role: 'developer', runtime: undefined, concurrency: 1
 })
-// Reset each time it opens, picking the first detected runtime
 watch([open, runtimes], ([isOpen], [wasOpen]) => {
   if (isOpen && !wasOpen) Object.assign(form, { name: '', role: 'developer', concurrency: 1, runtime: undefined })
   if (!form.runtime || !runtimes.value.some(r => r.value === form.runtime)) form.runtime = runtimes.value[0]?.value

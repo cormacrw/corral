@@ -1,10 +1,9 @@
 import { errorMessage } from '~/lib/errors'
 import { useMutation } from '@tanstack/vue-query'
 import type { Project } from '@corral/contracts'
+import { IMAGE_CONTENT_TYPES, imageTooLarge, THUMBNAIL_MAX_BYTES } from '@corral/contracts/client'
 import { setProjectThumbnail } from '~/queries/projects'
-
-const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
-const MAX_IMAGE_BYTES = 2 * 1024 * 1024
+import { IMAGE_ACCEPT } from '~/utils/attachments'
 
 // A project's thumbnail image, which applies immediately rather than with Save
 export function useProjectThumbnailUpload(project: () => Project) {
@@ -24,11 +23,11 @@ export function useProjectThumbnailUpload(project: () => Project) {
     }
   }
   function upload(file: File) {
-    const error = !IMAGE_TYPES.includes(file.type)
+    const error = !(IMAGE_CONTENT_TYPES as readonly string[]).includes(file.type)
       ? 'Choose a PNG, JPEG, WebP or GIF image.'
-      : file.size > MAX_IMAGE_BYTES ? 'The image is over 2 MB.' : null
+      : file.size > THUMBNAIL_MAX_BYTES ? `${imageTooLarge(THUMBNAIL_MAX_BYTES)}.` : null
     if (error) toast.add({ title: 'Image not uploaded', description: error, color: 'error' })
     else void change(file)
   }
-  return { busy, accept: IMAGE_TYPES.join(','), upload, remove: () => change(null) }
+  return { busy, accept: IMAGE_ACCEPT, upload, remove: () => change(null) }
 }

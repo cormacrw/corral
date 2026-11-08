@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { epicPath, taskPath } from '~/utils/routes'
 import type { PatchTaskInput, Project, Task } from '@corral/contracts'
-import { DEFAULT_LIMITS, canChangeType, type TaskPriority, type TaskStatus } from '@corral/core'
-import { statusOptions as humanStatusOptions, workerRole } from '~/features/tasks/utils/taskDetail'
+import { DEFAULT_LIMITS, authorRoleFor, canChangeType, type TaskPriority, type TaskStatus } from '@corral/core'
+import { statusOptions as humanStatusOptions } from '~/features/tasks/utils/taskDetail'
 import { PRIORITY, STATUS, TASK_TYPE } from '~/utils/labels'
 
 // The property rows of a task (design/task.md): label/value rows in the
@@ -19,7 +20,6 @@ const typeOptions = computed(() => (Object.keys(TASK_TYPE) as Task['type'][])
   .map(t => ({ label: TASK_TYPE[t], value: t })))
 const statusOptions = computed(() => humanStatusOptions(props.task))
 const statusEditable = computed(() => statusOptions.value.length > 1)
-// A merged task's properties are shown, not edited
 const readonly = computed(() => props.task.status === 'merged')
 const selectClass = '-ms-2.5 w-[calc(100%+0.625rem)] md:text-sm'
 
@@ -27,11 +27,11 @@ const dotClass = (status: TaskStatus) => ({
   neutral: 'bg-neutral-400', info: 'bg-info', primary: 'bg-primary', warning: 'bg-warning', error: 'bg-destructive', success: 'bg-success', secondary: 'bg-secondary'
 })[STATUS[status].color]
 // Why a task stopped: the card no longer says, so this is where it's read
-const hasReason = computed(() => (props.task.status === 'blocked' || props.task.status === 'failed') && Boolean(props.task.statusReason))
+const hasReason = computed(() => Boolean(props.task.statusReason))
 // Tasks aren't assigned ahead of time: these are the agents of the task's
 // latest runs, or null until one claims it (D15)
 const agents = computed(() => ({
-  developer: { agent: props.task.developer ?? null, role: workerRole(props.task) },
+  developer: { agent: props.task.developer ?? null, role: authorRoleFor(props.task.type) },
   reviewer: { agent: props.task.reviewer ?? null, role: 'reviewer' }
 }))
 const noPr = computed(() => props.task.type === 'spike' ? 'None: a spike reports findings' : props.task.type === 'design' ? 'None: a design is submitted as versions' : 'Not opened yet')
@@ -76,7 +76,7 @@ const rows = computed(() => ([
       <template v-else-if="row.key === 'parent'">
         <NuxtLink
           v-if="task.parentTask"
-          :to="`/tasks/${task.parentTask.ref}`"
+          :to="taskPath(task.parentTask.ref)"
           class="block truncate text-brand hover:underline"
         >{{ task.parentTask.title }}</NuxtLink>
         <span
@@ -92,7 +92,7 @@ const rows = computed(() => ([
         <NuxtLink
           v-for="dependency in task.waitingOnEpics"
           :key="dependency.id"
-          :to="`/epics/${dependency.id}`"
+          :to="epicPath(dependency.id)"
           class="block text-brand hover:underline"
         >{{ dependency.title }}</NuxtLink>
       </span>

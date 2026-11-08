@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import type { Actor, PmAction, PlanTaskContent } from '@corral/core'
+import { DEFAULT_AGENT_RUNTIME, PLAN_CHANGES, PLAN_MESSAGE_KINDS_BY_ROLE, type Actor, type PlanMessageKind, type PlanMessageRole, type PmAction, type PlanTaskContent } from '@corral/core'
 import {
   boolean,
   check,
@@ -14,7 +14,7 @@ import {
   uuid,
   type AnyPgColumn
 } from 'drizzle-orm/pg-core'
-import { actor, createdAt, updatedAt } from './columns.ts'
+import { actor, createdAt, sqlList, sqlLiteral, updatedAt } from './columns.ts'
 import { planChange, planStatus } from './enums.ts'
 import { epics } from './epics.ts'
 import { projects } from './projects.ts'
@@ -34,7 +34,7 @@ export const planSessions = pgTable('plan_sessions', {
   // The PM's runtime for this session (D18), picked in the composer and
   // locked once it has messages: an agent session ID only resumes on the
   // vendor that made it
-  runtime: text().notNull().default('claude-code'),
+  runtime: text().notNull().default(DEFAULT_AGENT_RUNTIME),
   // Set when a PM turn finishes (and for the epic delivery summary, D11);
   // cleared when the human opens the session or sends a message
   unread: boolean().notNull().default(false),
@@ -51,8 +51,8 @@ export const planMessages = pgTable('plan_messages', {
   id: uuid().primaryKey().defaultRandom(),
   sessionId: uuid().notNull().references(() => planSessions.id, { onDelete: 'cascade' }),
   // Questions are PM messages flagged as such
-  role: text().$type<'human' | 'pm' | 'thread'>().notNull(),
-  kind: text().$type<'message' | 'question' | 'error' | 'confirmation' | 'action_result' | 'notification'>().notNull().default('message'),
+  role: text().$type<PlanMessageRole>().notNull(),
+  kind: text().$type<PlanMessageKind>().notNull().default('message'),
   text: text().notNull(),
   pendingAction: jsonb().$type<PmAction>(),
   // A question's suggested answer and answer choices (ask_question)
@@ -66,7 +66,9 @@ export const planMessages = pgTable('plan_messages', {
   index().on(t.runId),
   // The migration diagnoses history, then adds these NOT VALID for future writes.
   // History stays as written and toMessage reads it
-  check('plan_messages_role_kind', sql`(${t.role} = 'human' and ${t.kind} = 'message') or (${t.role} = 'thread' and ${t.kind} in ('message', 'notification')) or (${t.role} = 'pm' and ${t.kind} in ('message', 'question', 'error', 'confirmation', 'action_result'))`),
+  check('plan_messages_role_kind', sql.join(Object.entries(PLAN_MESSAGE_KINDS_BY_ROLE).map(([role, kinds]) => kinds.length === 1
+    ? sql`(${t.role} = ${sqlLiteral(role)} and ${t.kind} = ${sqlLiteral(kinds[0]!)})`
+    : sql`(${t.role} = ${sqlLiteral(role)} and ${t.kind} in ${sqlList(kinds)})`), sql` or `)),
   check('plan_messages_question_fields', sql`${t.kind} = 'question' or (${t.recommendation} is null and ${t.options} is null)`)
 ])
 
@@ -109,7 +111,7 @@ export const planTasks = pgTable('plan_tasks', {
   // Change is a version diff, not whether this item references an existing
   // task: even an added or unchanged item can stage edits. FK deletion may
   // clear taskId later without clearing the historical revision.
-  check('plan_tasks_revision_change', sql`${t.revision} is null or ${t.change} in ('added', 'changed', 'unchanged')`)
+  check('plan_tasks_revision_change', sql`${t.revision} is null or ${t.change} in ${sqlList(PLAN_CHANGES.filter(change => change !== 'removed'))}`)
 ])
 
 export interface PlanRevision extends PlanTaskContent {

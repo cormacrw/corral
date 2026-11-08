@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import type { AgentRuns } from '~/features/runs/composables/useAgentRuns'
+import { isActiveRun } from '@corral/core'
+import type { AgentRuns } from '~/features/agents/composables/useAgentRuns'
 import { agentIdleNote } from '~/features/agents/utils/agents'
-import { duration, isLiveRun as isLive, runBadge, runRef, runTokens } from '~/utils/labels'
+import { duration, runBadge, runRef, runTokens } from '~/utils/labels'
 
 // The selected run on the web, beside the runs list (design/agent.md): the run
 // in the URL or the current or latest one.
@@ -20,7 +21,7 @@ const flyout = useTaskFlyout()
           :task-ref="selected.taskRef"
         /><template v-else>{{ runRef(selected) }}</template> {{ selected.taskTitle ?? selected.epicTitle ?? '' }}</span>
         <AppBadge
-          v-if="!isLive(selected)"
+          v-if="!isActiveRun(selected.state)"
           class="shrink-0"
           :label="runBadge(selected).label"
           :color="runBadge(selected).color"
@@ -38,7 +39,7 @@ const flyout = useTaskFlyout()
             @click="flyout.toggle(selected.taskRef)"
           />
           <AppButton
-            v-if="isLive(selected)"
+            v-if="isActiveRun(selected.state)"
             label="Stop run"
             color="error"
             variant="subtle"

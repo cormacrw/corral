@@ -1,10 +1,11 @@
 import { errorMessage } from '~/lib/errors'
+import { refusedNotReady } from '~/queries/client'
 import { useMutation } from '@tanstack/vue-query'
 import type { Task } from '@corral/contracts'
 import { backlogGroups, matchesBacklog } from '~/features/board/utils/backlog'
-import { ApiError } from '~/queries/client'
 import { createTask, transitionTask } from '~/queries/tasks'
 import { plural } from '~/utils/labels'
+import { planPath, taskPath } from '~/utils/routes'
 
 // The Backlog's data and moves (design/backlog.md): proposed tasks grouped by
 // epic, shared by BacklogDesktop and BacklogMobile so both behave the same
@@ -24,7 +25,7 @@ export function useBacklog() {
   const rows = computed(() => all.value.filter(t => matchesBacklog(t, search.value, showCompleted.value)))
   const groups = computed(() => backlogGroups(all.value, rows.value, epics.value))
   const summary = computed(() => `${plural(rows.value.length, 'task')} · never scheduled until approved`)
-  const planTo = computed(() => `/plan?project=${project.value?.id}`)
+  const planTo = computed(() => planPath(project.value?.id))
   const plans = computed(() => new Map(shell.planSessions.filter(s => s.status === 'needs_approval').map(s => [s.projectId, s])))
   const inPlan = (task: Task) => task.status === 'backlog' && plans.value.has(task.projectId)
   const toggle = (id: string) => {
@@ -46,8 +47,8 @@ export function useBacklog() {
         await transition.mutateAsync({ task: { ...task, slug: slug.value }, input: { type: 'approve' } })
         moved.push(task.ref)
       } catch (e) {
-        if (e instanceof ApiError && e.body?.code === 'transition_rejected' && e.body.reason.code === 'not_ready') {
-          notReady.push(`${task.ref} needs ${e.body.reason.problems.map(p => p.replaceAll('_', ' ')).join(', ')}`)
+        if (refusedNotReady(e)) {
+          notReady.push(`${task.ref}: ${e.message}`)
         } else {
           toast.add({ title: `Could not move ${task.ref}`, description: errorMessage(e), color: 'error' })
         }
@@ -80,7 +81,7 @@ export function useBacklog() {
     try {
       const task = await create.mutateAsync({ slug: slug.value, input: { title: 'New task', type: 'task', description: null } })
       // A phone has no room for the flyout, so the task opens on its own page
-      if (device.isMobile.value) void router.push(`/tasks/${task.ref}`)
+      if (device.isMobile.value) void router.push(taskPath(task.ref))
       else flyout.open(task.ref)
     } catch (e) {
       toast.add({ title: 'Could not create the task', description: errorMessage(e), color: 'error' })

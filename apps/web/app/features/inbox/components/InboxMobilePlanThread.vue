@@ -1,81 +1,23 @@
 <script setup lang="ts">
-import { errorMessage } from '~/lib/errors'
-import { provide } from 'vue'
-import type { Plan, PlanThreadItem } from '@corral/contracts'
-import { FLYOUT_SHEETS } from '~/features/tasks/composables/useTaskFlyout'
+import { planThreadPath } from '~/utils/routes'
+import type { PlanThreadItem } from '@corral/contracts'
+import { provideFlyoutHost } from '~/composables/useTaskFlyout'
 import { useInboxPlanThread } from '~/features/inbox/composables/useInboxPlanThread'
-import { approvePlan } from '~/features/plan/utils/plan-approval'
 import { STOP_ASKING } from '~/features/plan/utils/plan-questions'
 import TimeAgo from '~/components/shared/TimeAgo.vue'
 
 // Inbox shows the decision only. The session is loaded for the plan sheet;
 // its messages and run transcript belong in Plan, never on this screen.
 const props = defineProps<{ item: PlanThreadItem }>()
-const router = useRouter()
-const deleting = usePlanThreadDelete()
 // Task links in the summary and reply open in PlanSheets, not on the task's page
-provide(FLYOUT_SHEETS, true)
+provideFlyoutHost({ sheets: true })
 const flyout = useTaskFlyout()
-const toast = useToast()
-const { approval, detail, plan: latest, previous, counts, text, busy, offline, working, cantSend, send: sendMessage, log, content, onLogScroll, composer } = useInboxPlanThread(() => props.item)
-const actionError = ref<string | null>(null)
-const error = computed(() => actionError.value ?? detail.error.value?.message ?? null)
+const { detail, plan: latest, previous, counts, text, busy, working, cantSend, cantApprove, approving, send, quick, approve, writing, answer, submitAnswer, remove, log, content, onLogScroll, composer } = useInboxPlanThread(() => props.item)
+const error = computed(() => detail.error.value?.message ?? null)
 const loadingPlan = detail.isPending
 // A failed turn is answered here, a question in its card (Other… is written
 // there and sent with Submit), and a plan is approved instead
 const canReply = computed(() => Boolean(props.item.failure))
-const writing = ref(false)
-const answer = ref('')
-watch(() => props.item.id, () => {
-  writing.value = false
-  answer.value = ''
-})
-async function submitAnswer() {
-  const message = answer.value.trim()
-  if (!message || !await send(message)) return
-  answer.value = ''
-  writing.value = false
-}
-const messageOf = (e: unknown) => errorMessage(e)
-
-const loadPlan = () => {
-  actionError.value = null
-  return detail.refetch()
-}
-async function send(message: string): Promise<boolean> {
-  if (cantSend.value) return false
-  actionError.value = null
-  try {
-    await sendMessage(message)
-    await router.replace('/inbox')
-    return true
-  } catch (e) {
-    actionError.value = messageOf(e)
-    return false
-  }
-}
-async function approve(plan: Plan, to: 'ready' | 'backlog') {
-  if (busy.value || working.value) return
-  busy.value = true
-  try {
-    await approvePlan(plan, to, {
-      approve: (planId, to) => approval.mutateAsync({ planId, to }),
-      toast,
-      mobile: true,
-      closeSheet: flyout.close,
-      push: () => router.replace('/inbox')
-    })
-  } finally {
-    busy.value = false
-  }
-}
-// Deleting waits five seconds for Undo before closing the session; the
-// thread leaves the list at once (design/inbox.md#mobile)
-async function deleteThread() {
-  deleting.remove(props.item.sessionId)
-  await flyout.close()
-  await router.replace('/inbox')
-}
 </script>
 
 <template>
@@ -86,13 +28,13 @@ async function deleteThread() {
     <MobilePageHeader compact>
       <template #actions>
         <AppButton
-          :to="`/plan/${item.sessionId}`"
+          :to="planThreadPath(item.sessionId)"
           label="Open in Plan"
           variant="ghost"
           color="neutral"
           class="min-h-11"
         />
-        <AppDropdownMenu :items="[{ label: 'Delete thread', icon: 'i-hugeicons-delete-02', color: 'error' as const, disabled: busy, onSelect: deleteThread }]">
+        <AppDropdownMenu :items="[{ label: 'Delete thread', icon: 'i-hugeicons-delete-02', color: 'error' as const, disabled: approving !== null, onSelect: remove }]">
           <AppButton
             icon="i-hugeicons-more-horizontal"
             variant="ghost"
@@ -120,18 +62,24 @@ async function deleteThread() {
         />
         <PlanQuestion
           v-if="item.question"
-          v-model:draft="answer"
           :message="item.question"
           data-message-id="inbox-question"
           :active="!working"
           stacked
           :disabled="cantSend"
           :writing="writing"
-          @answer="send"
+          @answer="quick"
           @other="writing = !writing"
-          @stop="send(STOP_ASKING)"
-          @submit="submitAnswer"
-        />
+          @stop="quick(STOP_ASKING)"
+        >
+          <template #other>
+            <InboxQuestionAnswer
+              v-model="answer"
+              :disabled="cantSend"
+              @submit="submitAnswer"
+            />
+          </template>
+        </PlanQuestion>
         <template v-else-if="item.plan">
           <h2 class="text-lg font-semibold text-foreground">
             {{ item.plan.title }}
@@ -154,21 +102,22 @@ async function deleteThread() {
             label="Retry loading plan"
             variant="ghost"
             class="min-h-11"
-            @click="loadPlan"
+            @click="detail.refetch()"
           />
           <div class="flex min-w-0 gap-2">
             <AppButton
               label="Approve to board"
               class="min-h-11 min-w-0 flex-1 justify-center text-xs"
-              :loading="busy"
-              :disabled="!latest || working"
+              :loading="approving?.to === 'ready'"
+              :disabled="!latest || cantApprove"
               @click="latest && approve(latest, 'ready')"
             />
             <AppButton
               label="Approve to Backlog"
               variant="outline"
               class="min-h-11 min-w-0 flex-1 justify-center text-xs"
-              :disabled="!latest || busy || working"
+              :loading="approving?.to === 'backlog'"
+              :disabled="!latest || cantApprove"
               @click="latest && approve(latest, 'backlog')"
             />
           </div>
@@ -214,13 +163,7 @@ async function deleteThread() {
       v-if="canReply"
       class="shrink-0 border-t border-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
     >
-      <AppAlert
-        v-if="offline"
-        color="warning"
-        variant="subtle"
-        title="Plan needs the runner. It's offline."
-        class="mb-2"
-      />
+      <PlanRunnerOffline class="mb-2" />
       <PromptComposer
         ref="composer"
         v-model="text"
@@ -235,8 +178,8 @@ async function deleteThread() {
     <PlanSheets
       :plan="latest"
       :previous="previous"
-      :busy="busy"
-      :disabled="working"
+      :busy="approving !== null"
+      :disabled="cantApprove"
       @approve="latest && approve(latest, $event)"
     />
   </div>

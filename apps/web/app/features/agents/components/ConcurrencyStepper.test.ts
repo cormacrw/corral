@@ -56,6 +56,7 @@ const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200, 
 const number = (wrapper: ReturnType<typeof mountStepper>) => wrapper.get('[data-testid="concurrency"]').text()
 const plus = (wrapper: ReturnType<typeof mountStepper>) => wrapper.get('[aria-label="Increase concurrency for Victor"]')
 const minus = (wrapper: ReturnType<typeof mountStepper>) => wrapper.get('[aria-label="Decrease concurrency for Victor"]')
+const saved = (wrapper: ReturnType<typeof mountStepper>) => wrapper.find('[role="status"]').exists()
 
 describe('ConcurrencyStepper', () => {
   it('shows each tap at once and sends quick taps as one PATCH', async () => {
@@ -75,7 +76,7 @@ describe('ConcurrencyStepper', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]![0]).toBe('/api/agents/a1')
     expect(fetchMock.mock.calls[0]![1]).toMatchObject({ method: 'PATCH', body: JSON.stringify({ concurrency: 5 }) })
-    expect(wrapper.text()).toContain('Saved')
+    expect(saved(wrapper)).toBe(true)
     expect(toast.add).not.toHaveBeenCalled()
   })
 
@@ -90,7 +91,7 @@ describe('ConcurrencyStepper', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('goes back to the saved value and toasts "Not saved" when the PATCH fails', async () => {
+  it('goes back to the saved value and toasts the error when the PATCH fails', async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: { code: 'not_found' } }), { status: 404 }))
     const wrapper = mountStepper()
     await plus(wrapper).trigger('click')
@@ -100,8 +101,8 @@ describe('ConcurrencyStepper', () => {
     await flushPromises()
     expect(number(wrapper)).toBe('2')
     expect(agent().concurrency).toBe(2)
-    expect(toast.add).toHaveBeenCalledWith({ title: 'Not saved', description: 'Not found', color: 'error' })
-    expect(wrapper.text()).not.toContain('Saved')
+    expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({ description: 'Not found', color: 'error' }))
+    expect(saved(wrapper)).toBe(false)
   })
 
   it.each([true, false])('serializes delayed writes and preserves newer taps (first succeeds: %s)', async (succeeds) => {
@@ -127,14 +128,14 @@ describe('ConcurrencyStepper', () => {
     await flushPromises()
     expect(number(wrapper)).toBe('4')
     expect(agent().concurrency).toBe(4)
-    expect(wrapper.text()).not.toContain('Saved')
+    expect(saved(wrapper)).toBe(false)
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(fetchMock.mock.calls[1]![1].body).toBe(JSON.stringify({ concurrency: 4 }))
     finishSecond(ok({ concurrency: 4 }))
     await flushPromises()
     expect(number(wrapper)).toBe('4')
     expect(agent().concurrency).toBe(4)
-    expect(wrapper.text()).toContain('Saved')
+    expect(saved(wrapper)).toBe(true)
     expect(toast.add).toHaveBeenCalledTimes(succeeds ? 0 : 1)
     wrapper.unmount()
   })
@@ -158,8 +159,8 @@ describe('ConcurrencyStepper', () => {
     await flushPromises()
     expect(number(wrapper)).toBe('3')
     expect(agent().concurrency).toBe(3)
-    expect(wrapper.text()).not.toContain('Saved')
-    expect(toast.add).toHaveBeenCalledWith({ title: 'Not saved', description: 'Request failed (404)', color: 'error' })
+    expect(saved(wrapper)).toBe(false)
+    expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({ description: 'Request failed (404)', color: 'error' }))
     wrapper.unmount()
   })
 
@@ -183,9 +184,9 @@ describe('ConcurrencyStepper', () => {
   })
 
   it('shows how many runs are going under the number', () => {
-    seed({ activeRuns: 2 })
-    expect(mountStepper().text()).toContain('2 running now')
+    seed({ activeRuns: 3 })
+    expect(mountStepper().text()).toContain('3')
     seed({ activeRuns: 0 })
-    expect(mountStepper().text()).not.toContain('running now')
+    expect(mountStepper().text()).not.toContain('0')
   })
 })

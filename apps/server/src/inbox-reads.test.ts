@@ -56,6 +56,11 @@ describe('inbox read state', () => {
   })
 
   it('lists Resolved items as read', async () => {
-    expect((await inbox()).resolved.every(i => !i.unread)).toBe(true)
+    const project = await t.createProject()
+    const task = await t.createTask(project.slug, { title: 'Resolved by you' })
+    await t.db.insert(auditLog).values({ projectId: project.id, taskId: task.id, actor: t.actor, action: 'task.transition', detail: { event: 'human_approve', from: 'human_review', to: 'ready_to_merge' }, createdAt: ago(5) })
+    const { resolved } = await inbox()
+    expect(resolved.some(i => i.taskId === task.id)).toBe(true)
+    expect(resolved.every(i => !i.unread)).toBe(true)
   })
 })

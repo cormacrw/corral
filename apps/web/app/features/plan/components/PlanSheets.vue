@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import type { Plan } from '@corral/contracts'
-import { FLYOUT_SHEETS } from '~/features/tasks/composables/useTaskFlyout'
+import type { PlanApprovalTarget } from '@corral/core'
+import { provideFlyoutHost } from '~/composables/useTaskFlyout'
 
 // Phones show the plan in a bottom sheet, and a task or epic from it in a
 // taller sheet over it (design/plan.md#mobile), wherever a plan is on screen.
 // Opening from inside stays on this route rather than going to the task's page.
 const props = defineProps<{ plan: Plan | null, previous: Plan | null, busy: boolean, disabled?: boolean }>()
-const emit = defineEmits<{ approve: [to: 'ready' | 'backlog'] }>()
-provide(FLYOUT_SHEETS, true)
+const emit = defineEmits<{ approve: [to: PlanApprovalTarget] }>()
+provideFlyoutHost({ sheets: true })
 const flyout = useTaskFlyout()
 
 // The plan sheet stays under a task or epic opened from it

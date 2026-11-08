@@ -3,12 +3,12 @@ import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import InboxMessage from '~/features/inbox/components/InboxMessage.vue'
 import MarkdownText from '~/components/shared/MarkdownText.vue'
-import TaskRefText from '~/features/tasks/components/TaskRefText.vue'
+import TaskRefText from '~/components/shared/TaskRefText.vue'
 
 enableAutoUnmount(afterEach)
 
-vi.mock('~/queries/shell', () => ({ shell: () => ({ projects: { data: { value: [{ prefix: 'COR' }] } } }) }))
-vi.mock('~/features/tasks/components/TaskLink.vue', () => ({ default: { props: ['taskRef'], template: '<a :href="`/tasks/${taskRef}`"><slot /></a>' } }))
+vi.mock('~/queries/shell', () => ({ useShell: () => ({ projects: [{ prefix: 'COR' }], agents: [] }) }))
+vi.mock('~/components/shared/TaskLink.vue', () => ({ default: { props: ['taskRef'], template: '<a :href="`/tasks/${taskRef}`"><slot /></a>' } }))
 
 const render = (message: string | undefined = 'Ready for your review.') => mount(InboxMessage, {
   props: { item: { message, body: '## Findings\n\nThe complete investigation.' } },

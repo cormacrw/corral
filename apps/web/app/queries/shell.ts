@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/vue-query'
 import { useQuery } from '@tanstack/vue-query'
-import { computed, effectScope, shallowRef } from 'vue'
+import { computed, effectScope, reactive, shallowRef } from 'vue'
 import { agentsQuery } from './agents'
 import { inboxQuery } from './inbox'
 import { planSessionsQuery } from './plan'
@@ -30,7 +30,21 @@ function createShell(client: QueryClient) {
 
 const current = shallowRef<ReturnType<typeof createShell> | null>(null)
 
-export const shell = () => current.value
+// What every page shows, by name: read-only and empty until the shell
+// starts. Change this data with a mutation.
+export function useShell() {
+  return reactive({
+    loaded: computed(() => current.value?.loaded.value ?? false),
+    error: computed(() => current.value?.error.value ?? null),
+    projects: computed(() => current.value?.projects.data.value ?? []),
+    agents: computed(() => current.value?.agents.data.value ?? []),
+    profile: computed(() => current.value?.profile.data.value ?? null),
+    runner: computed(() => current.value?.runner.data.value ?? null),
+    status: computed(() => current.value?.status.data.value ?? { stopped: false, updating: false }),
+    inboxCount: computed(() => current.value?.inboxCount.data.value ?? 0),
+    planSessions: computed(() => current.value?.planSessions.data.value ?? [])
+  })
+}
 
 // Called once the first navigation is through: the setup middleware has its own
 // cold-start request, which mustn't wait out these queries' retries. Returns a stop.

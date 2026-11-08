@@ -6,7 +6,7 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, afterEach, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 let t: TestApp
 let runner: FakeRunner
@@ -17,7 +17,7 @@ databaseFixture('postgres', async () => {
 })
 afterEach(async () => {
   if (!t) return
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   await t.db.delete(schema.projects)
 })
 afterAll(async () => {
@@ -48,7 +48,7 @@ it.each(['stuck', 'failed'] as const)('rejects missing or blank %s reasons over 
   const task = await t.createTask(project.slug)
   await request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })
   await request('PATCH', `/api/projects/${project.slug}`, { paused: false })
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   const { job } = await runner.next('run.assign', m => m.job.taskId === task.id)
   await request('PATCH', `/api/projects/${project.slug}`, { paused: true })
   const report = async (summary?: string) => {

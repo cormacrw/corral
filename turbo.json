@@ -12,6 +12,9 @@
       "passThroughEnv": ["CORRAL_*"]
     },
     "lint": {},
+    "@corral/scripts#lint": {
+      "cache": false
+    },
     "typecheck": {},
     "test": {
       "cache": false,

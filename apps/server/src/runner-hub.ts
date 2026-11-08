@@ -1,20 +1,22 @@
+import { errorText } from '@corral/core'
 import {
+  RUNNER_CLOSE_CODES,
   RUNNER_HEARTBEAT_MS,
+  SETUP_JOB_TIMEOUTS,
   TASK_INTEGRATION_PROTOCOL,
   integrationCompatibilityReason,
   runnerMessageSchema,
   legacyRunnerHelloSchema,
   protocolMessageType,
   RUNNER_PROTOCOL_VERSION,
-  RUNNER_ROLES,
   toolContractReason,
   type RunnerCapacity,
   type RunnerInfo,
   type RunnerMessage,
+  type RunnerRefusal,
   type RunnerStatus,
   type ServerMessage,
   type SetupJob,
-  type SlotSource,
   type SetupJobResult
 } from '@corral/contracts'
 import { AGENT_TOOL_CONTRACT } from '@corral/contracts/agent-tools'
@@ -28,19 +30,17 @@ export interface RunnerSocket {
 }
 
 type ActiveRuns = { runId: string, leaseEpoch: number }[]
+type RunMessageType = 'run.started' | 'run.events' | 'run.ended'
 
 // What the orchestrator does with run traffic. Set once at startup.
 export interface RunnerHandlers {
   onConnected(activeRuns: ActiveRuns, runnerId: string): Promise<void>
   onReady(): void
   onHeartbeat(activeRuns: ActiveRuns, runnerId: string, sentAt?: number): Promise<void>
-  onDisconnected(): Promise<void>
-  onRunMessage(message: Extract<RunnerMessage, { type: 'run.started' | 'run.events' | 'run.ended' }>, runnerId: string): Promise<void>
+  onRunMessage(message: Extract<RunnerMessage, { type: RunMessageType }>, runnerId: string): Promise<void>
   // Returns the tool result, or throws to send an error back to the agent
   onToolCall(message: Extract<RunnerMessage, { type: 'tool.call' }>, runnerId: string): Promise<unknown>
 }
-
-const JOB_TIMEOUT_MS = 60_000
 
 // A setup job lost with its connection, as opposed to one that failed
 export class RunnerDisconnected extends Error {
@@ -60,12 +60,13 @@ export class RunnerHub {
   // on disk before run.ended reads the transcript. Tool calls and job
   // results stay unqueued: a tool call may wait on a job over this socket.
   #queues = new Map<string, Promise<void>>()
+  #handledWaiters: { runId: string, type: RunMessageType, done: () => void }[] = []
   // Active runs per runner, as the orchestrator last counted them
   #inUse = new Map<string, number>()
 
   readonly commit: string
 
-  constructor(events: EventBus, commit = process.env.CORRAL_BUILD_SHA || 'development') {
+  constructor(events: EventBus, commit = 'development') {
     this.commit = commit
     this.#events = events
   }
@@ -112,7 +113,7 @@ export class RunnerHub {
     if (!refresh && cache.result) return Promise.resolve(cache.result)
     if (cache.detecting) return cache.detecting
     const entry = cache
-    const detecting = this.#request({ kind: 'detect_clis' }, JOB_TIMEOUT_MS, runnerId).then((result) => {
+    const detecting = this.#request({ kind: 'detect_clis' }, SETUP_JOB_TIMEOUTS.detect_clis.waitMs, runnerId).then((result) => {
       entry.result = result
       return result
     }).finally(() => {
@@ -120,6 +121,22 @@ export class RunnerHub {
     })
     entry.detecting = detecting
     return detecting
+  }
+
+  // Resolves once the run's next message of this type has been handled; ask
+  // before it's sent. For the fake runners in tests and the demo.
+  handled(runId: string, type: RunMessageType, timeoutMs = 5000): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const waiter = { runId, type, done: () => {
+        clearTimeout(timer)
+        resolve()
+      } }
+      const timer = setTimeout(() => {
+        this.#handledWaiters.splice(this.#handledWaiters.indexOf(waiter), 1)
+        reject(new Error(`${type} for ${runId} was not handled within ${timeoutMs / 1000} s`))
+      }, timeoutMs)
+      this.#handledWaiters.push(waiter)
+    })
   }
 
   // Called by the WebSocket route for each new connection
@@ -137,7 +154,7 @@ export class RunnerHub {
         const legacyHello = legacyRunnerHelloSchema.safeParse(decoded)
         if (legacyHello.success && legacyHello.data.protocol !== RUNNER_PROTOCOL_VERSION) {
           this.#turnAway(legacyHello.data)
-          socket.close(4000, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION, commit: this.commit }))
+          socket.close(RUNNER_CLOSE_CODES.protocol, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION, commit: this.commit } satisfies RunnerRefusal))
           return
         }
         const parsed = runnerMessageSchema.safeParse(decoded)
@@ -152,7 +169,7 @@ export class RunnerHub {
           const old = this.#runners.get(runnerId)
           if (old?.socket) {
             this.#rejectJobs(runnerId)
-            old.socket.close(4001, 'Replaced by a newer runner connection')
+            old.socket.close(RUNNER_CLOSE_CODES.replaced, 'Replaced by a newer runner connection')
           }
           this.#cliCache.delete(runnerId)
           const now = new Date().toISOString()
@@ -162,7 +179,7 @@ export class RunnerHub {
           // still do setup work; toolsDiffer alone keeps it from runs
           const failedHere = message.updateState === 'failed' && message.updateTarget === this.commit
           const wantsUpdate = !!toolsDiffer || (!!message.autoUpdate && message.commit !== this.commit)
-          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, slotsInUse: this.#inUse.get(runnerId) ?? 0, protocol: message.protocol, needsUpdate: false, connectedAt: now, lastHeartbeatAt: now, ...capacity, taskIntegrationProtocols: message.taskIntegrationProtocols ?? [], taskIntegrationExecutor: !!message.taskIntegrationExecutor, epicRebaseExecutor: !!message.epicRebaseExecutor, epicFixExecutor: !!message.epicFixExecutor, integrationCompatibilityReason: integrationCompatibilityReason(TASK_INTEGRATION_PROTOCOL, message.taskIntegrationProtocols), commit: message.commit || 'unknown', serverCommit: this.commit, behind: message.commit !== this.commit, toolContractReason: toolsDiffer, draining: !!message.draining || (wantsUpdate && !failedHere), updateRequested: !!message.updateRequested, updateState: message.updateState ?? '', updateError: message.updateError ?? '', activeRunCount: message.activeRuns.length } })
+          this.#runners.set(runnerId, { socket, status: { id: runnerId, name: message.name, online: false, slotsInUse: this.#inUse.get(runnerId) ?? 0, protocol: message.protocol, needsUpdate: false, connectedAt: now, lastHeartbeatAt: now, ...capacity, taskIntegrationProtocols: message.taskIntegrationProtocols ?? [], taskIntegrationExecutor: !!message.taskIntegrationExecutor, epicRebaseExecutor: !!message.epicRebaseExecutor, epicFixExecutor: !!message.epicFixExecutor, integrationCompatibilityReason: integrationCompatibilityReason(TASK_INTEGRATION_PROTOCOL, message.taskIntegrationProtocols), commit: message.commit, serverCommit: this.commit, behind: message.commit !== this.commit, toolContractReason: toolsDiffer, draining: !!message.draining || (wantsUpdate && !failedHere), updateRequested: !!message.updateRequested, updateState: message.updateState ?? '', updateError: message.updateError ?? '', activeRunCount: message.activeRuns.length } })
           // Don't dispatch into this socket until its hello snapshot has been
           // reconciled: a newly assigned run isn't in that snapshot.
           await this.#handlers?.onConnected(message.activeRuns, runnerId).catch(error => console.error('Runner reconciliation failed', error))
@@ -179,21 +196,20 @@ export class RunnerHub {
         // One bad message must not take the connection or the process down
         await this.#handle(message, runnerId).catch(error => console.error(`Runner message ${message.type} failed`, error))
       },
-      onClose: async () => {
+      onClose: () => {
         if (!runnerId) return
         const runner = this.#runners.get(runnerId)
         if (runner?.socket !== socket) return
-        await this.#disconnected(runnerId, runner)
+        this.#disconnected(runnerId, runner)
       }
     }
   }
 
-  async #disconnected(runnerId: string, runner: { socket: RunnerSocket | null, status: RunnerStatus['runners'][number] }): Promise<void> {
+  #disconnected(runnerId: string, runner: { socket: RunnerSocket | null, status: RunnerStatus['runners'][number] }): void {
     runner.socket = null
     runner.status.online = false
     this.#rejectJobs(runnerId)
     this.#publishStatus()
-    await this.#handlers?.onDisconnected()
   }
 
   // A runner that vanished without a TCP FIN (a sleeping PC, D25) still looks
@@ -205,8 +221,8 @@ export class RunnerHub {
       if (!runner.socket || !runner.status.online || now - Date.parse(runner.status.lastHeartbeatAt) <= RUNNER_STALE_MS) continue
       console.warn(`Runner ${runner.status.name} has sent no heartbeat for ${RUNNER_STALE_MS / 1000} s; dropping it`)
       const { socket } = runner
-      void this.#disconnected(id, runner).catch(error => console.error('Runner disconnect failed', error))
-      socket.close(4002, 'No heartbeat')
+      this.#disconnected(id, runner)
+      socket.close(RUNNER_CLOSE_CODES.noHeartbeat, 'No heartbeat')
     }
   }
 
@@ -221,12 +237,12 @@ export class RunnerHub {
       socket: null,
       status: {
         id: message.runnerId,
-        name: typeof message.name === 'string' && message.name ? message.name : message.runnerId,
+        name: message.name || message.runnerId,
         online: false,
         slotsInUse: 0,
         protocol: message.protocol,
         needsUpdate: true,
-        commit: message.commit || 'unknown',
+        commit: message.commit,
         serverCommit: this.commit,
         behind: message.commit !== this.commit,
         draining: false,
@@ -306,32 +322,32 @@ export class RunnerHub {
     }
   }
 
-  // Sends a setup job and waits for its result. Throws an API failure when
-  // the runner is offline, so routes report it plainly.
-  request<K extends SetupJob['kind']>(job: Extract<SetupJob, { kind: K }>, timeoutMs = JOB_TIMEOUT_MS): Promise<Extract<SetupJobResult, { kind: K }>> {
-    if (job.kind === 'cleanup_worktrees') {
-      const ids = [...this.#runners.keys()].filter(id => this.isOnline(id))
-      if (!ids.length) return Promise.reject(runnerOffline())
-      return Promise.all(ids.map(id => this.#request<'cleanup_worktrees'>(job as Extract<SetupJob, { kind: 'cleanup_worktrees' }>, timeoutMs, id))).then(results => ({
-        kind: 'cleanup_worktrees',
-        removed: results.flatMap(r => r.removed),
-        kept: results.flatMap(r => r.kept)
-      }) as Extract<SetupJobResult, { kind: K }>)
-    }
-    const runnerId = this.pick(job.kind === 'release_notes' ? (job as Extract<SetupJob, { kind: 'release_notes' }>).runtime : undefined)
+  // Sends a setup job to one runner (with a signed-in CLI for `runtime`, when
+  // given) and waits for its result. Throws an API failure when no runner is
+  // online, so routes report it plainly.
+  request<K extends SetupJob['kind']>(job: Extract<SetupJob, { kind: K }>, timeoutMs: number = SETUP_JOB_TIMEOUTS[job.kind].waitMs, runtime?: string): Promise<Extract<SetupJobResult, { kind: K }>> {
+    const runnerId = this.pick(runtime)
     if (!runnerId) return Promise.reject(runnerOffline())
     return this.#request(job, timeoutMs, runnerId)
   }
 
   // A job for one runner: an integration's candidate only exists where it was built
-  requestOn<K extends SetupJob['kind']>(runnerId: string, job: Extract<SetupJob, { kind: K }>, timeoutMs: number): Promise<Extract<SetupJobResult, { kind: K }>> {
+  requestOn<K extends SetupJob['kind']>(runnerId: string, job: Extract<SetupJob, { kind: K }>, timeoutMs: number = SETUP_JOB_TIMEOUTS[job.kind].waitMs): Promise<Extract<SetupJobResult, { kind: K }>> {
     if (!this.isOnline(runnerId)) return Promise.reject(runnerOffline())
     return this.#request(job, timeoutMs, runnerId)
   }
 
+  // Every online runner removes the checkouts it has; the answers are merged
+  async cleanupWorktrees(job: Extract<SetupJob, { kind: 'cleanup_worktrees' }>, timeoutMs: number = SETUP_JOB_TIMEOUTS.cleanup_worktrees.waitMs): Promise<Extract<SetupJobResult, { kind: 'cleanup_worktrees' }>> {
+    const ids = [...this.#runners.keys()].filter(id => this.isOnline(id))
+    if (!ids.length) throw runnerOffline()
+    const results = await Promise.all(ids.map(id => this.#request(job, timeoutMs, id)))
+    return { kind: 'cleanup_worktrees', removed: results.flatMap(r => r.removed), kept: results.flatMap(r => r.kept) }
+  }
+
   // Every online runner sweeps. Each answer settles on its own, so one runner
   // failing doesn't lose what the others removed.
-  sweepWorktrees(job: Extract<SetupJob, { kind: 'sweep_worktrees' }>, timeoutMs: number): Promise<PromiseSettledResult<Extract<SetupJobResult, { kind: 'sweep_worktrees' }>>[]> {
+  sweepWorktrees(job: Extract<SetupJob, { kind: 'sweep_worktrees' }>, timeoutMs: number = SETUP_JOB_TIMEOUTS.sweep_worktrees.waitMs): Promise<PromiseSettledResult<Extract<SetupJobResult, { kind: 'sweep_worktrees' }>>[]> {
     return Promise.allSettled(this.available().map(r => this.#request(job, timeoutMs, r.id)))
   }
 
@@ -381,6 +397,8 @@ export class RunnerHub {
         const next = previous.then(() => this.#handlers?.onRunMessage(message, runnerId)).catch(error => console.error(`Runner message ${message.type} failed`, error))
         this.#queues.set(message.runId, next)
         await next
+        const waiter = this.#handledWaiters.findIndex(w => w.runId === message.runId && w.type === message.type)
+        if (waiter >= 0) this.#handledWaiters.splice(waiter, 1)[0]!.done()
         // Idle again: a run that never gets its run.ended leaves nothing behind
         if (this.#queues.get(message.runId) === next) this.#queues.delete(message.runId)
         return
@@ -391,7 +409,7 @@ export class RunnerHub {
           const result = await this.#handlers.onToolCall(message, runnerId)
           this.send({ type: 'tool.result', callId: message.callId, ok: true, result }, runnerId)
         } catch (error) {
-          this.send({ type: 'tool.result', callId: message.callId, ok: false, error: error instanceof Error ? error.message : String(error) }, runnerId)
+          this.send({ type: 'tool.result', callId: message.callId, ok: false, error: errorText(error) }, runnerId)
         }
         return
       }
@@ -413,24 +431,16 @@ export class RunnerHub {
 // A hello's capacity, checked: anything missing falls back to `fallback`
 function parseCapacity(message: Extract<RunnerMessage, { type: 'hello' }>, fallback?: RunnerCapacity): RunnerCapacity {
   return {
-    slotSource: parseSlotSource(message.slotSource),
-    slots: typeof message.slots === 'number' && Number.isInteger(message.slots) && message.slots > 0 ? message.slots : fallback?.slots ?? 1,
-    runtimes: Array.isArray(message.runtimes) ? message.runtimes.filter(r => typeof r === 'string') : fallback?.runtimes ?? [],
-    roles: Array.isArray(message.roles) ? message.roles.filter(r => (RUNNER_ROLES as readonly string[]).includes(r)) : fallback?.roles ?? []
+    slotSource: message.slotSource,
+    slots: message.slots ?? fallback?.slots ?? 1,
+    runtimes: message.runtimes ?? fallback?.runtimes ?? [],
+    roles: message.roles ?? fallback?.roles ?? []
   }
 }
 
 // How long without a heartbeat before the server treats the runner as gone,
 // even if the socket hasn't closed (e.g. a sleeping laptop)
 export const RUNNER_STALE_MS = RUNNER_HEARTBEAT_MS * 3
-
-function parseSlotSource(source: SlotSource | undefined): SlotSource | undefined {
-  if (source?.kind === 'explicit') return { kind: 'explicit' }
-  if (source?.kind !== 'derived') return undefined
-  const { cpus, memoryBytes, slotCpus, slotMemoryBytes } = source
-  if (![cpus, memoryBytes, slotCpus, slotMemoryBytes].every(n => Number.isFinite(n) && n > 0)) return undefined
-  return { kind: 'derived', cpus, memoryBytes, slotCpus, slotMemoryBytes }
-}
 
 export function runnerOffline(): ApiFailure {
   return new ApiFailure(503, { code: 'runner_offline' })

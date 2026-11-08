@@ -1,17 +1,98 @@
-import type { EpicReview, EpicReviewFeedback, PullRequestFile } from '@corral/contracts'
-import { isTaskDone } from '@corral/core'
-import { schema, type Executor } from '@corral/db'
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import type { EpicReview, EpicReviewFeedback, EpicReviewRound, EpicReviewTask, EpicPrEvent, PullRequestFile } from '@corral/contracts'
+import { isPrFree, isTaskDone } from '@corral/core'
+import { schema, type EpicRow, type Executor, type ProjectRow, type TaskRow } from '@corral/db'
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { auditText, readAudit } from './audit.ts'
+import { checkRows } from './checks.ts'
 import { ApiFailure } from './errors.ts'
-import { deferredConflicts } from './epic-rebase-approval.ts'
-import { epicReviewContext, lastChangesRequest, listEpicRounds } from './epic-prs.ts'
 import { findEpic } from './epics.ts'
 import { GitHubError, toFileStatus, type ChangedFile, type GitHubClient } from './github.ts'
-import { capDiff, readPullRequest, requiredChecks } from './pull-requests.ts'
-import type { ProjectRow } from './tasks.ts'
+import { compareUrl } from './github-urls.ts'
+import { deferredConflicts } from './operations.ts'
+import { epicBoard } from './parents.ts'
+import { capDiff, readPullRequest } from './pull-requests.ts'
+import { listEvidenceFor } from './runs.ts'
+import { toTasks } from './task-views.ts'
+import { CRITERIA_ORDER } from './criteria.ts'
 
-const { auditLog, reviews } = schema
+// A task's integration review as people and its reviewer read it (D23, D27):
+// its board with evidence, the human checks it owes, its rounds and feedback
+
+const { acceptanceCriteria, agents, auditLog, epicReviewRounds, reviews } = schema
+
+// The audit event of the human asking for changes on the task's PR
+export const CHANGES_EVENT = 'human_changes_requested' satisfies EpicPrEvent
+
+// What an integration review that gave up says, when its run left nothing better
+export const REVIEW_FAILED = 'Integration review failed'
+
+export function humanCriteria(db: Executor, board: TaskRow[]) {
+  if (board.length === 0) return Promise.resolve([])
+  return db.select({ id: acceptanceCriteria.id, taskId: acceptanceCriteria.taskId, text: acceptanceCriteria.text }).from(acceptanceCriteria)
+    .where(and(inArray(acceptanceCriteria.taskId, board.map(t => t.id)), eq(acceptanceCriteria.checkedByHuman, true))).orderBy(...CRITERIA_ORDER)
+}
+
+// What each PR-free task leaves for the epic's human approval. Task-PR tasks
+// had human review on their own path. Agent approval can't stand in (D28).
+export async function humanObligations(db: Executor, board: TaskRow[]) {
+  const criteria = await humanCriteria(db, board)
+  return board.filter(t => isPrFree(t)).map(t => ({ taskId: t.id, humanReview: t.humanReview, humanChecks: criteria.filter(c => c.taskId === t.id).map(c => c.id) }))
+}
+
+export async function epicReviewContext(db: Executor, epic: EpicRow, project: ProjectRow) {
+  const rows = await epicBoard(db, epic.id)
+  return { epicId: epic.id, title: epic.title, goal: epic.description, branch: epic.branch, headSha: epic.prHeadSha,
+    tasks: (await boardsWithEvidence(db, [{ project, rows }]))[0]! }
+}
+
+export type EpicBoard = EpicReviewTask[]
+
+// API tasks with their evidence and human obligations for several boards at
+// once, one per input
+export async function boardsWithEvidence(db: Executor, boards: { project: ProjectRow, rows: TaskRow[] }[]): Promise<EpicBoard[]> {
+  const [built, required] = await Promise.all([
+    Promise.all(boards.map(({ project, rows }) => toTasks(db, project, rows))),
+    humanObligations(db, boards.flatMap(b => b.rows))
+  ])
+  const evidence = await listEvidenceFor(db, built.flat().map(t => t.id))
+  const owedOf = new Map(required.map(r => [r.taskId, r]))
+  return built.map(board => board.map((task) => {
+    const owed = owedOf.get(task.id)
+    return { task, evidence: evidence.get(task.id) ?? [], humanReview: owed?.humanReview ?? false, humanChecks: owed?.humanChecks ?? [] }
+  }))
+}
+
+// The human's latest request for changes on the epic PR, if any. Its detail
+// is a snapshot; older records have no fix task links.
+async function lastChangesRequest(db: Executor, epicId: string) {
+  const [action] = await db.select({ detail: auditLog.detail, createdAt: auditLog.createdAt }).from(auditLog)
+    .where(and(eq(auditLog.action, 'epic.pr'), sql`${auditText('epic.pr', 'epicId')} = ${epicId}`, sql`${auditText('epic.pr', 'event')} = ${CHANGES_EVENT}`))
+    .orderBy(desc(auditLog.createdAt), desc(auditLog.id)).limit(1)
+  return action
+}
+
+export async function listEpicRounds(db: Executor, epicId: string): Promise<EpicReviewRound[]> {
+  const rounds = await db.select({ review: epicReviewRounds, reviewer: { id: agents.id, name: agents.name } })
+    .from(epicReviewRounds).innerJoin(agents, eq(agents.id, epicReviewRounds.reviewerId))
+    .where(eq(epicReviewRounds.epicId, epicId)).orderBy(asc(epicReviewRounds.round))
+  return rounds.map(({ review: r, reviewer }) => ({
+    round: r.round, verdict: r.verdict, reviewer, headSha: r.headSha,
+    summary: r.summary, findings: r.findings, at: r.createdAt.toISOString()
+  }))
+}
+
+// A task's PR that integration review has yet to take up: none opened yet,
+// or one left open or waiting for its fix work
+export function awaitsReview(epic: Pick<EpicRow, 'prNumber' | 'reviewState'>): boolean {
+  return !epic.prNumber || epic.reviewState === 'open' || epic.reviewState === 'changes_requested'
+}
+
+// What was approved, and where it sat. The base only informs the history, so
+// failing to read it doesn't refuse the approval.
+export async function approvalSnapshot(github: GitHubClient, project: ProjectRow, headSha: string) {
+  const comparison = await github.compare(project.repository, project.defaultBranch, headSha).catch(() => null)
+  return { approvedHeadSha: headSha, approvedBaseSha: comparison?.mergeBase ?? null }
+}
 
 const toFile = (file: ChangedFile): PullRequestFile => ({
   path: file.filename, status: toFileStatus(file.status), additions: file.additions, deletions: file.deletions, patch: file.patch ?? ''
@@ -55,7 +136,7 @@ async function lastFeedback(db: Executor, github: GitHubClient, project: Project
   const { summary, fixTasks, headSha: reviewedSha } = readAudit(action.detail)
   const feedback = { text: summary ?? '', at: action.createdAt.toISOString(), headSha: reviewedSha ?? null, fixTasks: fixTasks ?? [] }
   if (!reviewedSha || !headSha) return { ...feedback, files: [], totalFiles: 0, truncated: false, diffUrl: null }
-  const diffUrl = `https://github.com/${project.repository}/compare/${reviewedSha}...${headSha}`
+  const diffUrl = compareUrl(project.repository, reviewedSha, headSha)
   try {
     return { ...feedback, ...capDiff(await filesBetween(github, project, reviewedSha, headSha)), diffUrl }
   } catch (error) {
@@ -106,7 +187,7 @@ export async function getEpicReview(db: Executor, github: GitHubClient, epicId: 
   ])
   return {
     epicId: epic.id, title: epic.title, goal: epic.description, reviewMode: epic.reviewMode, state: epic.reviewState,
-    targetBranch: project.defaultBranch, headSha, pr, gateChecks: requiredChecks(project, checks), targetMovedBy,
+    targetBranch: project.defaultBranch, headSha, pr, gateChecks: checkRows(project.requiredChecks, checks), targetMovedBy,
     rounds: rounds.reverse(),
     tasks: board.map(({ task, evidence, humanReview, humanChecks }) => {
       const human = seen.has(task.id)

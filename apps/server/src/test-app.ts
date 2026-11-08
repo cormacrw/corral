@@ -7,12 +7,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createApp } from './app.ts'
 import { MemoryBlobStore } from './blob-store.ts'
-import { ensureAgents, ensureOwner } from './bootstrap.ts'
+import { boot } from './boot.ts'
 import { EventBus } from './events.ts'
 import { FakeGitHub } from './fake-github.ts'
-import { startServer, type RunningServer } from './server.ts'
-import { createServices, type Services } from './services.ts'
-import type { FakeRunner } from './test-runner.ts'
+import type { RunningServer } from './server.ts'
+import type { Services } from './services.ts'
+import { runStartHandled, type FakeRunner } from './fake-runner.ts'
+import { LONGEST_POLL_MS } from './retries.ts'
 
 // A server app on a throwaway database, for tests
 export interface TestApp extends Services {
@@ -69,21 +70,26 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
   const bus = new EventBus()
   const events: ServerEvent[] = []
   bus.subscribe(event => events.push(event))
-  const actor = await ensureOwner(handle.db)
-  await ensureAgents(handle.db)
   const spoolDir = await mkdtemp(join(tmpdir(), 'corral-spool-'))
   const github = new FakeGitHub()
   const blobs = new MemoryBlobStore()
   const clock = { now: new Date() }
-  const boot = async () => {
+  const start = async () => {
     const process = processDatabase(handle.db)
-    const services = createServices({ db: process.db, events: bus, spoolDir, blobs, github, publicUrl: 'http://corral.test', now: () => clock.now })
-    await services.orchestrator.init()
-    const deps = { db: process.db, events: bus, actor, ...services }
-    const server = options.listen ? await startServer(deps, { host: '127.0.0.1', port: 0, runnerToken: options.runnerToken, runnerOnly: options.runnerOnly }) : null
-    return { process, services, server, app: createApp(deps) }
+    const booted = await boot({
+      db: process.db,
+      events: bus,
+      spoolDir,
+      blobs,
+      github,
+      publicUrl: 'http://corral.test',
+      now: () => clock.now,
+      listeners: options.listen ? [{ host: '127.0.0.1', port: 0, runnerOnly: options.runnerOnly }] : [],
+      runnerToken: options.runnerToken
+    })
+    return { process, booted, services: booted.services, server: booted.servers[0] ?? null, app: createApp(booted.deps) }
   }
-  let current = await boot()
+  let current = await start()
 
   const request = async (method: string, path: string, body?: unknown) => current.app.request(path, {
     method,
@@ -97,7 +103,7 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
   const testApp: TestApp = {
     ...current.services,
     db: handle.db,
-    actor,
+    actor: current.booted.actor,
     events,
     bus,
     github,
@@ -106,24 +112,13 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
     server: current.server,
     request,
     async runStarted(runner, job, agentSessionId) {
-      const handled = new Promise<void>((resolve, reject) => {
-        const unsubscribe = bus.subscribe((event) => {
-          if (event.type !== 'run.updated' || event.run.id !== job.runId) return
-          clearTimeout(timer)
-          unsubscribe()
-          resolve()
-        })
-        const timer = setTimeout(() => {
-          unsubscribe()
-          reject(new Error(`run.started for ${job.runId} was not handled within 5 s`))
-        }, 5000)
-      })
+      const handled = runStartHandled(bus, job.runId)
       runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId })
       await handled
     },
     mergePass() {
-      clock.now = new Date(clock.now.getTime() + 121_000)
-      return current.services.orchestrator.merges.tick()
+      clock.now = new Date(clock.now.getTime() + LONGEST_POLL_MS + 1_000)
+      return current.services.orchestrator.mergePass()
     },
     async createProject(overrides = {}) {
       counter++
@@ -152,17 +147,15 @@ export async function createTestApp(driver: 'pglite' | 'postgres', options: { li
       return res.json() as Promise<Task>
     },
     async restart() {
+      // Flushed first: the dead process could no longer write its samples
       await current.services.performance.stop()
       current.process.kill()
-      current.services.orchestrator.stop()
-      await current.server?.close()
-      current = await boot()
+      await current.booted.stop()
+      current = await start()
       Object.assign(testApp, current.services, { server: current.server })
     },
     async close() {
-      current.services.orchestrator.stop()
-      await current.server?.close()
-      await current.services.performance.stop()
+      await current.booted.stop()
       await handle.close()
       await rm(spoolDir, { recursive: true, force: true })
     }

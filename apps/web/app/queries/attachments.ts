@@ -1,5 +1,5 @@
 import type { Attachment } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { api } from '~/queries/api'
 import { defineMutation } from './dependencies'
 
 // Nothing lists a project's attachments, so an upload leaves nothing stale

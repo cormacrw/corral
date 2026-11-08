@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import type { InboxActionInput } from '@corral/contracts'
 import { actionDisabled, type InboxComposerContext, type ResolveTo } from '~/features/inbox/composables/useInboxPanel'
-import { RESOLVE_TARGETS } from '~/features/inbox/utils/inbox-actions'
+import { RETRY_TARGETS } from '~/features/inbox/utils/inbox-actions'
 
-// The item's actions as buttons
 const props = defineProps<{ ctx: InboxComposerContext, canAct: boolean }>()
 const primary = computed(() => props.canAct ? props.ctx.actions[0] ?? null : null)
 const secondary = computed(() => props.canAct ? props.ctx.actions.slice(1) : [])
@@ -28,7 +27,7 @@ const act = (value: string) => props.ctx.act(value as InboxActionInput['action']
     <AppSelectMenu
       v-if="primary.value === 'resolve'"
       :model-value="ctx.resolveTo"
-      :items="RESOLVE_TARGETS"
+      :items="RETRY_TARGETS"
       aria-label="Retry into"
       class="w-32"
       @update:model-value="ctx.setResolveTo($event as ResolveTo)"

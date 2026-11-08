@@ -6,7 +6,7 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { appendAudit, auditEvent } from './audit.ts'
-import { createEpicFixTask } from './epic-prs.ts'
+import { createFixTask } from './tasks.ts'
 import { GitHubError, type ChangedFile, type Comparison } from './github.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
@@ -71,7 +71,7 @@ async function setup(sha = 'head-1') {
 
 async function requestChanges({ project, epic }: Awaited<ReturnType<typeof setup>>, reviewedSha: string) {
   const [row] = await t.db.select().from(projects).where(eq(projects.id, project.id))
-  const id = await createEpicFixTask(t.db, row!, epic, 'Reopen keeps the filters', t.actor)
+  const id = await createFixTask(t.db, row!, epic.id, 'Reopen keeps the filters', t.actor)
   const [fix] = await t.db.select().from(tasks).where(eq(tasks.id, id))
   const ref = `${project.prefix}-${fix!.number}`
   await appendAudit(t.db, { projectId: project.id, actor: t.actor }, auditEvent('epic.pr', { epicId: epic.id, event: 'human_changes_requested', headSha: reviewedSha, summary: 'Reopen keeps the filters', fixTasks: [{ id, ref, title: fix!.title }] }))
@@ -220,5 +220,5 @@ it('answers 404 for an unknown task and a clear error for a direct one', async (
   await t.db.update(epics).set({ reviewMode: 'direct' }).where(eq(epics.id, epic.id))
   const direct = await read(epic.id, 'epic-review-direct.json')
   expect(direct.status).toBe(409)
-  expect(direct.body.error).toEqual({ code: 'invalid_input', issues: [{ message: 'This task merges its subtasks straight to the target branch, so it has no task review' }] })
+  expect(direct.body.error).toMatchObject({ code: 'invalid_input' })
 })

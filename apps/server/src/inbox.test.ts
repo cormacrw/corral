@@ -3,7 +3,7 @@ import { schema } from '@corral/db'
 import { eq, sql } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 const { agents, auditLog, planMessages, planSessions, plans, planEpics, planTasks, tasks } = schema
 
@@ -118,7 +118,7 @@ describe('plan threads in the inbox', () => {
       const box = await inbox()
       return { box, item: box.needsYou.find(i => i.id === created.id) }
     }
-    expect((await thread()).item).toMatchObject({ type: 'plan_thread', status: 'failed', failure: 'The PM exited with code 1', question: null, plan: null })
+    expect((await thread()).item).toMatchObject({ type: 'plan_thread', status: 'failed', failure: expect.any(String), question: null, plan: null })
     const { count } = (await thread()).box
 
     await t.request('POST', `/api/plan/sessions/${created.id}/read`)

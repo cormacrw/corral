@@ -34,13 +34,13 @@ A simple kanban of a project's **approved** work, grouped by status (D10). Backl
      | Blocked & failed | Blocked, Failed | You |
      | Complete | Merged tasks and spikes, approved designs | Last 3 days |
 
-   - **Cards** (`features/tasks/components/TaskCard.vue`, shared with the mobile layout): a `div` with a `bg-background` background, a 1px border and `rounded-md`, stacked top to bottom:
+   - **Cards** (`features/board/components/TaskCard.vue`, shared with the mobile layout): a `div` with a `bg-background` background, a 1px border and `rounded-md`, stacked top to bottom:
      - **Title:** medium, highlighted, wrapping as far as it needs. It's the card's keyboard control.
      - **Task:** one line, truncated, muted. Omitted when the task has none.
-     - **Detail line** (`features/tasks/components/TaskCardMeta.vue`): the ref, the PR number when there is one, and on the right when the task last changed. Muted, and shared with task cards.
+     - **Detail line** (`features/board/components/TaskCardMeta.vue`): the ref, the PR number when there is one, and on the right when the task last changed. Muted, and shared with task cards.
      - **Footer:** the priority on the left (Urgent in `error`, High in `warning`, others muted), and on the right the blocked icon, type icon and assignee.
      - **Type icon:** muted, so colour on the card belongs to the priority. Bug `i-hugeicons-bug-01`, Design `i-hugeicons-paint-brush-02`, Spike `i-hugeicons-test-tube`, and none for Task.
-     - **Assignee** (`features/tasks/components/TaskCardAssignee.vue`): the avatar only, with the full name on hover. Agent review shows `task.reviewer` and every other status shows `task.developer`, never falling back to the other role. With no agent it's a dashed circle (hover: Unassigned). The green dot shows only when the displayed agent holds the lease.
+     - **Assignee** (`features/board/components/TaskCardAssignee.vue`): the avatar only, with the full name on hover. Agent review shows `task.reviewer` and every other status shows `task.developer`, never falling back to the other role. With no agent it's a dashed circle (hover: Unassigned). The green dot shows only when the displayed agent holds the lease.
      - **Not on the card, in any status:** notes (status reasons, review round, "Waiting for you", "Merges when checks pass", "Paused"), type badge, design-changed badge and a link to the PR. They're in the flyout.
      - **Working cards glow** (shared working indicator), with a `primary` border.
      - The selected card has a `primary` border and ring.
@@ -53,7 +53,7 @@ The toggle's view lives in `?view=` (`top` or `all`; old links say `epics` or `t
 
 Each card is a task with subtasks; individual subtask cards are hidden. Tasks with no subtasks do not appear.
 
-**Columns.** `epicStage` in `apps/web/app/features/board/utils/board.ts` puts each task in exactly one column, from the first row that matches:
+**Columns.** `parentStage` in `packages/core/src/parent.ts` puts each task in exactly one column, from the first row that matches:
 
 | Column | When | Hint |
 |---|---|---|

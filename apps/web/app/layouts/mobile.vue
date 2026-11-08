@@ -3,6 +3,7 @@ import AppBadge from '~/components/app/AppBadge.vue'
 // The mobile shell (D17, design/mobile.md): banners, the page and a five-tab
 // bar. app.vue swaps it in for the default layout; URLs stay the same.
 import { stepsToAppStart } from '~/utils/app-history'
+import { mobileChrome, SECTIONS } from '~/utils/routes'
 
 const shell = useShell()
 // Keep the same shared list queries warm as the desktop shell
@@ -48,22 +49,14 @@ async function selectTab(event: MouseEvent, to: string) {
 
 const planUnread = computed(() => shell.planSessions.some(s => s.unread))
 
-const isActive = (...paths: string[]) => paths.some(path => route.path === path || route.path.startsWith(`${path}/`))
-
-const tabs = computed(() => [
-  { label: 'Home', icon: 'i-hugeicons-dashboard-square-02', to: '/home', active: isActive('/home') || route.path === '/' },
-  { label: 'Plan', icon: 'i-hugeicons-message-01', to: '/plan', active: isActive('/plan'), dot: planUnread.value },
-  { label: 'Inbox', icon: 'i-hugeicons-inbox', to: '/inbox', active: isActive('/inbox'), badge: shell.inboxCount },
-  // Tasks and epics belong to a project
-  { label: 'Projects', icon: 'i-hugeicons-folder-01', to: '/projects', active: isActive('/projects', '/tasks', '/epics') },
-  { label: 'Settings', icon: 'i-hugeicons-settings-01', to: '/settings', active: isActive('/settings') }
-])
-
-const tabRoot = computed(() => ['/home', '/plan', '/inbox', '/projects', '/settings'].includes(route.path))
-const parts = computed(() => route.path.split('/').filter(Boolean))
-const fullScreen = computed(() => parts.value[0] === 'agents' && parts.value.length >= 3)
-const ownHeader = computed(() => isActive('/tasks', '/epics'))
-const focused = computed(() => ['plan', 'inbox'].includes(parts.value[0] ?? '') && parts.value.length >= 2)
+const chrome = computed(() => mobileChrome(route.path))
+const tabs = computed(() => chrome.value.tabs.map(tab => ({
+  ...SECTIONS[tab.section],
+  icon: tab.icon,
+  active: tab.active,
+  dot: tab.section === 'plan' && planUnread.value,
+  badge: tab.section === 'inbox' ? shell.inboxCount : 0
+})))
 </script>
 
 <template>
@@ -71,7 +64,7 @@ const focused = computed(() => ['plan', 'inbox'].includes(parts.value[0] ?? '') 
     <!-- The top inset applies once: above a banner when one shows, otherwise
          through --shell-top on whatever starts the page -->
     <div
-      v-if="ownHeader"
+      v-if="chrome.ownHeader"
       class="shrink-0 pt-(--shell-top)"
     />
 
@@ -90,14 +83,14 @@ const focused = computed(() => ['plan', 'inbox'].includes(parts.value[0] ?? '') 
          as the Inbox action bar) off the bottom of the screen. -->
     <div
       class="relative inset-auto flex min-h-0 flex-1 overflow-x-auto overscroll-contain *:min-h-0 *:overflow-y-auto *:overscroll-contain"
-      :class="tabRoot && 'pt-(--shell-top)'"
+      :class="chrome.tabRoot && 'pt-(--shell-top)'"
       data-testid="mobile-body"
     >
       <slot />
     </div>
 
     <nav
-      v-if="!fullScreen && !focused && !isActive('/tasks')"
+      v-if="!chrome.fullScreen && !chrome.focused && !chrome.noTabBar"
       aria-label="Main"
       class="shrink-0 border-t border-border bg-background pb-[env(safe-area-inset-bottom)] ps-[env(safe-area-inset-left)] pe-[env(safe-area-inset-right)]"
     >

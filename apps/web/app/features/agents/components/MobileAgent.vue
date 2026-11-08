@@ -1,20 +1,22 @@
 <script setup lang="ts">
+import { planThreadPath, runPath } from '~/utils/routes'
+import { isActiveRun } from '@corral/core'
 import type { Run } from '@corral/contracts'
-import type { AgentRuns } from '~/features/runs/composables/useAgentRuns'
+import type { AgentRuns } from '~/features/agents/composables/useAgentRuns'
 import { agentIdleNote } from '~/features/agents/utils/agents'
-import { duration, isLiveRun, plural, ROLE, runtimeLabel, timeAgo } from '~/utils/labels'
+import { duration, timeAgo } from '~/utils/labels'
 
 // An agent's page on mobile (design/agent.md, design/mobile.md): the
 // header and stat tiles, then the current run and previous runs. Each run
 // opens its transcript, or its linked Plan conversation for a PM turn.
 const props = defineProps<{ view: AgentRuns }>()
-const { name, agent, status, limited, missing, runs, pending, error, now, current, today, tiles, facts, load, project, resume } = props.view
+const { name, agent, missing, runs, pending, error, now, current, load, project } = props.view
 
-const previous = computed(() => runs.value.filter(r => !isLiveRun(r)))
+const previous = computed(() => runs.value.filter(r => !isActiveRun(r.state)))
 const to = (run: Run) => run.role === 'pm' && run.planSessionId
-  ? { path: `/plan/${run.planSessionId}`, query: { project: run.projectId } }
-  : `/agents/${name.value}/${run.id}`
-const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(run) ? null : duration(run.startedAt, run.endedAt, now.value)].filter(Boolean).join(' · ')
+  ? { path: planThreadPath(run.planSessionId), query: { project: run.projectId } }
+  : runPath(name.value, run.id)
+const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isActiveRun(run.state) ? null : duration(run.startedAt, run.endedAt, now.value)].filter(Boolean).join(' · ')
 </script>
 
 <template>
@@ -30,67 +32,10 @@ const meta = (run: Run) => [project(run)?.name, `Run #${run.number}`, isLiveRun(
     v-else
     class="flex flex-col gap-5 py-4"
   >
-    <header class="flex items-center gap-4 px-4">
-      <AgentAvatar
-        :name="agent.name"
-        :working="agent.activeRuns > 0"
-        size="3xl"
-      />
-      <div class="min-w-0 flex-1">
-        <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <h2 class="min-w-0 truncate text-2xl font-semibold text-foreground">
-            {{ agent.name }}
-          </h2>
-          <AppBadge
-            v-if="status"
-            v-bind="status"
-            variant="subtle"
-          />
-        </div>
-        <p class="text-sm text-muted-foreground">
-          {{ ROLE[agent.role] }} · {{ runtimeLabel(agent.runtime) }} · {{ plural(today.length, 'run') }} today
-        </p>
-        <p
-          v-if="limited"
-          class="text-xs text-muted-foreground"
-        >
-          Waiting on usage limit until {{ new Date(agent.pausedUntil!).toLocaleTimeString() }}
-        </p>
-        <AppButton
-          v-if="limited"
-          label="Resume now"
-          variant="outline"
-          color="neutral"
-          size="sm"
-          class="mt-2"
-          @click="resume"
-        />
-      </div>
-    </header>
-
-    <div class="flex flex-col gap-3">
-      <!-- The tiles scroll sideways rather than wrap -->
-      <div class="flex snap-x gap-2 overflow-x-auto overscroll-x-contain px-4 pb-1">
-        <dl
-          v-for="tile in tiles"
-          :key="tile.label"
-          class="w-48 shrink-0 snap-start rounded-lg border border-border p-3"
-        >
-          <dt class="truncate text-xs text-muted-foreground">
-            {{ tile.label }}
-          </dt>
-          <dd class="text-2xl font-semibold text-foreground tabular-nums">
-            {{ tile.value }}
-          </dd>
-          <dd class="truncate text-xs text-muted-foreground">
-            {{ tile.sub || '\u00A0' }}
-          </dd>
-        </dl>
-      </div>
-      <p class="px-4 text-xs text-muted-foreground">
-        {{ facts }}
-      </p>
-    </div>
+    <AgentHeader
+      :agent="agent"
+      :view="view"
+    />
 
     <AppLoadError
       v-if="error"

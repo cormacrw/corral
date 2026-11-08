@@ -1,7 +1,5 @@
 import { z } from 'zod'
-import { PAGE_PATTERNS, PERF_WINDOWS, type PerfWindow } from './client.ts'
-
-export { PAGE_PATTERNS, PERF_WINDOWS, type PerfWindow } from './client.ts'
+import { PAGE_PATTERNS, PERF_WINDOWS, type PerfWindow } from './performance.constants.ts'
 
 export const CLIENT_PERF_MAX_BYTES = 32 * 1024
 export const clientPerfInput = z.strictObject({

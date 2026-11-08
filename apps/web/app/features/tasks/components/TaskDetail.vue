@@ -1,14 +1,16 @@
 <script setup lang="ts">
+import { authorRoleFor } from '@corral/core'
+import type { DetailMode } from '~/composables/useTaskFlyout'
 import { computed, ref, watch } from 'vue'
 import { useTaskActions } from '~/features/tasks/composables/useTaskActions'
 import { useTaskCommentDraft } from '~/features/tasks/composables/useTaskCommentDraft'
 import { useTaskDetail } from '~/features/tasks/composables/useTaskDetail'
-import { agentHolds, canAddSubtask, workerRole } from '~/features/tasks/utils/taskDetail'
+import { agentHolds, canAddSubtask } from '~/features/tasks/utils/taskDetail'
 
 // One TaskDetail with three modes (design/task.md): docked flyout, the
 // task page with a properties rail, or the full mobile page with Details
 // and Criteria and activity tabs (design/mobile.md)
-const props = defineProps<{ taskRef: string, mode: 'flyout' | 'page' | 'mobile' }>()
+const props = defineProps<{ taskRef: string, mode: DetailMode }>()
 const emit = defineEmits<{ close: [] }>()
 
 const detail = useTaskDetail(() => props.taskRef)
@@ -38,9 +40,10 @@ const propertiesClass = computed(() => mobile.value
 const mobileTabs = computed(() => [{ label: 'Details', value: 'details' }, { label: isDraft.value ? 'Criteria' : 'Criteria and activity', value: 'criteria' }])
 
 const worker = computed(() => task.value?.developer?.name ?? null)
-const fallbackWorker = computed(() => task.value ? workerRole(task.value) : 'developer')
-const sentTo = computed(() => task.value && agentHolds(task.value) && task.value.lease ? worker.value ?? `the ${fallbackWorker.value}` : null)
-const composerHint = computed(() => task.value && agentHolds(task.value)
+const fallbackWorker = computed(() => task.value ? authorRoleFor(task.value.type) : 'developer')
+const running = computed(() => Boolean(task.value && agentHolds(task.value) && task.value.lease))
+const sentTo = computed(() => running.value ? worker.value ?? `the ${fallbackWorker.value}` : null)
+const composerHint = computed(() => running.value
   ? `${worker.value ?? `The ${fallbackWorker.value}`} gets this on its next step.`
   : 'No agent is working on this task, so this is saved as a note.')
 </script>

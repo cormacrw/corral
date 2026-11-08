@@ -4,7 +4,7 @@ import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 let t: TestApp
 let runner: FakeRunner
@@ -43,17 +43,18 @@ it('closes atomically, stops the PM, preserves accepted work and reopens cleanly
   expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', { title: 'Late', tasks: [] })).toMatchObject({ ok: false })
   // An already-dispatched tool must also refuse to write after close,
   // even if it passed the orchestrator's fence before the run stopped.
-  await expect(t.plans.tool(created.id, job.runId, 'propose_plan', {
+  await expect(t.orchestrator.pmTools.call(created.id, job.runId, 'propose_plan', {
     title: 'Late proposal', tasks: [{ key: 'late', title: 'Late draft', type: 'task', description: 'Build it', acceptanceCriteria: ['Works'] }]
   }, t.actor)).rejects.toThrow('This Plan turn has stopped')
   const after = await t.db.select().from(schema.tasks).where(eq(schema.tasks.projectId, project.id))
   expect(after.find(r => r.title === 'Draft')!.deletedAt).not.toBeNull()
   const deleted = await t.db.select().from(schema.auditLog).where(eq(schema.auditLog.taskId, rows.find(r => r.title === 'Draft')!.id))
-  expect(deleted).toContainEqual(expect.objectContaining({ action: 'task.deleted', detail: expect.objectContaining({ mode: 'soft', reason: 'Discarded with the Plan thread' }) }))
-  expect(after.filter(r => r.title !== 'Draft')).toEqual(before.filter(r => r.title !== 'Draft'))
-  expect(await t.plans.listDrafts(project.id)).toEqual([])
+  expect(deleted).toContainEqual(expect.objectContaining({ action: 'task.deleted', detail: expect.objectContaining({ mode: 'soft' }) }))
+  const accepted = (list: typeof before) => list.filter(r => r.title !== 'Draft').sort((a, b) => a.number - b.number)
+  expect(accepted(after)).toEqual(accepted(before))
+  expect(await t.orchestrator.proposals.listDrafts(project.id)).toEqual([])
   expect((await t.request('POST', `/api/plan/plans/${detail.plans[0]!.id}/approve`)).status).toBe(409)
-  const closed = await t.plans.getSession(created.id)
+  const closed = await t.orchestrator.plans.getSession(created.id)
   expect(closed).toMatchObject({ closed: true, status: 'none', activeRunId: null })
   expect(closed.plans[0]!.status).toBe('discarded')
   expect(JSON.stringify(await t.request('GET', '/api/inbox').then(r => r.json()))).not.toContain(created.id)
@@ -63,8 +64,8 @@ it('closes atomically, stops the PM, preserves accepted work and reopens cleanly
   await t.request('POST', `/api/plan/sessions/${created.id}/close`)
   expect(t.events).toHaveLength(eventCount)
   expect((await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Start again' })).status).toBe(201)
-  expect(await t.plans.getSession(created.id)).toMatchObject({ closed: false, status: 'none' })
-  expect(await t.plans.listDrafts(project.id)).toEqual([])
+  expect(await t.orchestrator.plans.getSession(created.id)).toMatchObject({ closed: false, status: 'none' })
+  expect(await t.orchestrator.proposals.listDrafts(project.id)).toEqual([])
 })
 
 it('returns not found for a missing session', async () => {
@@ -90,7 +91,7 @@ it('uses draftSessions ownership rather than every task referenced by the closin
   ])
   await t.request('POST', `/api/plan/sessions/${closing!.id}/close`)
   expect((await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, draft!.id)))[0]!.deletedAt).toBeNull()
-  expect(await t.plans.listDrafts(project.id)).toMatchObject([{ sessionId: owner!.id, drafts: [{ taskId: draft!.id }] }])
+  expect(await t.orchestrator.proposals.listDrafts(project.id)).toMatchObject([{ sessionId: owner!.id, drafts: [{ taskId: draft!.id }] }])
 })
 
 it('leaves an already approved session and its plan unchanged', async () => {
@@ -133,8 +134,8 @@ it('detaches accepted dependents from discarded drafts instead of blocking them'
 
 it('refuses a delayed first turn after close even with a stale open session snapshot', async () => {
   const [session] = await t.db.insert(schema.planSessions).values({ title: 'Delayed child', createdBy: t.actor }).returning()
-  await t.plans.close(session!.id, t.actor)
-  await expect(t.orchestrator.startPmRun(session!, {
+  await t.orchestrator.plans.close(session!.id, t.actor)
+  await expect(t.orchestrator.pm.startPmRun(session!, {
     role: 'pm', projectId: null, repository: '', defaultBranch: '', taskId: null, taskRef: null,
     branch: null, headSha: null, planSessionId: session!.id, agentSessionId: null,
     runtime: 'claude-code', model: null, timeoutSeconds: 60, prompt: 'Delayed first message', fallbackPrompt: null

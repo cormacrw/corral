@@ -13,6 +13,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { join, resolve } from 'node:path'
+import { DEFAULT_SERVER_PORT, DEV_INSTANCE_FILE, type DevInstance } from '@corral/contracts/client'
 
 const root = resolve(import.meta.dirname, '..')
 const instanceDir = join(root, '.corral')
@@ -23,7 +24,7 @@ const turboArgs = process.argv.slice(2).filter(arg => arg !== '--demo' && arg !=
 const demoDataDir = join(instanceDir, 'demo', 'server')
 
 // Prefer the usual ports so a single instance stays predictable
-const serverPort = await pickPort(process.env.CORRAL_SERVER_PORT, 4100)
+const serverPort = await pickPort(process.env.CORRAL_SERVER_PORT, DEFAULT_SERVER_PORT)
 const webPort = await pickPort(process.env.CORRAL_WEB_PORT, 3000)
 const serverUrl = `http://${host}:${serverPort}`
 
@@ -45,7 +46,7 @@ if (demo && (reseed || !existsSync(demoDataDir))) {
   if (seed.status !== 0) process.exit(seed.status ?? 1)
 }
 
-const instance = {
+const instance: DevInstance = {
   pid: process.pid,
   webUrl: `http://localhost:${webPort}`,
   serverUrl,
@@ -54,7 +55,7 @@ const instance = {
   demo
 }
 await mkdir(instanceDir, { recursive: true })
-await writeFile(join(instanceDir, 'dev.json'), JSON.stringify(instance, null, 2) + '\n')
+await writeFile(join(root, DEV_INSTANCE_FILE), JSON.stringify(instance, null, 2) + '\n')
 console.log(`corral dev${demo ? ' (demo)' : ''}: web ${instance.webUrl}, server ${serverUrl} (details in .corral/dev.json)`)
 
 const turbo = spawn('turbo', ['run', 'dev', ...(demo ? ['--filter=!@corral/runner'] : []), ...turboArgs], { cwd: root, env, stdio: 'inherit' })

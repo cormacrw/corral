@@ -1,4 +1,5 @@
 import type { RunEvent } from '@corral/contracts'
+import { corralToolName } from '@corral/contracts/client'
 
 // Turns a run's events into the transcript's entries (design/agent.md):
 // consecutive tool calls collapse into one group of plain-English steps
@@ -136,7 +137,7 @@ export function summarizeSteps(steps: ToolStep[]): string {
 function describe(rawTool: string, input: unknown): Pick<ToolStep, 'kind' | 'verb' | 'target' | 'file' | 'added' | 'removed'> {
   const o = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
   const str = (key: string) => (typeof o[key] === 'string' ? o[key] : '')
-  const tool = rawTool.replace(/^mcp__corral__/, '')
+  const tool = corralToolName(rawTool)
   switch (tool) {
     case 'Read':
       return { kind: 'read', verb: 'Read', target: relative(str('file_path')), file: str('file_path') }

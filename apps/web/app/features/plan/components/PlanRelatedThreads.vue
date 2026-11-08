@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { planThreadPath } from '~/utils/routes'
 import { computed } from 'vue'
 
 // Links to the thread that started this one and those it started
@@ -16,7 +17,7 @@ const children = computed(() => shell.planSessions.filter(s => s.parentSessionId
   >
     <NuxtLink
       v-if="parent"
-      :to="`/plan/${parent.id}`"
+      :to="planThreadPath(parent.id)"
       class="text-brand hover:underline"
     >Started from: {{ parent.title }}</NuxtLink>
     <span
@@ -26,7 +27,7 @@ const children = computed(() => shell.planSessions.filter(s => s.parentSessionId
     <NuxtLink
       v-for="child in children"
       :key="child.id"
-      :to="`/plan/${child.id}`"
+      :to="planThreadPath(child.id)"
       class="text-brand hover:underline"
     >{{ child.title }}{{ child.closed ? ' (closed)' : '' }}</NuxtLink>
   </nav>

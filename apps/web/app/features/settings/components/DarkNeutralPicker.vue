@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DARK_NEUTRALS } from '~/features/settings/utils/dark-neutral'
+import { DARK_NEUTRALS } from '~/utils/dark-neutral'
 
 const { palette, setPalette } = useDarkNeutral()
 </script>

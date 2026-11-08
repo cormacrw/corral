@@ -5,7 +5,7 @@ import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Orchestrator } from './orchestrator.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 const { agents, runs, tasks } = schema
 
@@ -22,6 +22,12 @@ describe('two-phase update hold', () => {
     await t?.close()
   })
 
+  // Any scheduling pass has finished, and the runner has received all it was
+  // sent: a job's answer comes back on the same socket, after them
+  async function delivered() {
+    await t.orchestrator.scheduler.idle
+    await t.runner.requestOn('r1', { kind: 'detect_clis' })
+  }
   const hold = () => t.request('POST', '/api/update-hold').then(r => r.json())
   async function row(id: string) {
     return (await t.db.select().from(runs).where(eq(runs.id, id)))[0]!
@@ -85,8 +91,9 @@ describe('two-phase update hold', () => {
     expect(answered.messages.at(-1)).toMatchObject({ role: 'human', text: 'CSV please' })
     const ids = [fresh.activeRunId!, answered.activeRunId!]
     for (const id of ids) expect(await row(id)).toMatchObject({ state: 'queued', pmJob: expect.objectContaining({ role: 'pm' }) })
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     expect(await hold()).toEqual({ busy: 0 })
+    await delivered()
     expect(runner.received.filter(m => m.type === 'run.assign' && ids.includes(m.job.runId))).toHaveLength(0)
     expect(await t.request('GET', '/api/status').then(r => r.json())).toMatchObject({ stopped: false, updating: true })
     if (resume === 'release') {
@@ -94,12 +101,11 @@ describe('two-phase update hold', () => {
     } else {
       t.orchestrator.stop()
       // A fresh server orchestrator on the persisted DB has no in-memory hold.
-      const restarted = new Orchestrator({ db: t.db, events: t.bus, runner: t.runner, github: t.github, blobs: t.blobs, transcripts: t.transcripts, publicUrl: 'http://corral.test' })
-      restarted.plans = t.plans
+      const restarted = new Orchestrator({ db: t.db, events: t.bus, runner: t.runner, github: t.github, blobs: t.blobs, transcripts: t.transcripts, releaseNotes: t.releaseNotes, publicUrl: 'http://corral.test' })
       await restarted.init()
-      expect(restarted.status).toEqual({ stopped: false, updating: false })
+      expect(restarted.controls.status).toEqual({ stopped: false, updating: false })
       await restarted.onConnected([], 'r1')
-      await restarted.schedule()
+      await restarted.scheduler.schedule()
       restarted.stop()
     }
     for (const id of ids) {
@@ -141,8 +147,9 @@ describe('two-phase update hold', () => {
     for (const phase of ['draining', 'finishing']) {
       if (phase === 'finishing') await t.db.update(runs).set({ state: 'completed', endedAt: new Date() }).where(eq(runs.id, worker!.id))
       await hold()
-      await t.orchestrator.schedule()
+      await t.orchestrator.scheduler.schedule()
       await t.mergePass()
+      await delivered()
       expect(runner.received.filter(m => m.type === 'run.assign')).toHaveLength(0)
       expect(t.github.calls).toEqual([])
     }

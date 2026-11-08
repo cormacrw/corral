@@ -1,21 +1,20 @@
-import type { CreateTaskInput, PlanSessionDetail, Project, PullRequestFile, RunEvent, RunJob, Task } from '@corral/contracts'
-import { markdownToRichText, type Actor } from '@corral/core'
+import type { CreateTaskInput, PlanSessionDetail, Project, PullRequestFile, RunEvent, RunJob, ServerEvent, Task } from '@corral/contracts'
+import { markdownToRichText, type EpicReviewMode, type EvidenceKind } from '@corral/core'
 import { databaseLocation, openDatabase, schema, type DatabaseHandle } from '@corral/db'
-import { sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 import { join } from 'node:path'
 import { createApp } from '../app.ts'
-import { ensureAgents, ensureOwner } from '../bootstrap.ts'
+import { boot, type Booted } from '../boot.ts'
 import { EventBus } from '../events.ts'
 import type { CheckResult } from '../github.ts'
-import { startServer, type RunningServer } from '../server.ts'
-import { createServices, type Services } from '../services.ts'
-import { FakeRunner, sleep } from '../test-runner.ts'
+import { answerSetupJob, FakeRunner, runStartHandled } from '../fake-runner.ts'
+import { LONGEST_POLL_MS } from '../retries.ts'
+import type { Services } from '../services.ts'
 import { DemoGitHub, demoSha } from './demo-github.ts'
 
 // Drives a real server, on a real data dir, through the same flows the tests
 // use: a fake runner plays the agents and a fake GitHub holds the repos. Every
 // state the demo shows is one the server reached itself.
-export type Criteria = Task['acceptanceCriteria']
 
 export interface DemoTaskInput extends Omit<Partial<CreateTaskInput>, 'description' | 'implementationPlan'> {
   title: string
@@ -29,51 +28,50 @@ const UNITS = { m: 60_000, h: 3_600_000, d: 86_400_000 } as const
 
 export class Seeder {
   readonly db: DatabaseHandle['db']
-  readonly actor: Actor
   readonly services: Services
   readonly github: DemoGitHub
   readonly runner: FakeRunner
-  readonly server: RunningServer
   readonly #handle: DatabaseHandle
+  readonly #booted: Booted
+  readonly #events: EventBus
   readonly #app: ReturnType<typeof createApp>
   readonly #clock: { offsetMs: number }
+  readonly #concurrency: { id: string, concurrency: number }[]
   #shiftSql: string[] = []
 
-  private constructor(parts: { handle: DatabaseHandle, actor: Actor, services: Services, github: DemoGitHub, runner: FakeRunner, server: RunningServer, app: ReturnType<typeof createApp>, clock: { offsetMs: number } }) {
+  private constructor(parts: { handle: DatabaseHandle, booted: Booted, events: EventBus, github: DemoGitHub, runner: FakeRunner, app: ReturnType<typeof createApp>, clock: { offsetMs: number }, concurrency: { id: string, concurrency: number }[] }) {
     this.#handle = parts.handle
     this.db = parts.handle.db
-    this.actor = parts.actor
-    this.services = parts.services
+    this.#booted = parts.booted
+    this.services = parts.booted.services
+    this.#events = parts.events
     this.github = parts.github
     this.runner = parts.runner
-    this.server = parts.server
     this.#app = parts.app
     this.#clock = parts.clock
+    this.#concurrency = parts.concurrency
   }
 
   static async open(dataDir: string, publicUrl: string): Promise<Seeder> {
     const handle = await openDatabase(databaseLocation(undefined, dataDir))
     const events = new EventBus()
-    await ensureAgents(handle.db)
-    const actor = await ensureOwner(handle.db)
     const github = new DemoGitHub()
     const clock = { offsetMs: 0 }
-    const services = createServices({
+    const booted = await boot({
       db: handle.db,
       events,
       spoolDir: join(dataDir, 'spool'),
       blobDir: join(dataDir, 'blobs'),
       github,
       publicUrl,
-      now: () => new Date(Date.now() + clock.offsetMs)
+      now: () => new Date(Date.now() + clock.offsetMs),
+      listeners: [{ host: '127.0.0.1', port: 0 }]
     })
-    await services.orchestrator.init()
-    const deps = { db: handle.db, events, actor, ...services }
-    const server = await startServer(deps, { host: '127.0.0.1', port: 0 })
     // Every role and slot, so nothing waits on capacity while seeding
+    const concurrency = await handle.db.select({ id: schema.agents.id, concurrency: schema.agents.concurrency }).from(schema.agents)
     await handle.db.update(schema.agents).set({ concurrency: 50, wakeIntervalSeconds: null })
-    const runner = await FakeRunner.connect(server.url, [], 'home-server', { slots: 50 })
-    const seeder = new Seeder({ handle, actor, services, github, runner, server, app: createApp(deps), clock })
+    const runner = await FakeRunner.connect(booted.servers[0]!.url, [], 'home-server', { slots: 50 })
+    const seeder = new Seeder({ handle, booted, events, github, runner, app: createApp(booted.deps), clock, concurrency })
     runner.onJob = job => seeder.answerJob(job)
     await seeder.#loadShiftSql()
     return seeder
@@ -81,7 +79,6 @@ export class Seeder {
 
   // What the fake runner answers for setup jobs; scenarios can override
   releaseNotes: (prompt: string) => string = () => 'Release notes'
-  inboxMessage: ((prompt: string) => string) | null = null
   // A PR guide's model answer; throwing makes the guide fail
   prGuide: (prompt: string) => string = () => {
     throw new Error('No guide while seeding')
@@ -89,31 +86,21 @@ export class Seeder {
 
   answerJob(job: Parameters<FakeRunner['onJob']>[0]) {
     switch (job.kind) {
-      case 'cleanup_worktrees': return { kind: 'cleanup_worktrees' as const, removed: [`worktrees/${job.taskId}`], kept: [] }
-      case 'sweep_worktrees': return { kind: 'sweep_worktrees' as const, removed: [], kept: [] }
-      case 'detect_clis': return { kind: 'detect_clis' as const, clis: [{ id: 'claude' as const, version: '2.1.0', signedIn: true }, { id: 'codex' as const, version: '0.52.0', signedIn: true }] }
       case 'release_notes': return { kind: 'release_notes' as const, notes: this.releaseNotes(job.prompt) }
-      case 'inbox_message':
-        if (!this.inboxMessage) throw new Error('No message while seeding')
-        return { kind: 'inbox_message' as const, message: this.inboxMessage(job.prompt) }
+      case 'inbox_message': throw new Error('No message while seeding')
       // The fallback title is the first message, which reads fine
       case 'session_title': throw new Error('No title while seeding')
       case 'pr_guide': return { kind: 'pr_guide' as const, text: this.prGuide(job.prompt) }
-      default: return null
+      default: return answerSetupJob(job)
     }
   }
 
   async close(): Promise<void> {
     this.runner.close()
-    this.services.orchestrator.stop()
-    await this.server.close()
-    await this.services.performance.stop()
-    // Back to the defaults a fresh install has
-    await this.db.update(schema.agents).set({ concurrency: 1 })
+    await this.#booted.stop()
+    for (const { id, concurrency } of this.#concurrency) await this.db.update(schema.agents).set({ concurrency }).where(eq(schema.agents.id, id))
     await this.#handle.close()
   }
-
-  // ---- Time ----
 
   // Every timestamp moves back by the duration, which is the same as that much
   // time passing: the story is written in order and ends at the present.
@@ -139,11 +126,9 @@ export class Seeder {
 
   // Lets merge and CI polling see that time has passed for them too
   async mergePass(): Promise<void> {
-    this.#clock.offsetMs += 121_000
-    await this.services.orchestrator.merges.tick()
+    this.#clock.offsetMs += LONGEST_POLL_MS + 1_000
+    await this.services.orchestrator.mergePass()
   }
-
-  // ---- API ----
 
   async request<T = unknown>(method: string, path: string, body?: unknown, expected = [200, 201]): Promise<T> {
     const res = await this.#app.request(path, {
@@ -155,7 +140,7 @@ export class Seeder {
     return (text ? JSON.parse(text) : undefined) as T
   }
 
-  async project(input: { name: string, prefix: string, repository: string, defaultBranch?: string, humanReviewDefault?: boolean, epicReviewModeDefault?: 'epic' | 'each_task' | 'direct' }): Promise<Project> {
+  async project(input: { name: string, prefix: string, repository: string, defaultBranch?: string, humanReviewDefault?: boolean, epicReviewModeDefault?: EpicReviewMode }): Promise<Project> {
     const project = await this.request<Project>('POST', '/api/projects', { defaultBranch: 'main', ...input })
     this.github.setBranch(project.repository, project.defaultBranch, demoSha(`${project.repository}-root`))
     return project
@@ -187,14 +172,37 @@ export class Seeder {
     await this.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/comments`, { body })
   }
 
+  // The first event that matches, published after this is called
+  event<T extends ServerEvent>(match: (event: ServerEvent) => event is T, what: string, timeoutMs = 5000): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const unsubscribe = this.#events.subscribe((event) => {
+        if (!match(event)) return
+        clearTimeout(timer)
+        unsubscribe()
+        resolve(event)
+      })
+      const timer = setTimeout(() => {
+        unsubscribe()
+        reject(new Error(`No ${what} within ${timeoutMs / 1000} s`))
+      }, timeoutMs)
+    })
+  }
+
+  // Asks until the answer is true, for state that changes without an event
+  async until(check: () => Promise<boolean>, what: string, timeoutMs = 5000): Promise<void> {
+    const deadline = Date.now() + timeoutMs
+    while (!await check()) {
+      if (Date.now() > deadline) throw new Error(`No ${what} within ${timeoutMs / 1000} s`)
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+  }
+
   async inboxAction(task: Task, body: Record<string, unknown>): Promise<void> {
     await this.request('POST', `/api/inbox/${task.id}/actions`, body)
   }
 
-  // ---- Runs ----
-
   async job(match: (job: RunJob) => boolean): Promise<RunJob> {
-    await this.services.orchestrator.schedule()
+    await this.services.orchestrator.scheduler.schedule()
     return (await this.runner.next('run.assign', m => match(m.job))).job
   }
 
@@ -203,14 +211,16 @@ export class Seeder {
   }
 
   async started(job: RunJob): Promise<void> {
+    const handled = runStartHandled(this.#events, job.runId)
     this.runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: `demo-${job.runId}`, initialHeadSha: job.headSha ?? null })
-    await sleep(20)
+    await handled
   }
 
   // What the agent did, for its transcript on the run page
   async transcript(job: RunJob, events: RunEvent[], tokens = { inputTokens: 48_000, cacheReadTokens: 310_000, outputTokens: 6_200 }): Promise<void> {
+    const handled = this.services.runner.handled(job.runId, 'run.events')
     this.runner.send({ type: 'run.events', runId: job.runId, leaseEpoch: job.leaseEpoch, events: [...events, { type: 'usage', ...tokens }] })
-    await sleep(20)
+    await handled
   }
 
   async call(job: RunJob, tool: Parameters<FakeRunner['call']>[2], input: unknown): Promise<unknown> {
@@ -220,15 +230,16 @@ export class Seeder {
   }
 
   async ended(job: RunJob, headSha: string | null = null): Promise<void> {
+    const handled = this.services.runner.handled(job.runId, 'run.ended')
     this.runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha })
-    await sleep(30)
+    await handled
   }
 
   async evidenceNote(job: RunJob, criterionId: string | null, note: string): Promise<void> {
     await this.call(job, 'attach_evidence', { ...(criterionId && { criterionId }), kind: 'note', note })
   }
 
-  async evidenceFile(job: RunJob, criterionId: string | null, file: { kind: 'screenshot' | 'video' | 'test_output' | 'log' | 'request' | 'text' | 'other', fileName: string, contentType: string, data: Buffer | string, note: string }): Promise<void> {
+  async evidenceFile(job: RunJob, criterionId: string | null, file: { kind: Exclude<EvidenceKind, 'note'>, fileName: string, contentType: string, data: Buffer | string, note: string }): Promise<void> {
     await this.call(job, 'attach_evidence', {
       ...(criterionId && { criterionId }),
       kind: file.kind,
@@ -274,8 +285,6 @@ export class Seeder {
     await this.ended(job, job.headSha ?? null)
   }
 
-  // ---- Plan ----
-
   async planSession(input: { projectId?: string | null, text: string }): Promise<{ session: PlanSessionDetail, job: RunJob }> {
     const session = await this.request<PlanSessionDetail>('POST', '/api/plan/sessions', input)
     const job = (await this.runner.next('run.assign', m => m.job.planSessionId === session.id)).job
@@ -287,18 +296,13 @@ export class Seeder {
     return (await this.runner.next('run.assign', m => m.job.planSessionId === sessionId)).job
   }
 
-  // The PM finishes its turn with a reply
   async pmReply(job: RunJob, reply: string, thinking?: string): Promise<void> {
     await this.started(job)
     await this.transcript(job, [...(thinking ? [{ type: 'thinking' as const, text: thinking }] : []), { type: 'message', text: reply }], { inputTokens: 12_000, cacheReadTokens: 84_000, outputTokens: 900 })
-    await sleep(40)
     await this.ended(job)
-    await sleep(60)
   }
 
   async session(id: string): Promise<PlanSessionDetail> {
     return this.request<PlanSessionDetail>('GET', `/api/plan/sessions/${id}`)
   }
 }
-
-export { demoSha, sleep }

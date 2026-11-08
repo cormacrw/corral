@@ -5,10 +5,10 @@ import type { AppDeps } from './app.ts'
 import { LocalBlobStore, type BlobStore } from './blob-store.ts'
 import { ReleaseNotes } from './deployments.ts'
 import type { EventBus } from './events.ts'
-import { RunnerGitHub, type GitHubClient } from './github.ts'
+import type { GitHubClient } from './github.ts'
+import { RunnerGitHub } from './runner-github.ts'
 import { Orchestrator } from './orchestrator.ts'
 import { PerformanceSamples } from './performance.ts'
-import { PlanService } from './plan.ts'
 import { RunnerHub } from './runner-hub.ts'
 import { Transcripts } from './transcripts.ts'
 
@@ -24,18 +24,21 @@ export interface ServiceOptions {
   github?: GitHubClient
   publicUrl: string
   now?: () => Date
+  // The server's build commit, which runners are expected to run
+  buildSha?: string
+  slowRequestMs?: number
 }
 
-export type Services = Omit<AppDeps, 'db' | 'events' | 'actor'> & { github: GitHubClient, plans: PlanService }
+export type Services = Omit<AppDeps, 'db' | 'events' | 'actor'> & { github: GitHubClient }
 
-// Wires the server's long-lived pieces together, the same way for the real
-// server and for tests, so the two never drift apart
+// Wires the server's long-lived pieces together (boot.ts)
 export function createServices(options: ServiceOptions): Services {
   const { db, events } = options
-  const runner = new RunnerHub(events)
+  const runner = new RunnerHub(events, options.buildSha)
   const blobs = options.blobs ?? new LocalBlobStore(options.blobDir ?? join(options.spoolDir, '..', 'blobs'))
   const transcripts = new Transcripts(options.spoolDir, blobs)
   const github = options.github ?? new RunnerGitHub(runner)
+  const releaseNotes = new ReleaseNotes({ db, events, runner })
   const orchestrator = new Orchestrator({
     db,
     events,
@@ -43,14 +46,11 @@ export function createServices(options: ServiceOptions): Services {
     github,
     blobs,
     transcripts,
+    releaseNotes,
     publicUrl: options.publicUrl,
     ...(options.now && { now: options.now })
   })
   runner.setHandlers(orchestrator)
-  const plans = new PlanService({ db, events, runner, recoveryReady: taskIds => void orchestrator.schedule(taskIds), stopRun: (runId, actor) => orchestrator.stopRun(runId, actor), startRun: (session, job) => orchestrator.startPmRun(session, job) })
-  orchestrator.plans = plans
   new InboxMessages(db, events, runner)
-  const releaseNotes = new ReleaseNotes({ db, events, runner })
-  orchestrator.releaseNotes = releaseNotes
-  return { runner, orchestrator, blobs, transcripts, github, plans, releaseNotes, performance: new PerformanceSamples(db) }
+  return { runner, orchestrator, blobs, transcripts, github, releaseNotes, performance: new PerformanceSamples(db, options.slowRequestMs) }
 }

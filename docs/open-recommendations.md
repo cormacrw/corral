@@ -69,7 +69,7 @@ See [stale-runners-and-fencing.md](stale-runners-and-fencing.md). Suggestion: le
 
 ### R16 — Web talks to the server through typed fetch wrappers, not the Hono client (raised while building, 2026-10-28)
 
-`architecture.md` says web's types come from the Hono typed client (`hc`). Building `hc<AppType>` would make the Nuxt typecheck compile `apps/server`'s source (Drizzle, Node types) inside the browser project. The web app instead has one `api` object (`apps/web/app/composables/useApi.ts`) whose inputs and outputs are typed from `packages/contracts`, which already is the boundary between apps. Protocol changes are still type errors in web, because the contracts change. Accept this, or switch to `hc` once the server exposes a type-only entry point.
+`architecture.md` says web's types come from the Hono typed client (`hc`). Building `hc<AppType>` would make the Nuxt typecheck compile `apps/server`'s source (Drizzle, Node types) inside the browser project. The web app instead has one `api` object (`apps/web/app/queries/api.ts`) whose inputs and outputs are typed from `packages/contracts`, which already is the boundary between apps. Protocol changes are still type errors in web, because the contracts change. Accept this, or switch to `hc` once the server exposes a type-only entry point.
 
 ### R17 — A deleted task's branch is only removed when a PR had been opened (raised while building, 2026-10-28)
 

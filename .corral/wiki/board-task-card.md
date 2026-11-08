@@ -1,6 +1,6 @@
 # Board task card
 
-`apps/web/app/features/tasks/components/TaskCard.vue` is the one card for the desktop Board and
+`apps/web/app/features/board/components/TaskCard.vue` is the one card for the desktop Board and
 `BoardMobile`. `docs/design/board.md` has the layout. The things that aren't
 obvious from it:
 
@@ -19,12 +19,12 @@ obvious from it:
 - `task.statusReason` used to reach the human through the card's note. It's now
   the Reason row in `TaskProperties`, in the flyout and on the task page.
 
-- `TaskCardBlockers` uses `features/tasks/utils/taskBlockers.ts` with the full project list passed
+- `TaskCardBlockers` uses `features/board/utils/taskBlockers.ts` with the full project list passed
   through both Board layouts. Only Ready cards get the amber ban button; merged
   tasks and approved designs are done. Waiting tasks with subtasks also appear, linking to
   their task pages. Task rows use `useTaskFlyout.open`, which handles phones.
   The popover stops click propagation and follows live task updates.
-- Task lists leave out Drafts, and `plan.ts` lets a task depend on one, so a Ready
+- Task lists leave out Drafts, and a plan lets a task depend on one, so a Ready
   task can be held by a dependency the client can't see. `taskBlockers` returns
   those refs in `unlisted`, and the popover shows them as ref-only rows. The
   list also leaves out soft-deleted tasks, but deleting a task moves its

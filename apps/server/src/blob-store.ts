@@ -2,8 +2,23 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
+// What a file read gives, or `missing` when there is no such file. Any other
+// failure, such as a permission error, is thrown.
+export function unlessMissing<T, M>(read: Promise<T>, missing: M): Promise<T | M> {
+  return read.catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return missing
+    throw error
+  })
+}
+
 // Immutable, content-addressed files: evidence and run transcripts (D8).
 // Local folder now, S3-compatible later under the same keys (D1).
+// A blob never changes, so whatever is served from one can be cached for good
+export const IMMUTABLE_CACHE = 'private, max-age=31536000, immutable'
+
+// Part of a blob's hash, for a URL that changes when the blob does
+export const blobVersion = (blob: string): string => blob.slice(0, 12)
+
 export interface BlobStore {
   // Returns the sha256; storing the same bytes twice is a no-op
   put(data: Uint8Array): Promise<string>
@@ -52,7 +67,7 @@ export class LocalBlobStore implements BlobStore {
   async put(data: Uint8Array): Promise<string> {
     const hash = createHash('sha256').update(data).digest('hex')
     const path = this.#path(hash)
-    if (await stat(path).then(() => true, () => false)) return hash
+    if (await unlessMissing(stat(path), null)) return hash
     await mkdir(dirname(path), { recursive: true })
     // Write then rename, so a crash never leaves a half-written blob under its hash
     const temp = `${path}.${randomUUID()}.tmp`
@@ -63,13 +78,13 @@ export class LocalBlobStore implements BlobStore {
 
   async get(hash: string): Promise<Uint8Array | null> {
     if (!HASH.test(hash)) return null
-    return readFile(this.#path(hash)).catch(() => null)
+    return unlessMissing(readFile(this.#path(hash)), null)
   }
 
   async open(hash: string): Promise<BlobHandle | null> {
     if (!HASH.test(hash)) return null
     const path = this.#path(hash)
-    const info = await stat(path).catch(() => null)
+    const info = await unlessMissing(stat(path), null)
     if (!info) return null
     return { size: info.size, stream: (start = 0, end = info.size - 1) => ReadableStream.from(fileChunks(path, start, end)) }
   }

@@ -4,15 +4,14 @@ import { enableAutoUnmount, flushPromises, mount, type DOMWrapper, type VueWrapp
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
 import type { Comment, Task } from '@corral/contracts'
-import { api } from '~/composables/useApi'
-import { projects, tasks } from '~/prototype/fixtures'
+import { api } from '~/queries/api'
 import { applyEvent } from '~/queries/dependencies'
 import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
 import TaskActivity from '~/features/activity/components/TaskActivity.vue'
 import TaskActivityFeed from '~/features/activity/components/TaskActivityFeed.vue'
-import DetailLoading from '~/features/tasks/components/DetailLoading.vue'
-import DraftComposer from '~/features/tasks/components/DraftComposer.vue'
+import DetailLoading from '~/components/shared/DetailLoading.vue'
+import DraftComposer from '~/components/shared/DraftComposer.vue'
 import TaskCriteria from '~/features/tasks/components/TaskCriteria.vue'
 import TaskDeleteSection from '~/features/tasks/components/TaskDeleteSection.vue'
 import TaskDependencies from '~/features/tasks/components/TaskDependencies.vue'
@@ -20,7 +19,7 @@ import TaskDescriptionField from '~/features/tasks/components/TaskDescriptionFie
 import TaskDetail from '~/features/tasks/components/TaskDetail.vue'
 import TaskStatusNotices from '~/features/tasks/components/TaskStatusNotices.vue'
 
-vi.mock('~/composables/useApi', () => ({
+vi.mock('~/queries/api', () => ({
   ApiError: class extends Error {},
   api: {
     tasks: { byRef: vi.fn(), comments: vi.fn(), history: vi.fn(), evidence: vi.fn(), reviews: vi.fn(), patch: vi.fn(), remove: vi.fn(), comment: vi.fn(), transition: vi.fn(), resume: vi.fn() },
@@ -28,7 +27,16 @@ vi.mock('~/composables/useApi', () => ({
   }
 }))
 
-const taskA = { ...tasks[0]!, id: 'task-a', ref: 'COR-1', number: 1, title: 'Task A', status: 'backlog' } as Task
+// A plain task with every field the detail reads
+const baseTask = {
+  id: 't-1', projectId: 'p-corral', ref: 'COR-1', number: 1, title: 'Task', description: null, implementationPlan: null,
+  priority: 'medium', type: 'task', kind: 'normal', epicId: null, parentTask: null, rollup: null, humanReview: false,
+  reviewRounds: 0, failedRuns: 0, paused: false, branch: null, pr: null, acceptanceCriteria: [], dependsOn: [], waitingOnEpics: [],
+  lease: null, developer: null, reviewer: null, headSha: null, latestReview: null, mergeCommitSha: null, mergedAt: null,
+  submission: null, gateChecks: null, design: null, status: 'backlog', statusReason: null, draftSession: null,
+  createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z'
+} as Task
+const taskA = { ...baseTask, id: 'task-a', ref: 'COR-1', number: 1, title: 'Task A' } as Task
 const taskB = { ...taskA, id: 'task-b', ref: 'COR-2', number: 2, title: 'Task B' } as Task
 
 function deferred<T>() {
@@ -89,7 +97,7 @@ beforeEach(() => {
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
   vi.stubGlobal('useTaskFlyout', () => ({ close: vi.fn(), open: vi.fn() }))
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(false) }))
-  vi.stubGlobal('useShell', () => ({ projects: [{ ...projects[0]!, id: taskA.projectId }], agents: [] }))
+  vi.stubGlobal('useShell', () => ({ projects: [{ id: taskA.projectId, slug: 'corral', prefix: 'COR', name: 'Corral' }], agents: [] }))
   vi.stubGlobal('useProjectLists', () => ({ tasks: vue.ref([]), epics: vue.ref([]) }))
   vi.mocked(api.tasks.byRef).mockImplementation(async ref => ref === 'COR-1' ? taskA : taskB)
   for (const side of [api.tasks.comments, api.tasks.history, api.tasks.evidence, api.tasks.reviews, api.runs.list]) vi.mocked(side).mockResolvedValue([])

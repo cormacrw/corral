@@ -2,6 +2,7 @@
 import withNuxt from './.nuxt/eslint.config.mjs'
 import betterTailwindcss from 'eslint-plugin-better-tailwindcss'
 import { getDefaultAttributes } from 'eslint-plugin-better-tailwindcss/api/defaults'
+import { sharedVocabulary } from '../../eslint.config.mjs'
 
 export default withNuxt(
   // Vendored from shadcn-vue, kept stock so `shadcn-vue diff` stays meaningful
@@ -11,25 +12,29 @@ export default withNuxt(
     files: ['app/**/*.{ts,vue}'],
     ignores: ['app/queries/**', '**/*.test.ts'],
     rules: {
-      // nuxt.config.ts keeps these out of auto-imports too
       'no-restricted-imports': ['error', {
         patterns: [
           {
-            regex: '(^|/)useApi(\\.[cm]?[jt]s)?$',
+            regex: '(^|/)queries/api(\\.[cm]?[jt]s)?$',
             message: 'Only app/queries talks to the server: add a query or mutation there. ApiError is exported from ~/queries/client.'
           },
           {
-            regex: '(^|/)useLive(\\.[cm]?[jt]s)?$',
+            regex: '(^|/)queries/stream(\\.[cm]?[jt]s)?$',
             importNames: ['subscribeLive', 'subscribeReconnect'],
             message: 'Server events reach pages through the query cache. Add the query to the event in queries/dependencies.ts.'
           }
         ]
       }],
-      'no-restricted-syntax': ['error', {
-        selector: 'ImportExpression[source.value=/(^|\\/)useApi(\\.[cm]?[jt]s)?$/]',
+      'no-restricted-syntax': ['error', ...sharedVocabulary, {
+        selector: 'ImportExpression[source.value=/(^|\\/)queries\\/api(\\.[cm]?[jt]s)?$/]',
         message: 'Only app/queries talks to the server: add a query or mutation there.'
       }]
     }
+  },
+  {
+    files: ['app/queries/**/*.ts'],
+    ignores: ['**/*.test.ts'],
+    rules: { 'no-restricted-syntax': ['error', ...sharedVocabulary] }
   },
   {
     settings: {

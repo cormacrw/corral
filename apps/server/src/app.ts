@@ -1,75 +1,49 @@
 import {
-  addCommentInput,
+  imageTooLarge,
+  THUMBNAIL_MAX_BYTES,
   clientPerfInput,
   CLIENT_PERF_MAX_BYTES,
-  perfSummaryQuery,
   ATTACHMENT_MAX_BYTES,
   AVATAR_MAX_BYTES,
-  approveDesignInput,
-  approvePlanInput,
-  checkRepoInput,
-  createAgentInput,
-  createDeploymentInput,
-  createProjectInput,
-  createTaskInput,
-  deleteProjectInput,
-  humanTransitionInput,
-  flowMetricsQuery,
-  inboxActionInput,
-  inboxReadInput,
-  epicReviewActionInput,
-  patchAgentInput,
-  patchEpicInput,
-  setEpicDependenciesInput,
-  patchPlanSessionInput,
-  patchProfileInput,
-  patchProjectInput,
-  patchTaskInput,
-  planMessageInput,
-  runMessageInput,
   SSE_HEARTBEAT_MS,
-  startPlanSessionInput,
-  taskListQuery,
-  uploadAttachmentQuery,
   type ApiErrorBody,
   type ServerEvent
 } from '@corral/contracts'
 import type { Actor } from '@corral/core'
-import { schema, type Database } from '@corral/db'
-import { zValidator } from '@hono/zod-validator'
-import { Hono, type Context, type ValidationTargets } from 'hono'
+import type { Database } from '@corral/db'
+import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { streamSSE } from 'hono/streaming'
-import { z, type ZodType } from 'zod'
-import { publishInvalidatedEpics, type InvalidatedEpics } from './epic-review-state.ts'
+import { registerEndpoints } from './endpoint-routes.ts'
 import { apiTiming, type PerformanceSamples } from './performance.ts'
-import { ApiFailure, fromDatabaseError } from './errors.ts'
-import { checkThumbnail, readThumbnail, thumbnailHash, THUMBNAIL_MAX_BYTES } from './thumbnails.ts'
+import { ApiFailure, fromDatabaseError, notFound, requireHuman } from './errors.ts'
+import { checkThumbnail, readThumbnail, thumbnailHash } from './thumbnails.ts'
 import { byteRange } from './byte-range.ts'
 import { createAttachment, readAttachment } from './attachments.ts'
 import { recordDeployment, updateDeploymentInbox, type ReleaseNotes } from './deployments.ts'
 import { flowMetrics, workspaceFlow } from './flow-metrics.ts'
 import { DESIGN_BUNDLE_HEADERS, listDesignVersions, readDesignFile, readDesignScreenshot } from './designs.ts'
-import { checkAvatar, getProfile, patchProfile, readAvatar, setAgentAvatar, setUserAvatar } from './avatars.ts'
-import { epicHistory } from './epic-prs.ts'
+import { checkAvatar, getProfile, readAvatar } from './avatars.ts'
 import { getEpicReview } from './epic-review.ts'
-import { getEpic, listEpicHistory, listEpics, patchEpic, setEpicDependencies } from './epics.ts'
+import { getEpic, listEpicHistory, listEpics } from './epics.ts'
 import type { EventBus } from './events.ts'
 import { loadInbox, markInboxRead } from './inbox.ts'
 import type { GitHubClient } from './github.ts'
 import { listPullRequests, readPullRequest } from './pull-requests.ts'
-import { createProject, findProjectBySlug, listProjects, patchProject, setProjectThumbnail, toProject } from './projects.ts'
-import type { BlobHandle, BlobStore } from './blob-store.ts'
+import { findProjectBySlug, listProjects, toProject } from './projects.ts'
+import { IMMUTABLE_CACHE, type BlobHandle, type BlobStore } from './blob-store.ts'
 import { evidenceHeaders } from './evidence-file.ts'
 import type { Orchestrator } from './orchestrator.ts'
-import type { PlanService } from './plan.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { PullRequestGuides } from './pull-request-guides.ts'
-import { createAgent, getRun, listAgents, listEvidence, listReviews, listRuns, patchAgent } from './runs.ts'
+import { getRun, listAgents, listEvidence, listReviews, listRuns, readEvidenceFile, readRunTranscript } from './runs.ts'
 import type { Transcripts } from './transcripts.ts'
 import { checkRepository, detectClis, RepoCatalog, requireRuntimeCli } from './setup.ts'
-import { addComment, addSubtask, createTask, findTaskId, listComments, listHistory, listTasks, loadTask, patchTask, transitionTask } from './tasks.ts'
-import { and, eq, isNull } from 'drizzle-orm'
+import { listComments } from './comments.ts'
+import { findTaskId, taskAndProjectByRef } from './task-rows.ts'
+import { listHistory } from './audit.ts'
+import { listTasks, loadTask } from './task-views.ts'
+import { epicHistory } from './epic-history.ts'
 
 // The request path exactly as the client sent it, without the query. The
 // Node adapter resolves `..` in the URL before routing, so this reads the
@@ -84,7 +58,6 @@ function rawPath(c: Context): string {
 // Bytes the response only reads, so they needn't be copied for it
 const bytes = (data: Uint8Array) => data as Uint8Array<ArrayBuffer>
 
-// A blob with Range support, reading only the requested bytes
 function serveBlob(c: Context, file: BlobHandle, headers: Record<string, string>) {
   const { size } = file
   const range = byteRange(c.req.header('range'), size)
@@ -96,7 +69,6 @@ function serveBlob(c: Context, file: BlobHandle, headers: Record<string, string>
   return c.body(file.stream(), 200, { ...headers, 'content-length': String(size) })
 }
 
-// Whether If-None-Match names this entity tag
 function matchesEtag(header: string | undefined, etag: string): boolean {
   return header?.split(',').some(tag => ['*', etag].includes(tag.trim().replace(/^W\//, ''))) ?? false
 }
@@ -107,24 +79,14 @@ export interface AppDeps {
   performance: PerformanceSamples
   db: Database
   events: EventBus
-  // Who web requests act as (see owner.ts)
+  // Who web requests act as (see ensureOwner in bootstrap.ts)
   actor: Actor
   runner: RunnerHub
   orchestrator: Orchestrator
   github: GitHubClient
   blobs: BlobStore
   transcripts: Transcripts
-  plans: PlanService
   releaseNotes: ReleaseNotes
-}
-
-// Validation failures get the same error shape as every other API error
-function validate<T extends ZodType, Target extends keyof ValidationTargets>(target: Target, schema: T) {
-  return zValidator(target, schema, (result, c) => {
-    if (!result.success) {
-      return c.json<ApiErrorBody>({ error: { code: 'invalid_input', issues: result.error.issues } }, 400)
-    }
-  })
 }
 
 const taskNumber = (value: string) => {
@@ -133,57 +95,40 @@ const taskNumber = (value: string) => {
   return number
 }
 
-export function createApp({ db, events, actor, runner, orchestrator, github, blobs, transcripts, plans, releaseNotes, performance }: AppDeps) {
+export function createApp({ db, events, actor, runner, orchestrator, github, blobs, transcripts, releaseNotes, performance }: AppDeps) {
   const repos = new RepoCatalog(db, runner)
   const guides = new PullRequestGuides({ db, github, runner })
 
-  const publishTask = async (taskId: string) => {
-    const task = await loadTask(db, taskId)
-    events.publish({ type: 'task.updated', task })
-    return task
-  }
-
-  // A task by its ref, e.g. COR-29 (design/task.md page route)
-  const findByRef = async (ref: string) => {
-    const match = /^([A-Z]{2,5})-(\d+)$/i.exec(ref)
-    if (!match) throw new ApiFailure(404, { code: 'not_found' })
-    const [project] = await db.select().from(schema.projects).where(eq(schema.projects.prefix, match[1]!.toUpperCase()))
-    if (!project) throw new ApiFailure(404, { code: 'not_found' })
-    return { project, taskId: await findTaskId(db, project.id, Number(match[2])) }
-  }
-
   // The single human (D1 POC); hosting will take this from the session
   const ownerId = () => {
-    if (actor.kind !== 'human') throw new ApiFailure(404, { code: 'not_found' })
+    requireHuman(actor, notFound)
     return actor.userId
-  }
-  const publishAgent = async (id: string) => {
-    const agent = (await listAgents(db)).find(a => a.id === id)!
-    events.publish({ type: 'agent.updated', agent })
-    return agent
   }
   // The URL changes with the picture, so a served one never changes
   const serveAvatar = (c: Context, avatar: { data: Uint8Array, type: string } | null) => {
     if (!avatar) throw new ApiFailure(404, { code: 'not_found' })
-    return c.body(bytes(avatar.data), 200, { 'content-type': avatar.type, 'cache-control': 'private, max-age=31536000, immutable' })
+    return c.body(bytes(avatar.data), 200, { 'content-type': avatar.type, 'cache-control': IMMUTABLE_CACHE })
   }
   const avatarBodyLimit = bodyLimit({
     maxSize: AVATAR_MAX_BYTES,
-    onError: c => c.json<ApiErrorBody>({ error: { code: 'invalid_input', issues: [{ path: ['avatar'], message: 'The image is over 2 MB' }] } }, 413)
+    onError: c => c.json<ApiErrorBody>({ error: { code: 'invalid_input', issues: [{ path: ['avatar'], message: imageTooLarge(AVATAR_MAX_BYTES) }] } }, 413)
   })
 
   const thumbnailBodyLimit = bodyLimit({
     // Bound parsing memory, including a small multipart envelope.
     maxSize: THUMBNAIL_MAX_BYTES + 64 * 1024,
-    onError: c => c.json<ApiErrorBody>({ error: { code: 'invalid_input', issues: [{ path: ['file'], message: 'The image is over 2 MB' }] } }, 413)
+    onError: c => c.json<ApiErrorBody>({ error: { code: 'invalid_input', issues: [{ path: ['file'], message: imageTooLarge(THUMBNAIL_MAX_BYTES) }] } }, 413)
   })
 
   const attachmentBodyLimit = bodyLimit({
     maxSize: ATTACHMENT_MAX_BYTES,
-    onError: c => c.json<ApiErrorBody>({ error: { code: 'invalid_input', issues: [{ path: ['file'], message: 'The image is over 10 MB' }] } }, 413)
+    onError: c => c.json<ApiErrorBody>({ error: { code: 'invalid_input', issues: [{ path: ['file'], message: imageTooLarge(ATTACHMENT_MAX_BYTES) }] } }, 413)
   })
 
-  return new Hono()
+  const taskIdOf = async (params: { slug: string, number: string }) =>
+    findTaskId(db, (await findProjectBySlug(db, params.slug)).id, taskNumber(params.number))
+
+  const app = new Hono()
     .basePath('/api')
     .use('*', apiTiming(performance))
     .onError((error, c) => {
@@ -206,71 +151,53 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
       return c.body(bytes(file.data), 200, { ...DESIGN_BUNDLE_HEADERS, 'content-type': file.type })
     })
 
-    .post('/perf/client', bodyLimit({
-      maxSize: CLIENT_PERF_MAX_BYTES,
-      onError: c => c.json({ error: { code: 'invalid_input' } }, 400)
-    }), async (c) => {
-      // Parse text as well as application/json: sendBeacon can use either.
-      const input = clientPerfInput.safeParse(await c.req.json().catch(() => null))
-      if (!input.success) return c.json({ error: { code: 'invalid_input' } }, 400)
-      const createdAt = new Date()
-      for (const sample of input.data.samples) {
-        performance.record({ kind: 'page', name: sample.name, metric: sample.metric,
-          durationMs: sample.value, sessionId: input.data.sessionId, createdAt })
+  registerEndpoints(app, {
+    'POST /perf/client': {
+      use: [bodyLimit({ maxSize: CLIENT_PERF_MAX_BYTES, onError: c => c.json({ error: { code: 'invalid_input' } }, 400) })],
+      handle: async (_, c) => {
+        // Parse text as well as application/json: sendBeacon can use either.
+        const input = clientPerfInput.safeParse(await c.req.json().catch(() => null))
+        if (!input.success) return c.json({ error: { code: 'invalid_input' } }, 400)
+        const createdAt = new Date()
+        for (const sample of input.data.samples) {
+          performance.record({ kind: 'page', name: sample.name, metric: sample.metric,
+            durationMs: sample.value, sessionId: input.data.sessionId, createdAt })
+        }
       }
-      return c.body(null, 204)
-    })
+    },
+    'GET /perf/summary': ({ query }) => performance.summary(query.window),
+    'GET /health': () => ({ ok: true }),
 
-    .get('/perf/summary', validate('query', perfSummaryQuery), async c =>
-      c.json(await performance.summary(c.req.valid('query').window)))
+    'POST /runners/:runnerId/update': ({ params }) => runner.drain(params.runnerId, true),
+    'GET /runner': () => runner.status(),
 
-    .get('/health', c => c.json({ ok: true }))
+    'GET /setup/repos': ({ query }) => repos.list(query.refresh),
+    'POST /setup/check-repo': ({ body }) => checkRepository(db, runner, body.repository),
+    'GET /setup/clis': () => detectClis(runner),
 
-    .post('/runners/:runnerId/update', c => c.json(runner.drain(c.req.param('runnerId'), true)))
-    .get('/runner', c => c.json(runner.status()))
-
-    .get('/setup/repos', async c => c.json(await repos.list(c.req.query('refresh') === '1')))
-
-    .post('/setup/check-repo', validate('json', checkRepoInput), async c =>
-      c.json(await checkRepository(db, runner, c.req.valid('json').repository)))
-
-    .get('/setup/clis', async c => c.json(await detectClis(runner)))
-
-    .get('/projects', async c => c.json(await listProjects(db)))
-
-    .post('/projects', validate('json', createProjectInput), async (c) => {
-      const project = await createProject(db, c.req.valid('json'), actor)
-      events.publish({ type: 'project.created', project })
-      return c.json(project, 201)
-    })
-
-    .get('/projects/:slug', async c => c.json(toProject(await findProjectBySlug(db, c.req.param('slug')))))
-
-    .get('/projects/:slug/metrics/flow', validate('query', flowMetricsQuery), async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      return c.json(await flowMetrics(db, project, c.req.valid('query').window))
-    })
-
-    // Cycle time across every project, for Home
-    .get('/metrics/flow', validate('query', flowMetricsQuery), async c => c.json(await workspaceFlow(db, c.req.valid('query').window)))
-
-    .put('/projects/:slug/thumbnail', thumbnailBodyLimit, async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      const invalid = () => new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['file'], message: 'Provide a multipart file image' }] })
-      const form = await c.req.formData().catch(() => {
-        throw invalid()
-      })
-      const files = form.getAll('file')
-      const file = files[0]
-      if (files.length !== 1 || !(file instanceof File)) throw invalid()
-      const data = new Uint8Array(await file.arrayBuffer())
-      checkThumbnail(data, file.type)
-      const saved = await setProjectThumbnail(db, project, await blobs.put(data), actor)
-      events.publish({ type: 'project.updated', project: saved })
-      return c.json(saved)
-    })
-    .get('/projects/:slug/thumbnail', async (c) => {
-      const hash = await thumbnailHash(db, c.req.param('slug'), c.req.query('v'))
+    'GET /projects': () => listProjects(db),
+    'POST /projects': ({ body }) => orchestrator.commands.createProject(body, actor),
+    'GET /projects/:slug': async ({ params }) => toProject(await findProjectBySlug(db, params.slug)),
+    'GET /projects/:slug/metrics/flow': async ({ params, query }) => flowMetrics(db, await findProjectBySlug(db, params.slug), query.window),
+    'GET /metrics/flow': ({ query }) => workspaceFlow(db, query.window),
+    'PUT /projects/:slug/thumbnail': {
+      use: [thumbnailBodyLimit],
+      handle: async ({ params }, c) => {
+        const project = await findProjectBySlug(db, params.slug)
+        const invalid = () => new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['file'], message: 'Provide a multipart file image' }] })
+        const form = await c.req.formData().catch(() => {
+          throw invalid()
+        })
+        const files = form.getAll('file')
+        const file = files[0]
+        if (files.length !== 1 || !(file instanceof File)) throw invalid()
+        const data = new Uint8Array(await file.arrayBuffer())
+        checkThumbnail(data, file.type)
+        return orchestrator.commands.setProjectThumbnail(project, await blobs.put(data), actor)
+      }
+    },
+    'GET /projects/:slug/thumbnail': async ({ params }, c) => {
+      const hash = await thumbnailHash(db, params.slug, c.req.query('v'))
       if (!hash) throw new ApiFailure(404, { code: 'not_found' })
       // The hash is the content, so a revalidation needn't read the blob
       const validators = { 'cache-control': 'private, no-cache', 'etag': `"${hash}"` }
@@ -278,445 +205,191 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
       const file = await readThumbnail(blobs, hash)
       if (!file) throw new ApiFailure(404, { code: 'not_found' })
       return c.body(bytes(file.data), 200, { ...validators, 'content-type': file.type, 'x-content-type-options': 'nosniff' })
-    })
-    .delete('/projects/:slug/thumbnail', async (c) => {
-      const project = await setProjectThumbnail(db, await findProjectBySlug(db, c.req.param('slug')), null, actor)
-      events.publish({ type: 'project.updated', project })
-      return c.json(project)
-    })
-
-    .patch('/projects/:slug', validate('json', patchProjectInput), async (c) => {
-      const project = await patchProject(db, await findProjectBySlug(db, c.req.param('slug')), c.req.valid('json'), actor)
-      events.publish({ type: 'project.updated', project })
-      orchestrator.poke()
-      return c.json(project)
-    })
-
-    .get('/tasks/:ref', async c => c.json(await loadTask(db, (await findByRef(c.req.param('ref'))).taskId)))
-
-    .delete('/projects/:slug', validate('json', deleteProjectInput), async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      if (c.req.valid('json').confirm !== project.name) {
+    },
+    'DELETE /projects/:slug/thumbnail': async ({ params }) => orchestrator.commands.setProjectThumbnail(await findProjectBySlug(db, params.slug), null, actor),
+    'PATCH /projects/:slug': async ({ params, body }) => orchestrator.commands.patchProject(await findProjectBySlug(db, params.slug), body, actor),
+    'GET /tasks/:ref': async ({ params }) => {
+      const found = await taskAndProjectByRef(db, params.ref)
+      if (!found) throw notFound()
+      return loadTask(db, found.task.id)
+    },
+    'DELETE /projects/:slug': async ({ params, body }) => {
+      const project = await findProjectBySlug(db, params.slug)
+      if (body.confirm !== project.name) {
         throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['confirm'], message: 'Type the project name to remove it' }] })
       }
-      await orchestrator.deleteProject(project.id, actor)
-      return c.body(null, 204)
-    })
+      await orchestrator.human.deleteProject(project.id, actor)
+    },
+    'GET /projects/:slug/epics': async ({ params }) => listEpics(db, await findProjectBySlug(db, params.slug)),
+    'GET /projects/:slug/drafts': async ({ params }) => orchestrator.proposals.listDrafts((await findProjectBySlug(db, params.slug)).id),
 
-    .get('/projects/:slug/epics', async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      return c.json(await listEpics(db, project))
-    })
+    'POST /epics/:id/review': ({ params, body }) => orchestrator.epicPrs.humanAction(params.id, body, actor),
+    'POST /epics/:id/sync/retry': ({ params }) => orchestrator.epicPrs.retrySync(params.id, actor),
+    'GET /epics/:id/activity': ({ params }) => listEpicHistory(db, params.id),
+    'GET /epics/:id/review': ({ params }) => getEpicReview(db, github, params.id),
+    'GET /epics/:id': ({ params }) => getEpic(db, params.id),
+    'GET /epics/:id/history': async ({ params }) => epicHistory(db, (await getEpic(db, params.id)).id),
+    'PUT /epics/:id/dependencies': async ({ params, body }) => {
+      const updated = await orchestrator.commands.setEpicDependencies(params.id, body.dependsOn, actor)
+      return updated.find(e => e.id === params.id)!
+    },
+    'PATCH /epics/:id': ({ params, body }) => orchestrator.commands.patchEpic(params.id, body, actor),
 
-    // Drafts by the Plan session they belong to, for the Plan tab (D10)
-    .get('/projects/:slug/drafts', async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      return c.json(await plans.listDrafts(project.id))
-    })
+    'GET /projects/:slug/tasks': async ({ params, query }) => listTasks(db, await findProjectBySlug(db, params.slug), query.view),
+    'GET /projects/:slug/pull-requests': async ({ params }) => listPullRequests(db, orchestrator.merges, await findProjectBySlug(db, params.slug)),
+    'GET /projects/:slug/pull-requests/:number': async ({ params }) => readPullRequest(github, await findProjectBySlug(db, params.slug), taskNumber(params.number)),
+    'GET /projects/:slug/pull-requests/:number/guide': async ({ params }) => guides.get(await findProjectBySlug(db, params.slug), taskNumber(params.number)),
+    'POST /projects/:slug/pull-requests/:number/guide': async ({ params }) => guides.generate(await findProjectBySlug(db, params.slug), taskNumber(params.number)),
 
-    .post('/epics/:id/review', validate('json', epicReviewActionInput), async c => c.json(await orchestrator.epicPrs.humanAction(c.req.param('id'), c.req.valid('json'), actor)))
-
-    .post('/epics/:id/sync/retry', async c => c.json(await orchestrator.epicPrs.retrySync(c.req.param('id'), actor)))
-    .get('/epics/:id/activity', async c => c.json(await listEpicHistory(db, c.req.param('id'))))
-    .get('/epics/:id/review', async c => c.json(await getEpicReview(db, github, c.req.param('id'))))
-
-    .get('/epics/:id', async c => c.json(await getEpic(db, c.req.param('id'))))
-
-    // PRD §14: every approval decision can be understood afterwards
-    .get('/epics/:id/history', async (c) => {
-      const epic = await getEpic(db, c.req.param('id'))
-      return c.json(await epicHistory(db, epic.id))
-    })
-
-    .put('/epics/:id/dependencies', validate('json', setEpicDependenciesInput), async (c) => {
-      const id = c.req.param('id')
-      const updated = await setEpicDependencies(db, id, c.req.valid('json').dependsOn, actor)
-      for (const epic of updated) events.publish({ type: 'epic.updated', epic })
-      const detail = await getEpic(db, id)
-      for (const task of detail.tasks) events.publish({ type: 'task.updated', task })
-      orchestrator.poke(detail.tasks.map(t => t.id))
-      return c.json(updated.find(e => e.id === id)!)
-    })
-
-    .patch('/epics/:id', validate('json', patchEpicInput), async (c) => {
-      const epic = await patchEpic(db, c.req.param('id'), c.req.valid('json'), actor)
-      events.publish({ type: 'epic.updated', epic })
-      return c.json(epic)
-    })
-
-    .get('/projects/:slug/tasks', validate('query', taskListQuery), async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      return c.json(await listTasks(db, project, c.req.valid('query').view))
-    })
-
-    // Open PRs and their merge gates, live from GitHub
-    .get('/projects/:slug/pull-requests', async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      return c.json(await listPullRequests(db, orchestrator.merges, project))
-    })
-
-    // Any PR on the project's repository: its description and capped diff
-    .get('/projects/:slug/pull-requests/:number', async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      return c.json(await readPullRequest(github, project, taskNumber(c.req.param('number'))))
-    })
-
-    // A PR's guided review (COR-525): read it, or start one for the head commit
-    .get('/projects/:slug/pull-requests/:number/guide', async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      return c.json(await guides.get(project, taskNumber(c.req.param('number'))))
-    })
-    .post('/projects/:slug/pull-requests/:number/guide', async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      return c.json(await guides.generate(project, taskNumber(c.req.param('number'))), 202)
-    })
-
-    .post('/projects/:slug/tasks/:number/subtasks', validate('json', createTaskInput), async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      const taskId = await addSubtask(db, project, await findTaskId(db, project.id, taskNumber(c.req.param('number'))), c.req.valid('json'), actor)
-      const created = await loadTask(db, taskId)
-      events.publish({ type: 'task.created', task: created })
-      if (created.parentTask) events.publish({ type: 'task.updated', task: await loadTask(db, created.parentTask.id) })
-      return c.json(created, 201)
-    })
-    .post('/projects/:slug/tasks', validate('json', createTaskInput), async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      const invalidatedEpics: InvalidatedEpics = new Map()
-      const task = await loadTask(db, await createTask(db, project, c.req.valid('json'), actor, { invalidatedEpics }))
-      await publishInvalidatedEpics(db, events, invalidatedEpics)
-      events.publish({ type: 'task.created', task })
-      return c.json(task, 201)
-    })
-
-    .get('/projects/:slug/tasks/:number/pull-request', async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      const task = await loadTask(db, await findTaskId(db, project.id, taskNumber(c.req.param('number'))))
+    'POST /projects/:slug/tasks/:number/subtasks': async ({ params, body }) => {
+      const project = await findProjectBySlug(db, params.slug)
+      return orchestrator.commands.addSubtask(project, await findTaskId(db, project.id, taskNumber(params.number)), body, actor)
+    },
+    'POST /projects/:slug/tasks': async ({ params, body }) => orchestrator.commands.createTask(await findProjectBySlug(db, params.slug), body, actor),
+    'GET /projects/:slug/tasks/:number/pull-request': async ({ params }) => {
+      const project = await findProjectBySlug(db, params.slug)
+      const task = await loadTask(db, await findTaskId(db, project.id, taskNumber(params.number)))
       if (task.pr === null) throw new ApiFailure(404, { code: 'no_pull_request' })
-      return c.json(await readPullRequest(github, project, task.pr.number))
-    })
-
-    .get('/projects/:slug/tasks/:number', async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      return c.json(await loadTask(db, await findTaskId(db, project.id, taskNumber(c.req.param('number')))))
-    })
-
-    .post('/projects/:slug/tasks/:number/transitions', validate('json', humanTransitionInput), async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
-      const invalidatedEpics: InvalidatedEpics = new Map()
-      await transitionTask(db, taskId, c.req.valid('json'), actor, { invalidatedEpics })
-      await publishInvalidatedEpics(db, events, invalidatedEpics)
-      // Published after the commit, so listeners never see a rolled-back state
-      const task = await loadTask(db, taskId)
-      events.publish({ type: 'task.updated', task })
-      // Approval triggers an immediate scheduler check (flows.md step 1)
-      orchestrator.poke([taskId])
-      return c.json(task)
-    })
-
-    .patch('/projects/:slug/tasks/:number', validate('json', patchTaskInput), async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
-      const invalidatedEpics: InvalidatedEpics = new Map()
-      const edit = await patchTask(db, project, taskId, c.req.valid('json'), actor, invalidatedEpics)
-      await publishInvalidatedEpics(db, events, invalidatedEpics)
-      // The edit is saved either way; telling the run is best effort (PRD §7.3)
-      if (edit) await orchestrator.noticeTaskEdit(taskId, edit, actor).catch(error => console.error(`Telling the run about the edit to task ${taskId} failed`, error))
-      return c.json(await publishTask(taskId))
-    })
-
-    .delete('/projects/:slug/tasks/:number', async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
-      const body = await c.req.json().catch(() => ({})) as { reason?: string }
-      await orchestrator.deleteTask(taskId, actor, body.reason ?? null)
-      return c.body(null, 204)
-    })
-
-    // Approve a mergeable task for the merge pass; spikes finish here.
-    // Designs must use version approval and are rejected by core.
-    .post('/projects/:slug/tasks/:number/approve', async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
-      await orchestrator.merges.humanApprove(taskId, actor)
-      orchestrator.poke([taskId])
-      return c.json(await publishTask(taskId))
-    })
-
-    // Clears a stopped run's pause. The task is what this is about, so it
-    // starts right away even inside its agent's wake interval (flows.md §3)
-    .post('/projects/:slug/tasks/:number/resume', async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
-      await orchestrator.resumeTask(taskId, actor)
-      const task = await publishTask(taskId)
-      orchestrator.poke([taskId])
-      return c.json(task)
-    })
-
-    // A design task's versions (D20), newest first
-    .get('/projects/:slug/tasks/:number/designs', async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      return c.json(await listDesignVersions(db, blobs, await findTaskId(db, project.id, taskNumber(c.req.param('number')))))
-    })
-
-    // Approve a design version (D20)
-    .post('/projects/:slug/tasks/:number/designs/:version/approve', async (c) => {
-      const parsed = approveDesignInput.safeParse(await c.req.json().catch(() => ({})))
-      if (!parsed.success) throw new ApiFailure(400, { code: 'invalid_input', issues: parsed.error.issues.map(i => ({ path: i.path.map(String), message: i.message })) })
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
-      await orchestrator.approveDesign(taskId, taskNumber(c.req.param('version')), parsed.data.note || undefined, actor)
-      return c.json(await loadTask(db, taskId))
-    })
-
-    .get('/projects/:slug/tasks/:number/comments', async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      return c.json(await listComments(db, await findTaskId(db, project.id, taskNumber(c.req.param('number')))))
-    })
-
-    .post('/projects/:slug/tasks/:number/comments', validate('json', addCommentInput), async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      const taskId = await findTaskId(db, project.id, taskNumber(c.req.param('number')))
-      const comment = await addComment(db, taskId, c.req.valid('json'), actor)
-      events.publish({ type: 'comment.created', comment })
-      return c.json(comment, 201)
-    })
-
-    // PRD §14: understand every merge decision
-    .get('/projects/:slug/tasks/:number/history', async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      return c.json(await listHistory(db, await findTaskId(db, project.id, taskNumber(c.req.param('number')))))
-    })
-
-    .get('/projects/:slug/tasks/:number/evidence', async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      return c.json(await listEvidence(db, await findTaskId(db, project.id, taskNumber(c.req.param('number')))))
-    })
-
-    .get('/projects/:slug/tasks/:number/reviews', async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      return c.json(await listReviews(db, await findTaskId(db, project.id, taskNumber(c.req.param('number')))))
-    })
-
-    .get('/evidence/:id/file', async (c) => {
+      return readPullRequest(github, project, task.pr.number)
+    },
+    'GET /projects/:slug/tasks/:number': async ({ params }) => loadTask(db, await taskIdOf(params)),
+    'POST /projects/:slug/tasks/:number/transitions': async ({ params, body }) => orchestrator.commands.transitionTask(await taskIdOf(params), body, actor),
+    'PATCH /projects/:slug/tasks/:number': async ({ params, body }) => {
+      const project = await findProjectBySlug(db, params.slug)
+      return orchestrator.commands.patchTask(project, await findTaskId(db, project.id, taskNumber(params.number)), body, actor)
+    },
+    'DELETE /projects/:slug/tasks/:number': async ({ params, body }) => {
+      await orchestrator.human.deleteTask(await taskIdOf(params), actor, body.reason ?? null)
+    },
+    'POST /projects/:slug/tasks/:number/approve': async ({ params }) => orchestrator.commands.approveTask(await taskIdOf(params), actor),
+    'POST /projects/:slug/tasks/:number/resume': async ({ params }) => orchestrator.human.resumeTask(await taskIdOf(params), actor),
+    'GET /projects/:slug/tasks/:number/designs': async ({ params }) => listDesignVersions(db, blobs, await taskIdOf(params)),
+    'POST /projects/:slug/tasks/:number/designs/:version/approve': async ({ params, body }) => {
+      const taskId = await taskIdOf(params)
+      await orchestrator.human.approveDesign(taskId, taskNumber(params.version), body.note || undefined, actor)
+      return loadTask(db, taskId)
+    },
+    'GET /projects/:slug/tasks/:number/comments': async ({ params }) => listComments(db, await taskIdOf(params)),
+    'POST /projects/:slug/tasks/:number/comments': async ({ params, body }) => orchestrator.commands.addComment(await taskIdOf(params), body, actor),
+    'GET /projects/:slug/tasks/:number/history': async ({ params }) => listHistory(db, await taskIdOf(params)),
+    'GET /projects/:slug/tasks/:number/evidence': async ({ params }) => listEvidence(db, await taskIdOf(params)),
+    'GET /projects/:slug/tasks/:number/reviews': async ({ params }) => listReviews(db, await taskIdOf(params)),
+    'GET /evidence/:id/file': async ({ params }, c) => {
       c.header('accept-ranges', 'bytes')
-      const [row] = await db.select().from(schema.evidence).where(eq(schema.evidence.id, c.req.param('id')))
-      // A note has no file
-      const file = row?.blob ? await blobs.open(row.blob) : null
-      if (!row || !file) throw new ApiFailure(404, { code: 'not_found' })
-      return serveBlob(c, file, evidenceHeaders(row.contentType, row.fileName))
-    })
+      const found = await readEvidenceFile(db, blobs, params.id)
+      if (!found) throw notFound()
+      return serveBlob(c, found.file, evidenceHeaders(found.contentType, found.fileName))
+    },
 
-    .get('/agents', async c => c.json(await listAgents(db)))
-
-    .post('/agents', validate('json', createAgentInput), async (c) => {
-      const input = c.req.valid('json')
-      await requireRuntimeCli(runner, input.runtime)
-      const agent = await createAgent(db, input, actor)
-      events.publish({ type: 'agent.updated', agent })
-      orchestrator.poke()
-      return c.json(agent, 201)
-    })
-
-    .patch('/agents/:id', validate('json', patchAgentInput), async (c) => {
-      const input = c.req.valid('json')
-      if (input.runtime) await requireRuntimeCli(runner, input.runtime)
-      const agent = await patchAgent(db, c.req.param('id'), input, actor)
-      events.publish({ type: 'agent.updated', agent })
-      orchestrator.poke()
-      return c.json(agent)
-    })
-
-    // Profile pictures: the raw image as the body, with its content type
-    .put('/agents/:id/avatar', avatarBodyLimit, async (c) => {
-      const data = new Uint8Array(await c.req.arrayBuffer())
-      await setAgentAvatar(db, blobs, c.req.param('id'), { data, type: checkAvatar(data, c.req.header('content-type')) })
-      return c.json(await publishAgent(c.req.param('id')))
-    })
-    .delete('/agents/:id/avatar', async (c) => {
-      await setAgentAvatar(db, blobs, c.req.param('id'), null)
-      return c.json(await publishAgent(c.req.param('id')))
-    })
-    .get('/agents/:id/avatar', async c => serveAvatar(c, await readAvatar(db, blobs, { agentId: c.req.param('id') })))
-
-    // Images in task text: the raw image as the body, with its content type
-    .post('/projects/:slug/attachments', attachmentBodyLimit, validate('query', uploadAttachmentQuery), async (c) => {
-      const data = new Uint8Array(await c.req.arrayBuffer())
-      const upload = { data, contentType: c.req.header('content-type'), name: c.req.valid('query').name }
-      return c.json(await createAttachment(db, blobs, c.req.param('slug'), upload, actor), 201)
-    })
+    'GET /agents': () => listAgents(db),
+    'POST /agents': ({ body }) => orchestrator.commands.createAgent(body, actor),
+    'PATCH /agents/:id': ({ params, body }) => orchestrator.commands.patchAgent(params.id, body, actor),
+    'PUT /agents/:id/avatar': {
+      use: [avatarBodyLimit],
+      handle: async ({ params }, c) => {
+        const data = new Uint8Array(await c.req.arrayBuffer())
+        return orchestrator.commands.setAgentAvatar(params.id, { data, type: checkAvatar(data, c.req.header('content-type')) })
+      }
+    },
+    'DELETE /agents/:id/avatar': ({ params }) => orchestrator.commands.setAgentAvatar(params.id, null),
+    'GET /agents/:id/avatar': async ({ params }, c) => serveAvatar(c, await readAvatar(db, blobs, { agentId: params.id })),
+    'POST /projects/:slug/attachments': {
+      use: [attachmentBodyLimit],
+      handle: async ({ params, query }, c) => {
+        const data = new Uint8Array(await c.req.arrayBuffer())
+        return createAttachment(db, blobs, params.slug, { data, contentType: c.req.header('content-type'), name: query.name }, actor)
+      }
+    },
     // An attachment never changes, so it can be cached for good. nosniff
     // keeps browsers to the stored (always raster image) type.
-    .get('/attachments/:id/file', async (c) => {
-      const attachment = await readAttachment(db, blobs, c.req.param('id'))
+    'GET /attachments/:id/file': async ({ params }, c) => {
+      const attachment = await readAttachment(db, blobs, params.id)
       if (!attachment) throw new ApiFailure(404, { code: 'not_found' })
       return c.body(attachment.file.stream(), 200, {
         'content-type': attachment.type,
         'content-length': String(attachment.file.size),
-        'cache-control': 'private, max-age=31536000, immutable',
+        'cache-control': IMMUTABLE_CACHE,
         'x-content-type-options': 'nosniff'
       })
-    })
-
-    .get('/designs/:versionId/screenshots/:index', async (c) => {
-      const file = await readDesignScreenshot(db, blobs, c.req.param('versionId'), Number(c.req.param('index')))
+    },
+    'GET /designs/:versionId/screenshots/:index': async ({ params }, c) => {
+      const file = await readDesignScreenshot(db, blobs, params.versionId, Number(params.index))
       if (!file) throw new ApiFailure(404, { code: 'not_found' })
       return c.body(bytes(file.data), 200, { ...DESIGN_BUNDLE_HEADERS, 'content-type': file.type })
-    })
-
+    },
     // Without the trailing slash, a prototype's relative asset paths would
     // resolve outside its bundle
-    .get('/designs/:versionId/files', c => c.redirect(`${c.req.path}/`, 301))
-    .get('/me', async c => c.json(await getProfile(db, ownerId())))
-    .patch('/me', validate('json', patchProfileInput), async (c) => {
-      const profile = await patchProfile(db, ownerId(), c.req.valid('json'))
-      events.publish({ type: 'profile.updated', profile })
-      return c.json(profile)
-    })
-    .put('/me/avatar', avatarBodyLimit, async (c) => {
-      const data = new Uint8Array(await c.req.arrayBuffer())
-      const profile = await setUserAvatar(db, blobs, ownerId(), { data, type: checkAvatar(data, c.req.header('content-type')) })
-      events.publish({ type: 'profile.updated', profile })
-      return c.json(profile)
-    })
-    .delete('/me/avatar', async (c) => {
-      const profile = await setUserAvatar(db, blobs, ownerId(), null)
-      events.publish({ type: 'profile.updated', profile })
-      return c.json(profile)
-    })
-    .get('/me/avatar', async c => serveAvatar(c, await readAvatar(db, blobs, { userId: ownerId() })))
+    'GET /designs/:versionId/files': (_, c) => c.redirect(`${c.req.path}/`, 301),
+    'GET /me': () => getProfile(db, ownerId()),
+    'PATCH /me': ({ body }) => orchestrator.commands.patchProfile(ownerId(), body),
+    'PUT /me/avatar': {
+      use: [avatarBodyLimit],
+      handle: async (_, c) => {
+        const data = new Uint8Array(await c.req.arrayBuffer())
+        return orchestrator.commands.setUserAvatar(ownerId(), { data, type: checkAvatar(data, c.req.header('content-type')) })
+      }
+    },
+    'DELETE /me/avatar': () => orchestrator.commands.setUserAvatar(ownerId(), null),
+    'GET /me/avatar': async (_, c) => serveAvatar(c, await readAvatar(db, blobs, { userId: ownerId() })),
 
-    // Plan (D9): sessions, turns and approval
-    .get('/plan/sessions', async c => c.json(await plans.listSessions()))
+    'GET /plan/sessions': () => orchestrator.plans.listSessions(),
+    'POST /plan/sessions': ({ body }) => orchestrator.plans.start(body.projectId, body, actor),
+    'GET /plan/sessions/:id': ({ params }) => orchestrator.plans.getSession(params.id),
+    'PATCH /plan/sessions/:id': async ({ params, body }) => {
+      await requireRuntimeCli(runner, body.runtime)
+      return orchestrator.plans.setRuntime(params.id, body.runtime, actor)
+    },
+    'POST /plan/sessions/:id/messages': ({ params, body }) => orchestrator.plans.message(params.id, { text: body.text, taskRef: body.taskRef }, actor),
+    'POST /plan/sessions/:id/actions/:actionId': ({ params, body }) => orchestrator.pmActions.resolve(params.id, params.actionId, body.decision, actor),
+    'POST /plan/sessions/:id/close': ({ params }) => orchestrator.plans.close(params.id, actor),
+    'POST /plan/sessions/:id/read': ({ params }) => orchestrator.plans.markRead(params.id),
+    'POST /plan/plans/:id/approve': ({ params, body }) => orchestrator.proposals.approve(params.id, actor, body.to),
+    'POST /plan/plans/:id/discard': ({ params }) => orchestrator.proposals.discard(params.id, actor),
 
-    .post('/plan/sessions', validate('json', startPlanSessionInput), async (c) => {
-      const input = c.req.valid('json')
-      return c.json(await plans.start(input.projectId, input, actor), 201)
-    })
+    'GET /inbox': () => loadInbox(db, runner),
+    'POST /inbox/read': async ({ body }) => {
+      await markInboxRead(db, body)
+      events.publish({ type: 'inbox.read', itemType: body.type, id: body.id })
+      return { ok: true }
+    },
+    'POST /inbox/:taskId/actions': async ({ params, body }) => ({ task: await orchestrator.human.inboxAction(params.taskId, body, actor) }),
 
-    .get('/plan/sessions/:id', async c => c.json(await plans.getSession(c.req.param('id'))))
-
-    // Only the runtime, and only before the session's first message (D18)
-    .patch('/plan/sessions/:id', validate('json', patchPlanSessionInput), async (c) => {
-      const input = c.req.valid('json')
-      await requireRuntimeCli(runner, input.runtime)
-      return c.json(await plans.setRuntime(c.req.param('id'), input.runtime, actor))
-    })
-
-    .post('/plan/sessions/:id/messages', validate('json', planMessageInput), async (c) => {
-      const input = c.req.valid('json')
-      return c.json(await plans.message(c.req.param('id'), { text: input.text, taskRef: input.taskRef }, actor), 201)
-    })
-
-    .post('/plan/sessions/:id/actions/:actionId', validate('json', z.object({ decision: z.enum(['confirm', 'cancel']) })), async c =>
-      c.json(await orchestrator.pmActions.resolve(c.req.param('id'), c.req.param('actionId'), c.req.valid('json').decision, actor)))
-
-    .post('/plan/sessions/:id/close', async c => c.json(await plans.close(c.req.param('id'), actor)))
-
-    .post('/plan/sessions/:id/read', async c => c.json(await plans.markRead(c.req.param('id'))))
-
-    .post('/plan/plans/:id/approve', async (c) => {
-      // The body is optional; no body means the board
-      const parsed = approvePlanInput.safeParse(await c.req.json().catch(() => ({})))
-      if (!parsed.success) throw new ApiFailure(400, { code: 'invalid_input', issues: parsed.error.issues.map(i => ({ path: i.path.map(String), message: i.message })) })
-      const plan = await plans.approve(c.req.param('id'), actor, parsed.data.to)
-      orchestrator.poke(plan.tasks.flatMap(t => t.taskId ? [t.taskId] : []))
-      return c.json(plan)
-    })
-
-    // Its Drafts are deleted; the session stays, so the PM can propose again
-    .post('/plan/plans/:id/discard', async c => c.json(await plans.discard(c.req.param('id'), actor)))
-
-    .get('/inbox', async c => c.json(await loadInbox(db, runner.status().runners)))
-
-    .post('/inbox/read', validate('json', inboxReadInput), async (c) => {
-      const input = c.req.valid('json')
-      await markInboxRead(db, input)
-      events.publish({ type: 'inbox.read', itemType: input.type, id: input.id })
-      return c.json({ ok: true })
-    })
-
-    .post('/inbox/:taskId/actions', validate('json', inboxActionInput), async (c) => {
-      const [row] = await db.select({ id: schema.tasks.id }).from(schema.tasks)
-        .where(and(eq(schema.tasks.id, c.req.param('taskId')), isNull(schema.tasks.deletedAt)))
-      if (!row) throw new ApiFailure(404, { code: 'not_found' })
-      const task = await orchestrator.inboxAction(row.id, c.req.valid('json'), actor)
-      return c.json({ task })
-    })
-
-    // The kill switch (PRD §7.11)
-    .get('/status', c => c.json({ ...orchestrator.status, runners: runner.status().runners }))
-
-    .post('/stop-all', async (c) => {
-      await orchestrator.stopAll(actor)
-      return c.json(orchestrator.status)
-    })
-
-    .post('/resume-all', async (c) => {
-      await orchestrator.resumeAll(actor)
-      return c.json(orchestrator.status)
-    })
-
-    // The update hold, for scripts/deploy/auto-deploy.sh
-    .post('/update-hold', async c => c.json({ busy: await orchestrator.holdForUpdate() }))
-
-    .delete('/update-hold', (c) => {
-      orchestrator.releaseUpdate()
-      return c.json(orchestrator.status)
-    })
-
-    // What a deploy shipped, also from auto-deploy.sh once the new server
-    // answers. 201 when recorded, 200 when this toSha already was.
-    .post('/deployments', validate('json', createDeploymentInput), async (c) => {
-      const { deployment, created } = await recordDeployment(db, c.req.valid('json'))
+    'GET /status': () => ({ ...orchestrator.controls.status, runners: runner.status().runners }),
+    'POST /stop-all': async () => {
+      await orchestrator.controls.stopAll(actor)
+      return orchestrator.controls.status
+    },
+    'POST /resume-all': async () => {
+      await orchestrator.controls.resumeAll(actor)
+      return orchestrator.controls.status
+    },
+    'POST /update-hold': async () => ({ busy: await orchestrator.controls.holdForUpdate() }),
+    'DELETE /update-hold': () => {
+      orchestrator.controls.releaseUpdate()
+      return orchestrator.controls.status
+    },
+    'POST /deployments': async ({ body }, c) => {
+      const { deployment, created } = await recordDeployment(db, body)
       // The response doesn't wait for the notes
       if (created) {
         events.publish({ type: 'deployment.updated', deployment })
         setImmediate(() => void releaseNotes.sweep())
       }
       return c.json(deployment, created ? 201 : 200)
-    })
+    },
+    'POST /deployments/:id/read': ({ params }) => updateDeploymentInbox(db, events, params.id),
+    'POST /deployments/:id/dismiss': ({ params }) => updateDeploymentInbox(db, events, params.id, true),
 
-    .post('/deployments/:id/read', async c => c.json(await updateDeploymentInbox(db, events, c.req.param('id'))))
-    .post('/deployments/:id/dismiss', async c => c.json(await updateDeploymentInbox(db, events, c.req.param('id'), true)))
+    'GET /runs': ({ query: { agentId, taskId, since, active } }) => listRuns(db, { ...(agentId && { agentId }), ...(taskId && { taskId }), ...(since && { since }), active }),
+    'GET /runs/:id': ({ params }) => getRun(db, params.id),
+    'GET /runs/:id/transcript': ({ params }) => readRunTranscript(db, transcripts, params.id),
+    'POST /runs/:id/stop': async ({ params }) => {
+      await orchestrator.human.stopRun(params.id, actor)
+      return getRun(db, params.id)
+    },
+    'POST /projects/:slug/runs/:runId/messages': async ({ params, body }) => orchestrator.human.messageRun((await findProjectBySlug(db, params.slug)).id, params.runId, body, actor),
 
-    .get('/runs', async (c) => {
-      const agentId = c.req.query('agentId')
-      const taskId = c.req.query('taskId')
-      // Every run queued since then, for the Agents page's history (ISO time)
-      const sinceText = c.req.query('since')
-      const since = sinceText ? new Date(sinceText) : undefined
-      if (since && Number.isNaN(since.getTime())) throw new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['since'], message: 'Expected an ISO time' }] })
-      return c.json(await listRuns(db, {
-        ...(agentId && { agentId }),
-        ...(taskId && { taskId }),
-        ...(since && { since }),
-        active: c.req.query('active') === '1'
-      }))
-    })
-
-    .get('/runs/:id', async c => c.json(await getRun(db, c.req.param('id'))))
-
-    .get('/runs/:id/transcript', async (c) => {
-      const [row] = await db.select({ blob: schema.runs.transcriptBlob }).from(schema.runs).where(eq(schema.runs.id, c.req.param('id')))
-      if (!row) throw new ApiFailure(404, { code: 'not_found' })
-      return c.json(await transcripts.read(c.req.param('id'), row.blob))
-    })
-
-    .post('/runs/:id/stop', async (c) => {
-      await orchestrator.stopRun(c.req.param('id'), actor)
-      return c.json(await getRun(db, c.req.param('id')))
-    })
-
-    // A human's message to a live developer or reviewer run, kept as their
-    // comment on the task. 409 run_not_live when no runner holds the run.
-    .post('/projects/:slug/runs/:runId/messages', validate('json', runMessageInput), async (c) => {
-      const project = await findProjectBySlug(db, c.req.param('slug'))
-      return c.json(await orchestrator.messageRun(project.id, c.req.param('runId'), c.req.valid('json'), actor), 202)
-    })
-
-    .get('/events', c => streamSSE(c, async (stream) => {
+    'GET /events': (_, c) => streamSSE(c, async (stream) => {
       const send = (event: ServerEvent) => stream.writeSSE({ event: event.type, data: JSON.stringify(event) })
       const unsubscribe = events.subscribe((event) => {
         void send(event)
@@ -729,8 +402,7 @@ export function createApp({ db, events, actor, runner, orchestrator, github, blo
       await new Promise<void>(resolve => stream.onAbort(resolve))
       clearInterval(heartbeat)
       unsubscribe()
-    }))
+    })
+  })
+  return app
 }
-
-// The Hono typed client (hc) in apps/web is built from this type
-export type AppType = ReturnType<typeof createApp>

@@ -1,9 +1,10 @@
 import type { QueryClient, QueryKey } from '@tanstack/vue-query'
 import type { ServerEvent } from '@corral/contracts'
-import { hashKey } from '@tanstack/vue-query'
-import { api } from '~/composables/useApi'
-import { subscribeLive, subscribeReconnect } from '~/composables/useLive'
+import { hashKey, MutationObserver } from '@tanstack/vue-query'
 import { applyEvent, invalidateKeys } from './dependencies'
+import { markRead } from './inbox'
+import { threadOnScreen } from './plan'
+import { subscribeLive, subscribeReconnect } from './stream'
 
 // Events arrive in bursts, with pauses inside them. Refetch after a full second
 // without an event, so any gap within a one-second burst keeps it together, and
@@ -12,12 +13,7 @@ import { applyEvent, invalidateKeys } from './dependencies'
 export const QUIET_MS = 1000
 export const MAX_WAIT_MS = 2000
 
-export interface InvalidationQueue {
-  add: (stale: readonly QueryKey[]) => void
-  clear: () => void
-}
-
-export function createInvalidationQueue(client: QueryClient): InvalidationQueue {
+function createInvalidationQueue(client: QueryClient) {
   const pending = new Map<string, QueryKey>()
   let quiet: ReturnType<typeof setTimeout> | null = null
   let deadline: ReturnType<typeof setTimeout> | null = null
@@ -36,7 +32,7 @@ export function createInvalidationQueue(client: QueryClient): InvalidationQueue 
   }
 
   return {
-    add: (stale) => {
+    add: (stale: readonly QueryKey[]) => {
       if (!stale.length) return
       for (const key of stale) pending.set(hashKey(key), key)
       if (quiet) clearTimeout(quiet)
@@ -45,13 +41,6 @@ export function createInvalidationQueue(client: QueryClient): InvalidationQueue 
     },
     clear
   }
-}
-
-interface ConnectOptions {
-  // The Plan thread on screen, whose replies are read as they arrive
-  openSession?: () => unknown
-  // Sees every event, with or without a conversation mounted
-  onEvent?: (event: ServerEvent) => void
 }
 
 type RunEvents = Extract<ServerEvent, { type: 'run.events' }>
@@ -89,15 +78,17 @@ export function createLineBuffer(write: (event: RunEvents) => void) {
 }
 
 // Feeds useLive's stream, real or mock, into the query cache. Returns a stop.
-export function connectQueries(client: QueryClient, { openSession, onEvent }: ConnectOptions = {}): () => void {
+export function connectQueries(client: QueryClient): () => void {
   const queue = createInvalidationQueue(client)
   const lines = createLineBuffer(event => queue.add(applyEvent(client, event)))
+  const reads = new MutationObserver(client, markRead)
   const stopEvents = subscribeLive((event) => {
-    onEvent?.(event)
-    // Before the cache, so it gets the session as read
-    if (event.type === 'plan.session' && event.session.unread && openSession?.() === event.session.id) {
+    // A reply to the thread on screen is read before it reaches the cache, so
+    // no list shows it unread
+    if (event.type === 'plan.session' && event.session.unread && threadOnScreen(client, event.session.id)) {
       event.session = { ...event.session, unread: false }
-      void api.plan.read(event.session.id).catch(() => {})
+      // A failure is handled by markRead itself
+      reads.mutate({ type: 'plan_thread', id: event.session.id }).catch(() => {})
     }
     if (event.type === 'run.events') lines.add(event)
     else queue.add(applyEvent(client, event))

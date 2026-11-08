@@ -3,7 +3,7 @@ import type { Project } from '@corral/contracts'
 import { VisAxis, VisStackedBar, VisXYContainer } from '@unovis/vue'
 import type { ChartConfig } from '~/components/ui/chart'
 import { ChartContainer, ChartCrosshair, ChartTooltip, ChartTooltipContent, componentToString } from '~/components/ui/chart'
-import type { MergedDay } from '~/features/home/utils/overview'
+import type { MergedDay } from '~/features/home/utils/figures'
 
 // Tasks merged per day, stacked by project, in each project's own colour
 const props = withDefaults(defineProps<{ rows: MergedDay[], projects: (Project & { color: string })[], height?: number }>(), { height: 220 })

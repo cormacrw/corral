@@ -64,9 +64,10 @@ merge. Approval or pending integration never means done.
 
 ## Human review at the task (COR-289)
 
-`applyTransition` clears the in-memory flag for `integrationProtocol > 0`, so
+`applyTransition` clears the in-memory flag for a PR-free task (core
+`humanReviewFlag`, which also sets it in an `each_task` task), so
 `review_approved` always lands in Ready to merge; the row keeps `humanReview`
-and the criteria keep `checkedByHuman`. `humanObligations` in `epic-prs.ts` turns
+and the criteria keep `checkedByHuman`. `humanObligations` in `epic-review.ts` turns
 those into the task approval's obligations, for PR-free tasks only. The Inbox gets
 them as `humanReview` and `humanChecks` on each `EpicReviewTask`. Approve must send
 `confirmedCriteria` and `confirmedTasks` covering the board read under the task
@@ -152,7 +153,7 @@ task's PR merges. Same-task dependents wake on Merged through `publishDependents
 
 ## Wait reasons and activity (COR-356)
 
-`holdsAcrossEpics` in `epic-review-state.ts` shares the claim rule with task
+`holdsAcrossEpics` in `delivery-sql.ts` shares the claim rule with task
 serialization. A Merged task/bug dependency in another unfinished task adds that
 task to `Task.waitingOnEpics`, including for standalone dependents. Same-task
 dependencies, spikes, deleted tasks and finished tasks with subtasks do not add a wait. An

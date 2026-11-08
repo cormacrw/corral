@@ -9,9 +9,10 @@ import { inspectIntegration, prepareIntegration, pushIntegration } from '../../r
 import { createTestDataDir, TEST_REPOSITORY } from '../../runner/src/test-repo.ts'
 import { claimNextTask } from './claim.ts'
 import { publishEpicDependents } from './dependent-tasks.ts'
+import { EpicSynchronizer } from './epic-sync.ts'
 import { TaskIntegrator } from './task-integration.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 import { recordTaskSubmission } from './task-submissions.ts'
 
 // Real git processes, so these need more time than the default on a busy machine
@@ -20,6 +21,12 @@ vi.setConfig({ testTimeout: 30_000 })
 // The real runner git code against a real origin, with the real server deciding.
 // Only the WebSocket's far end is a test: `faults` lets a test intervene around a job.
 type Job = Parameters<FakeRunner['onJob']>[0]
+
+// An integrator of its own, as the orchestrator wires one
+function integrator(settled: (taskId: string) => Promise<void> = async () => {}, gate: { readonly halted: boolean } = { halted: false }) {
+  const deps = { db: t.db, events: t.bus, github: t.github, runner: t.runner, gate, now: () => new Date(), wake: () => {}, settled }
+  return new TaskIntegrator({ ...deps, sync: new EpicSynchronizer(deps) })
+}
 let faults: ((job: Job, real: () => Promise<unknown>) => Promise<unknown>) | null = null
 
 let t: TestApp
@@ -60,6 +67,9 @@ afterAll(async () => {
   runner?.close()
   await t?.close()
 })
+afterEach(() => {
+  vi.unstubAllEnvs()
+})
 beforeEach(async () => {
   // An agent running these tests has a push URL that always fails
   vi.stubEnv('GIT_CONFIG_COUNT', '0')
@@ -95,7 +105,7 @@ const row = async (task: { id: string }) => (await t.db.select().from(schema.tas
 const submission = async (task: { submissionId: string }) => (await t.db.select().from(schema.taskSubmissions).where(eq(schema.taskSubmissions.id, task.submissionId)))[0]!
 const ops = (epicId: string) => t.db.select().from(schema.taskIntegrationOperations).where(eq(schema.taskIntegrationOperations.epicId, epicId)).orderBy(schema.taskIntegrationOperations.leaseEpoch)
 const trailers = async (branch: string, id: string) => (await git('log', '--format=%H', '--fixed-strings', `--grep=Corral-Submission: ${id}`, branch)).split('\n').filter(Boolean)
-const tick = () => t.orchestrator.merges.tick()
+const tick = () => t.orchestrator.mergePass()
 
 it('puts two concurrently approved tasks on the task\'s branch once each, neither overwriting the other', async () => {
   const epic = await createEpic()
@@ -169,8 +179,8 @@ it('recovers a restart after the push without a second commit', async () => {
 
   faults = null
   const settled: string[] = []
-  const restarted = new TaskIntegrator({ db: t.db, events: t.bus, github: t.github, runner: t.runner }, async id => void settled.push(id))
-  await restarted.tick(() => false)
+  const restarted = integrator(async id => void settled.push(id))
+  await restarted.tick()
   const [op] = await ops(epic.id)
   expect(op).toMatchObject({ state: 'succeeded', resultHeadSha: await git('rev-parse', epic.branch) })
   expect(await row(task)).toMatchObject({ status: 'merged', mergeCommitSha: op!.resultHeadSha })
@@ -233,7 +243,6 @@ it('sends a conflicted candidate to a rebase round: the branch stays put and dep
   expect(head).toBe((await row(a)).mergeCommitSha)
   const notes = await t.db.select().from(schema.comments).where(eq(schema.comments.taskId, b.id))
   expect(notes.at(-1)!.body).toContain('`same.txt`')
-  expect(notes.at(-1)!.body).toContain('report commit_submitted')
   const [developer] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'developer'))
   expect(await claimNextTask(t.db, developer!.id, t.clock.now, [dependent.id])).toBeNull()
 })
@@ -359,7 +368,7 @@ describe('while the kill switch or update hold is on', () => {
   let jobs: string[] = []
   const pushes = () => jobs.filter(kind => kind === 'integration_push').length
   const stop = (on: boolean) => {
-    t.orchestrator.merges.stopped = on
+    t.orchestrator.gate.stopped = on
   }
   const record = (stopAfter?: Job['kind']) => {
     faults = async (job, real) => {
@@ -462,8 +471,12 @@ describe('while the kill switch or update hold is on', () => {
     onChecks(waiting!.resultHeadSha!, () => {
       read = true
     })
-    const integrator = new TaskIntegrator({ db: t.db, events: t.bus, github: t.github, runner: t.runner }, async () => {})
-    await integrator.tick(() => read && ++looks > 1)
+    const separate = integrator(undefined, {
+      get halted() {
+        return read && ++looks > 1
+      }
+    })
+    await separate.tick()
     expect(pushes()).toBe(0)
     expect(await git('rev-parse', epic.branch)).toBe(epic.base)
     // Back as it was: not a push of unknown result, and its checks keep their age
@@ -485,21 +498,20 @@ it('reads the remote once at most while paused, and still finds a moved branch o
   t.github.setChecks(op!.resultHeadSha!, [{ name: 'ci', conclusion: 'success', url: null }])
   await t.db.update(schema.tasks).set({ paused: true }).where(eq(schema.tasks.id, task.id))
   // As after a restart: nothing remembers why the operation is waiting
-  const fresh = new TaskIntegrator({ db: t.db, events: t.bus, github: t.github, runner: t.runner }, async () => {})
+  const fresh = integrator()
   const reads: string[] = []
   faults = async (job, real) => {
     reads.push(job.kind)
     return real()
   }
-  const never = () => false
-  await fresh.tick(never)
-  await fresh.tick(never)
-  await fresh.tick(never)
+  await fresh.tick()
+  await fresh.tick()
+  await fresh.tick()
   expect(reads).toEqual(['integration_inspect'])
 
   await git('update-ref', `refs/heads/${epic.branch}`, await git('commit-tree', `${epic.base}^{tree}`, '-p', epic.base, '-m', 'Newer task work'))
   await t.db.update(schema.tasks).set({ paused: false }).where(eq(schema.tasks.id, task.id))
-  await fresh.tick(never)
+  await fresh.tick()
   expect((await ops(epic.id))[0]).toMatchObject({ id: op!.id, state: 'failed', error: 'The task\'s branch moved' })
   expect(await row(task)).toMatchObject({ status: 'ready_to_merge' })
   expect(await trailers(epic.branch, task.submissionId)).toHaveLength(0)
@@ -552,11 +564,11 @@ it('wakes same-epic dependents on integration, and others only when the task rea
   await t.db.update(schema.agents).set({ concurrency: 50, wakeIntervalSeconds: null })
 
   // Approval and a pending integration satisfy nothing
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   expect(await row(same)).toMatchObject({ status: 'ready' })
   const seen = t.events.length
   await tick()
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   expect(await row(task)).toMatchObject({ status: 'merged' })
   expect(t.events.slice(seen).some(e => e.type === 'task.updated' && e.task.id === same.id)).toBe(true)
   expect(await row(same)).toMatchObject({ status: 'in_progress' })
@@ -565,7 +577,7 @@ it('wakes same-epic dependents on integration, and others only when the task rea
 
   await t.db.update(schema.epics).set({ reviewState: 'merged' }).where(eq(schema.epics.id, epic.id))
   expect(await publishEpicDependents(t.db, t.bus, epic.id)).toEqual(expect.arrayContaining([elsewhere.id, standalone.id]))
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   expect(await row(elsewhere)).toMatchObject({ status: 'in_progress' })
   expect(await row(standalone)).toMatchObject({ status: 'in_progress' })
 })

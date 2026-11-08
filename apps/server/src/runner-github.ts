@@ -1,0 +1,253 @@
+import type { GateCheck, MergeMethod } from '@corral/core'
+import { GitHubError, toFileStatus, type CheckResult, type GitHubClient, type PullRequest } from './github.ts'
+import type { RunnerHub } from './runner-hub.ts'
+
+// How much of a raw log leaves the runner, which is where the end can be found
+const MAX_LOG_CHARS = 256_000
+
+interface RawPull {
+  number: number
+  node_id: string
+  html_url: string
+  state: 'open' | 'closed'
+  merged?: boolean
+  merged_at?: string | null
+  merge_commit_sha: string | null
+  head: { sha: string }
+  mergeable?: boolean | null
+  mergeable_state?: string | null
+}
+
+interface RawPullDetail {
+  number: number
+  html_url: string
+  title: string
+  body: string | null
+  base: { ref: string }
+  head: { ref: string, sha: string }
+  changed_files: number
+}
+
+interface RawPullFile {
+  filename: string
+  status: string
+  additions: number
+  deletions: number
+  patch?: string
+}
+
+function toPullRequest(raw: RawPull): PullRequest {
+  return {
+    number: raw.number,
+    nodeId: raw.node_id,
+    url: raw.html_url,
+    state: raw.state,
+    merged: Boolean(raw.merged ?? raw.merged_at),
+    mergeCommitSha: raw.merge_commit_sha,
+    headSha: raw.head.sha,
+    mergeable: raw.mergeable ?? null,
+    mergeableState: raw.mergeable_state ?? null
+  }
+}
+
+interface RawChangedFile {
+  filename: string
+  previous_filename?: string
+  status: string
+  sha: string
+  additions: number
+  deletions: number
+  patch?: string
+}
+
+// GitHub lists at most this many files in a comparison, without saying it cut
+// the list short
+const MAX_COMPARE_FILES = 300
+
+interface GraphQLError {
+  type?: string
+  message: string
+}
+
+const PAGE_SIZE = 100
+
+const UPDATE_BRANCH_MUTATION = `mutation($pullRequestId: ID!, $expectedHeadOid: GitObjectID!) {
+  updatePullRequestBranch(input: { pullRequestId: $pullRequestId, expectedHeadOid: $expectedHeadOid, updateMethod: REBASE }) {
+    pullRequest { headRefOid }
+  }
+}`
+
+export class RunnerGitHub implements GitHubClient {
+  #runner: RunnerHub
+
+  constructor(runner: RunnerHub) {
+    this.#runner = runner
+  }
+
+  async #call(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown, ok: number[] = [200, 201]) {
+    const result = await this.#runner.request({ kind: 'github', method, path, ...(body !== undefined && { body }) })
+    if (!ok.includes(result.status)) {
+      const message = (result.body as { message?: string } | null)?.message ?? `GitHub ${method} ${path} returned ${result.status}`
+      throw new GitHubError(result.status, message)
+    }
+    return result
+  }
+
+  async createBranch(repository: string, branch: string, sha: string): Promise<void> {
+    try {
+      await this.#call('POST', `/repos/${repository}/git/refs`, { ref: `refs/heads/${branch}`, sha })
+    } catch (error) {
+      // Another claim may have created the same epic branch first.
+      if (!(error instanceof GitHubError) || error.status !== 422 || !await this.branchHead(repository, branch)) throw error
+    }
+  }
+
+  async branchHead(repository: string, branch: string) {
+    const result = await this.#call('GET', `/repos/${repository}/git/ref/heads/${encodeURIComponent(branch)}`, undefined, [200, 404])
+    return result.status === 404 ? null : (result.body as { object: { sha: string } }).object.sha
+  }
+
+  async findOpenPullRequest(repository: string, branch: string) {
+    const owner = repository.split('/')[0]
+    const result = await this.#call('GET', `/repos/${repository}/pulls?state=open&head=${owner}:${encodeURIComponent(branch)}`)
+    const [first] = result.body as RawPull[]
+    return first ? toPullRequest(first) : null
+  }
+
+  async openPullRequest(repository: string, input: { head: string, base: string, title: string, body: string }) {
+    return toPullRequest((await this.#call('POST', `/repos/${repository}/pulls`, input)).body as RawPull)
+  }
+
+  async updatePullRequest(repository: string, number: number, input: { title?: string, body?: string }) {
+    await this.#call('PATCH', `/repos/${repository}/pulls/${number}`, input)
+  }
+
+  async getPullRequest(repository: string, number: number) {
+    return toPullRequest((await this.#call('GET', `/repos/${repository}/pulls/${number}`)).body as RawPull)
+  }
+
+  async getPullRequestDiff(repository: string, number: number, fileLimit: number) {
+    const [pull, files] = await Promise.all([
+      this.#call('GET', `/repos/${repository}/pulls/${number}`),
+      this.#call('GET', `/repos/${repository}/pulls/${number}/files?per_page=${fileLimit}`)
+    ])
+    const raw = pull.body as RawPullDetail
+    return {
+      number: raw.number,
+      url: raw.html_url,
+      title: raw.title,
+      body: raw.body ?? '',
+      baseBranch: raw.base.ref,
+      headBranch: raw.head.ref,
+      headSha: raw.head.sha,
+      changedFiles: raw.changed_files,
+      files: (files.body as RawPullFile[]).map(file => ({
+        path: file.filename,
+        status: toFileStatus(file.status),
+        additions: file.additions,
+        deletions: file.deletions,
+        patch: file.patch ?? ''
+      }))
+    }
+  }
+
+  // Every page: a required check past the first would look pending forever
+  async #allPages<T>(path: string, page: (body: unknown) => { total: number, items: T[] }): Promise<T[]> {
+    const items: T[] = []
+    for (let number = 1; ; number++) {
+      const { total, items: more } = page((await this.#call('GET', `${path}?per_page=${PAGE_SIZE}&page=${number}`)).body)
+      items.push(...more)
+      if (more.length < PAGE_SIZE || items.length >= total) return items
+    }
+  }
+
+  async checks(repository: string, sha: string) {
+    const runs = await this.#allPages(`/repos/${repository}/commits/${sha}/check-runs`, (body) => {
+      const { total_count: total, check_runs: items } = body as { total_count: number, check_runs: { name: string, status: string, conclusion: string | null, html_url: string | null }[] }
+      return { total, items }
+    })
+    const statuses = await this.#allPages(`/repos/${repository}/commits/${sha}/status`, (body) => {
+      const { total_count: total, statuses: items } = body as { total_count: number, statuses: { context: string, state: string, target_url: string | null }[] }
+      return { total, items }
+    })
+    return [
+      ...runs.map((run): CheckResult => ({
+        name: run.name,
+        conclusion: run.status !== 'completed'
+          ? 'pending'
+          : run.conclusion === 'success' ? 'success' : run.conclusion === 'neutral' ? 'neutral' : run.conclusion === 'skipped' ? 'skipped' : 'failure',
+        url: run.html_url
+      })),
+      ...statuses.map((status): CheckResult => ({
+        name: status.context,
+        conclusion: status.state === 'success' ? 'success' : status.state === 'pending' ? 'pending' : 'failure',
+        url: status.target_url
+      }))
+    ]
+  }
+
+  // Only a GitHub Actions check run links to its job
+  async ciFailure(repository: string, check: GateCheck) {
+    const jobId = /\/job\/(\d+)/.exec(check.url ?? '')?.[1]
+    if (!jobId) throw new Error(`${check.name} doesn't link to a GitHub Actions job`)
+    const job = (await this.#call('GET', `/repos/${repository}/actions/jobs/${jobId}`)).body as { steps?: { name: string, conclusion: string | null }[] }
+    const log = await this.#runner.request({ kind: 'github', method: 'GET', path: `/repos/${repository}/actions/jobs/${jobId}/logs`, tailChars: MAX_LOG_CHARS })
+    if (log.status !== 200 || typeof log.body !== 'string') throw new GitHubError(log.status, `The log of job ${jobId} isn't available`)
+    return { step: job.steps?.find(step => step.conclusion === 'failure')?.name ?? null, log: log.body, failureLines: log.failureLines ?? [] }
+  }
+
+  async behindBy(repository: string, base: string, head: string) {
+    const result = await this.#call('GET', `/repos/${repository}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`)
+    return (result.body as { behind_by: number }).behind_by
+  }
+
+  // One commit per page: only the files are needed, and they all come on page 1
+  async compare(repository: string, base: string, head: string) {
+    const result = await this.#call('GET', `/repos/${repository}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?per_page=1`)
+    const body = result.body as { merge_base_commit: { sha: string }, files?: RawChangedFile[] }
+    const files = body.files ?? []
+    if (files.length >= MAX_COMPARE_FILES) throw new GitHubError(result.status, `Comparison ${base}...${head} has too many files to list completely`)
+    return {
+      mergeBase: body.merge_base_commit.sha,
+      files: files.map(f => ({
+        filename: f.filename,
+        ...(f.previous_filename !== undefined && { previousFilename: f.previous_filename }),
+        status: f.status,
+        sha: f.sha,
+        additions: f.additions,
+        deletions: f.deletions,
+        ...(f.patch !== undefined && { patch: f.patch })
+      }))
+    }
+  }
+
+  // GraphQL, because the REST endpoint can only merge the base in.
+  // GraphQL answers 200 with an `errors` array when the mutation fails.
+  async updateBranch(repository: string, pr: { number: number, nodeId: string }, expectedHeadSha: string) {
+    const result = await this.#call('POST', 'graphql', {
+      query: UPDATE_BRANCH_MUTATION,
+      variables: { pullRequestId: pr.nodeId, expectedHeadOid: expectedHeadSha }
+    })
+    const body = result.body as { data?: { updatePullRequestBranch: unknown } | null, errors?: GraphQLError[] } | null
+    const errors = body?.errors ?? []
+    if (errors.length === 0) return Boolean(body?.data?.updatePullRequestBranch)
+    // A conflict, a moved head or anything else GitHub couldn't update is the
+    // developer's to fix; access and lookup failures are ours, so they throw
+    if (errors.every(e => e.type === 'UNPROCESSABLE' || /conflict|could not (update|rebase)|failed to (update|rebase)/i.test(e.message))) return false
+    throw new GitHubError(result.status, errors.map(e => e.message).join('; '))
+  }
+
+  async merge(repository: string, number: number, method: MergeMethod, expectedHeadSha: string) {
+    const result = await this.#call('PUT', `/repos/${repository}/pulls/${number}/merge`, { merge_method: method, sha: expectedHeadSha }, [200, 405, 409])
+    const body = result.body as { merged?: boolean, sha?: string, message?: string }
+    return { merged: result.status === 200 && Boolean(body.merged), sha: body.sha ?? null, message: body.message ?? '' }
+  }
+
+  async closePullRequest(repository: string, number: number) {
+    await this.#call('PATCH', `/repos/${repository}/pulls/${number}`, { state: 'closed' })
+  }
+
+  async deleteBranch(repository: string, branch: string) {
+    await this.#call('DELETE', `/repos/${repository}/git/refs/heads/${encodeURIComponent(branch)}`, undefined, [204, 422])
+  }
+}

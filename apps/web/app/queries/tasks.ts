@@ -1,13 +1,13 @@
 import { queryOptions, type QueryClient } from '@tanstack/vue-query'
-import type { Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, Task } from '@corral/contracts'
-import { api } from '~/composables/useApi'
-import { defineMutation, invalidateKeys, withComment, writeTaskResponse } from './dependencies'
-import { keys } from './keys'
+import type { Comment, CreateTaskInput, HumanTransitionInput, PatchTaskInput, PullRequestGuide, Task } from '@corral/contracts'
+import { api } from '~/queries/api'
+import { defineMutation, inTaskList, invalidateKeys, withComment, writeTaskResponse } from './dependencies'
+import { keys, pendingId } from './keys'
 
 // The API addresses a task by project and number; the cache by ref
 export type TaskAddress = Pick<Task, 'ref' | 'number'> & { slug: string }
 
-export const tasksQuery = (slug: string) => queryOptions({ queryKey: keys.tasks.list(slug), queryFn: async () => (await api.tasks.list(slug, 'all')).filter(task => task.status !== 'draft') })
+export const tasksQuery = (slug: string) => queryOptions({ queryKey: keys.tasks.list(slug), queryFn: async () => (await api.tasks.list(slug)).filter(inTaskList) })
 export const taskQuery = (ref: string) => queryOptions({ queryKey: keys.tasks.detail(ref), queryFn: () => api.tasks.byRef(ref) })
 export const taskCommentsQuery = ({ slug, number, ref }: TaskAddress) => queryOptions({ queryKey: keys.tasks.comments(ref), queryFn: () => api.tasks.comments(slug, number) })
 export const taskHistoryQuery = ({ slug, number, ref }: TaskAddress) => queryOptions({ queryKey: keys.tasks.history(ref), queryFn: () => api.tasks.history(slug, number) })
@@ -21,7 +21,7 @@ export const taskPullRequestQuery = ({ slug, ref }: Pick<TaskAddress, 'slug' | '
 // A list row is the whole task, so opening one shows it while its own copy
 // loads, and its side queries needn't wait for that copy. Drafts aren't in
 // lists, so they keep the skeleton.
-export function listedTask(client: QueryClient, ref: string): Task | undefined {
+function listedTask(client: QueryClient, ref: string): Task | undefined {
   for (const [, list] of client.getQueriesData<Task[]>({ queryKey: keys.tasks.lists() })) {
     const task = list?.find(t => t.ref === ref)
     if (task) return task
@@ -72,7 +72,7 @@ export const commentOnTask = {
     const key = keys.tasks.comments(task.ref)
     // A fetch already running started before this comment and would drop it
     await client.cancelQueries({ queryKey: key })
-    const pending: Comment = { id: `pending-${crypto.randomUUID()}`, taskId: task.id, author: { kind: 'human', userId: 'me' }, body, pinned: false, createdAt: new Date().toISOString() }
+    const pending: Comment = { id: pendingId(), taskId: task.id, author: { kind: 'human', userId: 'me' }, body, pinned: false, createdAt: new Date().toISOString() }
     client.setQueryData<Comment[]>(key, comments => comments && [...comments, pending])
     return { pending }
   },
@@ -81,7 +81,7 @@ export const commentOnTask = {
   }
 }
 
-export const removeTask = defineMutation<null, { task: TaskAddress }>({
+export const removeTask = defineMutation<unknown, { task: TaskAddress }>({
   mutationFn: ({ task }) => api.tasks.remove(task.slug, task.number),
   invalidates: (_, { task }) => [...changed(task.slug, task.ref), keys.epics.lists()]
 })
@@ -112,5 +112,15 @@ export const moveTask = {
 }
 
 // A PR's guided review (COR-525): read it, or ask for one
-export const pullRequestGuideQuery = ({ slug, ref }: Pick<TaskAddress, 'slug' | 'ref'>, number: number) => queryOptions({ queryKey: [...keys.tasks.pullRequest(ref, number), 'guide'] as const, queryFn: () => api.projects.pullRequestGuide(slug, number) })
-export const generatePullRequestGuide = (slug: string, number: number) => api.projects.generatePullRequestGuide(slug, number)
+// No event says when one is made, which takes seconds, so it polls every
+// second while it's being made
+export const pullRequestGuideQuery = ({ slug, ref }: Pick<TaskAddress, 'slug' | 'ref'>, number: number) => queryOptions({
+  queryKey: keys.tasks.pullRequestGuide(ref, number),
+  queryFn: () => api.projects.pullRequestGuide(slug, number),
+  refetchInterval: query => query.state.data?.status === 'generating' ? 1000 : false
+})
+export const generatePullRequestGuide = defineMutation<PullRequestGuide, { slug: string, ref: string, number: number }>({
+  mutationFn: ({ slug, number }) => api.projects.generatePullRequestGuide(slug, number),
+  write: (client, guide, { ref, number }) => client.setQueryData(keys.tasks.pullRequestGuide(ref, number), guide),
+  invalidates: []
+})

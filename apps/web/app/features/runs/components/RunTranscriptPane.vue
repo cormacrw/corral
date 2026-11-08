@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Run, RunEvent } from '@corral/contracts'
-import { isLiveRun } from '~/utils/labels'
+import { isActiveRun } from '@corral/core'
 
 // A run's timing breakdown and transcript, web and mobile. With a breakdown
 // the two scroll together; without one the transcript scrolls itself.
@@ -14,7 +14,7 @@ defineProps<{ run: Run, events: RunEvent[], agentName: string, mine?: string[], 
       <RunTranscript
         :events="events"
         :inline="!!run.timings"
-        :live="isLiveRun(run)"
+        :live="isActiveRun(run.state)"
         :agent-name="agentName"
         :mine="mine"
       />

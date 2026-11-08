@@ -3,29 +3,35 @@ import { VueQueryPlugin } from '@tanstack/vue-query'
 import { keys } from '~/queries/keys'
 import { applyEvent } from '~/queries/dependencies'
 import { testQueryClient } from '~/queries/mount-with-query'
-import type { PlanSessionDetail, ServerEvent } from '@corral/contracts'
-import { flushPromises, mount } from '@vue/test-utils'
+import type { Plan, PlanMessage, PlanSession, PlanSessionDetail, ServerEvent } from '@corral/contracts'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
-import { agents, planMessages, plans, planSessions, projects } from '~/prototype/fixtures'
-import { api } from '~/composables/useApi'
+import { api } from '~/queries/api'
 import PlanConversation from '~/features/plan/components/PlanConversation.vue'
-import PlanDetail from '~/features/plan/components/PlanDetail.vue'
 import PlanLiveTurn from '~/features/plan/components/PlanLiveTurn.vue'
 import PlanMessages from '~/features/plan/components/PlanMessages.vue'
 import PlanPill from '~/features/plan/components/PlanPill.vue'
+import PlanQuestion from '~/features/plan/components/PlanQuestion.vue'
 import PlanRefineMenu from '~/features/plan/components/PlanRefineMenu.vue'
 import PlanRelatedThreads from '~/features/plan/components/PlanRelatedThreads.vue'
 import PlanReplyComposer from '~/features/plan/components/PlanReplyComposer.vue'
 import PlanRunnerOffline from '~/features/plan/components/PlanRunnerOffline.vue'
 import PlanSessionHeader from '~/features/plan/components/PlanSessionHeader.vue'
 
-vi.mock('~/composables/useApi', () => ({
+vi.mock('~/queries/api', () => ({
   api: {
     plan: { session: vi.fn(), read: vi.fn(), message: vi.fn(), approve: vi.fn() },
     runs: { transcript: vi.fn() }
   }
 }))
+
+// Starts in flight are set by each test
+vi.mock('~/queries/plan', async original => ({
+  ...await original<typeof import('~/queries/plan')>(),
+  usePlanStarts: () => ({ entries: pendingEntries, start: retryStart, seed: vi.fn() })
+}))
+vi.mock('~/features/plan/composables/usePlanStart', () => ({ useRestoredStart: () => restored }))
 
 // The conversation column's measured width: narrow unless a test widens it
 const columnWidth = vue.ref(800)
@@ -39,8 +45,32 @@ let listener: (event: ServerEvent) => void
 const pendingEntries = vue.ref<Record<string, { session: PlanSessionDetail, state: string, error: string | null, taskRef?: string }>>({})
 const retryStart = vi.fn()
 const restored = vue.ref(null)
+const at = '2026-11-01T12:00:00.000Z'
+const session = (id: string, title: string): PlanSession => ({
+  id, projectId: 'p-1', title, runtime: 'claude-code', preview: '', unread: true, closed: false,
+  status: 'none', activeRunId: null, createdAt: at, updatedAt: at
+})
+const message = (sessionId: string, id: string, role: 'human' | 'pm', text: string): PlanMessage =>
+  ({ id, sessionId, role, kind: 'message', text, recommendation: null, options: null, planId: null, runId: null, createdAt: at })
+const plan: Plan = {
+  id: 'plan-1', sessionId: 's-1', projectId: 'p-1', epicId: null, version: 1, title: 'Billing plan', summary: '',
+  status: 'proposed', approvedAt: null, epics: [], createdAt: at,
+  tasks: [{ key: 'a', change: 'added', revises: false, taskId: null, epicId: null, ref: null, title: 'Invoice list', description: '', implementationPlan: '', status: null, priority: 'medium', humanReview: false, dependsOn: [] }]
+}
+const planSessions = [session('s-1', 'Billing page'), session('s-2', 'Notifications')]
+const details: Record<string, PlanSessionDetail> = {
+  's-1': { ...planSessions[0]!, plans: [plan], messages: [message('s-1', 'm-1', 'human', 'Add a billing page'), message('s-1', 'm-2', 'pm', 'Here is a plan for it')] },
+  's-2': {
+    ...planSessions[1]!, plans: [], messages: [
+      message('s-2', 'm-3', 'human', 'Notify me when a run fails'),
+      { ...message('s-2', 'q-1', 'pm', 'Which channel?'), kind: 'question', recommendation: null, options: ['Web Push', 'Email'] } as PlanMessage
+    ]
+  }
+}
 const state = vue.ref({
-  loaded: true, runner: { online: true }, agents, projects, planSessions,
+  loaded: true, runner: { online: true }, planSessions,
+  agents: [{ id: 'a-pm', role: 'pm', name: 'Juno' }],
+  projects: [{ id: 'p-1', slug: 'corral', name: 'Corral' }],
   runEvents: {} as Record<string, import('@corral/contracts').RunEvent[]>
 })
 const flyout = {
@@ -50,6 +80,42 @@ const flyout = {
 const toast = { add: vi.fn() }
 const push = vi.fn()
 const mounted: { unmount: () => void }[] = []
+
+// Stand-ins for what needs the Nuxt app: a composer with a textarea and a Send
+// button, and a plan with a button per approval target
+const PromptComposer = vue.defineComponent({
+  props: { modelValue: String, disabled: Boolean, busy: Boolean, onSubmit: Function },
+  emits: ['update:modelValue'],
+  setup: (props, { emit }) => () => vue.h('form', {
+    'aria-label': 'Reply',
+    'data-busy': props.busy ? '' : undefined,
+    'onSubmit': (e: Event) => {
+      e.preventDefault()
+      props.onSubmit?.(props.modelValue)
+    }
+  }, [
+    vue.h('textarea', { value: props.modelValue, disabled: props.disabled, onInput: (e: Event) => emit('update:modelValue', (e.target as HTMLTextAreaElement).value) }),
+    vue.h('button', { type: 'submit', disabled: props.disabled || props.busy }, 'Send')
+  ])
+})
+const PlanDetail = vue.defineComponent({
+  props: { plan: { type: Object, required: true }, busy: Boolean, disabled: Boolean },
+  emits: ['approve'],
+  setup: (props, { emit }) => () => vue.h('section', { 'data-testid': 'plan' }, [
+    vue.h('h3', (props.plan as Plan).title),
+    ...['ready', 'backlog'].map(to => vue.h('button', { 'data-approve': to, 'disabled': props.disabled || props.busy, 'onClick': () => emit('approve', to) }, to))
+  ])
+})
+const PlanSheets = vue.defineComponent({
+  props: { plan: Object, busy: Boolean, disabled: Boolean },
+  emits: ['approve'],
+  setup: (props, { emit }) => () => props.plan
+    ? vue.h('div', { 'data-testid': 'plan-sheet' }, vue.h(PlanDetail, { plan: props.plan, busy: props.busy, disabled: props.disabled, onApprove: (to: string) => emit('approve', to) }))
+    : null
+})
+const composer = (wrapper: VueWrapper) => wrapper.get('form[aria-label="Reply"]')
+const type = (wrapper: VueWrapper, text: string) => composer(wrapper).get('textarea').setValue(text)
+const draft = (wrapper: VueWrapper) => (composer(wrapper).get('textarea').element as HTMLTextAreaElement).value
 const button = vue.defineComponent({
   props: { label: String, to: String, disabled: Boolean },
   setup: (props, { attrs }) => () => vue.h(props.to ? 'a' : 'button', { ...attrs, href: props.to, disabled: props.disabled }, props.label)
@@ -62,11 +128,7 @@ const alertComponent = vue.defineComponent({
   ])
 })
 function detail(id = 's-1'): PlanSessionDetail {
-  return structuredClone({
-    ...planSessions.find(s => s.id === id)!,
-    messages: planMessages[id] ?? [],
-    plans: plans[id] ?? []
-  })
+  return structuredClone(details[id]!)
 }
 async function open(id = 's-1', mobile = false) {
   vi.stubGlobal('useDevice', () => ({ isMobile: vue.ref(mobile) }))
@@ -75,14 +137,13 @@ async function open(id = 's-1', mobile = false) {
     global: {
       plugins: [[VueQueryPlugin, { queryClient: client }]],
       stubs: {
-        PromptComposer: true, PlanQuestion: true, PlanConfirmAction: true,
-        AgentAvatar: true, PlanTurnSteps: true, PlanDetail: true,
-        TaskFlyout: true, PlanSheets: true, AppDrawer: true, AppBadge: true, Icon: true,
+        PlanConfirmAction: true, AgentAvatar: true, PlanTurnSteps: true,
+        TaskFlyout: true, AppDrawer: true, AppBadge: true, Icon: true,
         UiSkeleton: true, AppTooltip: true, AppSelectMenu: true,
         PlanGrillButton: true
       },
       components: {
-        PlanDetail, PlanLiveTurn, PlanMessages, PlanPill, PlanRefineMenu, PlanRelatedThreads, PlanReplyComposer, PlanRunnerOffline, PlanSessionHeader,
+        PromptComposer, PlanDetail, PlanSheets, PlanQuestion, PlanLiveTurn, PlanMessages, PlanPill, PlanRefineMenu, PlanRelatedThreads, PlanReplyComposer, PlanRunnerOffline, PlanSessionHeader,
         NuxtLink: vue.defineComponent({ name: 'NuxtLink', props: ['to'], setup: (props, { slots }) => () => vue.h('a', { href: props.to }, slots.default?.()) }),
         AppAlert: alertComponent,
         AppButton: button,
@@ -113,7 +174,6 @@ beforeEach(() => {
   vi.stubGlobal('useRouter', () => ({ push }))
   vi.stubGlobal('useSeoMeta', vi.fn())
   pendingEntries.value = {}
-  vi.stubGlobal('usePendingPlan', () => ({ entries: pendingEntries, restored, start: retryStart }))
   vi.stubGlobal('usePlanThreads', () => ({ add: vi.fn() }))
   vi.stubGlobal('useTaskFlyout', () => flyout)
   vi.stubGlobal('useToast', () => toast)
@@ -161,7 +221,7 @@ describe('Plan conversation', () => {
     const initial = detail()
     initial.id = 'pending-session'
     initial.plans = []
-    initial.messages = [{ ...initial.messages[0]!, id: 'pending-human', role: 'human', kind: 'message', recommendation: null, options: null, text: 'My unsent prompt' }]
+    initial.messages = [message('pending-session', 'pending-human', 'human', 'My unsent prompt')]
     pendingEntries.value[initial.id] = { session: initial, state: 'starting', error: null, taskRef: 'TA-1' }
     const wrapper = await open(initial.id)
     expect(api.plan.session).not.toHaveBeenCalled()
@@ -170,7 +230,6 @@ describe('Plan conversation', () => {
     pendingEntries.value[initial.id]!.state = 'failed'
     pendingEntries.value[initial.id]!.error = 'Network unavailable'
     await vue.nextTick()
-    expect(wrapper.text()).toContain('Not sent')
     expect(wrapper.find('[data-transcript]').exists()).toBe(false)
     const alert = wrapper.get('[role="alert"]')
     expect(alert.text()).toContain('Network unavailable')
@@ -188,38 +247,38 @@ describe('Plan conversation', () => {
     expect(api.plan.session).toHaveBeenCalledWith('s-1')
     expect(api.plan.read).toHaveBeenCalledWith('s-1')
     expect(flyout.openPlan).toHaveBeenCalledWith({ replace: true })
-    expect(wrapper.text()).toContain(detail().title)
+    expect(wrapper.text()).toContain('Here is a plan for it')
   })
 
-  it('switches sessions in place and replaces the composer so drafts and attachments are isolated', async () => {
+  it('switches sessions in place, keeping each thread\'s draft to itself', async () => {
     const wrapper = await open()
-    const composer = wrapper.findComponent({ name: 'PromptComposer' })
-    const previous = composer.element
-    composer.vm.$emit('update:modelValue', 'A reply for the first thread')
+    await type(wrapper, 'A reply for the first thread')
     await wrapper.setProps({ sessionId: 's-2' })
     await flushPromises()
     expect(api.plan.session).toHaveBeenLastCalledWith('s-2')
-    expect(wrapper.findComponent({ name: 'PromptComposer' }).element).not.toBe(previous)
-    expect(wrapper.findComponent({ name: 'PromptComposer' }).vm.$attrs.modelValue).toBe('')
-    expect(wrapper.text()).toContain(detail('s-2').title)
-    expect(wrapper.text()).not.toContain(detail('s-1').title)
+    expect(draft(wrapper)).toBe('')
+    expect(wrapper.text()).toContain('Notify me when a run fails')
+    expect(wrapper.text()).not.toContain('Add a billing page')
+    await wrapper.setProps({ sessionId: 's-1' })
+    await flushPromises()
+    expect(draft(wrapper)).toBe('A reply for the first thread')
   })
 
   it('sends a reply through Plan and renders live run events before the saved reply', async () => {
     const wrapper = await open()
-    const composer = wrapper.findComponent({ name: 'PromptComposer' })
-    await composer.vm.$emit('submit', 'Keep this small.')
+    await type(wrapper, 'Keep this small.')
+    await composer(wrapper).trigger('submit')
     await flushPromises()
     expect(api.plan.message).toHaveBeenCalledWith('s-1', 'Keep this small.', undefined)
-    listener({ type: 'plan.session', session: { ...planSessions.find(s => s.id === 's-1')!, activeRunId: 'live-run' } })
+    listener({ type: 'plan.session', session: { ...planSessions[0]!, activeRunId: 'live-run' } })
     await flushPromises()
     applyEvent(client, { type: 'run.events', runId: 'live-run', offset: 0, events: [{ type: 'message', text: 'I am checking the scope.' }] })
     await vue.nextTick()
     expect(wrapper.get('[data-transcript]').text()).toContain('I am checking the scope.')
-    expect(wrapper.findComponent({ name: 'PromptComposer' }).vm.$attrs.disabled).toBe(true)
-    const message = { ...detail().messages[1]!, id: 'reply', text: 'The scope is small.', planId: null, runId: 'live-run' }
-    listener({ type: 'plan.message', message })
-    listener({ type: 'plan.session', session: { ...planSessions.find(s => s.id === 's-1')!, activeRunId: null } })
+    expect(composer(wrapper).get('textarea').attributes('disabled')).toBeDefined()
+    const reply = { ...message('s-1', 'reply', 'pm', 'The scope is small.'), runId: 'live-run' }
+    listener({ type: 'plan.message', message: reply })
+    listener({ type: 'plan.session', session: { ...planSessions[0]!, activeRunId: null } })
     await vue.nextTick()
     expect(wrapper.text()).toContain('The scope is small.')
   })
@@ -236,28 +295,27 @@ describe('Plan conversation', () => {
     const log = wrapper.get('[role="log"]').element as HTMLElement
     Object.defineProperty(log, 'scrollHeight', { value: 1000 })
     log.scrollTop = 120
-    listener({ type: 'plan.session', session: { ...planSessions.find(s => s.id === 's-1')!, title: 'Updated thread title', unread: false } })
+    listener({ type: 'plan.session', session: { ...planSessions[0]!, title: 'Updated thread title', unread: false } })
     await flushPromises()
     expect(log.scrollTop).toBe(120)
   })
 
   it('shows a previously opened conversation immediately while its stale snapshot is delayed', async () => {
     const wrapper = await open()
-    const second = detail('s-2')
-    client.setQueryData(keys.plan.session('s-2'), second, { updatedAt: 1 })
+    client.setQueryData(keys.plan.session('s-2'), detail('s-2'), { updatedAt: 1 })
     vi.mocked(api.plan.session).mockImplementation(() => new Promise(() => {}))
     await wrapper.setProps({ sessionId: 's-2' })
-    expect(wrapper.text()).toContain(second.messages[0]!.text)
-    expect(wrapper.findComponent({ name: 'UiSkeleton' }).exists()).toBe(false)
+    expect(wrapper.text()).toContain('Notify me when a run fails')
     await wrapper.setProps({ sessionId: 's-1' })
-    expect(wrapper.text()).toContain(detail().messages[0]!.text)
+    expect(wrapper.text()).toContain('Add a billing page')
   })
 
   it('sends a one-tap answer immediately without submitting the composer draft', async () => {
     const wrapper = await open('s-2')
-    wrapper.findComponent({ name: 'PlanQuestion' }).vm.$emit('answer', 'Web Push')
+    await type(wrapper, 'Unsent draft')
+    await wrapper.findAll('button').find(b => b.text() === 'Web Push')!.trigger('click')
     await flushPromises()
-    expect(api.plan.message).toHaveBeenCalledWith('s-2', 'Web Push', undefined)
+    expect(api.plan.message).toHaveBeenCalledExactlyOnceWith('s-2', 'Web Push', undefined)
   })
 
   it('does not restore a one-tap answer draft into a different thread after the request finishes', async () => {
@@ -266,19 +324,15 @@ describe('Plan conversation', () => {
     vi.mocked(api.plan.message).mockReturnValueOnce(new Promise((resolve) => {
       finish = () => resolve(detail('s-2').messages[0]!)
     }))
-    wrapper.findComponent({ name: 'PromptComposer' }).vm.$emit('update:modelValue', 'Old draft')
-    await vue.nextTick()
-    wrapper.findComponent({ name: 'PlanQuestion' }).vm.$emit('answer', 'Web Push')
-    await vue.nextTick()
+    await type(wrapper, 'Old draft')
+    await wrapper.findAll('button').find(b => b.text() === 'Web Push')!.trigger('click')
     await wrapper.setProps({ sessionId: 's-1' })
     await flushPromises()
-    const composer = wrapper.findComponent({ name: 'PromptComposer' })
-    expect(composer.vm.$attrs.busy).toBe(false)
-    composer.vm.$emit('update:modelValue', 'New draft')
-    await vue.nextTick()
+    expect(composer(wrapper).attributes('data-busy')).toBeUndefined()
+    await type(wrapper, 'New draft')
     finish()
     await flushPromises()
-    expect(composer.vm.$attrs.modelValue).toBe('New draft')
+    expect(draft(wrapper)).toBe('New draft')
   })
 
   it('approves from the plan sheet on phones', async () => {
@@ -286,37 +340,36 @@ describe('Plan conversation', () => {
     expect(flyout.openPlan).not.toHaveBeenCalled()
     await wrapper.get('[data-testid="plan-pill"]').trigger('click')
     expect(flyout.openPlan).toHaveBeenCalledOnce()
-    vi.mocked(api.plan.approve).mockResolvedValue({ ...detail().plans[0]!, status: 'approved' as const })
-    wrapper.findComponent({ name: 'PlanSheets' }).vm.$emit('approve', 'backlog')
+    vi.mocked(api.plan.approve).mockResolvedValue({ ...plan, status: 'approved' as const })
+    await wrapper.get('[data-testid="plan-sheet"] [data-approve="backlog"]').trigger('click')
     await flushPromises()
-    expect(api.plan.approve).toHaveBeenCalledWith(detail().plans[0]!.id, 'backlog')
+    expect(api.plan.approve).toHaveBeenCalledWith(plan.id, 'backlog')
   })
 
   it('keeps a failed approval in place for retry', async () => {
     const wrapper = await open('s-1', true)
     vi.mocked(api.plan.approve).mockRejectedValue(new Error('Approval failed'))
-    wrapper.findComponent({ name: 'PlanSheets' }).vm.$emit('approve', 'ready')
+    await wrapper.get('[data-testid="plan-sheet"] [data-approve="ready"]').trigger('click')
     await flushPromises()
     expect(push).not.toHaveBeenCalled()
-    expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({ title: 'Could not approve', color: 'error' }))
+    expect(toast.add).toHaveBeenCalledWith(expect.objectContaining({ description: 'Approval failed', color: 'error' }))
+    expect(wrapper.get('[data-testid="plan-sheet"] [data-approve="ready"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('disables Add to board while Juno is working, rather than ignoring the click', async () => {
+  it('disables approving while the PM is working, rather than ignoring the click', async () => {
     vi.mocked(api.plan.session).mockResolvedValue({ ...detail(), activeRunId: 'r-1' })
     const wrapper = await open('s-1', true)
-    expect(wrapper.findComponent({ name: 'PlanSheets' }).attributes('disabled')).toBe('true')
+    expect(wrapper.get('[data-testid="plan-sheet"] [data-approve="ready"]').attributes('disabled')).toBeDefined()
   })
 
   it('keeps a draft through leaving the conversation and clears it once sent', async () => {
     const first = await open()
-    first.findComponent({ name: 'PromptComposer' }).vm.$emit('update:modelValue', 'Half a thought')
-    await vue.nextTick()
+    await type(first, 'Half a thought')
     first.unmount()
     const again = await open()
-    const composer = again.findComponent({ name: 'PromptComposer' })
-    expect(composer.vm.$attrs.modelValue).toBe('Half a thought')
+    expect(draft(again)).toBe('Half a thought')
     vi.mocked(api.plan.message).mockResolvedValue({ id: 'm', text: 'x' } as never)
-    composer.vm.$emit('submit', 'Half a thought')
+    await composer(again).trigger('submit')
     await flushPromises()
     expect(sessionStorage.length).toBe(0)
   })
@@ -328,26 +381,22 @@ describe('Plan conversation', () => {
 
     it('floats the latest plan beside the thread instead of opening the flyout', async () => {
       const wrapper = await open()
-      const card = wrapper.get('[data-testid="plan-beside"]')
-      const plan = card.findComponent({ name: 'PlanDetail' })
-      expect(plan.props('plan')).toMatchObject({ id: detail().plans[0]!.id })
-      expect(plan.props('card')).toBe(true)
+      expect(wrapper.get('[data-testid="plan-beside"]').text()).toContain('Billing plan')
       expect(flyout.openPlan).not.toHaveBeenCalled()
-      expect(wrapper.findComponent({ name: 'TaskFlyout' }).findComponent({ name: 'PlanDetail' }).exists()).toBe(false)
     })
 
     it('approves from the floating card', async () => {
       const wrapper = await open()
-      vi.mocked(api.plan.approve).mockResolvedValue({ ...detail().plans[0]!, status: 'approved' as const })
-      wrapper.get('[data-testid="plan-beside"]').findComponent({ name: 'PlanDetail' }).vm.$emit('approve', 'backlog')
+      vi.mocked(api.plan.approve).mockResolvedValue({ ...plan, status: 'approved' as const })
+      await wrapper.get('[data-testid="plan-beside"] [data-approve="backlog"]').trigger('click')
       await flushPromises()
-      expect(api.plan.approve).toHaveBeenCalledWith(detail().plans[0]!.id, 'backlog')
+      expect(api.plan.approve).toHaveBeenCalledWith(plan.id, 'backlog')
     })
 
-    it('marks the card busy while approving and disabled while the PM works', async () => {
+    it('disables the card while the PM works', async () => {
       vi.mocked(api.plan.session).mockResolvedValue({ ...detail(), activeRunId: 'r-1' })
       const wrapper = await open()
-      expect(wrapper.get('[data-testid="plan-beside"]').findComponent({ name: 'PlanDetail' }).props('disabled')).toBe(true)
+      expect(wrapper.get('[data-testid="plan-beside"] [data-approve="ready"]').attributes('disabled')).toBeDefined()
     })
 
     it('drops a ?plan flyout once the card is showing', async () => {
@@ -358,16 +407,13 @@ describe('Plan conversation', () => {
 
     it('updates the card in place when a new version arrives', async () => {
       const wrapper = await open()
-      const first = detail().plans[0]!
-      const next = { ...first, id: 'plan-v2', version: first.version + 1, title: 'Revised plan' }
-      listener({ type: 'plan.session', session: { ...planSessions.find(s => s.id === 's-1')!, updatedAt: new Date().toISOString() } })
+      const next = { ...plan, id: 'plan-v2', version: 2, title: 'Revised plan' }
+      listener({ type: 'plan.session', session: { ...planSessions[0]!, updatedAt: new Date().toISOString() } })
       client.setQueryData<PlanSessionDetail>(keys.plan.session('s-1'), old => old && { ...old, plans: [...old.plans, next] })
       await flushPromises()
       const cards = wrapper.findAll('[data-testid="plan-beside"]')
       expect(cards).toHaveLength(1)
-      const plan = cards[0]!.findComponent({ name: 'PlanDetail' })
-      expect(plan.props('plan')).toMatchObject({ id: 'plan-v2' })
-      expect(plan.props('previous')).toMatchObject({ id: first.id })
+      expect(cards[0]!.text()).toContain('Revised plan')
     })
 
     it('falls back to the flyout when the column is too narrow for both', async () => {

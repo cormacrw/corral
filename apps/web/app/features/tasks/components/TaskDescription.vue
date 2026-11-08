@@ -3,7 +3,7 @@ import { errorMessage } from '~/lib/errors'
 import { useMutation } from '@tanstack/vue-query'
 import type { EditorView } from '@tiptap/pm/view'
 import { uploadAttachment } from '~/queries/attachments'
-import { attachmentProblem } from '~/utils/attachments'
+import { attachmentProblem, IMAGE_ACCEPT } from '~/utils/attachments'
 import { AttachmentImage, imageFiles, insertImages } from '~/features/tasks/utils/editor-image'
 
 // A task's description being edited. Its own chunk, since the editor is the
@@ -93,7 +93,7 @@ const toolbarItems = [
   <input
     ref="imageInput"
     type="file"
-    accept="image/png,image/jpeg,image/webp,image/gif"
+    :accept="IMAGE_ACCEPT"
     multiple
     class="hidden"
     @change="onImagePicked"

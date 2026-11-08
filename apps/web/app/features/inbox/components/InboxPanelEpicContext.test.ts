@@ -4,11 +4,11 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { computed } from 'vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Task } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { api } from '~/queries/api'
 import { testQueryClient } from '~/queries/mount-with-query'
 import InboxPanelEpicContext from '~/features/inbox/components/InboxPanelEpicContext.vue'
 
-vi.mock('~/composables/useApi', () => ({ api: { epics: { get: vi.fn() } } }))
+vi.mock('~/queries/api', () => ({ api: { epics: { get: vi.fn() } } }))
 
 const wrappers: VueWrapper[] = []
 const openEpic = vi.fn()

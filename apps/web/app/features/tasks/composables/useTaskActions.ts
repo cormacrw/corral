@@ -1,9 +1,12 @@
 import { ref, watch, type ComputedRef } from 'vue'
 import { useMutation } from '@tanstack/vue-query'
 import type { PatchTaskInput, Task } from '@corral/contracts'
+import type { TaskStatus } from '@corral/core'
 import { moveTask, patchTask, removeTask, resumeTask, type TaskAddress } from '~/queries/tasks'
-import { ApiError } from '~/queries/client'
-import { notReadyNeeds, statusMove } from '~/features/tasks/utils/taskDetail'
+import { useSavedNote } from '~/composables/useSavedNote'
+import { errorMessage } from '~/lib/errors'
+import { refusedNotReady } from '~/queries/client'
+import { boardMove } from '~/features/board/utils/board'
 
 interface TaskTarget {
   task: ComputedRef<Task | null>
@@ -18,34 +21,24 @@ export function useTaskActions({ task, address }: TaskTarget, onRemoved: () => v
   const transitionMutation = useMutation(moveTask)
   const removeMutation = useMutation(removeTask)
   const resumeMutation = useMutation(resumeTask)
-  const saved = ref(false)
+  const { saved, flash: flashSaved, clear: clearSaved } = useSavedNote()
   const resuming = ref(false)
   const placing = ref(false)
   const confirmDelete = ref(false)
   const isOpen = (requested: string) => requested === address.value.ref
-  let savedTimer: ReturnType<typeof setTimeout> | null = null
 
   watch(() => address.value.ref, () => {
     confirmDelete.value = false
-    saved.value = false
+    clearSaved()
     resuming.value = false
     placing.value = false
-    if (savedTimer) clearTimeout(savedTimer)
   })
 
-  function flashSaved() {
-    saved.value = true
-    if (savedTimer) clearTimeout(savedTimer)
-    savedTimer = setTimeout(() => {
-      saved.value = false
-    }, 1800)
-  }
   function fail(e: unknown) {
-    toast.add({ title: 'Not saved', description: e instanceof ApiError ? e.message : String(e), color: 'error' })
+    toast.add({ title: 'Not saved', description: errorMessage(e), color: 'error' })
   }
   function failMove(e: unknown) {
-    const needs = notReadyNeeds(e)
-    if (needs) toast.add({ title: 'Not ready yet', description: `Needs: ${needs}`, color: 'warning' })
+    if (refusedNotReady(e)) toast.add({ title: 'Not ready yet', description: e.message, color: 'warning' })
     else fail(e)
   }
   // Confirms an action on this task, unless another task replaced it while the
@@ -68,10 +61,13 @@ export function useTaskActions({ task, address }: TaskTarget, onRemoved: () => v
     }
   }
 
+  // value is a Status menu option: 'current' or the status to move to
   async function changeStatus(value: string) {
-    if (!task.value || value === 'current') return
+    const status = value as TaskStatus
+    const input = task.value && value !== 'current' ? boardMove(task.value, status) : null
+    if (!input) return
     try {
-      await confirm(transitionMutation.mutateAsync({ task: address.value, ...statusMove(value) }))
+      await confirm(transitionMutation.mutateAsync({ task: address.value, input, status }))
     } catch (e) {
       failMove(e)
     }

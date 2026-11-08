@@ -1,6 +1,6 @@
 # Inbox review changes
 
-Needs-you task and task items carry `since` and `newArtifacts`, derived on read in `taskChanges` (`apps/server/src/inbox.ts`) and `epicChanges` (`apps/server/src/epic-prs.ts`), with shared filters in `apps/server/src/inbox-changes.ts`.
+Needs-you task and task items carry `since` and `newArtifacts`, derived on read in `taskChanges` (`apps/server/src/inbox.ts`) and `epicChanges` (`apps/server/src/inbox-epics.ts`), with shared filters in `apps/server/src/inbox-changes.ts`.
 
 The last action is the latest human `human_request_changes` or `resolve` transition (a clarify is a resolve with a pinned comment), or the task's `human_changes_requested`. Everything compares `createdAt`, never rounds: resolving Blocked resets `reviewRounds`, so rounds repeat.
 

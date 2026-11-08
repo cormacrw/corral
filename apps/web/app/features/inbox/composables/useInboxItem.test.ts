@@ -1,20 +1,20 @@
 // @vitest-environment happy-dom
-import type { EpicActivityItem, Inbox, InboxItem, Task, TaskInboxItem } from '@corral/contracts'
+import type { EpicActivityItem, EpicReviewItem, Inbox, InboxItem, Task, TaskInboxItem } from '@corral/contracts'
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as vue from 'vue'
-import { api } from '~/composables/useApi'
+import { api } from '~/queries/api'
 import { readDraft, writeDraft } from '~/composables/useDraft'
 import { useInboxItem } from '~/features/inbox/composables/useInboxItem'
 import { actionDisabled } from '~/features/inbox/composables/useInboxPanel'
 import { provideInboxView } from '~/features/inbox/composables/useInboxView'
-import { inbox, projects, tasks } from '~/prototype/fixtures'
+import { inboxOf, project, task as taskOf, taskItem as makeItem } from '~/features/inbox/test-items'
 import { invalidateKeys } from '~/queries/dependencies'
 import { keys } from '~/queries/keys'
 import { testQueryClient } from '~/queries/mount-with-query'
 
-vi.mock('~/composables/useApi', () => ({
+vi.mock('~/queries/api', () => ({
   api: {
     inbox: { get: vi.fn(), act: vi.fn(), read: vi.fn() },
     tasks: { byRef: vi.fn(), evidence: vi.fn(), reviews: vi.fn() }
@@ -32,8 +32,15 @@ afterEach(() => {
   sessionStorage.clear()
 })
 
-const taskItem = (data: Inbox, type: InboxItem['type'], ref?: string) => data.needsYou.find(i => i.type === type && (ref ? i.taskRef === ref : i.taskRef && tasks.find(t => t.ref === i.taskRef)?.type !== 'design'))!
-const fixtureTask = (ref: string) => structuredClone(tasks.find(t => t.ref === ref)!)
+// COR-41 is a design; the rest are code tasks
+const inbox = (): Inbox => inboxOf([
+  makeItem('COR-5', 'human_review'),
+  makeItem('COR-41', 'human_review'),
+  makeItem('COR-6', 'failed'),
+  makeItem('COR-8', 'blocked')
+])
+const fixtureTask = (ref: string) => taskOf(ref, ref === 'COR-41' ? { type: 'design' } : {})
+const taskItem = (data: Inbox, type: InboxItem['type'], ref?: string) => data.needsYou.find(i => i.type === type && (ref ? i.taskRef === ref : i.taskRef && i.taskRef !== 'COR-41'))!
 
 interface Options {
   selected: string
@@ -63,7 +70,7 @@ async function mountItem({ selected, data = inbox(), mobile = false, docked = nu
   vi.stubGlobal('useToast', () => ({ add: vi.fn() }))
   let served = data
   vi.mocked(api.inbox.get).mockImplementation(async () => structuredClone(served))
-  vi.mocked(api.inbox.read).mockResolvedValue({})
+  vi.mocked(api.inbox.read).mockResolvedValue({ ok: true })
   vi.mocked(api.inbox.act).mockResolvedValue({ task: null })
   vi.mocked(api.tasks.byRef).mockImplementation(async (ref) => {
     const loaded = task(fixtureTask(ref))
@@ -305,7 +312,7 @@ describe('a parent item', () => {
   it('opens parent history with no task load, closing the dock', async () => {
     const epic: EpicActivityItem = {
       id: 'epic-100', type: 'epic_activity', event: 'human_changes_requested', epicId: 'epic-id',
-      project: projects[0]!, subject: 'Parent history', preview: 'You requested changes', body: 'You requested changes',
+      project, subject: 'Parent history', preview: 'You requested changes', body: 'You requested changes',
       sender: { name: 'You', role: 'system' }, at: '2026-10-31T12:00:00.000Z',
       taskId: null, taskRef: null, prUrl: null, resolution: 'You requested changes', unread: false
     }
@@ -321,8 +328,13 @@ describe('a parent item', () => {
   })
 
   it('stays on a parent item that leaves the Inbox while open, keeping what was typed', async () => {
-    const epic = inbox().needsYou.find(i => i.type === 'epic_review')!
-    const v = await mountItem({ selected: epic.id, data: { needsYou: [epic], activity: [], resolved: [], count: 1 } as Inbox })
+    const epic: EpicReviewItem = {
+      id: 'epic-1', type: 'epic_review', epicId: 'epic-1', project, subject: 'Parent', preview: '', body: '',
+      sender: { name: 'Rita', role: 'reviewer' }, at: '2026-11-01T00:00:00.000Z', unread: false,
+      taskId: null, taskRef: null, prUrl: 'https://github.com/o/r/pull/9', resolution: null,
+      headSha: 'head', reviewRounds: [], findings: [], tasks: [], since: null, newArtifacts: []
+    }
+    const v = await mountItem({ selected: epic.id, data: inboxOf([epic]) })
     expect(v.item().epicGone.value).toBe(false)
     writeDraft(`inbox:${epic.id}`, 'Rename the sheet')
     // The head moved: review restarts, and the next read has no item

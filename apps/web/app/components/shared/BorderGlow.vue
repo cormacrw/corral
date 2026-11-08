@@ -11,30 +11,24 @@ import { computed, ref, useTemplateRef, watchEffect } from 'vue'
 // would without the glow (a button otherwise shrinks to fit its content).
 const props = withDefaults(defineProps<{
   active?: boolean
-  // HSL values as "H S L", e.g. "172 66% 50%"
-  glowColor?: string
-  // Three colors for the mesh gradient on the edge
-  colors?: string[]
   // Match the wrapped element's corner radius (rounded-md is 6, rounded-lg 8)
   borderRadius?: number
   glowRadius?: number
-  glowIntensity?: number
-  // Width of the edge cone, as a percentage (5-45)
-  coneSpread?: number
-  fillOpacity?: number
   // Seconds per lap
   duration?: number
 }>(), {
   active: true,
-  glowColor: '172 66% 50%',
-  colors: () => ['#6ee7b7', '#34d399', '#38bdf8'],
   borderRadius: 6,
   glowRadius: 24,
-  glowIntensity: 0.6,
-  coneSpread: 25,
-  fillOpacity: 0.5,
   duration: 4
 })
+// The glow's hue (H S L), the edge's mesh colours, and the edge cone's width
+// as a percentage
+const GLOW_COLOR = '172 66% 50%'
+const COLORS = ['#6ee7b7', '#34d399', '#38bdf8']
+const GLOW_INTENSITY = 0.6
+const CONE_SPREAD = 25
+const FILL_OPACITY = 0.5
 
 // Keep SSR and the first client render identical; choose a phase per mount.
 const lapOffset = ref(0)
@@ -95,12 +89,9 @@ watchEffect((onCleanup) => {
   onCleanup(() => observer.disconnect())
 })
 
-const mesh = computed(() => buildMeshGradients(props.colors))
-const boxShadow = computed(() => buildBoxShadow(props.glowColor, props.glowIntensity))
-const edgeCone = computed(() => {
-  const spread = props.coneSpread
-  return `conic-gradient(from var(--glow-angle) at center, black ${spread}%, transparent ${spread + 15}%, transparent ${100 - spread - 15}%, black ${100 - spread}%)`
-})
+const mesh = buildMeshGradients(COLORS)
+const boxShadow = buildBoxShadow(GLOW_COLOR, GLOW_INTENSITY)
+const edgeCone = `conic-gradient(from var(--glow-angle) at center, black ${CONE_SPREAD}%, transparent ${CONE_SPREAD + 15}%, transparent ${100 - CONE_SPREAD - 15}%, black ${100 - CONE_SPREAD}%)`
 const fillMask = [
   'linear-gradient(to bottom, black, black)',
   'radial-gradient(ellipse at 50% 50%, black 40%, transparent 65%)',
@@ -139,19 +130,17 @@ const glowCone = 'conic-gradient(from var(--glow-angle) at center, black 2.5%, t
       />
     </span>
 
-    <!-- mesh gradient fill -->
     <span
       class="pointer-events-none absolute inset-0 z-[1] rounded-[inherit] border border-transparent mix-blend-soft-light"
       :style="{
         background: mesh.map(g => `${g} padding-box`).join(', '),
         maskImage: fillMask,
         maskComposite: 'subtract, add, add, add, add, add',
-        opacity: props.fillOpacity
+        opacity: FILL_OPACITY
       }"
       aria-hidden="true"
     />
 
-    <!-- outer glow -->
     <span
       class="pointer-events-none absolute z-[1] rounded-[inherit] mix-blend-normal dark:mix-blend-plus-lighter"
       :style="{ inset: `-${props.glowRadius}px`, maskImage: glowCone }"

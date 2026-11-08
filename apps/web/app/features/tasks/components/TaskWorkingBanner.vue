@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { runPath } from '~/utils/routes'
 import { computed } from 'vue'
 import type { Task } from '@corral/contracts'
 import { agentHolds } from '~/features/tasks/utils/taskDetail'
@@ -21,7 +22,7 @@ const agent = computed(() => agentHolds(props.task) && props.task.lease ? shell.
     />
     <span class="min-w-0 flex-1 truncate"><span class="font-medium">{{ agent.name }}</span> <span class="text-muted-foreground">is working</span></span>
     <NuxtLink
-      :to="`/agents/${agent.name.toLowerCase()}/${task.lease?.runId}`"
+      :to="runPath(agent.name, task.lease!.runId)"
       class="font-medium text-brand"
     >Watch</NuxtLink>
   </div>

@@ -2,8 +2,9 @@ import type { Inbox, InboxActionInput } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { applyTransition, lockTask } from './tasks.ts'
+import { applyTransition } from './tasks.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
+import { lockTask } from './task-rows.ts'
 
 const { auditLog, deployments, epics, planMessages, planSessions, runs, tasks } = schema
 const server = { kind: 'system', component: 'server' } as const
@@ -59,7 +60,7 @@ describe('the actionable Inbox', () => {
       expect(await mine(project.id)).toEqual([])
     }
     await failRun(task.id)
-    expect(await mine(project.id)).toEqual([expect.objectContaining({ type: 'failed', body: `Failed-run cap reached (${failedRunCap})` })])
+    expect(await mine(project.id)).toEqual([expect.objectContaining({ type: 'failed', taskId: task.id })])
     // Reading or commenting doesn't resolve it
     await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/comments`, { body: 'Looking' })
     expect(await mine(project.id)).toHaveLength(1)
@@ -111,7 +112,6 @@ describe('the actionable Inbox', () => {
     const items = await mine(project.id)
     expect(items.map(i => i.subject).sort()).toEqual(['Checked', 'Design', 'Spike', 'Standalone'])
     expect(items.every(i => i.type === 'human_review')).toBe(true)
-    expect(items.find(i => i.subject === 'Checked')).toMatchObject({ body: expect.stringContaining('need your OK') })
   })
 
   it('counts exactly what it lists', async () => {

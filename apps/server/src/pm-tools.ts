@@ -1,119 +1,102 @@
-import { createAgentInput, pmActionTools, pmDirectTools, PM_PROJECT_LIST_MAX, PM_RUN_LIST_MAX, storedProjectFields, type ActionableInboxItem, type PmDirectTool, type RunEvent, type Run } from '@corral/contracts'
-import { taskRef, type Actor } from '@corral/core'
-import { schema, type Database } from '@corral/db'
-import { and, eq, isNull } from 'drizzle-orm'
+import { askQuestionInput, isGatedTool, isPmTool, isProjectScopedTool, listTasksInput, parsePmToolInput, PM_TOOL_NAMES, proposedPlanInput, toolDefinitions, type PmTool, type PmToolInput, type ProjectScopedPmTool, type ToolDefinition } from '@corral/contracts'
+import { clip, parseTaskRef, type Actor } from '@corral/core'
+import { schema, type Database, type PlanSessionRow, type ProjectRow } from '@corral/db'
+import { eq } from 'drizzle-orm'
 import { z } from 'zod'
+import { readEvidenceInput } from './agent-files.ts'
 import { appendAudit, auditEvent } from './audit.ts'
-import { waitingDecision } from './epic-rebase-approval.ts'
 import { ApiFailure, failureReason, fromDatabaseError } from './errors.ts'
-import type { EventBus } from './events.ts'
-import { loadInbox } from './inbox.ts'
-import type { Orchestrator } from './orchestrator.ts'
-import type { PmEdit, PmEditTool } from './pm-calls.ts'
-import { createProject, findProjectBySlug, listProjects, patchProject, toProject } from './projects.ts'
-import { idleStop, stuckQuestion } from './retry-recovery.ts'
-import type { RunnerHub } from './runner-hub.ts'
-import { createAgent, findRun, getRun, listAgents, listRuns, patchAgent } from './runs.ts'
-import { checkRepository, requireRuntimeCli } from './setup.ts'
-import { addComment, applyTransition, lockTask } from './tasks.ts'
-import type { Transcripts } from './transcripts.ts'
+import { taskAndProjectByRef } from './task-rows.ts'
+import { ToolError } from './tool-error.ts'
 
-const { projects, runs, tasks } = schema
+// The PM's tools (D30): one handler per tool, with its schema, confirm and
+// gate policy and project scoping from its definition in contracts. Every PM
+// call goes through here, from the runner and from a confirmed card.
 
-// A tool call fails after two minutes on the runner (TOOL_CALL_TIMEOUT_MS), so
-// the check gives up first: a project is never created behind a timed-out call
-const CHECK_REPO_TIMEOUT_MS = 100_000
-const RUN_TEXT_MAX = 2_000
-const LIST_TEXT_MAX = 300
-const TOOL_INPUT_MAX = 200
-const TOOL_OUTPUT_MAX = 500
+const { planSessions, projects } = schema
+
 const ERROR_SUMMARY_MAX = 300
 
-// act_on_inbox is direct only for clarify; its other actions take a confirm card
-type PmToolName = PmDirectTool | 'act_on_inbox' | PmEditTool
-
-// What each tool was trying to do, for the Activity line of a call that failed
-const TOOL_GOALS: Record<PmToolName, string> = {
-  start_thread: 'start a thread',
-  list_threads: 'list threads',
-  read_thread: 'read a thread',
-  message_thread: 'message a thread',
-  close_thread: 'close a thread',
-  list_projects: 'list projects',
-  get_project: 'read a project',
-  update_project: 'change a project',
-  create_project: 'create a project',
-  list_runs: 'list runs',
-  get_run: 'read a run',
-  message_run: 'message a run',
-  get_status: 'check Corral\'s status',
-  clear_update_hold: 'lift the update hold',
-  list_inbox: 'read the Inbox',
-  list_agents: 'list agents',
-  update_agent: 'change an agent',
-  create_agent: 'create an agent',
-  act_on_inbox: 'answer an Inbox item',
-  create_task: 'create a task',
-  update_task: 'change a task',
-  update_parent: 'change a task with subtasks'
-}
-
-interface Deps {
-  db: Database
-  events: EventBus
-  runner: RunnerHub
-  transcripts: Transcripts
-  orchestrator: Pick<Orchestrator, 'status' | 'holdForUpdate' | 'releaseUpdate' | 'messageRun' | 'poke' | 'taskChanged' | 'plans'>
-  editEntity(sessionId: string, tool: PmEditTool, input: unknown, actor: Actor): Promise<PmEdit>
-}
-
-export interface PmToolContext {
-  sessionId: string
-  runId: string
-  // The conversation's project, for the audit of calls with no project of their own.
-  // A global conversation has none.
+// What a confirm card proposes, bound to its target: a confirmation can't
+// move to another one
+export interface PreparedPmAction {
+  input: Record<string, unknown>
+  summary: string
+  targetId: string | null
+  taskId: string | null
   projectId: string | null
 }
 
-interface ToolResult {
+// The input as the server reads it, where it takes more than the PM is
+// offered: older runners' names, and a file's contents in place of its path
+const READERS = {
+  list_tasks: (input: unknown) => refused(listTasksInput.extend({ project: z.string().optional() }), input, error => `The tasks were not listed: ${z.prettifyError(error)}`),
+  ask_question: (input: unknown) => refused(askQuestionInput, input, error => `The question was not asked: ${z.prettifyError(error)}`),
+  propose_plan: (input: unknown) => refused(proposedPlanInput.extend({ project: z.string().optional() }), input, error => `The plan was not saved: ${z.prettifyError(error)}`),
+  attach_evidence: readEvidenceInput
+}
+
+// A scoped tool's `project`, read ahead of the rest so a global session
+// asks for it first
+const scopedProject = z.object({ project: z.string().trim().min(1).optional() })
+
+function refused<T extends z.ZodType>(schema: T, input: unknown, message: (error: z.ZodError) => string): z.output<T> {
+  const parsed = schema.safeParse(input)
+  if (!parsed.success) throw new ToolError(message(parsed.error))
+  return parsed.data
+}
+
+type ReadInput<T extends PmTool> = T extends keyof typeof READERS ? ReturnType<typeof READERS[T]> : PmToolInput<T>
+// The project a scoped tool names is resolved into the call's `project`
+export type PmToolCallInput<T extends PmTool> = T extends ProjectScopedPmTool ? Omit<ReadInput<T>, 'project'> : ReadInput<T>
+
+export interface PmToolCall<T extends PmTool> {
+  sessionId: string
+  runId: string
+  session: PlanSessionRow
+  input: PmToolCallInput<T>
+  // A project-scoped tool acts in its `project` input or the conversation's
+  project: T extends ProjectScopedPmTool ? ProjectRow : null
+  actor: Actor
+}
+
+export interface PmToolResult {
   result: unknown
+  // What the call did, in the words Activity shows. Audited tools only.
+  summary?: string
   projectId?: string | null
   // The task it acted on, so Activity can link to it
   target?: { taskId: string, taskRef: string }
-  // What the call did, in the words Activity shows
-  summary: string
 }
 
-function capText(text: string | null, max: number): { text: string | null, capped: boolean } {
-  return text !== null && text.length > max ? { text: `${text.slice(0, max)}…`, capped: true } : { text, capped: false }
+export interface PmToolHandler<T extends PmTool> {
+  // Each call that acts straight away is audited (pm.tool_called) and shows
+  // in Activity; this is what it was trying to do, for a failed one
+  goal?: string
+  run?(call: PmToolCall<T>): Promise<PmToolResult>
+  // A confirm card: what it proposes, and what Confirm does
+  prepare?(call: PmToolCall<T>): Promise<PreparedPmAction>
+  execute?(call: PmToolCall<T>, prepared: PreparedPmAction): Promise<unknown>
+  // A gated tool: the card for what this call lowers, or null when it lowers
+  // nothing. The card keeps the call's input as the PM sent it.
+  lowers?(call: PmToolCall<T>): Promise<Omit<PreparedPmAction, 'input'> | null>
 }
 
-function clip(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max)}…` : text
+export type PmToolHandlers = { [T in PmTool]: PmToolHandler<T> }
+
+export interface PmToolsDeps {
+  db: Database
+  handlers: PmToolHandlers
+  // Posts the card; nothing changes until the human confirms
+  propose(sessionId: string, runId: string, tool: PmTool, prepared: PreparedPmAction, actor: Actor): Promise<unknown>
 }
 
-function eventLine(event: RunEvent): string | null {
-  switch (event.type) {
-    case 'system': return `[system] ${event.text}`
-    case 'message': return event.text
-    case 'tool_call': return `[tool] ${event.tool} ${clip(JSON.stringify(event.input) ?? '', TOOL_INPUT_MAX)}`
-    case 'tool_result': return `[${event.isError ? 'tool error' : 'tool result'}] ${clip(event.output, TOOL_OUTPUT_MAX)}`
-    case 'thinking':
-    case 'usage': return null
-  }
-}
-
-// The end of a transcript as text, never longer than the limit. It's empty
-// when the agent produced nothing, even if the runner noted what it was doing.
-export function transcriptExcerpt(events: RunEvent[], limit: number, ended = false) {
-  const text = events.map(eventLine).filter(line => line !== null).join('\n\n')
-  const truncated = text.length > limit
-  const empty = !events.some(event => event.type === 'message' || event.type === 'tool_call' || event.type === 'tool_result')
-  const notes = [
-    ...(empty ? [ended ? 'This run has no agent transcript: the agent produced nothing before the run ended.' : 'This run has no agent transcript yet.'] : []),
-    ...(truncated ? [`Transcript cut to its last ${limit} of ${text.length} characters.`] : [])
-  ]
-  return { excerpt: truncated ? text.slice(-limit) : text, truncated, empty, ...(notes.length > 0 && { note: notes.join(' ') }) }
+// A task in any project by its ref, for the tools that span projects
+export async function taskByAnyRef(db: Database, ref: string) {
+  if (!parseTaskRef(ref)) throw new ToolError(`${ref} isn't a task ref; refs look like COR-12`)
+  const found = await taskAndProjectByRef(db, ref)
+  if (!found) throw new ToolError(`Task ${ref} doesn't exist`)
+  return found
 }
 
 // A failure in words the PM can act on; the API's codes alone say little
@@ -123,257 +106,110 @@ function toolFailure(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
 
-// The PM tools that act without a confirm card (D30). Each validates its typed
-// input and calls the service behind the matching route, and every call is
-// audited with the PM session as actor.
-export class PmTools {
-  #d: Deps
-  constructor(deps: Deps) { this.#d = deps }
+// How much of a free-text field a PM listing or card summary shows
+export const LIST_TEXT_MAX = 300
 
-  async call(tool: PmToolName, input: unknown, actor: Actor, context: PmToolContext): Promise<unknown> {
-    const audit = (projectId: string | null | undefined, outcome: { ok: boolean, summary: string, error?: string }, target?: ToolResult['target']) =>
-      appendAudit(this.#d.db, { projectId: projectId === undefined ? context.projectId : projectId, taskId: target?.taskId ?? null, actor }, auditEvent('pm.tool_called', { sessionId: context.sessionId, runId: context.runId, tool, input: target ? { ...input as object, taskRef: target.taskRef } : input, targetId: target?.taskId ?? null, ...outcome }))
-    try {
-      const { result, projectId, target, summary } = await this.#run(tool, input, actor, context)
-      await audit(projectId, { ok: true, summary }, target)
-      return result
-    } catch (error) {
-      const failure = toolFailure(error)
-      await audit(undefined, { ok: false, error: failure.message, summary: `Could not ${TOOL_GOALS[tool]}: ${clip(failureReason(error), ERROR_SUMMARY_MAX)}` })
-      throw failure
-    }
-  }
-
-  async #run(tool: PmToolName, input: unknown, actor: Actor, context: PmToolContext): Promise<ToolResult> {
-    const { db, events, orchestrator, runner, transcripts } = this.#d
-    const strict = <T extends z.ZodRawShape>(shape: T) => z.object(shape).strict().parse(input)
-    switch (tool) {
-      case 'start_thread': {
-        const { title, project, message, runtime } = strict(pmDirectTools.start_thread.input)
-        if (!orchestrator.plans) throw new Error('Planning is unavailable')
-        const projectId = project ? (await findProjectBySlug(db, project)).id : null
-        const result = await orchestrator.plans.start(projectId, { text: message, title, parentSessionId: context.sessionId, ...(runtime && { runtime }) }, actor)
-        return { result, projectId: result.projectId, summary: `Started thread ${title}` }
-      }
-      case 'list_threads': {
-        strict(pmDirectTools.list_threads.input)
-        if (!orchestrator.plans) throw new Error('Planning is unavailable')
-        const sessions = await orchestrator.plans.listSessions()
-        const allProjects = await listProjects(db)
-        return { result: sessions.map(s => ({ ...s, project: allProjects.find(p => p.id === s.projectId)?.slug ?? null, running: s.activeRunId !== null })), summary: `Listed ${sessions.length} threads` }
-      }
-      case 'read_thread': {
-        const { threadId, limit } = strict(pmDirectTools.read_thread.input)
-        if (!orchestrator.plans) throw new Error('Planning is unavailable')
-        const { messages, ...session } = await orchestrator.plans.getSession(threadId)
-        return { result: { ...session, messages: messages.slice(-limit).reverse() }, projectId: session.projectId, summary: `Read thread ${session.title}` }
-      }
-      case 'message_thread': {
-        const { threadId, message } = strict(pmDirectTools.message_thread.input)
-        if (!orchestrator.plans) throw new Error('Planning is unavailable')
-        const target = await orchestrator.plans.getSession(threadId)
-        const result = await orchestrator.plans.message(threadId, { text: message, senderSessionId: context.sessionId }, actor)
-        return { result, projectId: target.projectId, summary: `Messaged thread ${threadId}` }
-      }
-      case 'close_thread': {
-        const { threadId } = strict(pmDirectTools.close_thread.input)
-        if (!orchestrator.plans) throw new Error('Planning is unavailable')
-        const result = await orchestrator.plans.close(threadId, actor)
-        return { result, projectId: result.projectId, summary: `Closed thread ${result.title}` }
-      }
-      case 'list_projects': {
-        strict(pmDirectTools.list_projects.input)
-        const all = await listProjects(db)
-        return {
-          result: {
-            projects: all.slice(0, PM_PROJECT_LIST_MAX),
-            ...(all.length > PM_PROJECT_LIST_MAX && { note: `Showing the first ${PM_PROJECT_LIST_MAX} of ${all.length} projects.` })
-          },
-          summary: `Listed ${all.length} ${all.length === 1 ? 'project' : 'projects'}`
-        }
-      }
-
-      case 'get_project': {
-        const { project } = strict(pmDirectTools.get_project.input)
-        const row = await findProjectBySlug(db, project)
-        return { result: toProject(row), projectId: row.id, summary: `Read project ${row.name}` }
-      }
-
-      case 'update_project': {
-        const { project: slug, ...neutral } = strict(pmDirectTools.update_project.input)
-        const changes = storedProjectFields(neutral)
-        const fields = Object.entries(changes).filter(([, value]) => value !== undefined)
-        if (fields.length === 0) throw new Error('Nothing to change: pass at least one setting')
-        const project = await findProjectBySlug(db, slug)
-        const updated = await patchProject(db, project, changes, actor)
-        events.publish({ type: 'project.updated', project: updated })
-        orchestrator.poke()
-        const list = fields.map(([key, value]) => `${key} to ${JSON.stringify(value)}`).join(', ')
-        return { result: updated, projectId: project.id, summary: `Set ${list} on ${updated.name}` }
-      }
-
-      case 'create_project': {
-        const { defaultBranch, ...neutral } = strict(pmDirectTools.create_project.input)
-        const parsed = storedProjectFields(neutral)
-        const check = await checkRepository(db, runner, parsed.repository, CHECK_REPO_TIMEOUT_MS)
-        if (!check.ready) throw new Error(`The project was not created: ${check.checks.filter(c => !c.ok).map(c => `${c.title}: ${c.detail}`).join(' ')}`)
-        const branch = defaultBranch ?? check.defaultBranch
-        if (!branch) throw new Error('The project was not created: the repository has no default branch; pass defaultBranch')
-        const project = await createProject(db, { ...parsed, defaultBranch: branch }, actor)
-        events.publish({ type: 'project.created', project })
-        return { result: project, projectId: project.id, summary: `Created project ${project.name} for ${project.repository}` }
-      }
-
-      case 'list_runs': {
-        const { project, taskRef, role, status, limit } = strict(pmDirectTools.list_runs.input)
-        const projectId = project ? (await findProjectBySlug(db, project)).id : undefined
-        const taskId = taskRef ? await this.#taskIdByRef(taskRef) : undefined
-        const rows = await listRuns(db, {
-          ...(projectId && { projectId }),
-          ...(taskId && { taskId }),
-          ...(role && { role }),
-          ...(status === 'active' ? { active: true } : status ? { state: status } : {})
-        }, limit + 1)
-        const capped = rows.slice(0, limit).map(run => this.#capRun(run, LIST_TEXT_MAX))
-        const notes = [
-          ...(rows.length > limit ? [`Showing the newest ${limit} matching runs; there are more. ${limit < PM_RUN_LIST_MAX ? 'Raise limit or narrow' : 'Narrow'} the filters to see the rest.`] : []),
-          ...(capped.some(c => c.capped) ? [`Summaries and errors are cut to ${LIST_TEXT_MAX} characters; get_run has more.`] : [])
-        ]
-        const filters = [project && `in ${project}`, taskRef && `on ${taskRef}`, role && `by ${role}s`, status && `with status ${status}`].filter(Boolean).join(' ')
-        return {
-          result: { runs: capped.map(c => c.run), ...(notes.length > 0 && { note: notes.join(' ') }) },
-          ...(projectId && { projectId }),
-          summary: `Listed ${capped.length} ${capped.length === 1 ? 'run' : 'runs'}${filters && ` ${filters}`}`
-        }
-      }
-
-      case 'get_run': {
-        const { runId, runNumber, transcriptLimit } = strict(pmDirectTools.get_run.input)
-        if ((runId === undefined) === (runNumber === undefined)) throw new Error('Pass runNumber or runId, not both')
-        const found = await findRun(db, runId === undefined ? eq(runs.number, runNumber!) : eq(runs.id, runId))
-        if (!found) throw new Error(`Run ${runId ?? `#${runNumber}`} doesn't exist`)
-        const [row] = await db.select({ blob: runs.transcriptBlob }).from(runs).where(eq(runs.id, found.id))
-        const { run: shown, capped } = this.#capRun(found, RUN_TEXT_MAX)
-        return {
-          result: {
-            ...shown,
-            transcript: transcriptExcerpt(await transcripts.read(found.id, row?.blob ?? null), transcriptLimit, found.endedAt !== null),
-            ...(capped && { note: `The summary and error are cut to ${RUN_TEXT_MAX} characters.` })
-          },
-          ...(found.projectId && { projectId: found.projectId }),
-          summary: `Read run #${found.number}${found.taskRef ? ` on ${found.taskRef}` : found.epicTitle ? ` on ${found.epicTitle}` : ''}`
-        }
-      }
-      case 'message_run': {
-        const { runId, text } = strict(pmDirectTools.message_run.input)
-        const run = await getRun(db, runId)
-        if (!run.projectId) throw new Error(`Run #${run.number} is a ${run.role} run; only developer, reviewer and designer runs take messages`)
-        const sent = await orchestrator.messageRun(run.projectId, runId, { text: `From the PM: ${text}`, attachments: [] }, actor)
-        return { result: { ok: true, runId: sent.runId, commentId: sent.comment.id }, projectId: run.projectId, summary: `Messaged run #${run.number}${run.taskRef ? ` on ${run.taskRef}` : ''}: ${clip(text, LIST_TEXT_MAX)}` }
-      }
-
-      case 'get_status':
-        strict(pmDirectTools.get_status.input)
-        return { result: { ...orchestrator.status, ...runner.status() }, summary: 'Checked Corral\'s status' }
-
-      case 'clear_update_hold': {
-        strict(pmDirectTools.clear_update_hold.input)
-        const held = orchestrator.status.updating
-        orchestrator.releaseUpdate()
-        return { result: orchestrator.status, summary: held ? 'Lifted the update hold' : 'Tried to lift the update hold, which was already off' }
-      }
-
-      case 'list_inbox': {
-        strict(pmDirectTools.list_inbox.input)
-        const items = (await loadInbox(db, runner.status().runners)).needsYou
-        return { result: items.map(toolItem), summary: `Read the Inbox: ${items.length} ${items.length === 1 ? 'item' : 'items'}` }
-      }
-
-      case 'list_agents': {
-        strict(pmDirectTools.list_agents.input)
-        const agents = await listAgents(db)
-        return { result: agents, summary: `Listed ${agents.length} ${agents.length === 1 ? 'agent' : 'agents'}` }
-      }
-
-      case 'update_agent': {
-        const { agentId, ...changes } = strict(pmDirectTools.update_agent.input)
-        const fields = Object.entries(changes).filter(([, value]) => value !== undefined)
-        if (fields.length === 0) throw new Error('Nothing to change: pass at least one setting')
-        if (changes.runtime) await requireRuntimeCli(runner, changes.runtime)
-        const agent = await patchAgent(db, agentId, changes, actor)
-        events.publish({ type: 'agent.updated', agent })
-        orchestrator.poke()
-        return { result: agent, summary: `Updated ${agent.name}: ${fields.map(([key, value]) => `${key} ${String(value)}`).join(', ')}` }
-      }
-
-      case 'create_agent': {
-        const parsed = createAgentInput.strict().parse(input)
-        await requireRuntimeCli(runner, parsed.runtime)
-        const agent = await createAgent(db, parsed, actor)
-        events.publish({ type: 'agent.updated', agent })
-        orchestrator.poke()
-        return { result: agent, summary: `Created ${agent.name}: ${parsed.role} on ${parsed.runtime}` }
-      }
-
-      case 'act_on_inbox':
-        return this.#answer(input, actor)
-
-      case 'create_task':
-      case 'update_task':
-      case 'update_parent': {
-        const edited = await this.#d.editEntity(context.sessionId, tool, input, actor)
-        return { result: edited.result, projectId: edited.projectId, ...(edited.target && { target: edited.target }), summary: edited.summary }
-      }
-    }
-  }
-
-  // A Blocked task's question, answered for the human: the same pinned
-  // comment as Clarify, by the PM's own transition (D30)
-  async #answer(input: unknown, actor: Actor): Promise<ToolResult> {
-    const { taskRef: ref, action, text } = z.object(pmActionTools.act_on_inbox.input).strict().parse(input)
-    if (action !== 'clarify' || !text) throw new Error('clarify needs text: your answer for the developer')
-    const { db, events, orchestrator } = this.#d
-    const taskId = await this.#taskIdByRef(ref)
-    const { comment, project, number } = await db.transaction(async (tx) => {
-      const { task, project } = await lockTask(tx, taskId)
-      if (await waitingDecision(tx, task.id)) throw new Error('Rebase decisions must be answered by the human in the Inbox')
-      const label = taskRef(project.prefix, task.number)
-      if (idleStop(task)) throw new Error(`${label} stopped repeating and isn't asking a question. Propose retry or resolve; those need the human.`)
-      if (task.status === 'blocked' && !await stuckQuestion(tx, task.id)) throw new Error(`${label} is blocked by a cap, repeated review feedback or a human decision, not a developer's question, so that's the human's: propose resolve on a confirm card.`)
-      const added = await addComment(tx, task.id, { body: text, pinned: true }, actor)
-      await applyTransition(tx, task, project, { type: 'answer' }, actor, { event: 'answer' })
-      // Answered, so the triage stop this question raised is over
-      await tx.update(tasks).set({ retryStop: null }).where(eq(tasks.id, task.id))
-      return { comment: added, project, number: task.number }
-    })
-    events.publish({ type: 'comment.created', comment })
-    await orchestrator.taskChanged(taskId)
-    const answered = taskRef(project.prefix, number)
-    return { result: { ref: answered, status: 'in_progress' }, projectId: project.id, target: { taskId, taskRef: answered }, summary: `Answered ${answered}: ${clip(text, LIST_TEXT_MAX)}` }
-  }
-
-  #capRun(run: Run, max: number): { run: Run, capped: boolean } {
-    const summary = capText(run.summary, max)
-    const error = capText(run.error, max)
-    return { run: { ...run, summary: summary.text, error: error.text }, capped: summary.capped || error.capped }
-  }
-
-  async #taskIdByRef(ref: string): Promise<string> {
-    const match = /^([A-Za-z]+)-(\d+)$/.exec(ref)
-    if (!match) throw new Error(`${ref} isn't a task ref; they look like COR-12`)
-    const [row] = await this.#d.db.select({ id: tasks.id }).from(tasks).innerJoin(projects, eq(projects.id, tasks.projectId))
-      .where(and(eq(projects.prefix, match[1]!.toUpperCase()), eq(tasks.number, Number(match[2])), isNull(tasks.deletedAt)))
-    if (!row) throw new Error(`Task ${ref} doesn't exist`)
-    return row.id
-  }
+function confirmPolicy(tool: PmTool): NonNullable<ToolDefinition['confirmRequired']> {
+  return (toolDefinitions[tool] as ToolDefinition).confirmRequired ?? false
 }
 
-// What the PM needs of an Inbox item: enough to tell the human and to act on it
-function toolItem(item: ActionableInboxItem) {
-  const common = { id: item.id, type: item.type, project: item.project?.slug ?? null, taskRef: item.taskRef, subject: item.subject, from: item.sender.name, at: item.at, prUrl: item.prUrl }
-  switch (item.type) {
-    case 'plan_thread': return { ...common, sessionId: item.sessionId, status: item.status, asking: item.question?.text ?? item.plan?.title ?? item.failure ?? item.preview }
-    case 'epic_review': return { ...common, epicId: item.epicId, asking: item.body }
-    default: return { ...common, asking: item.body || item.preview }
+function confirms(tool: PmTool, input: unknown): boolean {
+  const policy = confirmPolicy(tool)
+  return typeof policy === 'function' ? policy(input) : policy
+}
+
+export class PmTools {
+  #d: PmToolsDeps
+
+  constructor(deps: PmToolsDeps) {
+    for (const tool of PM_TOOL_NAMES) {
+      const handler: PmToolHandler<PmTool> = deps.handlers[tool]
+      const policy = confirmPolicy(tool)
+      if (policy !== false && !(handler.prepare && handler.execute)) throw new Error(`${tool} takes a confirm card but has none`)
+      if (policy !== true && !handler.run) throw new Error(`${tool} acts directly but has no handler`)
+      if (isGatedTool(tool) && !(handler.lowers && handler.execute)) throw new Error(`${tool} is gated but can't tell what it lowers`)
+    }
+    this.#d = deps
+  }
+
+  // A call from the PM's run. A confirm-required call, or a gated one that
+  // lowers a gate, becomes a card; anything else acts now.
+  async call(sessionId: string, runId: string, tool: PmTool, raw: unknown, actor: Actor): Promise<unknown> {
+    const handler: PmToolHandler<PmTool> = this.#d.handlers[tool]
+    if (confirms(tool, raw)) {
+      const call = await this.#read(sessionId, runId, tool, raw, actor)
+      return this.#d.propose(sessionId, runId, tool, await handler.prepare!(call), actor)
+    }
+    const failed = async (error: unknown) => {
+      if (!handler.goal) return error
+      const failure = toolFailure(error)
+      await this.#audit(sessionId, runId, tool, raw, actor, { ok: false, error: failure.message, summary: `Could not ${handler.goal}: ${clip(failureReason(error), ERROR_SUMMARY_MAX)}` })
+      return failure
+    }
+    let call: PmToolCall<PmTool>
+    let lowered: PreparedPmAction | null
+    try {
+      call = await this.#read(sessionId, runId, tool, raw, actor)
+      lowered = await this.#lowers(handler, call, raw)
+    } catch (error) {
+      throw await failed(error)
+    }
+    if (lowered) return this.#d.propose(sessionId, runId, tool, lowered, actor)
+    try {
+      const { result, ...done } = await handler.run!(call)
+      if (handler.goal) await this.#audit(sessionId, runId, tool, raw, actor, { ok: true, summary: done.summary ?? '' }, done)
+      return result
+    } catch (error) {
+      throw await failed(error)
+    }
+  }
+
+  // A card's action as it stands now, for the human's Confirm to compare
+  // with what the card says
+  async prepare(sessionId: string, runId: string, tool: string, raw: unknown): Promise<PreparedPmAction> {
+    if (!isPmTool(tool)) throw new ToolError('This tool is no longer available for confirmation')
+    const handler: PmToolHandler<PmTool> = this.#d.handlers[tool]
+    const call = await this.#read(sessionId, runId, tool, raw, { kind: 'agent', role: 'pm', runId })
+    if (confirms(tool, raw)) return handler.prepare!(call)
+    if (!handler.lowers) throw new ToolError('This tool is no longer available for confirmation')
+    const lowered = await this.#lowers(handler, call, raw)
+    if (!lowered) throw new ToolError('The target of this action has changed')
+    return lowered
+  }
+
+  async execute(sessionId: string, runId: string, tool: string, prepared: PreparedPmAction, actor: Actor): Promise<unknown> {
+    if (!isPmTool(tool)) throw new ToolError('This tool is no longer available for confirmation')
+    const handler: PmToolHandler<PmTool> = this.#d.handlers[tool]
+    return handler.execute!(await this.#read(sessionId, runId, tool, prepared.input, actor), prepared)
+  }
+
+  async #lowers(handler: PmToolHandler<PmTool>, call: PmToolCall<PmTool>, raw: unknown): Promise<PreparedPmAction | null> {
+    const lowered = handler.lowers ? await handler.lowers(call) : null
+    return lowered && { ...lowered, input: raw as Record<string, unknown> }
+  }
+
+  async #read(sessionId: string, runId: string, tool: PmTool, raw: unknown, actor: Actor): Promise<PmToolCall<PmTool>> {
+    const [session] = await this.#d.db.select().from(planSessions).where(eq(planSessions.id, sessionId))
+    if (!session) throw new ToolError('The conversation no longer exists')
+    const read = (READERS as Partial<Record<PmTool, (input: unknown) => unknown>>)[tool] ?? (input => parsePmToolInput(tool, input))
+    if (!isProjectScopedTool(tool)) return { sessionId, runId, session, input: read(raw), project: null, actor } as PmToolCall<PmTool>
+    const project = await this.#project(session, scopedProject.parse(raw ?? {}).project)
+    // The project is resolved, so the handler doesn't see the slug
+    const input = Object.fromEntries(Object.entries(read(raw) as object).filter(([key]) => key !== 'project'))
+    return { sessionId, runId, session, input, project, actor } as PmToolCall<PmTool>
+  }
+
+  async #project(session: PlanSessionRow, slug: string | undefined): Promise<ProjectRow> {
+    if (!slug && !session.projectId) throw new ToolError('Provide a project slug in the project argument for this global session.')
+    const [project] = await this.#d.db.select().from(projects).where(slug ? eq(projects.slug, slug) : eq(projects.id, session.projectId!))
+    if (!project) throw new ToolError(slug ? `Unknown project: ${slug}` : 'The project no longer exists')
+    return project
+  }
+
+  async #audit(sessionId: string, runId: string, tool: PmTool, raw: unknown, actor: Actor, outcome: { ok: boolean, summary: string, error?: string }, done: Omit<PmToolResult, 'result'> = {}): Promise<void> {
+    const [session] = await this.#d.db.select({ projectId: planSessions.projectId }).from(planSessions).where(eq(planSessions.id, sessionId))
+    const { target } = done
+    await appendAudit(this.#d.db, { projectId: done.projectId === undefined ? session?.projectId ?? null : done.projectId, taskId: target?.taskId ?? null, actor },
+      auditEvent('pm.tool_called', { sessionId, runId, tool, input: target ? { ...raw as object, taskRef: target.taskRef } : raw, targetId: target?.taskId ?? null, ...outcome }))
   }
 }

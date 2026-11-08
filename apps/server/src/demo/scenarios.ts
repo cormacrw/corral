@@ -1,4 +1,5 @@
-import type { Project, PullRequestFile, RunEvent, RunJob, Task } from '@corral/contracts'
+import type { Project, PullRequestFile, RunEvent, RunJob, ServerEvent, Task } from '@corral/contracts'
+import { isActiveRun } from '@corral/core'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { execFileSync } from 'node:child_process'
@@ -6,7 +7,8 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { demoGuideAnswer } from './demo-guide.ts'
-import { demoSha, type Seeder } from './harness.ts'
+import { demoSha } from './demo-github.ts'
+import type { Seeder } from './harness.ts'
 
 // The demo's story: two projects over about two weeks, told in order. Each
 // step goes through the server the way the human, the agents and GitHub
@@ -20,9 +22,9 @@ const asset = (name: string) => readFileSync(join(ASSETS, name))
 export async function seedDemo(t: Seeder): Promise<void> {
   await t.request('PATCH', '/api/me', { name: 'Sam Rivera' })
   const shop = await t.project({ name: 'Storefront', prefix: 'SHOP', repository: 'acme/storefront' })
-  await t.db.update(schema.projects).set({ requiredChecks: ['ci'], thumbnailColor: '#f97316' }).where(eq(schema.projects.id, shop.id))
+  await t.request('PATCH', `/api/projects/${shop.slug}`, { requiredChecks: ['ci'], thumbnailColor: '#f97316' })
   const notes = await t.project({ name: 'Field Notes', prefix: 'NOTE', repository: 'acme/field-notes', humanReviewDefault: true })
-  await t.db.update(schema.projects).set({ thumbnailColor: '#16a34a' }).where(eq(schema.projects.id, notes.id))
+  await t.request('PATCH', `/api/projects/${notes.slug}`, { thumbnailColor: '#16a34a' })
   await t.advance('2h')
 
   await storefrontFoundations(t, shop)
@@ -44,11 +46,9 @@ export async function seedDemo(t: Seeder): Promise<void> {
 
   const active = await t.db.select({ id: schema.runs.id, role: schema.runs.role, taskId: schema.runs.taskId, state: schema.runs.state, runnerId: schema.runs.runnerId, lease: schema.runs.leaseExpiresAt }).from(schema.runs)
   // A queued run no runner has taken is fine: it waits for one
-  const live = active.filter(r => ['queued', 'starting', 'running', 'waiting_for_input', 'stopping'].includes(r.state) && (r.runnerId || r.lease))
+  const live = active.filter(r => isActiveRun(r.state) && (r.runnerId || r.lease))
   if (live.length > 0) throw new Error(`The story left runs in flight, which would hold leases: ${JSON.stringify(live)}`)
 }
-
-// ---- Flows ----
 
 interface DevelopInput {
   head: string
@@ -133,8 +133,6 @@ function patch(path: string, lines: string[], status: PullRequestFile['status'] 
 }
 
 const testOutput = (lines: string) => ({ kind: 'test_output' as const, fileName: 'vitest.txt', contentType: 'text/plain', data: lines, note: 'Test run' })
-
-// ---- Storefront ----
 
 async function storefrontFoundations(t: Seeder, shop: Project): Promise<void> {
   const images = await t.task(shop, {
@@ -559,22 +557,17 @@ async function releaseNotes(t: Seeder, shop: Project): Promise<void> {
     'Category pages load noticeably faster on mobile, product pages show their review summary, and UK and EU customers now get confirmation emails in their own currency.'
   ].join('\n')
   const fromSha = demoSha('deploy-previous')
+  // The notes come from a job on the runner
+  const written = t.event((event): event is Extract<ServerEvent, { type: 'deployment.updated' }> => event.type === 'deployment.updated' && event.deployment.notesStatus !== 'pending', 'release notes')
   await t.request('POST', '/api/deployments', {
     repository: shop.repository,
     fromSha,
     toSha: shipped.at(-1)!.mergeCommitSha!,
     commits: shipped.toReversed().map(row => ({ sha: row.mergeCommitSha!, subject: `${row.title} (#${row.prNumber})` }))
   })
-  // The notes come from a job on the runner
-  for (let i = 0; i < 50; i++) {
-    const [row] = await t.db.select({ status: schema.deployments.notesStatus }).from(schema.deployments)
-    if (row?.status !== 'pending') break
-    await new Promise(resolve => setTimeout(resolve, 20))
-  }
+  await written
   await t.advance('6h')
 }
-
-// ---- Field Notes ----
 
 function tarball(dir: string): Buffer {
   const out = mkdtempSync(join(tmpdir(), 'corral-demo-bundle-'))
@@ -747,8 +740,6 @@ async function backlogs(t: Seeder, shop: Project, notes: Project): Promise<void>
   await t.comment(shop, cart as unknown as Task, 'Seen on iOS Safari and Chrome. Probably the cart store not being reset when the last line is deleted.')
 }
 
-// ---- Guided code review (COR-525) ----
-
 // A file whose patch has several `@@` hunks
 function hunks(path: string, blocks: string[][]): PullRequestFile {
   const all = blocks.flat()
@@ -762,11 +753,8 @@ async function guide(t: Seeder, project: Project, task: Task, answer: (prompt: s
   const { pr } = await t.get(project, task)
   t.prGuide = answer
   await t.request('POST', `/api/projects/${project.slug}/pull-requests/${pr!.number}/guide`, undefined, [202])
-  for (;;) {
-    const g = await t.request<{ status: string }>('GET', `/api/projects/${project.slug}/pull-requests/${pr!.number}/guide`)
-    if (g.status !== 'generating') break
-    await new Promise(resolve => setTimeout(resolve, 10))
-  }
+  // A finished guide publishes nothing, so it's asked for
+  await t.until(async () => (await t.request<{ status: string }>('GET', `/api/projects/${project.slug}/pull-requests/${pr!.number}/guide`)).status !== 'generating', `guide for PR #${pr!.number}`)
 }
 
 // One task in Human review per guide state: ready (with Other changes),

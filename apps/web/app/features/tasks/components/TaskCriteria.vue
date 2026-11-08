@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { Epic, PatchTaskInput, Task } from '@corral/contracts'
+import { deliversCode } from '@corral/core'
 import CriterionMetIcon from '~/features/evidence/components/CriterionMetIcon.vue'
 import { wantsEdit } from '~/features/tasks/utils/taskDetail'
 
@@ -11,7 +12,7 @@ const editingCriterion = ref<string | null>(null)
 const metCount = computed(() => props.task.acceptanceCriteria.filter(c => c.met).length)
 const note = computed(() => {
   if (!props.task.acceptanceCriteria.some(c => c.checkedByHuman)) return 'The reviewer marks criteria met from evidence.'
-  return props.epic?.reviewMode === 'epic' && !props.task.pr && ['task', 'bug'].includes(props.task.type)
+  return props.epic?.reviewMode === 'epic' && !props.task.pr && deliversCode(props.task.type)
     ? 'The reviewer checks other criteria from evidence. Human checks are completed on the task\'s review, once every subtask is ready.'
     : 'The reviewer checks other criteria from evidence. Human checks are completed in the Inbox.'
 })

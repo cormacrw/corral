@@ -1,7 +1,6 @@
 import type { ApiError } from '@corral/contracts'
-import type { MergeGate, ReadyProblem, TransitionError } from '@corral/core'
+import { errorText, transitionReason, type Actor } from '@corral/core'
 
-// A failure the API reports to the client with a status and an ApiError body
 export class ApiFailure extends Error {
   readonly status: 400 | 403 | 404 | 409 | 413 | 502 | 503
   readonly body: ApiError
@@ -14,6 +13,11 @@ export class ApiFailure extends Error {
 }
 
 export const notFound = () => new ApiFailure(404, { code: 'not_found' })
+
+// Actions only the human takes. Each says no the way its route always has.
+export function requireHuman(actor: Actor, refusal: () => ApiFailure = () => new ApiFailure(403, { code: 'forbidden' })): asserts actor is Extract<Actor, { kind: 'human' }> {
+  if (actor.kind !== 'human') throw refusal()
+}
 
 // Maps Postgres constraint errors (both drivers report the SQLSTATE `code`)
 // to API errors, so the database stays the last line of defence for
@@ -32,41 +36,13 @@ export function fromDatabaseError(error: unknown): ApiFailure | null {
   return null
 }
 
-const READY_PROBLEMS: Record<ReadyProblem, string> = {
-  missing_title: 'a title',
-  missing_description: 'a description',
-  missing_acceptance_criteria: 'acceptance criteria',
-  blank_acceptance_criterion: 'no blank acceptance criteria'
-}
-
-const MERGE_GATE_NAMES: Record<MergeGate, string> = {
-  approvalIsForHeadCommit: 'approval of the latest commit',
-  requiredChecksPassed: 'passing required checks',
-  evidenceComplete: 'complete evidence',
-  mergeable: 'a mergeable PR'
-}
-
 const words = (code: string) => code.replaceAll('_', ' ')
-const statusName = (status: string) => words(status).replace(/^./, first => first.toUpperCase())
-
-function transitionReason(reason: TransitionError): string {
-  switch (reason.code) {
-    case 'invalid_transition': return `This move doesn't apply to a task in ${statusName(reason.status)}`
-    case 'actor_not_allowed': return `This move isn't allowed for ${reason.actor ? `the ${reason.actor}` : 'this actor'}`
-    case 'not_ready': return `This task needs ${reason.problems.map(p => READY_PROBLEMS[p]).join(', ')}`
-    case 'dependencies_not_merged': return 'The tasks this one depends on haven\'t merged yet'
-    case 'invalid_outcome': return `This outcome can't be accepted: ${reason.problems.map(words).join(', ')}`
-    case 'gates_failed': return `Merging needs ${reason.gates.map(g => MERGE_GATE_NAMES[g]).join(', ')}`
-    case 'integration_unconfirmed': return 'This task\'s commit isn\'t confirmed on the task\'s branch yet'
-    case 'reason_required': return 'This move needs a reason'
-  }
-}
 
 // A failure in plain words, for the people reading Activity and confirm cards.
 // The PM's tool responses keep the structured error instead (COR-240).
 export function failureReason(error: unknown): string {
   const failure = error instanceof ApiFailure ? error : fromDatabaseError(error)
-  if (!failure) return error instanceof Error ? error.message : String(error)
+  if (!failure) return errorText(error)
   const { body } = failure
   if (body.code === 'transition_rejected') return transitionReason(body.reason)
   if (body.code === 'run_not_live') return body.reason

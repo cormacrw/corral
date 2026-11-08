@@ -21,7 +21,6 @@ function render(open: ViewerFile | null, list?: ViewerFile[], captions?: Record<
   return wrapper
 }
 const body = (w: ReturnType<typeof render>) => w.get('[data-testid="evidence-viewer-body"]')
-// The file on show
 const shown = (w: ReturnType<typeof render>) => body(w).get('img').attributes('src')
 
 describe('EvidenceViewer', () => {

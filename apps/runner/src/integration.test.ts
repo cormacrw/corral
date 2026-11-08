@@ -1,6 +1,6 @@
-import { writeFile } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { exec } from './exec.ts'
 import { inspectIntegration, prepareIntegration, pushIntegration } from './integration.ts'
 import { createTestDataDir, TEST_REPOSITORY as repository } from './test-repo.ts'
@@ -45,6 +45,11 @@ beforeEach(async () => {
   origin = join(dirname(dataDir), 'origin')
   await run('branch', 'epic', 'main')
   tip = await run('rev-parse', 'main')
+})
+
+afterEach(async () => {
+  vi.unstubAllEnvs()
+  await rm(dirname(dataDir), { recursive: true, force: true })
 })
 
 it('puts a task on the epic branch as one commit with its author, leaving the task branch as reviewed', async () => {
@@ -106,10 +111,10 @@ it('still finds every submission after the epic branch is squashed and rebased t
   const squashed = await exec('sh', ['-c', script], { cwd: origin })
   expect(squashed.stderr).toBe('')
   expect(await run('rev-list', '--count', 'main..HEAD')).toBe('1')
-  expect((await exec('git', ['rebase', 'main'], { cwd: origin })).code).toBe(1)
+  expect((await exec('git', ['-c', 'user.name=Dev', '-c', 'user.email=dev@example.com', 'rebase', 'main'], { cwd: origin })).code).toBe(1)
   await writeFile(join(origin, 'same.txt'), 'target\na\n')
   await run('add', '.')
-  const resolved = await exec('git', ['-c', 'user.name=Dev', '-c', 'user.email=dev@example.com', 'rebase', '--continue'], { cwd: origin, env: { GIT_EDITOR: 'true' } })
+  const resolved = await exec('git', ['-c', 'user.name=Dev', '-c', 'user.email=dev@example.com', 'rebase', '--continue'], { cwd: origin, env: { ...process.env, GIT_EDITOR: 'true' } })
   expect(resolved.code).toBe(0)
   expect(await run('rev-list', '--count', 'main..HEAD')).toBe('1')
   const head = await run('rev-parse', 'HEAD')

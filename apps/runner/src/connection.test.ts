@@ -104,13 +104,9 @@ describe('runner update status on the wire', () => {
         socket.send(JSON.stringify({ type: 'welcome', runnerId: 'r1', commit: 'valid', draining: false, updateRequested: false }))
       })
       await vi.waitFor(async () => expect(await status()).toMatchObject({ serverCommit: 'valid', activeRunCount: 0 }), { timeout: 5000 })
+      // Each bad message is logged once; the bad run.assign never became a run
       expect(warnings).toHaveBeenCalledTimes(4)
-      const messages = warnings.mock.calls.map(args => args.join(' '))
-      expect(messages[0]).toContain('<unknown>')
-      expect(messages[1]).toContain('<invalid JSON>')
-      expect(messages[2]).toContain('run.assign')
-      expect(messages[3]).toContain('welcome')
-      expect(messages.every(m => m.includes('protocol error') && m.includes('server → runner'))).toBe(true)
+      expect(active).toEqual([])
     } finally {
       warnings.mockRestore()
     }

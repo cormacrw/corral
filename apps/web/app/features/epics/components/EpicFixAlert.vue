@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { runPath } from '~/utils/routes'
 import type { EpicSync } from '@corral/contracts'
-import { EPIC_FIX, runPath } from '~/utils/labels'
+import { EPIC_FIX } from '~/utils/labels'
 
 // Who is fixing an epic and why, on its page and flyout. There's no task for
 // this work (D29), so this is the only place it's told.

@@ -2,24 +2,19 @@
 // pages/inbox.vue provides it, so it lasts across selections, and
 // pages/inbox/[itemId].vue, which remounts per item, reads it.
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
-import type { EpicActivityItem, EpicConflictItem, EpicReviewItem, Inbox, InboxItem, PlanThreadItem, TaskInboxItem } from '@corral/contracts'
+import type { EpicActivityItem, EpicConflictItem, EpicReviewItem, InboxItem, PlanThreadItem, TaskInboxItem } from '@corral/contracts'
 import { inject, provide, type InjectionKey } from 'vue'
-import { readInboxItem, useHeldInbox } from '~/queries/inbox'
+import { markRead, useHeldInbox } from '~/queries/inbox'
 import { taskQuery } from '~/queries/tasks'
+import { isOwnPane, readsOnOpen } from '~/utils/inbox-kinds'
+import { inboxPath } from '~/utils/routes'
 
 export type EpicInboxItem = EpicReviewItem | EpicConflictItem | EpicActivityItem
 export const isEpicItem = (item: InboxItem | null): item is EpicInboxItem => item?.type === 'epic_review' || item?.type === 'epic_conflict' || item?.type === 'epic_activity'
-export const isOwnPane = (item: InboxItem | null) => isEpicItem(item) || item?.type === 'plan_thread' || item?.type === 'release_notes' || item?.type === 'runner_update'
 export const isTaskItem = (item: InboxItem | null): item is TaskInboxItem => item?.taskId != null
 
 const PREFETCH_LIMIT_MS = 1000
 export const AGENTS_MAY_BE_WORKING = 'Agents may still be working.'
-
-// What each tab lists (D11): the server's lists, decisions first. The server's
-// informational items (its activity list) have no place in the Inbox (D33).
-export function inboxTabs(inbox: Inbox | null): Record<'needsYou' | 'resolved', InboxItem[]> {
-  return { needsYou: inbox?.needsYou ?? [], resolved: inbox?.resolved ?? [] }
-}
 
 function createInboxView() {
   const route = useRoute()
@@ -36,10 +31,16 @@ function createInboxView() {
   const search = ref('')
 
   const isHidden = (item: InboxItem) => deletes.pending.value.includes(item.id)
-  const tabs = computed(() => inboxTabs(inbox.value))
+  // What each tab lists (D11): the server's lists, decisions first. The server's
+  // informational items (its activity list) have no place in the Inbox (D33).
+  const tabs = computed<Record<'needsYou' | 'resolved', InboxItem[]>>(() => ({ needsYou: inbox.value?.needsYou ?? [], resolved: inbox.value?.resolved ?? [] }))
   // In the server's order (newest first, D11), less threads waiting out their Undo
   const items = computed<InboxItem[]>(() => tabs.value[tab.value].filter(i => !isHidden(i)).filter(i => !search.value || `${i.taskRef ?? ''} ${i.subject} ${i.preview}`.toLowerCase().includes(search.value.toLowerCase())))
   const count = computed(() => (inbox.value?.count ?? 0) - tabs.value.needsYou.filter(isHidden).length)
+  const tabItems = computed(() => [
+    { label: 'Inbox', value: 'needsYou', icon: 'i-hugeicons-inbox', count: count.value },
+    { label: 'Resolved', value: 'resolved', icon: 'i-hugeicons-checkmark-circle-02', count: tabs.value.resolved.length }
+  ])
   const emptyText = computed(() => {
     if (search.value) return 'Nothing matches your search.'
     if (tab.value === 'resolved') return 'Nothing resolved yet.'
@@ -61,13 +62,12 @@ function createInboxView() {
       ?? (openThread.value?.id === selectedId.value ? { ...openThread.value, unread: false } : null)
   })
 
-  // Opening an item reads it, as in email. Plan threads and release notes read
-  // through their own panes. By ID, not the flag: a failed read restores the
-  // flag and must not try again in a loop.
-  const read = useMutation(readInboxItem)
+  // Opening an item reads it, as in email, unless its pane reads it. By ID,
+  // not the flag: a failed read restores the flag and must not try again in a loop.
+  const read = useMutation(markRead)
   watch(() => selected.value && `${selected.value.type}:${selected.value.id}`, () => {
     const item = selected.value
-    if (item?.unread && item.type !== 'plan_thread' && item.type !== 'release_notes') read.mutate({ type: item.type, id: item.id })
+    if (item?.unread && readsOnOpen(item)) read.mutate({ type: item.type, id: item.id })
   }, { immediate: true })
 
   watch(() => selected.value?.id, async (_, previous) => {
@@ -92,13 +92,13 @@ function createInboxView() {
 
   // An item opens with the task flyout closed, whatever the last one had open.
   function itemRoute(item: InboxItem | undefined) {
-    return { path: item ? `/inbox/${item.id}` : '/inbox', query: {} }
+    return { path: inboxPath(item?.id), query: {} }
   }
   // Resolving moves to the item at the same position, or to the empty state when
   // that was the last one. The held list still has the old position.
   async function moveToNext() {
     const position = items.value.findIndex(i => i.id === selectedId.value)
-    const remaining = inboxTabs(list.data.value ?? null).needsYou.filter(i => !isHidden(i))
+    const remaining = (list.data.value?.needsYou ?? []).filter(i => !isHidden(i))
     const next = remaining[Math.min(Math.max(position, 0), remaining.length - 1)]
     // Arrive with its task, so the panes never show a skeleton, but don't let a
     // slow or failing task hold up the move
@@ -142,7 +142,7 @@ function createInboxView() {
     mobileHeader.value = null
   })
 
-  return { list, inbox, error, tab, search, items, count, emptyText, selectedId, selected, toggleTask, itemRoute, moveToNext, deleteThread }
+  return { list, inbox, error, tab, tabItems, search, items, count, emptyText, selectedId, selected, toggleTask, itemRoute, moveToNext, deleteThread }
 }
 
 const INBOX_VIEW: InjectionKey<ReturnType<typeof createInboxView>> = Symbol('inbox-view')

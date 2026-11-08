@@ -7,8 +7,10 @@ screenshots. Data lives in `.corral/demo/server`, apart from `pnpm dev`'s
 `.corral/server`. The first start seeds it (about 8 s); `pnpm dev:demo
 --reseed` starts over, and `pnpm seed:demo` rebuilds it while nothing runs on it.
 
-**Seeded through the real flows.** `apps/server/src/demo/harness.ts` boots
-the server's services in-process with the tests' `FakeRunner` and `FakeGitHub`.
+**Seeded through the real flows.** `apps/server/src/demo/harness.ts` starts
+the server with `boot()` (`src/boot.ts`, the same start as `index.ts` and the
+tests) and drives it with `FakeRunner` and `FakeGitHub` (`src/fake-runner.ts`,
+`src/fake-github.ts`), the fakes the tests use.
 `scenarios.ts` then plays the human, the agents and GitHub step by step. A
 task reaches Human review because a fake developer opened a PR and a fake
 reviewer approved it, not because a row says so. Every state is one the
@@ -22,7 +24,8 @@ durations and ages.
 **What the demo instance runs.** `CORRAL_DEMO=1` swaps in two stand-ins
 (`src/demo/`), loaded only then:
 - `DemoGitHub`: the fake GitHub, loaded from and saved to
-  `demo-github.json` on every write. Seeded PRs, diffs and CI results
+  `demo-github.json` in the data dir on every write, through
+  `FakeGitHub.snapshot()` and `restore()`. Seeded PRs, diffs and CI results
   survive restarts, and Approve really merges. Nothing reaches GitHub.
 - A demo runner connects to the server itself. It answers setup jobs and
   takes PM turns only, replying that this is a demo. Developers, designers

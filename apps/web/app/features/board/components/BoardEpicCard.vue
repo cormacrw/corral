@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { runPath } from '~/utils/routes'
 import type { Agent, Epic } from '@corral/contracts'
-import { EPIC_CONFLICT_PENDING, EPIC_FIX, epicStoppedLabel, runPath } from '~/utils/labels'
+import { EPIC_CONFLICT_PENDING, EPIC_FIX, epicStoppedLabel } from '~/utils/labels'
 import { markdownToPlainText } from '~/utils/markdown'
 
 // An epic on the Board: its title and progress, with a blocked icon while

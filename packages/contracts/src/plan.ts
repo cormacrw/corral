@@ -1,5 +1,6 @@
-import { EPIC_REVIEW_MODES, requiresHumanReview, TASK_PRIORITIES, TASK_TYPES, type ProposedPlan } from '@corral/core'
+import { requiresHumanReview, TASK_PRIORITIES, TASK_REF_PATTERN, TASK_TYPES, type ProposedPlan } from '@corral/core'
 import { z } from 'zod'
+import { advertisedPlanReviewMode, planReviewModeInput } from './wire-compat.ts'
 
 const proposedTask = z.object({
   key: z.string().trim().min(1).describe('A short handle used by dependsOn, e.g. t1'),
@@ -23,10 +24,6 @@ const proposedTask = z.object({
   }).optional().describe('For a task that builds part of an approved design: the version and the screens it covers')
 })
 
-// `parent` is the stored mode `epic`, which older runners still send
-const reviewMode = z.enum([...EPIC_REVIEW_MODES, 'parent'], { error: 'reviewMode must be one of parent, each_task, direct' }).optional()
-  .transform(mode => mode === 'parent' ? 'epic' as const : mode)
-
 const REVIEW_MODE_HELP = 'How its subtasks reach the target branch: parent = human reviews the task\'s PR; each_task = human also reviews every subtask; direct = subtasks merge straight into the target branch. Leave it out for the project\'s default.'
 const parentFields = {
   key: z.string().trim().min(1).describe('A short handle referenced by each subtask’s `parent`, e.g. p1'),
@@ -39,14 +36,14 @@ const parentFields = {
 export const proposedPlanInput = z.object({
   title: z.string().trim().min(1),
   summary: z.string().trim().default(''),
-  parents: z.array(z.object({ ...parentFields, reviewMode: reviewMode.describe(REVIEW_MODE_HELP) })).default([]),
+  parents: z.array(z.object({ ...parentFields, reviewMode: planReviewModeInput.describe(REVIEW_MODE_HELP) })).default([]),
   epics: z.array(z.object({
     key: z.string().trim().min(1).describe('A short handle, e.g. e1'),
     title: z.string().trim(),
     summary: z.string().trim().default(''),
     dependsOn: z.array(z.string().trim()).optional().describe('Keys in this list, or ids from list_tasks. Omit to keep dependencies in a revision; [] clears them.'),
     // The project's default when left out (D27)
-    reviewMode: reviewMode.describe('See parents')
+    reviewMode: planReviewModeInput.describe('See parents')
   })).default([]).describe('Older name for parents'),
   tasks: z.array(proposedTask),
   // Older PMs proposed a single epic without keys.
@@ -56,21 +53,21 @@ export const proposedPlanInput = z.object({
 // What the PM is offered: the same plan without the names older runners send
 export const advertisedPlanInput = {
   ...proposedPlanInput.omit({ epics: true, epic: true, parents: true }).shape,
-  parents: z.array(z.object({ ...parentFields, reviewMode: z.enum(['parent', 'each_task', 'direct'], { error: 'reviewMode must be one of parent, each_task, direct' }).optional().describe(REVIEW_MODE_HELP) })).default([]),
+  parents: z.array(z.object({ ...parentFields, reviewMode: advertisedPlanReviewMode.describe(REVIEW_MODE_HELP) })).default([]),
   tasks: z.array(proposedTask.omit({ epic: true }))
 }
 
-const REF = /^([A-Za-z]+)-(\d+)$/
-
 // Keep wire compatibility and normalization at the boundary, outside core.
-export function normalizeProposedPlan(input: z.output<typeof proposedPlanInput>): ProposedPlan {
+export type ProposedPlanInput = z.output<typeof proposedPlanInput>
+
+export function normalizeProposedPlan(input: ProposedPlanInput): ProposedPlan {
   const { epic, parents, ...plan } = input
   const legacyEpic = epic && plan.epics.length === 0
   const keys = new Set(plan.tasks.map(t => t.key))
-  const dependency = (dep: string) => keys.has(dep) || !REF.test(dep) ? dep : dep.toUpperCase()
+  const dependency = (dep: string) => keys.has(dep) || !TASK_REF_PATTERN.test(dep) ? dep : dep.toUpperCase()
   const parentKeys = new Set(parents.map(p => p.key))
   // A parent named only by its ref on a task
-  const named = [...new Set(plan.tasks.flatMap(t => t.parent && !parentKeys.has(t.parent) && REF.test(t.parent) ? [t.parent.toUpperCase()] : []))]
+  const named = [...new Set(plan.tasks.flatMap(t => t.parent && !parentKeys.has(t.parent) && TASK_REF_PATTERN.test(t.parent) ? [t.parent.toUpperCase()] : []))]
     .filter(ref => !parents.some(p => p.ref === ref))
   const allParents = [...parents, ...named.map(ref => ({ key: ref, ref, title: '', summary: '' }))]
   const parentOf = (task: { parent?: string | undefined }) => {

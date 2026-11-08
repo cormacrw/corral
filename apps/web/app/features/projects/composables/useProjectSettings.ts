@@ -1,8 +1,9 @@
+import { useSavedNote } from '~/composables/useSavedNote'
 import { errorMessage } from '~/lib/errors'
+import { prefixTaken } from '~/queries/client'
 import { useMutation } from '@tanstack/vue-query'
 import type { PatchProjectInput, Project } from '@corral/contracts'
-import { DEFAULT_LIMITS } from '@corral/core'
-import { ApiError } from '~/queries/client'
+import { DEFAULT_LIMITS, PROJECT_PREFIX_HINT, PROJECT_PREFIX_PATTERN } from '@corral/core'
 import { patchProject } from '~/queries/projects'
 
 type SettingsForm = Required<Omit<PatchProjectInput, 'paused'>>
@@ -28,13 +29,13 @@ export function useProjectSettings() {
     Object.assign(form, formOf(p), edits)
   }, { immediate: true })
 
-  const prefixValid = computed(() => /^[A-Z]{2,5}$/.test(form.prefix))
+  const prefixValid = computed(() => PROJECT_PREFIX_PATTERN.test(form.prefix))
   const dirty = computed(() => project.value ? JSON.stringify(form) !== JSON.stringify(formOf(project.value)) : false)
   const canSave = computed(() => dirty.value && prefixValid.value && Boolean(form.name.trim()))
   const saving = ref(false)
-  const saved = ref(false)
+  const { saved, flash: flashSaved } = useSavedNote()
   const prefixConflict = ref('')
-  const prefixError = computed(() => prefixConflict.value || (prefixValid.value ? undefined : 'Use 2–5 letters, A–Z.'))
+  const prefixError = computed(() => prefixConflict.value || (prefixValid.value ? undefined : PROJECT_PREFIX_HINT))
 
   async function save() {
     if (!project.value) return
@@ -42,12 +43,10 @@ export function useProjectSettings() {
     prefixConflict.value = ''
     try {
       await patch.mutateAsync({ slug: slug.value, input: { ...form } })
-      saved.value = true
-      setTimeout(() => {
-        saved.value = false
-      }, 1800)
+      flashSaved()
     } catch (e) {
-      if (e instanceof ApiError && e.body?.code === 'conflict' && e.body.constraint?.includes('prefix')) prefixConflict.value = 'Another project uses this prefix.'
+      const conflict = prefixTaken(e)
+      if (conflict) prefixConflict.value = conflict
       else toast.add({ title: 'Not saved', description: errorMessage(e), color: 'error' })
     } finally {
       saving.value = false

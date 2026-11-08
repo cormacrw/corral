@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { flushPromises, mount } from '@vue/test-utils'
 import { focusManager, VueQueryPlugin } from '@tanstack/vue-query'
-import { computed, defineComponent, h, reactive, ref } from 'vue'
+import { computed, defineComponent, h, nextTick, reactive, ref } from 'vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { PullRequestStatus } from '@corral/contracts'
 import { testQueryClient } from '~/queries/mount-with-query'
@@ -13,7 +13,7 @@ import PullRequestMerge from '~/features/projects/components/pull-requests/PullR
 import { usePullRequests } from '~/features/projects/composables/usePullRequests'
 
 const pullRequests = vi.hoisted(() => vi.fn())
-vi.mock('~/composables/useApi', () => ({ api: { projects: { pullRequests } } }))
+vi.mock('~/queries/api', () => ({ api: { projects: { pullRequests } } }))
 vi.mock('~/features/projects/utils/pull-requests', () => {
   const cell = () => ({ label: '', color: 'neutral', detail: '' })
   return { ciCell: cell, evidenceCell: cell, mergeCell: cell, rebaseCell: cell, reviewCell: cell }
@@ -89,7 +89,7 @@ it('shows a project\'s cached list at once when switching back to it', async () 
   expect(wrapper.text()).toContain('other-1')
   pullRequests.mockImplementation(() => new Promise(() => {}))
   route.params.slug = 'corral'
-  await wrapper.vm.$nextTick()
+  await nextTick()
   expect(wrapper.text()).toContain('corral-1')
   expect(wrapper.text()).not.toContain('other-1')
   wrapper.unmount()

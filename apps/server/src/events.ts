@@ -11,7 +11,6 @@ export class EventBus {
     for (const listener of this.#listeners) listener(event)
   }
 
-  // Returns the unsubscribe function
   subscribe(listener: Listener): () => void {
     this.#listeners.add(listener)
     return () => this.#listeners.delete(listener)

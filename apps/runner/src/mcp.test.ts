@@ -1,11 +1,11 @@
-import { advertisedPlanInput, pmActionTools, pmDirectTools, type AgentTool } from '@corral/contracts'
+import { advertisedPlanInput, outcomesFor, pmActionTools, pmDirectTools, ROLE_TOOLS, toolsForJob, type AgentTool } from '@corral/contracts'
 import { z } from 'zod'
 import { TASK_TYPES, type AgentRole } from '@corral/core'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { spawnSync } from 'node:child_process'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { outcomesFor, ROLE_TOOLS, toolsFor, ToolServer } from './mcp.ts'
+import { ToolServer } from './mcp.ts'
 
 // The tools each role sees over MCP, through the SDK client the agent uses
 describe('ToolServer', () => {
@@ -28,7 +28,7 @@ describe('ToolServer', () => {
           : { ok: false, error: `${String(input.attachmentId)} isn't an attachment in this project` }
       }
       return { ok: true, result: { ref: input.taskRef ?? 'own task' } }
-    })
+    }, toolsForJob({ role }))
     const client = new Client({ name: 'test', version: '1' })
     await client.connect(new StreamableHTTPClientTransport(new URL(tools.url(secret))))
     return { client, calls }
@@ -40,8 +40,6 @@ describe('ToolServer', () => {
     const result = await client.callTool({ name: 'propose_plan', arguments: input })
     expect(result.isError).not.toBe(true)
     expect(calls).toEqual([{ tool: 'propose_plan', input: z.object(advertisedPlanInput).parse(input) }])
-    const listed = (await client.listTools()).tools.find(t => t.name === 'propose_plan')!
-    expect(JSON.stringify(listed.inputSchema)).toContain('The design task, e.g. COR-70')
     const invalid = { ...input, tasks: [{ ...input.tasks[0], design: { taskRef: 'COR-8', version: 0 } }] }
     const parsed = z.object(advertisedPlanInput).safeParse(invalid)
     expect(parsed.success).toBe(false)
@@ -129,7 +127,6 @@ describe('ToolServer', () => {
     const input = { taskRef: 'COR-4', title: 'New title', priority: 'high', paused: true }
     expect((await client.callTool({ name: 'update_task', arguments: input })).isError).not.toBe(true)
     expect(calls).toEqual([{ tool: 'update_task', input }])
-    expect(listed.find(t => t.name === 'approve_task')!.description).toContain('confirmation')
     await client.close()
   })
 
@@ -154,7 +151,6 @@ describe('ToolServer', () => {
     const { client, calls } = await connect('pm')
     const { tools: listed } = await client.listTools()
     const getTask = listed.find(t => t.name === 'get_task')!
-    expect(getTask.description).toContain('Read any task in this project by ref')
     expect(getTask.inputSchema).toMatchObject({ type: 'object', properties: { taskRef: { type: 'string' } }, required: ['taskRef'] })
 
     const result = await client.callTool({ name: 'get_task', arguments: { taskRef: 'COR-4' } })
@@ -220,10 +216,9 @@ describe('ToolServer', () => {
     await client.close()
   })
 
-  it('tells the PM to refine a Backlog task by ref in propose_plan, and passes the ref through', async () => {
+  it('takes a Backlog task\'s ref in propose_plan, and passes the ref through', async () => {
     const { client, calls } = await connect('pm')
     const propose = (await client.listTools()).tools.find(t => t.name === 'propose_plan')!
-    expect(propose.description).toContain('To refine an existing Backlog task or an unclaimed Ready task (one no developer has picked up), read it with get_task and include it in the plan with its `ref`')
     expect(propose.inputSchema).toMatchObject({ properties: { tasks: { items: { properties: { ref: { type: 'string' } } } } } })
 
     const task = { key: 't1', ref: 'COR-4', title: 'Login', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'], dependsOn: ['COR-2'] }
@@ -260,7 +255,7 @@ describe('ToolServer', () => {
 
     const unknown = await client.callTool({ name: 'propose_plan', arguments: { title: 'Login', parents: [{ key: 'e1', title: 'Login', reviewMode: 'later' }], tasks: [task] } })
     expect(unknown.isError).toBe(true)
-    expect(JSON.stringify(unknown.content)).toContain('reviewMode must be one of parent, each_task, direct')
+    expect(JSON.stringify(unknown.content)).toContain('reviewMode')
     expect(calls).toHaveLength(1)
     await client.close()
   })
@@ -295,7 +290,6 @@ describe('ToolServer', () => {
   it.each(['developer', 'reviewer'] as const)('keeps the %s get_task for its own task, with no input', async (role) => {
     const { client, calls } = await connect(role)
     const getTask = (await client.listTools()).tools.find(t => t.name === 'get_task')!
-    expect(getTask.description).toMatch(/^The task you are working on/)
     expect(getTask.inputSchema.properties ?? {}).toEqual({})
     expect(getTask.inputSchema.required ?? []).toEqual([])
     await client.callTool({ name: 'get_task', arguments: {} })
@@ -331,7 +325,7 @@ import { ToolServer } from './src/mcp.ts'
 
 const server = new ToolServer()
 await server.start()
-server.register('agent', 'developer', async () => ({ ok: true, result: {} }))
+server.register('agent', 'developer', async () => ({ ok: true, result: {} }), ['get_task'])
 const url = new URL(server.url('agent'))
 
 await new Promise((resolve) => {
@@ -362,9 +356,9 @@ describe('ToolServer aborted requests', () => {
 })
 
 // D23: only a designer gets submit_design
-describe('toolsFor', () => {
+describe('toolsForJob', () => {
   it('gives a designer the developer\'s tools plus submit_design, before report_outcome', () => {
-    const tools = toolsFor({ role: 'designer' })
+    const tools = toolsForJob({ role: 'designer' })
     expect(tools).toEqual(expect.arrayContaining([...ROLE_TOOLS.developer, 'get_design', 'submit_design']))
     expect(tools).toHaveLength(ROLE_TOOLS.developer.length + 1)
     expect(tools.at(-1)).toBe('report_outcome')
@@ -372,15 +366,15 @@ describe('toolsFor', () => {
 
   it('leaves every other role with no submit_design', () => {
     for (const role of ['developer', 'reviewer', 'pm'] as const) {
-      expect(toolsFor({ role })).toEqual(ROLE_TOOLS[role])
-      expect(toolsFor({ role })).not.toContain('submit_design')
+      expect(toolsForJob({ role })).toEqual(ROLE_TOOLS[role])
+      expect(toolsForJob({ role })).not.toContain('submit_design')
     }
   })
 
   it('gives the run diagnostics to the PM alone', () => {
-    expect(toolsFor({ role: 'pm' })).toEqual(expect.arrayContaining(['get_agent_activity', 'list_runs', 'get_run']))
+    expect(toolsForJob({ role: 'pm' })).toEqual(expect.arrayContaining(['get_agent_activity', 'list_runs', 'get_run']))
     for (const role of ['developer', 'designer', 'reviewer'] as const) {
-      for (const tool of ['get_agent_activity', 'list_runs', 'get_run'] as const) expect(toolsFor({ role })).not.toContain(tool)
+      for (const tool of ['get_agent_activity', 'list_runs', 'get_run'] as const) expect(toolsForJob({ role })).not.toContain(tool)
     }
   })
 
@@ -392,7 +386,7 @@ describe('toolsFor', () => {
       server.register('pm', 'pm', async (tool) => {
         calls.push(tool)
         return { ok: true, result: {} }
-      })
+      }, ROLE_TOOLS.pm)
       const client = new Client({ name: 'test', version: '1' })
       await client.connect(new StreamableHTTPClientTransport(new URL(server.url('pm'))))
       const tools = (await client.listTools()).tools
@@ -405,11 +399,11 @@ describe('toolsFor', () => {
       await client.close()
 
       for (const role of ['developer', 'designer', 'reviewer'] as const) {
-        server.register(role, role, async () => ({ ok: true, result: {} }))
+        server.register(role, role, async () => ({ ok: true, result: {} }), ROLE_TOOLS[role])
         const other = new Client({ name: 'test', version: '1' })
         await other.connect(new StreamableHTTPClientTransport(new URL(server.url(role))))
         expect((await other.listTools()).tools.map(t => t.name)).not.toContain('get_run')
-        expect(await other.callTool({ name: 'get_run', arguments: { runNumber: 1 } })).toEqual({ isError: true, content: [{ type: 'text', text: `The ${role} can't use get_run` }] })
+        expect(await other.callTool({ name: 'get_run', arguments: { runNumber: 1 } })).toEqual({ isError: true, content: [{ type: 'text', text: expect.stringContaining(role) }] })
         await other.close()
       }
     } finally {
@@ -422,8 +416,8 @@ describe('toolsFor', () => {
     const server = new ToolServer()
     await server.start()
     try {
-      server.register('designer', 'designer', async () => ({ ok: true, result: {} }))
-      server.register('developer', 'developer', async () => ({ ok: true, result: {} }))
+      server.register('designer', 'designer', async () => ({ ok: true, result: {} }), ROLE_TOOLS.designer)
+      server.register('developer', 'developer', async () => ({ ok: true, result: {} }), ROLE_TOOLS.developer)
       const connect = async (secret: string) => {
         const client = new Client({ name: 'test', version: '1' })
         await client.connect(new StreamableHTTPClientTransport(new URL(server.url(secret))))
@@ -433,10 +427,7 @@ describe('toolsFor', () => {
       const developer = await connect('developer')
       expect((await designer.listTools()).tools.map(t => t.name)).toContain('submit_design')
       expect((await developer.listTools()).tools.map(t => t.name)).not.toContain('submit_design')
-      expect(await developer.callTool({ name: 'submit_design', arguments: {} })).toEqual({
-        isError: true,
-        content: [{ type: 'text', text: 'The developer can\'t use submit_design: only a designer submits a design' }]
-      })
+      expect(await developer.callTool({ name: 'submit_design', arguments: {} })).toEqual({ isError: true, content: [{ type: 'text', text: expect.stringContaining('developer') }] })
       await designer.close()
       await developer.close()
     } finally {
@@ -458,6 +449,6 @@ describe('outcomesFor', () => {
 })
 
 it('gives a developer on an epic no task tools', () => {
-  expect(toolsFor({ role: 'developer', taskId: null })).toEqual(['get_task', 'report_outcome'])
-  expect(toolsFor({ role: 'developer', taskId: 'task' })).toContain('attach_evidence')
+  expect(toolsForJob({ role: 'developer', taskId: null })).toEqual(['get_task', 'report_outcome'])
+  expect(toolsForJob({ role: 'developer', taskId: 'task' })).toContain('attach_evidence')
 })

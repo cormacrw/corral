@@ -1,34 +1,18 @@
-import { ACTIVE_RUN_STATES, LEASE_DURATION_MS, transition, type Actor, type TaskStatus } from '@corral/core'
-import { schema, type Executor } from '@corral/db'
-import { and, asc, count, eq, gt, inArray, isNotNull, isNull, ne, notInArray, notExists, or, sql } from 'drizzle-orm'
+import { ACTIVE_RUN_STATES, RUNNABLE_STATUSES, isAgentPaused, isAuthoringRole, leaseExpiry, transition, type Actor, type TaskStatus } from '@corral/core'
+import { schema, type AgentRow, type Executor, type TaskRow } from '@corral/db'
+import { and, asc, count, eq, inArray, isNotNull, isNull, ne, notInArray, notExists, or, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
-import { holdsAcrossEpics, holdsEpicOpen } from './epic-review-state.ts'
-import { appendAudit, auditEvent, auditText } from './audit.ts'
-import { toTaskState, type TaskRow } from './tasks.ts'
-import { unfinishedTask } from './completion.ts'
-import { parentHolds } from './parents.ts'
+import { holdsAcrossEpics, holdsEpicOpen, parentHolds, unfinishedTask } from './delivery-sql.ts'
+import { appendAudit, auditEvent } from './audit.ts'
+import { verdictForSubmission } from './task-submissions.ts'
+import { toTaskState } from './task-rows.ts'
 
-const { agents, auditLog, projects, reviews, runs, epics, epicDependencies, taskDependencies, tasks } = schema
+const { agents, projects, reviews, runs, epics, epicDependencies, taskDependencies, tasks } = schema
 
 // How many candidate tasks a placing claim locks and tries at a time
 export const PLACE_BATCH = 50
 
 const scheduler: Actor = { kind: 'system', component: 'scheduler' }
-
-// A review row that is a verdict on the task's latest submission. A human
-// resolving Blocked resets the round counter (D10), so even this head and round
-// may have a verdict from an older submission. Uses existing history so
-// already-stranded tasks recover too.
-export function verdictForSubmission(db: Executor) {
-  return and(eq(reviews.taskId, tasks.id), eq(reviews.headSha, tasks.headSha), eq(reviews.round, tasks.reviewRounds),
-    notExists(db.select({ one: sql`1` }).from(auditLog).where(and(
-      eq(auditLog.taskId, tasks.id),
-      eq(auditLog.action, 'task.transition'),
-      sql`${auditText('task.transition', 'from')} = 'in_progress'`,
-      sql`${auditText('task.transition', 'to')} = 'agent_review'`,
-      gt(auditLog.createdAt, reviews.createdAt)
-    ))))
-}
 
 export interface Claim {
   taskId: string
@@ -40,6 +24,16 @@ export interface Claim {
   status: TaskStatus
   // Where the run goes; null only when the caller placed nothing
   runnerId: string | null
+}
+
+// `place` picks the runner for a candidate task, or null when none can take
+// it now: that task is skipped without a lease and the next one is tried.
+export type Place = (tx: Executor, task: TaskRow) => Promise<string | null>
+
+export async function hasCapacity(tx: Executor, agent: AgentRow, now: Date): Promise<boolean> {
+  if (isAgentPaused(agent, now)) return false
+  const [active] = await tx.select({ n: count() }).from(runs).where(and(eq(runs.agentId, agent.id), inArray(runs.state, [...ACTIVE_RUN_STATES])))
+  return active!.n < agent.concurrency
 }
 
 // Atomically gives an agent the next task to work on, or null if there's
@@ -58,10 +52,16 @@ export interface Claim {
 // `only` limits the claim to those tasks, for an agent still inside its
 // wake interval that an event about them may start anyway. `skip` leaves
 // those tasks out, e.g. ones whose run couldn't start earlier in the pass.
-//
-// `place` picks the runner for a candidate task, or null when none can take
-// it now: that task is skipped without a lease and the next one is tried.
-export type Place = (tx: Executor, task: TaskRow) => Promise<string | null>
+// A task an agent could claim now, before its role and dependencies are
+// checked. The query must join the task's project.
+export const claimable = () => and(
+  inArray(tasks.status, [...RUNNABLE_STATUSES]),
+  isNull(tasks.leaseRunId),
+  isNull(tasks.retryStop),
+  isNull(tasks.deletedAt),
+  eq(tasks.paused, false),
+  eq(projects.paused, false)
+)
 
 export async function claimNextTask(db: Executor, agentId: string, now = new Date(), only?: readonly string[], skip: readonly string[] = [], place?: Place): Promise<Claim | null> {
   if (only?.length === 0) return null
@@ -69,16 +69,12 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
     const [agent] = await tx.select().from(agents).where(eq(agents.id, agentId)).for('update')
     if (!agent) throw new Error(`Unknown agent ${agentId}`)
     if (agent.role === 'pm') throw new Error('PM turns are not claimed; they run when the human sends a message (D9)')
-    if (agent.paused || (agent.pausedUntil && agent.pausedUntil > now)) return null
-
-    const [active] = await tx.select({ n: count() }).from(runs)
-      .where(and(eq(runs.agentId, agentId), inArray(runs.state, [...ACTIVE_RUN_STATES])))
-    if (active!.n >= agent.concurrency) return null
+    if (!await hasCapacity(tx, agent, now)) return null
 
     const dependency = alias(tasks, 'dependency')
     const dependencyEpic = alias(epics, 'dependency_epic')
     const epicTask = alias(tasks, 'epic_task')
-    const author = agent.role === 'developer' || agent.role === 'designer'
+    const author = isAuthoringRole(agent.role)
     const eligible = author
       ? and(
           inArray(tasks.status, ['ready', 'in_progress']),
@@ -107,14 +103,10 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
       .from(tasks)
       .innerJoin(projects, eq(projects.id, tasks.projectId))
       .where(and(
+        claimable(),
         eligible,
         only && inArray(tasks.id, [...only]),
-        skip.length > 0 ? notInArray(tasks.id, [...skip]) : undefined,
-        isNull(tasks.leaseRunId),
-        isNull(tasks.retryStop),
-        isNull(tasks.deletedAt),
-        eq(tasks.paused, false),
-        eq(projects.paused, false)
+        skip.length > 0 ? notInArray(tasks.id, [...skip]) : undefined
       ))
       // Priority enum: urgent first. The explicit status rank avoids enum order;
       // createdAt and id keep each status group stable across placement pages.
@@ -154,7 +146,7 @@ export async function claimNextTask(db: Executor, agentId: string, now = new Dat
     }
 
     const leaseEpoch = task.leaseEpoch + 1
-    const leaseExpiresAt = new Date(now.getTime() + LEASE_DURATION_MS)
+    const leaseExpiresAt = leaseExpiry(now)
     const [run] = await tx.insert(runs).values({
       agentId,
       projectId: task.projectId,

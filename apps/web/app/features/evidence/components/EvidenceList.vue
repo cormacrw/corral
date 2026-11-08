@@ -15,7 +15,6 @@ const checked = defineModel<string[]>('checked', { default: () => [] })
 const open = ref<ViewerFile | null>(null)
 
 const latest = computed(() => props.reviews[0] ?? null)
-// Each criterion shows its latest submission, earlier rounds behind a toggle
 const rounds = computed(() => evidenceRounds(props.evidence))
 const forTask = computed(() => rounds.value.group(null))
 // Groups whose earlier rounds are open, by criterion id ('' for the task)

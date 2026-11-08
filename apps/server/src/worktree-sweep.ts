@@ -1,4 +1,4 @@
-import { ACTIVE_RUN_STATES, type Actor } from '@corral/core'
+import { ACTIVE_RUN_STATES, SERVER_ACTOR } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, eq, gte, inArray, isNotNull, isNull, ne, or } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
@@ -6,20 +6,16 @@ import type { RunnerHub } from './runner-hub.ts'
 
 const { epics, planSessions, runs, tasks } = schema
 
-const server: Actor = { kind: 'system', component: 'server' }
-
 // How long a Plan session keeps its pm worktree after its last activity. The
 // next PM turn recreates it at the same path, so the agent session still resumes.
 export const PM_WORKTREE_TTL = 24 * 60 * 60 * 1000
 
 const SWEEP_INTERVAL_MS = 60 * 60 * 1000
-// A first sweep can have a lot to remove, behind fetches holding the repo locks
-const SWEEP_TIMEOUT_MS = 10 * 60 * 1000
 
 export interface WorktreeSweepDeps {
   db: Database
   runner: RunnerHub
-  now?: () => Date
+  now: () => Date
 }
 
 // Removes the worktrees nothing needs any more, on every online runner, each
@@ -65,18 +61,18 @@ export class WorktreeSweep {
   async #sweep(): Promise<void> {
     const { db, runner } = this.#d
     if (!runner.online) return
-    const results = await runner.sweepWorktrees({ kind: 'sweep_worktrees', ...await this.#keepSet() }, SWEEP_TIMEOUT_MS)
+    const results = await runner.sweepWorktrees({ kind: 'sweep_worktrees', ...await this.#keepSet() })
     const answers = results.flatMap(r => r.status === 'fulfilled' ? [r.value] : [])
     for (const result of results) {
       if (result.status === 'rejected') console.error('Worktree sweep failed on a runner', result.reason)
     }
     if (!answers.length) return
-    await appendAudit(db, { actor: server }, auditEvent('worktrees.swept', { removed: answers.flatMap(a => a.removed), kept: answers.flatMap(a => a.kept) }))
+    await appendAudit(db, { actor: SERVER_ACTOR }, auditEvent('worktrees.swept', { removed: answers.flatMap(a => a.removed), kept: answers.flatMap(a => a.kept) }))
   }
 
   async #keepSet(): Promise<{ keepTaskIds: string[], keepPlanSessionIds: string[], keepEpicIds: string[] }> {
     const { db } = this.#d
-    const cutoff = new Date((this.#d.now?.() ?? new Date()).getTime() - PM_WORKTREE_TTL)
+    const cutoff = new Date(this.#d.now().getTime() - PM_WORKTREE_TTL)
     // Soft-deleted tasks stay in the table, but nothing runs on them again
     const keptTasks = await db.select({ id: tasks.id }).from(tasks)
       .where(and(ne(tasks.status, 'merged'), isNull(tasks.deletedAt)))

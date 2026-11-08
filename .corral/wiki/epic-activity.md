@@ -19,6 +19,3 @@ a phone, with no task load and no actions.
 Coverage: `apps/server/src/inbox-history.test.ts` checks existing raw audit
 shapes, every task event, mixed ordering, empty/deleted tasks, human resolutions,
 and the separate live conflict item using PGlite HTTP requests.
-`apps/web/app/features/inbox/components/InboxTaskLoad.test.ts` opens the history route on
-both layouts and checks the task link, closed flyout, absent task requests,
-and absent task panel/composer.

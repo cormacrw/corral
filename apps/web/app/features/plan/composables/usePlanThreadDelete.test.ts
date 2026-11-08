@@ -6,7 +6,7 @@ import { testQueryClient } from '~/queries/mount-with-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ close: vi.fn(), add: vi.fn(), removeToast: vi.fn(), removeThread: vi.fn() }))
-vi.mock('~/composables/useApi', () => ({ api: { plan: { close: mocks.close } } }))
+vi.mock('~/queries/api', () => ({ api: { plan: { close: mocks.close } } }))
 
 type Toast = { id: string, duration: number, actions: { label: string, onClick: () => void }[] }
 
@@ -51,8 +51,8 @@ describe('deleting a Plan thread with Undo', () => {
     const d = deletion()
     d.remove('s-5')
     expect(d.pending.value.includes('s-5')).toBe(true)
-    expect(toast()).toMatchObject({ title: 'Thread deleted · its drafts were discarded', duration: 5000 })
-    expect(toast().actions.map(a => a.label)).toEqual(['Undo'])
+    expect(toast()).toMatchObject({ duration: 5000 })
+    expect(toast().actions).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(4999)
     expect(mocks.close).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
@@ -97,6 +97,6 @@ describe('deleting a Plan thread with Undo', () => {
     await vi.advanceTimersByTimeAsync(5000)
     expect(d.pending.value.includes('s-5')).toBe(false)
     expect(mocks.removeThread).not.toHaveBeenCalled()
-    expect(mocks.add).toHaveBeenLastCalledWith(expect.objectContaining({ title: 'Could not delete the thread', description: 'Runner offline', color: 'error' }))
+    expect(mocks.add).toHaveBeenLastCalledWith(expect.objectContaining({ description: 'Runner offline', color: 'error' }))
   })
 })

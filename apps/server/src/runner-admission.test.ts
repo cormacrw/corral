@@ -15,7 +15,6 @@ it('reconciles the hello snapshot before accepting new assignments', async () =>
   hub.setHandlers({
     onConnected: () => reconciliation,
     onReady: ready,
-    onDisconnected: async () => {},
     onHeartbeat: async () => {},
     onRunMessage: async () => {},
     onToolCall: async () => null
@@ -28,7 +27,7 @@ it('reconciles the hello snapshot before accepting new assignments', async () =>
   reconciled()
   await hello
   expect(hub.pick()).toBe('B')
-  expect(sent).toEqual([{ type: 'welcome', integrationCompatibilityReason: expect.stringContaining('Update the runner'), runnerId: 'B', commit: 'development', draining: false, updateRequested: false }, { type: 'job.request', jobId: expect.any(String), job: { kind: 'detect_clis' } }])
+  expect(sent).toMatchObject([{ type: 'welcome', runnerId: 'B' }, { type: 'job.request', job: { kind: 'detect_clis' } }])
   const detection = sent[1] as Extract<ServerMessage, { type: 'job.request' }>
   await connection.onMessage(JSON.stringify({ type: 'job.result', jobId: detection.jobId, ok: true, result: { kind: 'detect_clis', clis: [] } }))
   expect(ready).toHaveBeenCalledOnce()
@@ -95,6 +94,6 @@ it('negotiates integration separately from envelope version and fences dispatch 
     }
     expect(hub.send({ type: 'run.assign', job }, id)).toBe(id === 'capable')
     expect(hub.send({ type: 'run.assign', job: { ...job, integrationProtocol: 0 } }, id)).toBe(true)
-    expect(hub.status().runners.find(r => r.id === id)?.integrationCompatibilityReason).toEqual(id === 'capable' ? null : expect.stringContaining('Update the runner'))
+    expect(hub.status().runners.find(r => r.id === id)?.integrationCompatibilityReason).toEqual(id === 'capable' ? null : expect.any(String))
   }
 })

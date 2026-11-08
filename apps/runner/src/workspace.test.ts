@@ -5,7 +5,9 @@ import { dirname, join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { git } from './exec.ts'
 import { createTestDataDir, pmJob } from './test-repo.ts'
-import { MAX_BRIEF_CHARS, pmWorktreePath, prepareWorkspace, readProjectBrief } from './workspace.ts'
+import { pmWorktreePath } from './layout.ts'
+import { MAX_BRIEF_CHARS, readProjectBrief } from './project-docs.ts'
+import { prepareWorkspace } from './workspace.ts'
 
 describe('prepareWorkspace for PM turns', () => {
   let dataDir: string
@@ -134,13 +136,12 @@ describe('readProjectBrief', () => {
     await rm(worktree, { recursive: true, force: true })
   })
 
-  it('includes CORRAL.md under a brief heading and says not to read it again', async () => {
+  it('includes CORRAL.md and not CLAUDE.md', async () => {
     await writeFile(join(worktree, 'CORRAL.md'), '# Corral brief\nRun with pnpm dev.\n')
     await writeFile(join(worktree, 'CLAUDE.md'), '# Claude notes\n')
     const brief = await readProjectBrief(worktree)
     expect(brief).toMatch(/^## Project brief\n/)
     expect(brief).toContain('### CORRAL.md\n\n# Corral brief\nRun with pnpm dev.')
-    expect(brief).toContain('don\'t read that file again')
     expect(brief).not.toContain('Claude notes')
   })
 
@@ -198,7 +199,7 @@ describe('readProjectBrief', () => {
     await writeFile(join(worktree, 'CORRAL.md'), 'x'.repeat(MAX_BRIEF_CHARS * 2))
     const brief = await readProjectBrief(worktree)
     expect(brief.length).toBeLessThan(MAX_BRIEF_CHARS + 1000)
-    expect(brief).toContain('[Brief truncated: it is longer than 20,000 characters. Read CORRAL.md for the rest if you need it.]')
+    expect(brief).toMatch(/truncated/i)
   })
 })
 

@@ -2,8 +2,6 @@ import { EPIC_REVIEW_MODES, type EpicFixKind, type EpicReviewMode, type EpicRevi
 import { z } from 'zod'
 import type { Task } from './tasks.ts'
 
-// ── Epics ───────────────────────────────────────────────────────────────────
-
 // Corral keeping the epic branch on top of its target branch (D27). Only
 // `failed` needs anyone: it's an operational stop that a retry clears.
 // `conflict_pending` is progress: resolved once, when the epic is about to land.
@@ -93,7 +91,6 @@ export interface EpicDetail extends Epic {
 }
 
 export const setEpicDependenciesInput = z.object({ dependsOn: z.array(z.uuid()) })
-export type SetEpicDependenciesInput = z.infer<typeof setEpicDependenciesInput>
 
 export const patchEpicInput = z.object({
   title: z.string().trim().min(1).optional(),

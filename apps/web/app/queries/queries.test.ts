@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import type { Agent, Epic, Project, Run, RunEvent, ServerEvent, Task } from '@corral/contracts'
+import { enableAutoUnmount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, nextTick, ref } from 'vue'
-import { useLive } from '~/composables/useLive'
-import { ApiError, api } from '~/composables/useApi'
+import { useLive } from '~/queries/stream'
+import { api } from '~/queries/api'
+import { ApiError } from '~/queries/client'
 import type { eventDependencies } from './dependencies'
 import { applyEvent, defineMutation, serverEventTypes, writeTaskResponse } from './dependencies'
 import { createQueryClient } from './client'
@@ -18,6 +20,7 @@ import { moveTask, patchTask, seededTaskQuery } from './tasks'
 
 // @ts-expect-error A type missing from the map must not compile
 const incomplete: typeof eventDependencies = { 'deployment.updated': { invalidates: () => [] } }
+void incomplete
 
 class FakeEventSource {
   static last: FakeEventSource
@@ -39,6 +42,8 @@ class FakeEventSource {
 
 const project = { id: 'p-1', slug: 'corral' }
 const task = (over: Partial<Task> = {}) => ({ id: 't-1', ref: 'COR-1', number: 1, projectId: 'p-1', epicId: null, status: 'ready', title: 'One', ...over }) as Task
+
+enableAutoUnmount(afterEach)
 
 // Counts the fetches of a query mounted on screen, with what it showed
 // Call counts below are per test
@@ -146,16 +151,15 @@ describe('query layer', () => {
   })
 
   it('subscribes the stream to every event in the map', () => {
-    expect(incomplete).toBeDefined()
     useLive().connect()
     expect([...FakeEventSource.last.handlers.keys()]).toEqual(expect.arrayContaining(serverEventTypes))
   })
 
   it('reads the open thread as its session arrives, and leaves others unread', async () => {
-    stop()
-    const seen = vi.fn()
-    stop = connectQueries(client, { openSession: () => 's-1', onEvent: seen })
     useLive().connect()
+    // On screen: its session is observed
+    const open = onScreen(client, keys.plan.session('s-1'), () => ({ id: 's-1', unread: false, messages: [], plans: [] }))
+    await vi.advanceTimersByTimeAsync(0)
     const session = { id: 's-1', unread: true, updatedAt: 'now' }
     const sessions = [{ ...session }, { id: 's-2', unread: true, updatedAt: 'now' }]
     client.setQueryData(keys.plan.sessions(), sessions)
@@ -163,9 +167,10 @@ describe('query layer', () => {
     FakeEventSource.last.emit('plan.session', { type: 'plan.session', session })
     FakeEventSource.last.emit('plan.session', { type: 'plan.session', session: sessions[1] })
     expect(client.getQueryData(keys.plan.sessions())).toEqual(expect.arrayContaining([expect.objectContaining({ id: 's-1', unread: false }), expect.objectContaining({ id: 's-2', unread: true })]))
+    await vi.advanceTimersByTimeAsync(0)
     expect(api.plan.read).toHaveBeenCalledTimes(1)
     expect(api.plan.read).toHaveBeenCalledWith('s-1')
-    expect(seen).toHaveBeenCalledTimes(2)
+    open.wrapper.unmount()
   })
 
   it('keeps read-only Inbox events out of refetches and leaves the count alone', async () => {
@@ -179,7 +184,7 @@ describe('query layer', () => {
     await vi.advanceTimersByTimeAsync(MAX_WAIT_MS + QUIET_MS)
     expect(client.getQueryData(keys.inbox())).toEqual({ count: 2, needsYou: [], activity: [] })
     expect(inbox.queryFn).toHaveBeenCalledTimes(1)
-    // Content changes still invalidate the derived Inbox, as on main.
+    // Content changes still invalidate the derived Inbox
     FakeEventSource.last.emit('deployment.updated', { type: 'deployment.updated' })
     await vi.advanceTimersByTimeAsync(MAX_WAIT_MS + QUIET_MS)
     expect(inbox.queryFn).toHaveBeenCalledTimes(2)
@@ -319,16 +324,18 @@ describe('query layer', () => {
     inbox.wrapper.unmount()
   })
 
-  it('refetches after a write that raced a fetch in flight', async () => {
+  it('keeps a write that raced a fetch in flight', async () => {
     client.setQueryData(keys.tasks.list('corral'), [task()])
     let release!: (tasks: Task[]) => void
-    void client.fetchQuery({ queryKey: keys.tasks.list('corral'), queryFn: () => new Promise<Task[]>((resolve) => {
+    const fetching = client.fetchQuery({ queryKey: keys.tasks.list('corral'), queryFn: () => new Promise<Task[]>((resolve) => {
       release = resolve
     }) })
     await vi.advanceTimersByTimeAsync(0)
-    const stale = applyEvent(client, { type: 'task.updated', task: task({ title: 'new' }) })
-    expect(stale).toContainEqual(keys.tasks.list('corral'))
-    release([])
+    applyEvent(client, { type: 'task.updated', task: task({ title: 'new' }) })
+    // The fetch started before the change
+    release([task()])
+    await fetching
+    expect(client.getQueryData<Task[]>(keys.tasks.list('corral'))?.map(t => t.title)).toEqual(['new'])
   })
 
   it('keeps drafts out of task lists and adds tasks only to loaded lists', () => {
@@ -370,7 +377,7 @@ describe('query layer', () => {
   })
 })
 
-vi.mock('~/composables/useApi', async original => ({ ...await original<typeof import('~/composables/useApi')>(), api: {
+vi.mock('~/queries/api', async original => ({ ...await original<typeof import('~/queries/api')>(), api: {
   plan: { read: vi.fn(async () => ({})) },
   agents: { list: vi.fn(), create: vi.fn() },
   projects: { list: vi.fn(), remove: vi.fn() },
@@ -444,19 +451,17 @@ describe('removing a project', () => {
     client.setQueryData(keys.tasks.detail('COR-2'), task({ id: 't-2', ref: 'COR-2' }))
     client.setQueryData(keys.epics.list('corral'), [])
     client.setQueryData(keys.epics.detail('e-1'), { id: 'e-1', projectId: 'p-1' } as Epic)
-    client.setQueryData(keys.runs.detail('r-1'), goneRun)
     client.setQueryData(keys.runs.transcript('r-1'), [])
     client.setQueryData(keys.runs.list({ active: true }), [goneRun, keptRun])
     client.setQueryData(keys.plan.sessions(), [session('s-1', 'p-1'), session('s-2', 'p-2')])
     client.setQueryData(keys.plan.session('s-1'), session('s-1', 'p-1'))
     client.setQueryData(keys.plan.drafts('corral'), [])
     client.setQueryData(keys.tasks.list('other'), [task({ id: 't-9', ref: 'OTH-1', projectId: 'p-2' })])
-    client.setQueryData(keys.runs.detail('r-2'), keptRun)
     return client
   }
   function expectCleared(client: ReturnType<typeof testQueryClient>) {
     const left = client.getQueryCache().getAll().map(query => JSON.stringify(query.queryKey))
-    expect(left.sort()).toEqual([keys.projects.list(), keys.runs.list({ active: true }), keys.plan.sessions(), keys.tasks.list('other'), keys.runs.detail('r-2')].map(key => JSON.stringify(key)).sort())
+    expect(left.sort()).toEqual([keys.projects.list(), keys.runs.list({ active: true }), keys.plan.sessions(), keys.tasks.list('other')].map(key => JSON.stringify(key)).sort())
     expect(client.getQueryData(keys.projects.list())).toEqual([kept])
     expect(client.getQueryData(keys.runs.list({ active: true }))).toEqual([keptRun])
     expect(client.getQueryData(keys.plan.sessions())).toEqual([session('s-2', 'p-2')])

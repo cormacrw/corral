@@ -1,3 +1,4 @@
+import type { CriterionVerdict, EpicReviewFinding } from '@corral/core'
 import { sql } from 'drizzle-orm'
 import { check, foreignKey, index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 import { actor, createdAt } from './columns.ts'
@@ -18,7 +19,7 @@ export const reviews = pgTable('reviews', {
   headSha: text().notNull(),
   verdict: reviewVerdict().notNull(),
   summary: text().notNull(),
-  criteria: jsonb().$type<{ criterionId: string, met: boolean | null, note: string }[]>().notNull().default([]),
+  criteria: jsonb().$type<CriterionVerdict[]>().notNull().default([]),
   // Who gave the verdict: the reviewer agent, or a human in Human review
   author: actor('author'),
   createdAt: createdAt()
@@ -68,7 +69,7 @@ export const epicReviewRounds = pgTable('epic_review_rounds', {
   headSha: text().notNull(),
   verdict: reviewVerdict().notNull(),
   summary: text().notNull(),
-  findings: jsonb().$type<{ level: 'blocking' | 'non_blocking', text: string, taskRefs: string[] }[]>().notNull().default([]),
+  findings: jsonb().$type<EpicReviewFinding[]>().notNull().default([]),
   createdAt: createdAt()
 }, t => [
   uniqueIndex().on(t.epicId, t.round),

@@ -1,4 +1,4 @@
-import { isTaskDone } from '@corral/core'
+import { completedAt, isTaskDone } from '@corral/core'
 import type { AuditEntry, Epic, Project, Run, Task } from '@corral/contracts'
 import { useQueries, useQuery } from '@tanstack/vue-query'
 import type { ComputedRef } from 'vue'
@@ -6,7 +6,6 @@ import { inboxQuery } from '~/queries/inbox'
 import { runsQuery } from '~/queries/runs'
 import { taskHistoryQuery } from '~/queries/tasks'
 import { epicTitle, epicWithLiveCounts } from '~/utils/labels'
-import { completedAt } from '~/features/runs/utils/completion'
 import { projectNeedsYou } from '~/features/projects/utils/projects'
 
 interface OverviewSource {
@@ -57,7 +56,6 @@ export function useProjectOverview({ slug, project, tasks, epics: epicList, load
   const inbox = computed(() => inboxState.data.value ?? null)
   const runs = computed(() => (activeRuns.data.value ?? []).filter(run => run.projectId === project.value?.id))
   const history = computed(() => taskHistories.value.flatMap(query => query.data ?? []).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 12))
-  // The agent of each run behind the recent activity, by run id
   const runAgents = computed(() => new Map([...taskRuns.value.flatMap(query => query.data ?? []), ...runs.value].map(run => [run.id, run.agentName])))
   // A failed background refetch keeps its data and shows no error
   const failed = computed(() => [inboxState, activeRuns].flatMap(query => query.data.value === undefined && query.error.value ? [query] : []))

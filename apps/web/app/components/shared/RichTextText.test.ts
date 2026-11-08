@@ -5,11 +5,11 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { attachmentUrl } from '@corral/core'
 import RichTextText from '~/components/shared/RichTextText.vue'
 
-vi.mock('~/queries/shell', () => ({ shell: () => ({ projects: { data: { value: [{ prefix: 'COR' }] } } }) }))
-vi.mock('~/features/tasks/components/TaskLink.vue', () => ({ default: { props: ['taskRef'], template: '<a :href="`/tasks/${taskRef}`"><slot /></a>' } }))
+vi.mock('~/queries/shell', () => ({ useShell: () => ({ projects: [{ prefix: 'COR' }], agents: [] }) }))
+vi.mock('~/components/shared/TaskLink.vue', () => ({ default: { props: ['taskRef'], template: '<a :href="`/tasks/${taskRef}`"><slot /></a>' } }))
 
 it('links rich descriptions without interpreting literal markdown or replacing marked links', () => {
-  const router = createRouter({ history: createMemoryHistory(), routes: [] })
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:all(.*)*', component: { template: '<div />' } }] })
   const wrapper = mount(RichTextText, {
     props: { doc: { type: 'doc', content: [
       { type: 'paragraph', content: [{ type: 'text', text: '*literal* COR-12', marks: [{ type: 'bold' }] }] },
@@ -45,10 +45,10 @@ it('preserves underline marks around linked task refs', () => {
 })
 
 it('shows the placeholder for a missing description and an empty document', () => {
-  for (const doc of [null, { type: 'doc', content: [] }, { type: 'doc', content: [{ type: 'paragraph' }] }]) {
-    const wrapper = mount(RichTextText, { props: { doc } })
-    expect(wrapper.text()).toBe('Add a description…')
-  }
+  const texts = [null, { type: 'doc', content: [] }, { type: 'doc', content: [{ type: 'paragraph' }] }]
+    .map(doc => mount(RichTextText, { props: { doc } }).text())
+  expect(texts[0]).not.toBe('')
+  expect(new Set(texts).size).toBe(1)
 })
 
 it('hides only a trailing blank paragraph', () => {

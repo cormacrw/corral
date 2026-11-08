@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { useMutation } from '@tanstack/vue-query'
 import type { DesignVersion, Task } from '@corral/contracts'
+import { isDesignDecidable } from '@corral/core'
 import { actOnInboxItem } from '~/queries/inbox'
-import { ApiError } from '~/queries/client'
+import { errorMessage } from '~/lib/errors'
 import { approveDesign, moveTask } from '~/queries/tasks'
 
 // The human's say on a design version: Approve, Request changes, or Reopen
@@ -14,14 +15,14 @@ const act = useMutation(actOnInboxItem)
 const approval = useMutation(approveDesign)
 
 // Only the version waiting on the human can be decided
-const decidable = computed(() => ['human_review', 'ready_to_merge'].includes(props.task.status) && (props.selected.status === 'submitted' || (props.selected.status === 'approved' && props.selected.id === props.versions[0]?.id && !props.versions.some(v => v.status === 'submitted'))))
+const decidable = computed(() => isDesignDecidable(props.task.status) && (props.selected.status === 'submitted' || (props.selected.status === 'approved' && props.selected.id === props.versions[0]?.id && !props.versions.some(v => v.status === 'submitted'))))
 const reopenable = computed(() => props.task.status === 'approved')
 const requesting = ref(false)
 const feedback = ref('')
 // Saved on the task and sent to the PM in the build Plan session
 const note = ref('')
 function fail(e: unknown) {
-  toast.add({ title: 'Not saved', description: e instanceof ApiError ? e.message : String(e), color: 'error' })
+  toast.add({ title: 'Not saved', description: errorMessage(e), color: 'error' })
 }
 async function approve() {
   const { version } = props.selected

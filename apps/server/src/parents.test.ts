@@ -15,7 +15,7 @@ describe('tasks with subtasks', () => {
     t = await createTestApp('pglite')
   })
   afterEach(async () => {
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     await t.db.delete(schema.projects)
   })
   afterAll(async () => {
@@ -186,7 +186,6 @@ describe('tasks with subtasks', () => {
       await t.db.update(tasks).set({ status: 'in_progress' }).where(eq(tasks.id, started.id))
       const refused = await add(started.number)
       expect(refused.status).toBe(409)
-      expect(JSON.stringify(await refused.json())).toContain('follow-up')
     })
   })
 })

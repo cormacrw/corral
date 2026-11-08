@@ -106,7 +106,6 @@ export function cleanMessage(text: string): string | null {
   return value && value.split(/\s+/).length <= 80 && !/[#*`]/.test(value) ? value : null
 }
 
-// The arrivals that already have a message
 export async function storedMessages(db: Executor, arrivals: string[]): Promise<Map<string, string>> {
   if (arrivals.length === 0) return new Map()
   const rows = await db.select().from(schema.inboxMessages).where(inArray(schema.inboxMessages.arrival, arrivals))

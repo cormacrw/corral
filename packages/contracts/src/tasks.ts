@@ -1,7 +1,5 @@
-import { EVIDENCE_KINDS, REVIEW_VERDICTS, richTextIssue, TASK_PRIORITIES, TASK_TYPES, type Actor, type AgentRole, type EpicReviewMode, type EvidenceKind, type ParentStage, type ReviewVerdict, type TaskKind, type TaskPriority, type TaskStatus, type TaskType } from '@corral/core'
+import { EVIDENCE_KINDS, RESOLVE_TARGETS, REVIEW_VERDICTS, richTextIssue, TASK_PRIORITIES, TASK_TYPES, type Actor, type AgentRole, type CriterionVerdict, type GateCheck, type EpicReviewMode, type EvidenceKind, type ParentStage, type ReasonStatus, type ReviewVerdict, type TaskKind, type TaskPriority, type TaskStatus, type TaskType } from '@corral/core'
 import { z } from 'zod'
-
-// ── Tasks ───────────────────────────────────────────────────────────────────
 
 // Structural safety only; semantic Ready checks belong in core.
 export const richTextDocument = z.looseObject({ type: z.literal('doc') }).superRefine((doc, ctx) => {
@@ -43,6 +41,11 @@ export const patchTaskInput = z.object({
 })
 export type PatchTaskInput = z.infer<typeof patchTaskInput>
 
+// DELETE /projects/:slug/tasks/:number, whose body is optional
+export const deleteTaskInput = z.object({
+  reason: z.string().optional()
+})
+
 export const addCommentInput = z.object({
   body: z.string().trim().min(1),
   pinned: z.boolean().default(false)
@@ -81,7 +84,7 @@ export const humanTransitionInput = z.discriminatedUnion('type', [
   z.object({ type: z.literal('accept') }),
   z.object({ type: z.literal('send_back') }),
   z.object({ type: z.literal('human_request_changes'), feedback: z.string().trim().min(1).optional() }),
-  z.object({ type: z.literal('resolve'), to: z.enum(['backlog', 'ready', 'in_progress']) })
+  z.object({ type: z.literal('resolve'), to: z.enum(RESOLVE_TARGETS) })
 ])
 export type HumanTransitionInput = z.infer<typeof humanTransitionInput>
 
@@ -170,7 +173,7 @@ interface TaskFields {
   mergedAt: string | null
   submission: TaskSubmissionSummary | null
   // Required checks seen passing when the task reached Human review
-  gateChecks: { name: string, url: string | null }[] | null
+  gateChecks: GateCheck[] | null
   // The approved design version a build task builds, and the screens it
   // covers (D20)
   design: TaskDesignPin | null
@@ -182,8 +185,8 @@ interface TaskFields {
 // Draft ownership and status reasons cannot leak into unrelated statuses.
 export type Task = TaskFields & (
   | { status: 'draft', statusReason: null, draftSession: { id: string, title: string } | null }
-  | { status: 'blocked' | 'failed', statusReason: string, draftSession: null }
-  | { status: Exclude<TaskStatus, 'draft' | 'blocked' | 'failed'>, statusReason: null, draftSession: null }
+  | { status: ReasonStatus, statusReason: string, draftSession: null }
+  | { status: Exclude<TaskStatus, 'draft' | ReasonStatus>, statusReason: null, draftSession: null }
 )
 
 export interface TaskDesignPin {
@@ -223,14 +226,13 @@ export const evidenceInputSchema = z.discriminatedUnion('kind', [
   }).strict(),
   z.object({
     ...evidenceInputBase,
-    kind: z.enum(['screenshot', 'video', 'test_output', 'log', 'request', 'text', 'other']),
+    kind: z.enum(EVIDENCE_KINDS).exclude(['note']),
     note: z.string().default(''),
     fileName: z.string({ error: 'A file needs its fileName' }).trim().min(1, 'A file needs its fileName'),
     contentType: z.string({ error: 'A file needs its contentType' }).trim().min(1, 'A file needs its contentType'),
     dataBase64: z.string({ error: 'Pass the path of the file to attach, or use kind "note" to explain a criterion with nothing to show' })
   }).strict()
 ])
-export type EvidenceInput = z.infer<typeof evidenceInputSchema>
 
 export const reviewVerdict = z.enum(REVIEW_VERDICTS)
 
@@ -242,7 +244,7 @@ export interface Review {
   headSha: string
   verdict: ReviewVerdict
   summary: string
-  criteria: { criterionId: string, met: boolean | null, note: string }[]
+  criteria: CriterionVerdict[]
   author: Actor
   createdAt: string
 }

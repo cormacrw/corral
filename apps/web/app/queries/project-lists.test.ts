@@ -4,7 +4,7 @@ import type { Project, Task } from '@corral/contracts'
 import { defineComponent, h, nextTick, ref } from 'vue'
 import { flushPromises } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { api } from '~/composables/useApi'
+import { api } from '~/queries/api'
 import { useAllProjectLists, useProjectLists } from '~/features/projects/composables/useProjectLists'
 import { applyEvent } from './dependencies'
 import { keys } from './keys'
@@ -73,7 +73,6 @@ describe('shared project lists', () => {
     } }), { client })
     await client.invalidateQueries()
     await flushPromises()
-    // Confirm a real refetch error, including the cached empty epic list.
     expect(client.getQueryState(keys[domain].list(project.slug))?.error?.message).toBe('502')
     expect(lists.error.value).toBeNull()
     expect(lists.loading.value).toBe(false)

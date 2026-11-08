@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { planThreadPath } from '~/utils/routes'
 import { planAttention } from '~/features/plan/utils/plan-attention'
 
-const { active, sessions: threads, close: closeThread } = useOpenPlanSessions()
+const { active, sessions: threads, remove: closeThread } = useOpenPlanSessions()
 const { threadColor } = useSidebarData()
 const STATUS_DOT: Record<string, string> = { needs_approval: 'bg-primary', question: 'bg-info', failed: 'bg-destructive' }
 </script>
@@ -19,7 +20,7 @@ const STATUS_DOT: Record<string, string> = { needs_approval: 'bg-primary', quest
       data-testid="plan-thread"
     >
       <NuxtLink
-        :to="`/plan/${thread.id}`"
+        :to="planThreadPath(thread.id)"
         :title="thread.title"
         :aria-current="active === thread.id ? 'page' : undefined"
         class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-sidebar-accent"
@@ -61,7 +62,7 @@ const STATUS_DOT: Record<string, string> = { needs_approval: 'bg-primary', quest
         color="neutral"
         :aria-label="`Close ${thread.title}`"
         class="shrink-0 opacity-0 group-hover/thread:opacity-100 group-focus-within/thread:opacity-100 focus-visible:opacity-100"
-        @click="closeThread(thread)"
+        @click="closeThread(thread.id)"
       />
     </div>
   </div>

@@ -5,6 +5,19 @@ import js from '@eslint/js'
 import stylistic from '@stylistic/eslint-plugin'
 import tseslint from 'typescript-eslint'
 
+// Values with one home in @corral/core, re-typed by hand (.corral/wiki/shared-vocabulary.md).
+// A package config that sets no-restricted-syntax itself must include these.
+export const sharedVocabulary = [
+  {
+    selector: 'Literal[value="claude-code"]',
+    message: 'Runtime ids come from @corral/core: DEFAULT_AGENT_RUNTIME, AGENT_RUNTIMES, runtimeOfCli.'
+  },
+  {
+    selector: 'Literal[regex.pattern="^([A-Za-z]+)-(\\\\d+)$"]',
+    message: 'Read task refs with parseTaskRef or TASK_REF_PATTERN from @corral/core.'
+  }
+]
+
 export default tseslint.config(
   { ignores: ['**/node_modules/**', '**/dist/**', '**/.turbo/**', 'apps/web/**'] },
   js.configs.recommended,
@@ -17,14 +30,8 @@ export default tseslint.config(
     }
   },
   {
-    files: ['apps/server/src/**/*.ts'],
-    ignores: ['apps/server/src/audit.ts', '**/*.test.ts'],
-    rules: {
-      // Entries go through appendAudit, which links an action to its detail
-      'no-restricted-syntax': ['error', {
-        selector: 'CallExpression[callee.property.name=/^(insert|update|delete)$/] > :matches(Identifier[name="auditLog"], MemberExpression[property.name="auditLog"])',
-        message: 'Write audit entries with appendAudit from audit.ts. The audit log is append-only.'
-      }]
-    }
+    files: ['**/*.ts'],
+    ignores: ['packages/core/**', '**/*.test.ts'],
+    rules: { 'no-restricted-syntax': ['error', ...sharedVocabulary] }
   }
 )

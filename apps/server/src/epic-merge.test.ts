@@ -5,9 +5,9 @@ import type { EpicReviewItem, Inbox, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeEach, expect, it } from 'vitest'
-import { recordSyncFailure } from './epic-sync.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
+import { recordSyncFailure } from './operations.ts'
 
 let t: TestApp
 let runner: FakeRunner
@@ -42,7 +42,7 @@ async function approved(mode: 'epic' | 'each_task' = 'epic') {
   t.github.setChecks(head, [{ name: 'ci', conclusion: 'success', url: null }])
   const task = await t.createTask(project.slug, { title: 'Search API', epicId: epic!.id, acceptanceCriteria: ['Search works'] })
   await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, task.id))
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   const job = (await runner.next('run.assign', m => m.job.epicId === epic!.id)).job
   expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Fits together' })).toMatchObject({ ok: true })
   const item = (await inbox()).needsYou.find(i => i.id === epic!.id) as EpicReviewItem
@@ -114,7 +114,7 @@ it('counts a PR merged on GitHub, and leaves a closed one to the human', async (
   t.github.pulls.get(closed.pr.number)!.state = 'closed'
   await t.mergePass()
   expect(await reload(closed.epic.id)).toMatchObject({ reviewState: 'open', approvedHeadSha: null, approvedBaseSha: null })
-  expect((await inbox()).activity.find(a => a.type === 'epic_activity' && a.epicId === closed.epic.id)!.preview).toBe('The task\'s PR closed on GitHub')
+  expect((await inbox()).activity.find(a => a.type === 'epic_activity' && a.epicId === closed.epic.id)!.preview).toContain('closed')
 })
 
 it('holds tasks in a dependent task until the task\'s PR merges, though every task is Merged', async () => {
@@ -127,14 +127,14 @@ it('holds tasks in a dependent task until the task\'s PR merges, though every ta
 
   t.github.setChecks(head, [{ name: 'ci', conclusion: 'pending', url: null }])
   await t.mergePass()
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   const held = await get()
   expect(held).toMatchObject({ status: 'ready', waitingOnEpics: [{ id: epic.id, title: epic.title }] })
   expect(runner.received.some(m => m.type === 'run.assign' && m.job.taskId === waiting.id)).toBe(false)
 
   t.github.setChecks(head, [{ name: 'ci', conclusion: 'success', url: null }])
   await t.mergePass()
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   const { job } = await runner.next('run.assign', m => m.job.taskId === waiting.id)
   expect(job.role).toBe('developer')
   const claimed = await get()

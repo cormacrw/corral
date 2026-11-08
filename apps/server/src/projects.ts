@@ -1,11 +1,15 @@
 import type { CreateProjectInput, PatchProjectInput, Project } from '@corral/contracts'
 import type { Actor } from '@corral/core'
-import { schema, type Executor } from '@corral/db'
-import { asc, eq } from 'drizzle-orm'
+import { schema, type Executor, type ProjectRow } from '@corral/db'
+import { asc, eq, sql } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
+import { blobVersion } from './blob-store.ts'
 import { notFound } from './errors.ts'
 
-type ProjectRow = typeof schema.projects.$inferSelect
+// How the Inbox names a project on an item
+export function projectTag(project: Pick<ProjectRow, 'id' | 'slug' | 'name' | 'thumbnailColor' | 'thumbnailBlob'>) {
+  return { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: thumbnailUrl(project) }
+}
 
 export function toProject(row: ProjectRow): Project {
   return {
@@ -32,6 +36,11 @@ export function toProject(row: ProjectRow): Project {
 
 export function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'project'
+}
+
+// The title part of a branch name Corral creates
+export function branchSlug(title: string): string {
+  return slugify(title).slice(0, 40).replace(/-+$/, '')
 }
 
 export async function listProjects(db: Executor): Promise<Project[]> {
@@ -80,7 +89,7 @@ export async function createProject(db: Executor, input: CreateProjectInput, act
 
 // Content hashes version the URL without adding a second source of truth.
 export function thumbnailUrl(project: Pick<ProjectRow, 'slug' | 'thumbnailBlob'>): string | null {
-  return project.thumbnailBlob ? `/api/projects/${encodeURIComponent(project.slug)}/thumbnail?v=${project.thumbnailBlob.slice(0, 12)}` : null
+  return project.thumbnailBlob ? `/api/projects/${encodeURIComponent(project.slug)}/thumbnail?v=${blobVersion(project.thumbnailBlob)}` : null
 }
 
 export async function setProjectThumbnail(db: Executor, project: ProjectRow, blob: string | null, actor: Actor): Promise<Project> {
@@ -89,4 +98,14 @@ export async function setProjectThumbnail(db: Executor, project: ProjectRow, blo
     await appendAudit(tx, { projectId: project.id, actor }, auditEvent('project.updated', { changed: ['thumbnailBlob'] }))
     return toProject(row!)
   })
+}
+
+// The project's next task number. Takes the project row lock, which is what
+// keeps numbers sequential under concurrent creates.
+export async function allocateTaskNumber(tx: Executor, projectId: string): Promise<number> {
+  const [allocated] = await tx.update(schema.projects)
+    .set({ nextTaskNumber: sql`${schema.projects.nextTaskNumber} + 1` })
+    .where(eq(schema.projects.id, projectId))
+    .returning({ number: sql<number>`${schema.projects.nextTaskNumber} - 1` })
+  return allocated!.number
 }

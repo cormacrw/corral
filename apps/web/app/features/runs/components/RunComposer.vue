@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Run } from '@corral/contracts'
-import type { AgentRuns } from '~/features/runs/composables/useAgentRuns'
+import type { AgentRuns } from '~/features/agents/composables/useAgentRuns'
 import { timeAgo } from '~/utils/labels'
 import { runComposer } from '~/features/runs/utils/run-composer'
 

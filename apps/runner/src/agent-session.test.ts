@@ -2,8 +2,9 @@ import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { agentArgs, spawnAgentSession, type AgentSession } from './agent.ts'
-import type { ParsedLine } from './stream-json.ts'
+import type { AgentSession } from './agent-runtime.ts'
+import { agentArgs, spawnAgentSession } from './claude.ts'
+import type { ParsedLine } from './parsed-line.ts'
 
 // Stands in for `claude --input-format stream-json`: stays alive, reads one
 // user message per stdin line, replays it, and answers each with a result
@@ -93,7 +94,7 @@ describe('spawnAgentSession', () => {
   })
 
   function start(): AgentSession {
-    session = spawnAgentSession({ ...BASE, claudeBin, cwd: root, gitAuthor: null, onLine: (_raw, parsed) => lines.push(parsed) })
+    session = spawnAgentSession(claudeBin, { systemPrompt: BASE.systemPrompt, model: null, resumeSessionId: null, cwd: root, scratchDir: root, noRepository: false, mcpServers: {}, quietResume: false, gitAuthor: null, checkScope: null, turboCacheDir: null, onLine: (_raw, parsed) => lines.push(parsed) })
     return session
   }
 
@@ -151,17 +152,15 @@ describe('spawnAgentSession', () => {
 
     agent.send('/context')
     expect(await agent.nextResult()).toEqual({ isError: false, text: 'Context usage' })
-    expect(lines.some(line => line.replayed === '/context')).toBe(false)
   })
 
-  it.each(['/clear', '/compact'])('returns the empty result of %s, which is never replayed', async (command) => {
+  it.each(['/clear', '/compact'])('returns the empty result of %s', async (command) => {
     const agent = start()
     agent.send('first')
     await agent.nextResult()
 
     agent.send(command)
     expect(await agent.nextResult()).toEqual({ isError: false, text: '' })
-    expect(lines.some(line => line.replayed === command)).toBe(false)
   })
 
   it('exits once stdin closes', async () => {

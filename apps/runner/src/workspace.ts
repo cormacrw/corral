@@ -1,52 +1,32 @@
-import type { RunJob } from '@corral/contracts'
-import type { AgentRole } from '@corral/core'
-import { mkdir, readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
-import { join, relative, resolve, sep } from 'node:path'
-import type { GitAuthor } from './config.ts'
-import { exec, git } from './exec.ts'
-import { barePath, exists, syncRepository, withRepoLock } from './repos.ts'
-import { DEFAULT_ROLE_INSTRUCTIONS } from './role-defaults.ts'
+import { isGlobalPmJob, type RunJob } from '@corral/contracts'
+import { mkdir, readFile, rm } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { PUSH_TIMEOUT_MS } from './budgets.ts'
+import { FALLBACK_COMMITTER, type GitAuthor } from './config.ts'
+import { git } from './exec.ts'
+import { exists, globalSessionPath, pmWorktreePath, workspaceKey, worktreePath } from './layout.ts'
+import { openRepo, remoteRef, type Repo } from './repos.ts'
 
-// Worktrees under <dataDir>/worktrees (architecture.md, Layout on disk):
-// one per task for the developer, kept between revisions, and a separate
-// one at the PR commit for the reviewer (flows.md step 6)
-export function worktreePath(dataDir: string, taskId: string, role: AgentRole): string {
-  return join(dataDir, 'worktrees', role === 'reviewer' ? `${taskId}-review` : taskId)
-}
+// The checkouts agents work in, and the git work on them the runner does itself
 
-// A PM checkout per Plan session (D9). It must stay put between turns:
-// `claude --resume` finds a session by its working directory.
-export function pmWorktreePath(dataDir: string, projectId: string, planSessionId: string): string {
-  return join(dataDir, 'worktrees', `pm-${projectId}-${planSessionId}`)
-}
-
-// One Turbo cache per project on this runner, shared by its worktrees, so a
-// new task's unchanged packages replay lint, typecheck and build. Keyed by
-// project, so one project's entries never replay in another
-// (.corral/wiki/turbo-cache.md).
-export function turboCachePath(dataDir: string, projectId: string): string {
-  return join(dataDir, 'turbo-cache', projectId)
-}
-
-export interface Workspace {
+interface Workspace {
   path: string
   bare: string | null
 }
 
-// Fetches the bare clone and creates or reuses the worktree for this run.
 // Returns an error message instead of throwing, so the run can fail cleanly.
 export async function prepareWorkspace(dataDir: string, job: RunJob): Promise<Prepared> {
-  if (job.role === 'pm' && job.projectId === null) {
+  if (isGlobalPmJob(job)) {
     if (!job.planSessionId) return { workspace: null, error: 'The job has no plan session' }
-    const path = join(dataDir, 'sessions', job.planSessionId)
+    const path = globalSessionPath(dataDir, job.planSessionId)
     await mkdir(path, { recursive: true })
     return { workspace: { path, bare: null }, error: null }
   }
-  const syncError = await syncRepository(dataDir, job.repository)
+  const repo = openRepo(dataDir, job.repository)
+  const syncError = await repo.sync()
   if (syncError) return { workspace: null, error: `Could not fetch ${job.repository}: ${syncError}` }
-  const bare = barePath(dataDir, job.repository)
   // Adding worktrees writes to the bare clone too, so it takes the same lock
-  return withRepoLock(bare, () => checkOut(dataDir, bare, job))
+  return repo.withLock(() => checkOut(dataDir, repo, job))
 }
 
 type Prepared = { workspace: Workspace, error: null } | { workspace: null, error: string }
@@ -54,7 +34,8 @@ type Prepared = { workspace: Workspace, error: null } | { workspace: null, error
 // A checkout of a large repository under load can take minutes
 const CHECKOUT_TIMEOUT_MS = 10 * 60_000
 
-async function checkOut(dataDir: string, bare: string, job: RunJob): Promise<Prepared> {
+async function checkOut(dataDir: string, repo: Repo, job: RunJob): Promise<Prepared> {
+  const bare = repo.bare
   // Forget worktrees whose folders were removed by hand
   await git(['worktree', 'prune'], { cwd: bare })
   const prepared = (path: string, error: string | null): Prepared => error ? { workspace: null, error } : { workspace: { path, bare }, error: null }
@@ -66,7 +47,7 @@ async function checkOut(dataDir: string, bare: string, job: RunJob): Promise<Pre
     return prepared(path, await checkoutOrAdd(bare, path, `origin/${job.defaultBranch}`))
   }
 
-  const workId = job.taskId ?? (job.epicId ? `epic-${job.epicId}` : null)
+  const workId = workspaceKey(job)
   if (!workId) return { workspace: null, error: 'The job has no task' }
   const path = worktreePath(dataDir, workId, job.role)
 
@@ -91,8 +72,7 @@ async function checkOut(dataDir: string, bare: string, job: RunJob): Promise<Pre
   // Developer: reuse the worktree between revisions (D10) so uncommitted
   // work is never lost; otherwise start the branch from origin
   if (await keptWorktree(bare, path)) return prepared(path, job.continueFrom ? await catchUp(path, job.continueFrom) : null)
-  const remote = await git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${job.branch}`], { cwd: bare })
-  const start = remote.code === 0 ? `origin/${job.branch}` : `origin/${job.baseBranch ?? job.defaultBranch}`
+  const start = await repo.revParse(remoteRef(job.branch)) ? `origin/${job.branch}` : `origin/${job.baseBranch ?? job.defaultBranch}`
   return prepared(path, await addWorktree(bare, path, [path, '-B', job.branch, start]))
 }
 
@@ -156,62 +136,6 @@ async function catchUp(path: string, sha: string): Promise<string | null> {
   return `Could not continue from WIP commit ${sha}: ${forward.stderr.trim() || 'git merge failed'}`
 }
 
-// Role instructions live in the repo so each project can set its own rules
-// (D13); the built-in text applies when the file is missing
-export async function readRoleInstructions(worktree: string, role: AgentRole): Promise<string> {
-  const text = await readFile(join(worktree, '.corral', 'agents', `${role}.md`), 'utf8').catch(() => null)
-  return text?.trim() || DEFAULT_ROLE_INSTRUCTIONS[role] || ''
-}
-
-// Every role's project brief, so a first turn doesn't spend model calls finding
-// the top-level docs. Searched in this order; the first that exists wins.
-const BRIEF_FILES = ['CORRAL.md', join('.corral', 'CORRAL.md'), 'CLAUDE.md']
-export const MAX_BRIEF_CHARS = 20_000
-
-async function wikiPages(worktree: string): Promise<string[]> {
-  const wiki = join(worktree, '.corral', 'wiki')
-  const entries = await readdir(wiki, { recursive: true, withFileTypes: true }).catch(() => [])
-  return entries
-    .filter(entry => entry.isFile())
-    .map(entry => relative(wiki, join(entry.parentPath, entry.name)).split(sep).join('/'))
-    .sort()
-}
-
-// Always includes worktree status, even when no project docs exist.
-export async function readProjectBrief(worktree: string): Promise<string> {
-  let doc: { name: string, text: string } | null = null
-  for (const name of BRIEF_FILES) {
-    const text = await readFile(join(worktree, name), 'utf8').catch(() => null)
-    if (text?.trim()) {
-      doc = { name: name.split(sep).join('/'), text: text.trim() }
-      break
-    }
-  }
-  const pages = await wikiPages(worktree)
-  const [hasWiki, hasDependencies] = await Promise.all([
-    stat(join(worktree, '.corral', 'wiki')).then(s => s.isDirectory(), () => false),
-    stat(join(worktree, 'node_modules')).then(s => s.isDirectory(), () => false)
-  ])
-
-  const parts: string[] = []
-  if (doc) parts.push(`### ${doc.name}`, '', doc.text, '')
-  if (pages.length > 0) parts.push('### Wiki pages in .corral/wiki/', '', ...pages.map(page => `- ${page}`), '')
-  let body = parts.join('\n').trim()
-  if (body.length > MAX_BRIEF_CHARS) {
-    body = `${body.slice(0, MAX_BRIEF_CHARS)}\n\n[Brief truncated: it is longer than ${MAX_BRIEF_CHARS.toLocaleString('en')} characters. Read ${doc ? doc.name : 'the files above'} for the rest if you need it.]`
-  }
-  const listed = [doc?.name, pages.length > 0 ? 'the .corral/wiki/ file list' : null].filter(Boolean).join(' and ')
-  return [
-    '## Project brief',
-    '',
-    `Worktree status: .corral/wiki/ ${hasWiki ? 'exists' : 'does not exist'}; dependencies (node_modules) are ${hasDependencies ? 'installed' : 'not installed'} in this worktree.`,
-    '',
-    listed ? `The runner has already read ${listed} from your checkout and included it below, so don't read ${doc ? 'that file' : 'it'} again. Open other files, including individual wiki pages, only when a request needs them.` : 'No project brief file (CORRAL.md, .corral/CORRAL.md or CLAUDE.md) was found.',
-    '',
-    body
-  ].join('\n')
-}
-
 export async function headSha(worktree: string, timeoutMs?: number): Promise<string | null> {
   const result = await git(['rev-parse', 'HEAD'], { cwd: worktree, ...(timeoutMs === undefined ? {} : { timeoutMs }) })
   return result.code === 0 ? result.stdout.trim() : null
@@ -225,7 +149,7 @@ export async function mergeBase(worktree: string, ref: string): Promise<string |
 
 // The runner is the only thing that pushes, and only to the branch the run
 // holds a lease for (D8). Returns the pushed commit.
-export async function pushBranch(worktree: string, branch: string, timeoutMs = 5 * 60_000): Promise<{ sha: string, error: null } | { sha: null, error: string }> {
+export async function pushBranch(worktree: string, branch: string, timeoutMs = PUSH_TIMEOUT_MS): Promise<{ sha: string, error: null } | { sha: null, error: string }> {
   const sha = await headSha(worktree)
   if (!sha) return { sha: null, error: 'The worktree has no commits' }
   const push = await git(['push', '--force-with-lease', 'origin', `HEAD:refs/heads/${branch}`], { cwd: worktree, timeoutMs })
@@ -233,9 +157,7 @@ export async function pushBranch(worktree: string, branch: string, timeoutMs = 5
   return { sha, error: null }
 }
 
-export const WIP_AUTHOR: GitAuthor = { name: 'Corral', email: 'corral@localhost' }
-
-export interface SavedWork {
+interface SavedWork {
   // The WIP commit; null when there was nothing to save or it couldn't be made
   sha: string | null
   pushed: boolean
@@ -262,7 +184,7 @@ export async function saveStoppedWork(worktree: string, branch: string, message:
   const added = await git(['add', '--all'], options())
   if (added.code !== 0) return failed(added.stderr.trim() || 'git add failed')
   // A runner with no identity of its own still has to save the work
-  const configured = gitAuthor ?? ((await git(['config', 'user.email'], options())).code === 0 ? null : WIP_AUTHOR)
+  const configured = gitAuthor ?? ((await git(['config', 'user.email'], options())).code === 0 ? null : FALLBACK_COMMITTER)
   const identity = configured
     ? { GIT_AUTHOR_NAME: configured.name, GIT_AUTHOR_EMAIL: configured.email, GIT_COMMITTER_NAME: configured.name, GIT_COMMITTER_EMAIL: configured.email }
     : {}
@@ -276,171 +198,31 @@ export async function saveStoppedWork(worktree: string, branch: string, message:
   return { sha: pushed.sha, pushed: true, error: null }
 }
 
-export async function hasUncommittedChanges(worktree: string, timeoutMs?: number): Promise<boolean> {
+async function hasUncommittedChanges(worktree: string, timeoutMs?: number): Promise<boolean> {
   const status = await git(['status', '--porcelain'], { cwd: worktree, ...(timeoutMs === undefined ? {} : { timeoutMs }) })
   return status.code !== 0 || status.stdout.trim().length > 0
 }
 
 // Removes a worktree unless it holds uncommitted work (PRD §7.4). Returns
 // whether it was removed.
-export function removeWorktree(bare: string, path: string, force = false): Promise<boolean> {
-  return withRepoLock(bare, async () => {
+export function removeWorktree(repo: Repo, path: string, force = false): Promise<boolean> {
+  return repo.withLock(async () => {
     if (!(await exists(path))) {
-      await git(['worktree', 'prune'], { cwd: bare })
+      await repo.git(['worktree', 'prune'])
       return true
     }
     if (!force && await hasUncommittedChanges(path)) return false
-    const result = await git(['worktree', 'remove', '--force', path], { cwd: bare })
+    const result = await repo.git(['worktree', 'remove', '--force', path])
     if (result.code !== 0) await rm(path, { recursive: true, force: true })
-    await git(['worktree', 'prune'], { cwd: bare })
+    await repo.git(['worktree', 'prune'])
     return true
   })
-}
-
-// Ids are database UUIDs, so anything else under worktrees/ isn't ours
-const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
-const TASK_FOLDER = new RegExp(`^(${UUID})(-review)?$`)
-const PM_FOLDER = new RegExp(`^pm-${UUID}-(${UUID})$`)
-const EPIC_FOLDER = new RegExp(`^epic-(${UUID})(?:-review)?$`)
-const RUN_FOLDER = new RegExp(`^${UUID}$`)
-const RUN_SPOOL = new RegExp(`^(${UUID})\\.jsonl$`)
-
-interface KeepLists {
-  keepTaskIds: string[]
-  keepPlanSessionIds: string[]
-  // An older server doesn't send this, and then epic checkouts are left alone
-  keepEpicIds?: string[] | undefined
-}
-
-// Removes every worktree outside the keep lists. A developer worktree or an
-// orphan with uncommitted changes stays (PRD §7.4); review and PM checkouts
-// are read-only by contract, so theirs are discarded. Scratch and spool files
-// nothing needs go too, without a place in the result: it's about worktrees.
-export async function sweepWorktrees(
-  dataDir: string,
-  keep: KeepLists,
-  pmTurnRunning: (planSessionId: string) => boolean,
-  runIsHere: (runId: string) => boolean = () => true,
-  projectRunning: (projectId: string) => boolean = () => true
-): Promise<{ removed: string[], kept: string[] }> {
-  const root = join(dataDir, 'worktrees')
-  const folders = await readdir(root, { withFileTypes: true }).catch(() => [])
-  const registered = await registeredWorktrees(dataDir)
-  const removed: string[] = []
-  const kept: string[] = []
-  for (const folder of folders) {
-    if (!folder.isDirectory()) continue
-    const task = TASK_FOLDER.exec(folder.name)
-    const planSessionId = PM_FOLDER.exec(folder.name)?.[1]
-    const epicId = keep.keepEpicIds ? EPIC_FOLDER.exec(folder.name)?.[1] : undefined
-    if (!task && !planSessionId && !epicId) continue
-    if (task ? keep.keepTaskIds.includes(task[1]!) : planSessionId ? keep.keepPlanSessionIds.includes(planSessionId) : keep.keepEpicIds!.includes(epicId!)) continue
-
-    const path = join(root, folder.name)
-    const bare = registered.get(await realpath(path))
-    // Nothing awaits between this check and removeWorktree taking its place
-    // in the repo queue, so a turn starting later checks out after the removal
-    if (planSessionId && pmTurnRunning(planSessionId)) continue
-    const force = planSessionId !== undefined || epicId !== undefined || task?.[2] !== undefined
-    const gone = bare ? await removeWorktree(bare, path, force) : await removeOrphan(path)
-    ;(gone ? removed : kept).push(path)
-  }
-  await sweepRunFiles(dataDir, keep, pmTurnRunning, runIsHere).catch((error: unknown) => {
-    console.warn(`Could not sweep the scratch folders: ${error instanceof Error ? error.message : String(error)}`)
-  })
-  await pruneTurboCaches(dataDir, projectRunning).catch((error: unknown) => {
-    console.warn(`Could not prune the Turbo caches: ${error instanceof Error ? error.message : String(error)}`)
-  })
-  return { removed, kept }
-}
-
-// Design copies are read-only, and rm can't empty a read-only folder
-export async function removeScratch(path: string): Promise<void> {
-  await exec('chmod', ['-R', 'u+w', path])
-  await rm(path, { recursive: true, force: true })
-}
-
-// A Plan session's scratch folder goes with its session. A run's goes when the
-// run ends; these are what a runner that died left behind. Nothing awaits
-// between each check and its removal starting, and a new run isn't on disk yet.
-async function sweepRunFiles(dataDir: string, keep: KeepLists, pmTurnRunning: (planSessionId: string) => boolean, runIsHere: (runId: string) => boolean): Promise<void> {
-  const scratch = join(dataDir, 'scratch')
-  for (const folder of await readdir(scratch).catch(() => [])) {
-    const planSessionId = PM_FOLDER.exec(folder)?.[1]
-    const unused = planSessionId
-      ? !keep.keepPlanSessionIds.includes(planSessionId) && !pmTurnRunning(planSessionId)
-      : RUN_FOLDER.test(folder) && !runIsHere(folder)
-    if (unused) await removeScratch(join(scratch, folder))
-  }
-  const spool = join(dataDir, 'spool')
-  for (const file of await readdir(spool).catch(() => [])) {
-    const runId = RUN_SPOOL.exec(file)?.[1]
-    if (runId && !runIsHere(runId)) await rm(join(spool, file), { force: true })
-  }
-}
-
-export const TURBO_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60_000
-export const TURBO_CACHE_MAX_BYTES = 5 * 1024 ** 3
-
-// Turbo never evicts local entries. An entry is a task hash's files
-// (<hash>.tar.zst, <hash>-meta.json, <hash>-manifest.json); its last use is the newest atime or
-// mtime of them. Entries unused for the age limit go, then the oldest until
-// the project is under the size cap. A project with a run on this runner is
-// left alone: its agent may be reading or writing entries right now.
-export async function pruneTurboCaches(
-  dataDir: string,
-  projectRunning: (projectId: string) => boolean,
-  now = Date.now(),
-  limits: { maxAgeMs: number, maxBytes: number } = { maxAgeMs: TURBO_CACHE_MAX_AGE_MS, maxBytes: TURBO_CACHE_MAX_BYTES }
-): Promise<void> {
-  const root = join(dataDir, 'turbo-cache')
-  for (const project of await readdir(root, { withFileTypes: true }).catch(() => [])) {
-    if (!project.isDirectory() || projectRunning(project.name)) continue
-    const folder = join(root, project.name)
-    const entries = new Map<string, { files: string[], used: number, bytes: number }>()
-    for (const file of await readdir(folder, { withFileTypes: true })) {
-      if (!file.isFile()) continue
-      const info = await stat(join(folder, file.name)).catch(() => null)
-      if (!info) continue
-      const hash = /^[^-.]+/.exec(file.name)?.[0] ?? file.name
-      const entry = entries.get(hash) ?? { files: [], used: 0, bytes: 0 }
-      entry.files.push(file.name)
-      entry.used = Math.max(entry.used, info.atimeMs, info.mtimeMs)
-      entry.bytes += info.size
-      entries.set(hash, entry)
-    }
-    const oldestFirst = [...entries.values()].sort((a, b) => a.used - b.used)
-    let total = oldestFirst.reduce((sum, entry) => sum + entry.bytes, 0)
-    for (const entry of oldestFirst) {
-      if (now - entry.used <= limits.maxAgeMs && total <= limits.maxBytes) break
-      for (const file of entry.files) await rm(join(folder, file), { force: true })
-      total -= entry.bytes
-    }
-  }
-}
-
-// Each worktree's real path and its bare clone, as barePath spells it so
-// removeWorktree takes the same lock as the runs. Throws when a clone can't
-// answer: its worktrees would otherwise look like orphans.
-async function registeredWorktrees(dataDir: string): Promise<Map<string, string>> {
-  const repos = join(dataDir, 'repos')
-  const clones = await readdir(repos).catch(() => [])
-  const registered = new Map<string, string>()
-  for (const clone of clones.filter(name => name.endsWith('.git'))) {
-    const bare = join(repos, clone)
-    const list = await git(['worktree', 'list', '--porcelain'], { cwd: bare })
-    if (list.code !== 0) throw new Error(`git worktree list failed in ${clone}: ${list.stderr.trim()}`)
-    for (const [, path] of list.stdout.matchAll(/^worktree (.+)$/gm)) {
-      registered.set(await realpath(path!).catch(() => path!), bare)
-    }
-  }
-  return registered
 }
 
 // Status only runs where the folder has its own working .git: git would
 // otherwise answer for a repository above it, or fail on a dangling .git file
 // that can't report changes at all
-async function removeOrphan(path: string): Promise<boolean> {
+export async function removeOrphan(path: string): Promise<boolean> {
   const hasRepository = await exists(join(path, '.git')) && (await git(['rev-parse', '--git-dir'], { cwd: path })).code === 0
   if (hasRepository && await hasUncommittedChanges(path)) return false
   await rm(path, { recursive: true, force: true })

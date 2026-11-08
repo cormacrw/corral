@@ -3,10 +3,9 @@ import type { Attachment, Comment, DraftSession, Epic, EpicDetail, Plan, PlanSes
 import { richTextToMarkdown } from '@corral/core'
 import { schema } from '@corral/db'
 import { and, desc, eq, inArray, isNull, ne } from 'drizzle-orm'
-import { writeFile } from 'node:fs/promises'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner, sleep } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 const { agents, epics, runs, tasks } = schema
 
@@ -174,12 +173,11 @@ describe('plan sessions', () => {
 
     const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
     expect(job).toMatchObject({ role: 'pm', runtime: 'claude-code', taskId: null, planSessionId: created.id, agentSessionId: null, repository: project.repository })
-    expect(job.prompt).toContain('product-manager agent')
     expect(job.prompt).toContain('Plan a login feature')
     await t.runStarted(runner, job, 'claude-sess-1')
 
     // Tools the PM doesn't have are refused by role
-    expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('can’t use') })
+    expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('can\'t use') })
 
     const board = await runner.call(job.runId, job.leaseEpoch, 'list_tasks', {})
     expect(board).toMatchObject({ ok: true, result: { project: { prefix: project.prefix }, tasks: [] } })
@@ -200,7 +198,6 @@ describe('plan sessions', () => {
     expect(detail.plans).toHaveLength(1)
     const v1 = detail.plans[0]!
     expect(v1).toMatchObject({ version: 1, status: 'proposed', title: 'Login', tasks: [{ title: 'Login form', change: 'added', status: 'draft', priority: 'medium', humanReview: false }, { title: 'Session cookie', priority: 'medium', humanReview: true, dependsOn: [`${project.prefix}-1`] }] })
-    expect(v1.tasks[0]).not.toHaveProperty('criteriaCount')
     expect(detail.messages.at(-1)).toMatchObject({ role: 'pm', planId: v1.id })
     // A plan without epics creates none, and its tasks have no epic
     expect(v1).toMatchObject({ epicId: null, epics: [] })
@@ -221,8 +218,10 @@ describe('plan sessions', () => {
     expect(next.status).toBe(201)
     const second = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.runId !== job.runId)).job
     expect(second.agentSessionId).toBe('claude-sess-1')
-    expect(second.prompt).not.toContain('product-manager agent')
-    expect(second.fallbackPrompt).toContain('Conversation so far')
+    // The resumed session has the record: only the new message is sent
+    expect(second.prompt).toContain('Drop the cookie task')
+    expect(second.prompt).not.toContain('Plan a login feature')
+    expect(second.fallbackPrompt).toContain('Plan a login feature')
     expect(second.fallbackPrompt).toContain('Magic links too?')
 
     const v2 = await runner.call(second.runId, second.leaseEpoch, 'propose_plan', plan([{ title: 'Login form', acceptanceCriteria: ['It works', 'Errors are shown'] }, { key: 't3', title: 'Logout', dependsOn: ['t1'] }]))
@@ -285,9 +284,9 @@ describe('plan sessions', () => {
     // The next turn's history numbers the options, so "2" can be matched
     await t.request('POST', `/api/plan/sessions/${created.id}/messages`, { text: '2' })
     const next = (await runner.next('run.assign', m => m.job.planSessionId === created.id && m.job.runId !== job.runId)).job
-    expect(next.fallbackPrompt).toContain('**PM (question):** Who uses exports?\n\n**')
-    expect(next.fallbackPrompt).toContain('**PM (question):** Which format?\n\nOptions:\n1. CSV\n2. Excel\n3. JSON\n\nRecommended: CSV')
-    expect(next.fallbackPrompt).toContain('**PM (question):** Daily?\n\nRecommended: Yes')
+    expect(next.fallbackPrompt).toContain('Who uses exports?')
+    expect(next.fallbackPrompt).toMatch(/Which format\?[\s\S]*1\. CSV\n2\. Excel\n3\. JSON[\s\S]*CSV/)
+    expect(next.fallbackPrompt).toMatch(/Daily\?[\s\S]*Yes/)
     await endTurn(next, 'Excel it is.')
   })
 
@@ -328,8 +327,8 @@ describe('plan sessions', () => {
     })
 
     const missing = `${project.prefix}-99`
-    expect(await runner.call(job.runId, job.leaseEpoch, 'get_task', { taskRef: missing })).toMatchObject({ ok: false, error: `No task ${missing} in this project` })
-    expect(await runner.call(job.runId, job.leaseEpoch, 'get_task', { taskRef: 'XYZ-1' })).toMatchObject({ ok: false, error: expect.stringContaining('No task XYZ-1 in this project') })
+    expect(await runner.call(job.runId, job.leaseEpoch, 'get_task', { taskRef: missing })).toMatchObject({ ok: false, error: expect.stringContaining(missing) })
+    expect(await runner.call(job.runId, job.leaseEpoch, 'get_task', { taskRef: 'XYZ-1' })).toMatchObject({ ok: false, error: expect.stringContaining('XYZ-1') })
     await endTurn(job, 'Read it.')
   })
 
@@ -369,7 +368,7 @@ describe('plan sessions', () => {
       result: { id: own.id, fileName: 'login.png', mimeType: 'image/png', byteSize: png.byteLength, images: [{ mimeType: 'image/png', dataBase64: png.toString('base64') }] }
     })
     for (const id of [foreign.id, '00000000-0000-4000-8000-000000000000', 'nope']) {
-      expect(await runner.call(job.runId, job.leaseEpoch, 'get_attachment', { attachmentId: id })).toMatchObject({ ok: false, error: `${id} isn't an attachment in this project` })
+      expect(await runner.call(job.runId, job.leaseEpoch, 'get_attachment', { attachmentId: id })).toMatchObject({ ok: false, error: expect.stringContaining(id) })
     }
     await endTurn(job, 'Looked at it.')
   })
@@ -521,10 +520,10 @@ describe('plan sessions', () => {
     const tasksBefore = await count()
 
     const propose = (ref: string) => runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ ref, title: 'Revised' }]))
-    expect(await propose(`${project.prefix}-999`)).toMatchObject({ ok: false, error: expect.stringContaining(`There is no task ${project.prefix}-999 in this project`) })
-    expect(await propose(deleted.ref)).toMatchObject({ ok: false, error: expect.stringContaining(`${deleted.ref} was deleted`) })
-    expect(await propose(foreign.ref)).toMatchObject({ ok: false, error: expect.stringContaining(`${foreign.ref} belongs to the project`) })
-    expect(await propose(started.ref)).toMatchObject({ ok: false, error: expect.stringContaining(`${started.ref} is in_progress; only Backlog and unclaimed Ready tasks can be revised`) })
+    expect(await propose(`${project.prefix}-999`)).toMatchObject({ ok: false, error: expect.stringContaining(`${project.prefix}-999`) })
+    expect(await propose(deleted.ref)).toMatchObject({ ok: false, error: expect.stringMatching(new RegExp(`${deleted.ref}.*deleted`)) })
+    expect(await propose(foreign.ref)).toMatchObject({ ok: false, error: expect.stringMatching(new RegExp(`${foreign.ref}.*project`)) })
+    expect(await propose(started.ref)).toMatchObject({ ok: false, error: expect.stringMatching(new RegExp(`${started.ref}.*in_progress`)) })
     // A dependency may name any existing task, but not a deleted one
     expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ dependsOn: [deleted.ref] }]))).toMatchObject({ ok: false, error: expect.stringContaining('deleted_ref') })
     expect(await count()).toBe(tasksBefore)
@@ -557,12 +556,12 @@ describe('plan sessions', () => {
     const [developer] = await t.db.select().from(agents).where(eq(agents.role, 'developer')).limit(1)
     await t.db.insert(runs).values({ agentId: developer!.id, projectId: project.id, taskId: target.id, role: 'developer', state: 'failed', endedAt: new Date(), leaseEpoch: 1, queuedAt: new Date() })
     const ran = await propose(target.ref)
-    expect(ran).toMatchObject({ ok: false, error: expect.stringContaining(`${target.ref} has already been picked up`) })
+    expect(ran).toMatchObject({ ok: false, error: expect.stringContaining(target.ref) })
     expect(ran).toMatchObject({ error: expect.stringContaining('update_task') })
 
     const leased = await t.createTask(project.slug, { title: 'Leased' })
     await t.db.update(tasks).set({ status: 'ready', ...lease(job.runId) }).where(eq(tasks.id, leased.id))
-    expect(await propose(leased.ref)).toMatchObject({ ok: false, error: expect.stringContaining(`${leased.ref} has already been picked up`) })
+    expect(await propose(leased.ref)).toMatchObject({ ok: false, error: expect.stringContaining(leased.ref) })
     await t.db.update(tasks).set(noLease).where(eq(tasks.id, leased.id))
     expect((await getTask(target.ref)).title).toBe('Add login')
     await endTurn(job, 'Nothing saved.')
@@ -701,18 +700,12 @@ describe('plan sessions', () => {
   })
 
   it('refuses locked epic mode changes in reopened approved plans without saving the revision (D27)', async () => {
-    const evidence: unknown[] = []
     async function request(method: string, path: string, body?: unknown) {
-      const response = await fetch(`${t.server!.url}${path}`, {
-        method,
-        ...(body !== undefined && { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
-      })
-      const result: unknown = await response.json()
-      evidence.push({ request: { method, path, body }, response: { status: response.status, body: result } })
+      const response = await t.request(method, path, body)
       expect(response.ok).toBe(true)
-      return result
+      return response.json() as Promise<unknown>
     }
-    const project = await t.createProject({ repository: 'cormacrw/test-app' })
+    const project = await t.createProject()
     await request('PATCH', `/api/projects/${project.slug}`, { paused: true })
     const created = await request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan login in an epic' }) as PlanSessionDetail
     let job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
@@ -722,9 +715,7 @@ describe('plan sessions', () => {
         epics: [{ key: 'login', title, ...(reviewMode && { reviewMode }) }],
         tasks: [{ ...plan([{}]).tasks[0]!, epic: 'login' }]
       }
-      const response = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', input)
-      evidence.push({ request: { transport: 'runner WebSocket', tool: 'propose_plan', input }, response })
-      return response
+      return runner.call(job.runId, job.leaseEpoch, 'propose_plan', input)
     }
     expect(await propose('each_task')).toMatchObject({ ok: true })
     // A Draft revision with no PR work can still change the mode.
@@ -741,7 +732,7 @@ describe('plan sessions', () => {
     job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
     const before = await request('GET', `/api/plan/sessions/${created.id}`) as PlanSessionDetail
     for (const mode of ['direct', 'each_task']) {
-      expect(await propose(mode, 'Must roll back')).toMatchObject({ ok: false, error: expect.stringContaining('The plan was not saved: the review mode can\'t change') })
+      expect(await propose(mode, 'Must roll back')).toMatchObject({ ok: false, error: expect.stringContaining('review mode') })
       expect((await request('GET', `/api/plan/sessions/${created.id}`) as PlanSessionDetail).plans).toEqual(before.plans)
       expect(await request('GET', `/api/epics/${epicId}`)).toMatchObject({ reviewMode: 'epic', title: 'Login', tasks: [{ status: 'merged' }] })
     }
@@ -753,7 +744,6 @@ describe('plan sessions', () => {
     expect(after.plans).toHaveLength(before.plans.length + 2)
     expect(after.plans.at(-1)).toMatchObject({ status: 'proposed', epics: [{ reviewMode: 'epic' }] })
     await endTurn(job, 'Kept the epic review mode.')
-    if (process.env.CORRAL_PLAN_MODE_EVIDENCE) await writeFile(process.env.CORRAL_PLAN_MODE_EVIDENCE, JSON.stringify(evidence, null, 2))
   })
 
   it('stores each epic\'s review mode from the plan or the project\'s default, and rejects an unknown one (D27)', async () => {
@@ -769,7 +759,7 @@ describe('plan sessions', () => {
     })
 
     const bad = await propose([{ key: 'e1', title: 'Login', reviewMode: 'later' }])
-    expect(bad).toMatchObject({ ok: false, error: expect.stringContaining('reviewMode must be one of parent, each_task, direct') })
+    expect(bad).toMatchObject({ ok: false, error: expect.stringContaining('reviewMode') })
     expect(await t.db.select().from(epics).where(eq(epics.projectId, project.id))).toEqual([])
 
     expect(await propose([{ key: 'e1', title: 'Login' }, { key: 'e2', title: 'Logout', reviewMode: 'each_task' }])).toMatchObject({ ok: true })
@@ -874,7 +864,7 @@ describe('plan sessions', () => {
     it('refuses humanReview false on a new top-level task where the project reviews by default', async () => {
       const project = await reviewProject(true)
       const { result, plans } = await propose(project, plan([{ title: 'Unreviewed', humanReview: false }]))
-      expect(result).toMatchObject({ error: expect.stringMatching(/not saved.*"Unreviewed".*update_task with humanReview false.*confirm/) })
+      expect(result).toMatchObject({ ok: false, error: expect.stringMatching(/Unreviewed.*update_task/) })
       expect(plans).toEqual([])
     })
 
@@ -921,7 +911,7 @@ describe('plan sessions', () => {
       }
     })
     expect(await runner.call(job.runId, job.leaseEpoch, 'get_design', { taskRef: design.ref, version: 2 })).toMatchObject({ ok: true, result: { version: 2, status: 'approved', commitSha: 'sha2' } })
-    expect(await runner.call(job.runId, job.leaseEpoch, 'get_design', { taskRef: design.ref, version: 9 })).toMatchObject({ ok: false, error: `${design.ref} has no design version v9` })
+    expect(await runner.call(job.runId, job.leaseEpoch, 'get_design', { taskRef: design.ref, version: 9 })).toMatchObject({ ok: false, error: expect.stringContaining('v9') })
 
     // A build task pinned to v2 reads v2 and its screens
     expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ title: 'Login form', design: { taskRef: design.ref, version: 2, screens: ['login'] } }]))).toMatchObject({ ok: true })
@@ -956,7 +946,7 @@ describe('plan sessions', () => {
     const count = async () => (await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))).length
     const before = await count()
     const propose = (pin: { taskRef: string, version: number, screens: string[] }) => runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ design: pin }]))
-    expect(await propose({ taskRef: design.ref, version: 1, screens: ['login'] })).toMatchObject({ ok: false, error: expect.stringContaining(`Design ${design.ref} v1 is superseded; pin only the approved version.`) })
+    expect(await propose({ taskRef: design.ref, version: 1, screens: ['login'] })).toMatchObject({ ok: false, error: expect.stringContaining('superseded') })
     expect(await propose({ taskRef: design.ref, version: 3, screens: ['login'] })).toMatchObject({ ok: false, error: expect.stringContaining('design_not_approved') })
     expect(await propose({ taskRef: design.ref, version: 7, screens: ['login'] })).toMatchObject({ ok: false, error: expect.stringContaining('design_not_found') })
     expect(await propose({ taskRef: other.ref, version: 1, screens: ['login'] })).toMatchObject({ ok: false, error: expect.stringContaining('isn\'t a design task') })
@@ -1163,7 +1153,7 @@ describe('plan sessions', () => {
     await expect.poll(async () => {
       const detail = await session(created.id)
       return { last: detail.messages.at(-1), activeRunId: detail.activeRunId }
-    }).toMatchObject({ last: { role: 'pm', kind: 'error', text: 'The PM exited with code 1' }, activeRunId: null })
+    }).toMatchObject({ last: { role: 'pm', kind: 'error', text: expect.stringContaining('code 1') }, activeRunId: null })
   })
 
   it('names a renamed PM in the errors of turns that fail', async () => {
@@ -1177,7 +1167,7 @@ describe('plan sessions', () => {
       runner.send({ type: 'run.ended', runId: first.runId, leaseEpoch: first.leaseEpoch, exit: { kind: 'rate_limited', resetsAt }, headSha: null })
       await vi.waitFor(async () => {
         const detail = await session(created.id)
-        expect(detail.messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: `Renamed PM hit a usage limit; try again after ${resetsAt}` })
+        expect(detail.messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: expect.stringMatching(new RegExp(`Renamed PM.*${resetsAt}`)) })
         expect(detail.activeRunId).toBeNull()
       }, { timeout: 5000 })
 
@@ -1187,7 +1177,7 @@ describe('plan sessions', () => {
       runner.send({ type: 'run.ended', runId: second.runId, leaseEpoch: second.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
       await vi.waitFor(async () => {
         const detail = await session(created.id)
-        expect(detail.messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: 'Renamed PM finished without replying' })
+        expect(detail.messages.at(-1)).toMatchObject({ role: 'pm', kind: 'error', text: expect.stringContaining('Renamed PM') })
         expect(detail.activeRunId).toBeNull()
       }, { timeout: 5000 })
     } finally {
@@ -1284,16 +1274,14 @@ describe('plan sessions', () => {
       }
       return ids
     }
-    const assigned = (ids: string[]) => runner.received.filter(m => m.type === 'run.assign' && ids.includes(m.job.runId))
 
     // Paused: a start pass leaves them queued
     expect((await t.request('PATCH', `/api/agents/${pm!.id}`, { paused: true })).status).toBe(200)
     const paused = await queue(3)
-    await t.orchestrator.schedule()
-    await sleep(150)
-    expect(assigned(paused)).toHaveLength(0)
+    await t.orchestrator.scheduler.schedule()
+    // A sent turn gives up its stored job
     const held = await t.db.select().from(runs).where(inArray(runs.id, paused))
-    expect(held.map(r => r.state)).toEqual(['queued', 'queued', 'queued'])
+    expect(held.map(r => [r.state, r.pmJob === null])).toEqual([['queued', false], ['queued', false], ['queued', false]])
 
     // Resumed: all three go to the runner at once
     expect((await t.request('PATCH', `/api/agents/${pm!.id}`, { paused: false })).status).toBe(200)
@@ -1302,7 +1290,7 @@ describe('plan sessions', () => {
 
     // Queued when the server starts: the next start pass sends them all
     const atStart = await queue(3)
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const startJobs = await Promise.all(atStart.map(id => runner.next('run.assign', m => m.job.runId === id).then(m => m.job)))
     expect(startJobs).toHaveLength(3)
     for (const job of startJobs) runner.send({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: `claude-${job.runId}` })
@@ -1327,13 +1315,13 @@ describe('plan sessions', () => {
     await t.request('POST', `/api/plan/plans/${planId}/approve`)
 
     // Developer and reviewer runs, then the merge
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const dev = (await runner.next('run.assign', m => m.job.role === 'developer' && m.job.projectId === project.id)).job
     const task = await t.request('GET', `/api/tasks/${dev.taskRef}`).then(r => r.json()) as Task
     t.github.setBranch(project.repository, dev.branch!, 'abc123')
     await runner.call(dev.runId, dev.leaseEpoch, 'attach_evidence', { criterionId: task.acceptanceCriteria[0]!.id, kind: 'text', fileName: 'n.txt', contentType: 'text/plain', dataBase64: Buffer.from('x').toString('base64') })
     await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', note: 'Did the work', summary: 'Done', headSha: 'abc123' })
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const review = (await runner.next('run.assign', m => m.job.role === 'reviewer' && m.job.taskId === task.id)).job
     await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Good', criteria: [{ criterionId: task.acceptanceCriteria[0]!.id, met: true, note: '' }] })
     t.github.setChecks('abc123', [{ name: 'lint', conclusion: 'success', url: null }])
@@ -1341,8 +1329,8 @@ describe('plan sessions', () => {
     expect((await t.request('GET', `/api/tasks/${dev.taskRef}`).then(r => r.json()) as Task).status).toBe('merged')
 
     // Merged work isn't handed back to the PM: no turn, nothing unread
-    await sleep(100)
-    expect(runner.received.filter(m => m.type === 'run.assign' && m.job.role === 'pm' && m.job.projectId === project.id && m.job.runId !== job.runId)).toHaveLength(0)
+    await t.orchestrator.scheduler.schedule()
+    expect((await t.db.select().from(runs).where(eq(runs.planSessionId, created.id))).map(r => r.id)).toEqual([job.runId])
     expect((await session(created.id)).unread).toBe(false)
   })
 

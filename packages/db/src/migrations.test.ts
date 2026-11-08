@@ -182,7 +182,7 @@ describe('migrations', () => {
     await db.execute(sql`insert into acceptance_criteria (task_id, position, text) select id, 0, 'Criterion' from tasks where title = 'B'`)
     await db.execute(sql`insert into evidence (task_id, criterion_id, run_id, round, kind, note, size) select t.id, c.id, r.id, 0, 'note', 'Proof', 0 from tasks t, acceptance_criteria c, runs r where t.title = 'A'`)
     await db.execute(sql`insert into evidence (criterion_id, run_id, round, kind, note, size) select c.id, r.id, 0, 'note', 'Null owner', 0 from acceptance_criteria c, runs r`)
-    const snapshot = async () => (await db.execute(sql`select jsonb_build_object('runs', (select jsonb_agg(to_jsonb(r) - 'retry_context' - 'fix_kind' - 'operation_id' - 'behaviour_changed' - 're_reviewed' - 'cache_write_tokens' - 'session_start') from runs r), 'plans', (select jsonb_agg(p) from plans p), 'evidence', (select jsonb_agg(e) from evidence e)) as records`)).rows
+    const snapshot = async () => (await db.execute(sql`select jsonb_build_object('runs', (select jsonb_agg(to_jsonb(r) - 'retry_context' - 'fix_kind' - 'operation_id' - 'behaviour_changed' - 're_reviewed' - 'cache_write_tokens' - 'session_start' order by r.id) from runs r), 'plans', (select jsonb_agg(p order by p.id) from plans p), 'evidence', (select jsonb_agg(e order by e.id) from evidence e)) as records`)).rows
     const old = await snapshot()
     const error = await migrate(migrationsFolder).then(() => null, (e: unknown) => e)
     expect(error).not.toBeNull()

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { inboxPath } from '~/utils/routes'
 import type { Epic } from '@corral/contracts'
 import { useQuery } from '@tanstack/vue-query'
 import { inboxQuery } from '~/queries/inbox'
@@ -41,7 +42,7 @@ const item = computed(() => inbox.data.value?.needsYou.find(i => i.id === props.
     </p>
     <div v-if="item">
       <AppButton
-        :to="`/inbox/${epic.id}`"
+        :to="inboxPath(epic.id)"
         :label="item.type === 'epic_review' ? 'Review in the Inbox' : 'Open in the Inbox'"
         icon="i-hugeicons-inbox"
         size="sm"

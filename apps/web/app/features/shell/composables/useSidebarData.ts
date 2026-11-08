@@ -1,4 +1,5 @@
 import type { Project } from '@corral/contracts'
+import { useLive } from '~/queries/stream'
 import { agentStatus, projectColor, runnerSummary, taskCounts } from '~/utils/labels'
 
 // Everything the sidebar shows, derived once so its sections stay presentational
@@ -34,7 +35,7 @@ export function useSidebarData() {
   }
   const runnerTone = computed(() => !shell.runner?.online ? 'error' : connection.value === 'open' ? 'success' : 'warning')
   const isActive = (path: string) => route.path === path || route.path.startsWith(`${path}/`)
-  const statusOf = (agent: typeof shell.agents[number]) => agentStatus(agent, now.value, false)?.label
+  const statusOf = (agent: typeof shell.agents[number]) => agentStatus(agent, now.value)?.label
 
   return { shell, lists, counts, isActive, isExpanded, toggle, threadColor, runnerTone, statusOf, runnerSummary }
 }

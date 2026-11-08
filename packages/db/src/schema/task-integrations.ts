@@ -1,7 +1,7 @@
-import type { EpicFixCheck, EpicFixKind, EpicFixReport, EpicRebaseDecision, ResolutionReview } from '@corral/core'
+import { ACTIVE_OPERATION_STATES, EPIC_FIX_KINDS, OPERATION_KINDS, OPERATION_STATES, type EpicFixReport, type EpicRebaseDecision, type GateCheck, type ResolutionReview } from '@corral/core'
 import { sql } from 'drizzle-orm'
 import { check, index, integer, jsonb, pgTable, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
-import { createdAt, updatedAt } from './columns.ts'
+import { createdAt, sqlList, updatedAt } from './columns.ts'
 import { epics } from './epics.ts'
 import { tasks } from './tasks.ts'
 
@@ -38,8 +38,8 @@ export const taskIntegrationOperations = pgTable('task_integration_operations', 
   submissionId: uuid().references(() => taskSubmissions.id, { onDelete: 'cascade' }),
   // The shared branch being advanced: one operation at a time per epic
   epicId: uuid().notNull().references(() => epics.id, { onDelete: 'cascade' }),
-  kind: text({ enum: ['integrate', 'rebase'] }).notNull(),
-  state: text({ enum: ['pending', 'running', 'reconciling', 'succeeded', 'failed'] }).notNull().default('pending'),
+  kind: text({ enum: OPERATION_KINDS }).notNull(),
+  state: text({ enum: OPERATION_STATES }).notNull().default('pending'),
   expectedTargetSha: text().notNull(),
   resultHeadSha: text(),
   // The target branch commit a rebase moves the epic onto
@@ -57,9 +57,9 @@ export const taskIntegrationOperations = pgTable('task_integration_operations', 
   // failed checks of a CI fix, what the developer reported for this candidate,
   // and the runs that came to nothing. Null on a clean rebase and on a
   // resolution task's operation.
-  fix: text({ enum: ['conflict', 'ci', 'review'] }).$type<EpicFixKind>(),
+  fix: text({ enum: EPIC_FIX_KINDS }),
   fixBrief: text(),
-  fixChecks: jsonb().$type<EpicFixCheck[]>(),
+  fixChecks: jsonb().$type<GateCheck[]>(),
   fixReport: jsonb().$type<EpicFixReport>(),
   fixAttempts: integer().notNull().default(0),
   runnerId: text(),
@@ -69,11 +69,11 @@ export const taskIntegrationOperations = pgTable('task_integration_operations', 
   updatedAt: updatedAt()
 }, t => [
   index().on(t.submissionId),
-  uniqueIndex('task_integration_one_active_operation').on(t.submissionId).where(sql`${t.state} in ('pending', 'running', 'reconciling')`),
-  uniqueIndex('task_integration_one_active_per_epic').on(t.epicId).where(sql`${t.state} in ('pending', 'running', 'reconciling')`),
-  check('task_integration_operation_kind', sql`${t.kind} in ('integrate', 'rebase')`),
+  uniqueIndex('task_integration_one_active_operation').on(t.submissionId).where(sql`${t.state} in ${sqlList(ACTIVE_OPERATION_STATES)}`),
+  uniqueIndex('task_integration_one_active_per_epic').on(t.epicId).where(sql`${t.state} in ${sqlList(ACTIVE_OPERATION_STATES)}`),
+  check('task_integration_operation_kind', sql`${t.kind} in ${sqlList(OPERATION_KINDS)}`),
   check('task_integration_operation_subject', sql`(${t.kind} = 'integrate') = (${t.submissionId} is not null) and (${t.kind} = 'rebase') = (${t.ontoSha} is not null)`),
-  check('task_integration_operation_state', sql`${t.state} in ('pending', 'running', 'reconciling', 'succeeded', 'failed')`),
+  check('task_integration_operation_state', sql`${t.state} in ${sqlList(OPERATION_STATES)}`),
   check('task_integration_operation_epoch', sql`${t.leaseEpoch} >= 0`),
   check('task_integration_operation_result', sql`${t.state} <> 'succeeded' or ${t.resultHeadSha} is not null`)
 ])

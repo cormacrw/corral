@@ -1,40 +1,31 @@
-import { isPmGatedTool, neutralPmCall, requiresPmConfirmation, type PlanMessage } from '@corral/contracts'
-import type { Actor, PmAction } from '@corral/core'
+import { neutralPmCall, type PlanMessage, type PmActionDecision } from '@corral/contracts'
+import { SERVER_ACTOR, type Actor, type PmAction } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, eq, sql } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
-import { ApiFailure, failureReason, notFound } from './errors.ts'
+import { failureReason, notFound, requireHuman } from './errors.ts'
 import type { EventBus } from './events.ts'
-import { insertMessage, toMessage } from './plan.ts'
+import { insertMessage, toMessage, touchSession, type PlanSessions } from './plan-sessions.ts'
+import type { PmTools, PreparedPmAction } from './pm-tools.ts'
 
 const { planMessages, planSessions, projects, tasks } = schema
-
-export interface PreparedPmAction {
-  input: Record<string, unknown>
-  summary: string
-  // What the action is bound to: a confirmation can't move to another target
-  targetId: string | null
-  taskId: string | null
-  projectId: string | null
-}
 
 interface Deps {
   db: Database
   events: EventBus
-  prepare(sessionId: string, tool: string, input: unknown): Promise<PreparedPmAction>
-  execute(sessionId: string, tool: string, prepared: PreparedPmAction, actor: Actor): Promise<unknown>
-  sessionChanged(sessionId: string): Promise<void>
+  sessions: Pick<PlanSessions, 'publish' | 'messageSaved'>
+  tools: Pick<PmTools, 'prepare' | 'execute'>
 }
 
 function oneLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
 }
 
-// Every confirm-required tool uses this lifecycle. Its message is also the
-// durable pending-action record, so the card survives reloads and restarts.
 // What a card agreed to, whichever names it was saved under
 const neutralSummary = (summary: string) => summary.replaceAll(/\bepicId\b/g, 'parentId').replaceAll(/\b(?:epic|parent)\b/g, 'task')
 
+// Every confirm card's lifecycle. Its message is also the durable
+// pending-action record, so the card survives reloads and restarts.
 export class PmActions {
   #d: Deps
   constructor(deps: Deps) { this.#d = deps }
@@ -47,33 +38,31 @@ export class PmActions {
       await db.transaction(async (tx) => {
         await tx.update(planMessages).set({ pendingAction: { ...row.pendingAction!, status: 'failed', error } }).where(eq(planMessages.id, row.id))
         await insertMessage(tx, row.sessionId, { role: 'pm', kind: 'action_result', text: `${row.pendingAction!.summary}: ${error}` })
-        await tx.update(planSessions).set({ unread: true, updatedAt: new Date() }).where(eq(planSessions.id, row.sessionId))
+        await touchSession(tx, row.sessionId, { unread: true })
         const [session] = await tx.select().from(planSessions).where(eq(planSessions.id, row.sessionId))
-        await appendAudit(tx, { projectId: session!.projectId, actor: { kind: 'system', component: 'server' } }, auditEvent('pm.action_failed', { actionId: row.id, sessionId: row.sessionId, runId: row.runId, error }))
+        await appendAudit(tx, { projectId: session!.projectId, actor: SERVER_ACTOR }, auditEvent('pm.action_failed', { actionId: row.id, sessionId: row.sessionId, runId: row.runId, error }))
       })
     }
   }
 
-  async propose(sessionId: string, runId: string, tool: string, input: unknown, actor: Actor) {
-    if (!requiresPmConfirmation(tool, input) && !isPmGatedTool(tool)) throw new Error(`Not a confirm-required tool: ${tool}`)
-    const prepared = await this.#d.prepare(sessionId, tool, input)
+  async propose(sessionId: string, runId: string, tool: string, prepared: PreparedPmAction, actor: Actor) {
     const action: PmAction = { tool, input: prepared.input, summary: oneLine(prepared.summary), status: 'pending', targetId: prepared.targetId, error: null, result: null }
     const message = await this.#d.db.transaction(async (tx) => {
       const [session] = await tx.select().from(planSessions).where(eq(planSessions.id, sessionId)).for('update')
       if (!session || session.closedAt) throw new Error('This conversation is closed or no longer exists')
       const row = await insertMessage(tx, sessionId, { role: 'pm', kind: 'confirmation', text: action.summary }, { runId, pendingAction: action })
       await appendAudit(tx, { projectId: prepared.projectId, taskId: prepared.taskId, actor }, auditEvent('pm.action_proposed', { actionId: row.id, sessionId, runId, targetId: action.targetId, tool, input: action.input, summary: action.summary }))
-      await tx.update(planSessions).set({ unread: true, updatedAt: new Date() }).where(eq(planSessions.id, sessionId))
+      await touchSession(tx, sessionId, { unread: true })
       return row
     })
-    this.#d.events.publish({ type: 'plan.message', message: toMessage(message) })
-    await this.#d.sessionChanged(sessionId)
+    this.#d.sessions.messageSaved(message)
+    await this.#d.sessions.publish(sessionId)
     return { confirmationPending: true, actionId: message.id, summary: action.summary, message: 'Confirmation is pending. Nothing has changed. Finish your turn; the human can Confirm or Cancel in the conversation.' }
   }
 
-  async resolve(sessionId: string, actionId: string, decision: 'confirm' | 'cancel', actor: Actor): Promise<PlanMessage> {
-    if (actor.kind !== 'human') throw new ApiFailure(403, { code: 'forbidden' })
-    const { db, events } = this.#d
+  async resolve(sessionId: string, actionId: string, decision: PmActionDecision, actor: Actor): Promise<PlanMessage> {
+    requireHuman(actor)
+    const { db } = this.#d
     const [row] = await db.select().from(planMessages).where(and(eq(planMessages.id, actionId), eq(planMessages.sessionId, sessionId)))
     if (!row?.pendingAction || !row.runId) throw notFound()
     if (row.pendingAction.status !== 'pending') return toMessage(row)
@@ -99,14 +88,14 @@ export class PmActions {
     } else {
       try {
         if (session.closedAt) throw new Error('This conversation is closed')
+        // A card saved before D31 keeps its old names
         const { tool, input } = neutralPmCall(action.tool, action.input)
-        if (!requiresPmConfirmation(tool, input) && !isPmGatedTool(tool)) throw new Error('This tool is no longer available for confirmation')
-        const prepared = await this.#d.prepare(sessionId, tool, input)
+        const prepared = await this.#d.tools.prepare(sessionId, row.runId, tool, input)
         actionProjectId = prepared.projectId
         // The summary is what the human agreed to, so it also catches a task
         // that moved on and came back, such as a new head on a reviewed PR.
         if (prepared.targetId !== action.targetId || neutralSummary(oneLine(prepared.summary)) !== neutralSummary(action.summary)) throw new Error('The target of this action has changed')
-        action.result = await this.#d.execute(sessionId, tool, prepared, { ...actor, viaPm: { sessionId, runId: row.runId } })
+        action.result = await this.#d.tools.execute(sessionId, row.runId, tool, prepared, { ...actor, viaPm: { sessionId, runId: row.runId } })
         action.status = 'confirmed'
       } catch (error) {
         action.status = 'failed'
@@ -129,13 +118,13 @@ export class PmActions {
       if (!alive) return null
       const [message] = await tx.update(planMessages).set({ pendingAction: action }).where(eq(planMessages.id, actionId)).returning()
       const result = await insertMessage(tx, sessionId, { role: 'pm', kind: 'action_result', text })
-      await tx.update(planSessions).set({ unread: true, updatedAt: new Date() }).where(eq(planSessions.id, sessionId))
+      await touchSession(tx, sessionId, { unread: true })
       return { message: message!, result }
     })
     if (!resolved) return toMessage({ ...row, pendingAction: action })
-    events.publish({ type: 'plan.message', message: toMessage(resolved.message) })
-    if (resolved.result) events.publish({ type: 'plan.message', message: toMessage(resolved.result) })
-    await this.#d.sessionChanged(sessionId)
-    return toMessage(resolved.message)
+    const message = this.#d.sessions.messageSaved(resolved.message)
+    this.#d.sessions.messageSaved(resolved.result)
+    await this.#d.sessions.publish(sessionId)
+    return message
   }
 }

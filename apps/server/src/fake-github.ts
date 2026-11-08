@@ -1,13 +1,27 @@
 import type { PullRequestFile } from '@corral/contracts'
-import type { MergeMethod } from '@corral/core'
+import type { GateCheck, MergeMethod } from '@corral/core'
 import { GitHubError, type CheckResult, type Comparison, type GitHubClient, type PullRequest } from './github.ts'
 
-// An in-memory GitHub for tests: branches, PRs, checks and a configurable
-// merge result. Tests push a branch head with `setBranch` the way the runner
-// would, then watch what the orchestrator does with it.
+export interface FakeGitHubSnapshot {
+  nextNumber: number
+  branches: [string, string][]
+  pulls: [number, FakePullRequest][]
+  pullFiles: [number, PullRequestFile[]][]
+  checkResults: [string, CheckResult[]][]
+  comparisons: [string, Comparison][]
+  behind: [string, number][]
+  ciLogs: [string, { step: string | null, log: string }][]
+}
+
+type FakePullRequest = PullRequest & { head: string, base: string, title: string, body: string }
+
+// An in-memory GitHub for tests and the demo (src/demo/): branches, PRs,
+// checks and a configurable merge result. Tests push a branch head with
+// `setBranch` the way the runner would, then watch what the orchestrator does
+// with it. The demo saves and reloads it with `snapshot` and `restore`.
 export class FakeGitHub implements GitHubClient {
   branches = new Map<string, string>()
-  pulls = new Map<number, PullRequest & { head: string, base: string, title: string, body: string }>()
+  pulls = new Map<number, FakePullRequest>()
   // Changed files by PR number
   pullFiles = new Map<number, PullRequestFile[]>()
   checkResults = new Map<string, CheckResult[]>()
@@ -23,8 +37,33 @@ export class FakeGitHub implements GitHubClient {
   behind = new Map<string, number>()
   // What ciFailure answers, by check name; anything else can't be read
   ciLogs = new Map<string, { step: string | null, log: string }>()
-  // The next PR number; public so a saved demo GitHub can carry on from it
   nextNumber = 1
+
+  // Everything but what tests configure per case (call log, merge and
+  // update-branch results, comparisons that fail)
+  snapshot(): FakeGitHubSnapshot {
+    return {
+      nextNumber: this.nextNumber,
+      branches: [...this.branches],
+      pulls: [...this.pulls],
+      pullFiles: [...this.pullFiles],
+      checkResults: [...this.checkResults],
+      comparisons: [...this.comparisons].filter((entry): entry is [string, Comparison] => !(entry[1] instanceof Error)),
+      behind: [...this.behind],
+      ciLogs: [...this.ciLogs]
+    }
+  }
+
+  restore(snapshot: FakeGitHubSnapshot): void {
+    this.nextNumber = snapshot.nextNumber
+    this.branches = new Map(snapshot.branches)
+    this.pulls = new Map(snapshot.pulls)
+    this.pullFiles = new Map(snapshot.pullFiles)
+    this.checkResults = new Map(snapshot.checkResults)
+    this.comparisons = new Map(snapshot.comparisons)
+    this.behind = new Map(snapshot.behind)
+    this.ciLogs = new Map(snapshot.ciLogs)
+  }
 
   #key(repository: string, branch: string): string {
     return `${repository}#${branch}`
@@ -49,9 +88,13 @@ export class FakeGitHub implements GitHubClient {
     this.calls.push({ method, args })
   }
 
+  // Called after every call that changes what GitHub holds
+  protected changed(): void {}
+
   async createBranch(repository: string, branch: string, sha: string): Promise<void> {
     this.#record('createBranch', repository, branch, sha)
     if (!this.branches.has(this.#key(repository, branch))) this.setBranch(repository, branch, sha)
+    this.changed()
   }
 
   async branchHead(repository: string, branch: string): Promise<string | null> {
@@ -59,7 +102,7 @@ export class FakeGitHub implements GitHubClient {
     return this.branches.get(this.#key(repository, branch)) ?? null
   }
 
-  async ciFailure(repository: string, check: { name: string, url: string | null }) {
+  async ciFailure(repository: string, check: GateCheck) {
     this.#record('ciFailure', repository, check.name)
     const found = this.ciLogs.get(check.name)
     if (!found) throw new GitHubError(404, 'No such log')
@@ -77,7 +120,7 @@ export class FakeGitHub implements GitHubClient {
   async openPullRequest(repository: string, input: { head: string, base: string, title: string, body: string }): Promise<PullRequest> {
     this.#record('openPullRequest', repository, input)
     const head = this.branches.get(this.#key(repository, input.head))
-    if (!head) throw new Error(`Branch ${input.head} doesn't exist on ${repository}`)
+    if (!head) throw new GitHubError(422, `Branch ${input.head} doesn't exist on ${repository}`)
     const number = this.nextNumber++
     const pr = {
       number,
@@ -92,21 +135,23 @@ export class FakeGitHub implements GitHubClient {
       ...input
     }
     this.pulls.set(number, pr)
+    this.changed()
     return { ...pr }
   }
 
   async updatePullRequest(repository: string, number: number, input: { title?: string, body?: string }): Promise<void> {
     this.#record('updatePullRequest', repository, number, input)
     const pr = this.pulls.get(number)
-    if (!pr) throw new Error(`No PR #${number}`)
+    if (!pr) throw new GitHubError(404, `No PR #${number}`)
     if (input.title !== undefined) pr.title = input.title
     if (input.body !== undefined) pr.body = input.body
+    this.changed()
   }
 
   async getPullRequest(repository: string, number: number): Promise<PullRequest> {
     this.#record('getPullRequest', repository, number)
     const pr = this.pulls.get(number)
-    if (!pr) throw new Error(`No PR #${number}`)
+    if (!pr) throw new GitHubError(404, `No PR #${number}`)
     return { ...pr }
   }
 
@@ -141,7 +186,7 @@ export class FakeGitHub implements GitHubClient {
   async compare(repository: string, base: string, head: string): Promise<Comparison> {
     this.#record('compare', repository, base, head)
     const result = this.comparisons.get(`${base}...${head}`)
-    if (result === undefined) throw new Error(`No comparison ${base}...${head}`)
+    if (result === undefined) throw new GitHubError(404, `No comparison ${base}...${head}`)
     if (result instanceof Error) throw result
     return result
   }
@@ -151,25 +196,29 @@ export class FakeGitHub implements GitHubClient {
   async updateBranch(repository: string, pull: { number: number, nodeId: string }, expectedHeadSha: string): Promise<boolean> {
     this.#record('updateBranch', repository, pull.number, expectedHeadSha)
     const pr = this.pulls.get(pull.number)
-    if (!pr) throw new Error(`No PR #${pull.number}`)
+    if (!pr) throw new GitHubError(404, `No PR #${pull.number}`)
     if (this.onUpdateBranch) await this.onUpdateBranch()
-    if (!this.updateBranchResult) return false
-    pr.mergeableState = 'clean'
-    return true
+    if (this.updateBranchResult) pr.mergeableState = 'clean'
+    this.changed()
+    return this.updateBranchResult
   }
 
   async merge(repository: string, number: number, method: MergeMethod, expectedHeadSha: string) {
     this.#record('merge', repository, number, method, expectedHeadSha)
     if (this.mergeResult instanceof Error) throw this.mergeResult
     const pr = this.pulls.get(number)
-    if (!pr) throw new Error(`No PR #${number}`)
-    if (pr.headSha !== expectedHeadSha) return { merged: false, sha: null, message: 'Head branch was modified. Review and try the merge again.' }
+    if (!pr) throw new GitHubError(404, `No PR #${number}`)
+    if (pr.headSha !== expectedHeadSha) {
+      this.changed()
+      return { merged: false, sha: null, message: 'Head branch was modified. Review and try the merge again.' }
+    }
     if (this.mergeResult.merged) {
       pr.state = 'closed'
       pr.merged = true
       pr.mergeCommitSha = this.mergeResult.sha
       if (this.mergeResult.sha) this.setBranch(repository, pr.base, this.mergeResult.sha)
     }
+    this.changed()
     return { ...this.mergeResult }
   }
 
@@ -177,10 +226,12 @@ export class FakeGitHub implements GitHubClient {
     this.#record('closePullRequest', repository, number)
     const pr = this.pulls.get(number)
     if (pr) pr.state = 'closed'
+    this.changed()
   }
 
   async deleteBranch(repository: string, branch: string): Promise<void> {
     this.#record('deleteBranch', repository, branch)
     this.branches.delete(this.#key(repository, branch))
+    this.changed()
   }
 }

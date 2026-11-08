@@ -1,20 +1,20 @@
 <script setup lang="ts">
 import { errorMessage } from '~/lib/errors'
-import type { PlanMessage } from '@corral/contracts'
+import type { PlanMessage, PmActionDecision } from '@corral/contracts'
+import { useMutation } from '@tanstack/vue-query'
 import { resolvePlanAction } from '~/queries/plan'
 
 const props = defineProps<{ message: PlanMessage }>()
-const emit = defineEmits<{ resolved: [] }>()
+const resolve = useMutation(resolvePlanAction)
 const busy = ref(false)
 const error = ref<string | null>(null)
 const action = computed(() => props.message.pendingAction!)
-async function decide(decision: 'confirm' | 'cancel') {
+async function decide(decision: PmActionDecision) {
   if (busy.value || action.value.status !== 'pending') return
   busy.value = true
   error.value = null
   try {
-    await resolvePlanAction(props.message.sessionId, props.message.id, decision)
-    emit('resolved')
+    await resolve.mutateAsync({ sessionId: props.message.sessionId, messageId: props.message.id, decision })
   } catch (e) {
     error.value = errorMessage(e)
   } finally {

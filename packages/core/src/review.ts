@@ -23,10 +23,26 @@ export interface ResolutionReview {
 export const EPIC_FIX_KINDS = ['conflict', 'ci', 'review'] as const
 export type EpicFixKind = typeof EPIC_FIX_KINDS[number]
 
-// A failed check, as GitHub named it
-export interface EpicFixCheck {
+// A required check, as GitHub named it
+export interface GateCheck {
   name: string
   url: string | null
+}
+
+// A reviewer's verdict on one acceptance criterion; null met is a human check
+export interface CriterionVerdict {
+  criterionId: string
+  met: boolean | null
+  note: string
+}
+
+// An integration review's finding, with the task refs it concerns (D23)
+export const FINDING_LEVELS = ['blocking', 'non_blocking'] as const
+export type FindingLevel = typeof FINDING_LEVELS[number]
+export interface EpicReviewFinding {
+  level: FindingLevel
+  text: string
+  taskRefs: string[]
 }
 
 // What the developer reported for a candidate, bound to that commit. Only the

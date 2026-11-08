@@ -1,3 +1,7 @@
+<script setup lang="ts">
+import { SECTIONS } from '~/utils/routes'
+</script>
+
 <template>
   <div
     class="flex flex-col items-center gap-3 p-12 text-center"
@@ -11,7 +15,7 @@
     </p>
     <AppButton
       label="Home"
-      to="/home"
+      :to="SECTIONS.home.to"
       color="neutral"
       variant="outline"
     />

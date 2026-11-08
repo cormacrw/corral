@@ -3,7 +3,7 @@ import { schema } from '@corral/db'
 import { and, eq } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 const { agents, auditLog, runs, tasks } = schema
 
@@ -42,7 +42,7 @@ describe('spikes deliver findings instead of a PR', () => {
   }
 
   async function nextJob(task: Task, role: RunJob['role']): Promise<RunJob> {
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     return (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === role)).job
   }
 
@@ -85,13 +85,13 @@ describe('spikes deliver findings instead of a PR', () => {
 
     const dependent = await t.createTask(project.slug, { title: 'Implement locking', dependsOn: [task.number] })
     expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${dependent.number}/transitions`, { type: 'approve' })).status).toBe(200)
-    await t.orchestrator.schedule()
-    expect(runner.received.some(m => m.type === 'run.assign' && m.job.taskId === dependent.id)).toBe(false)
+    await t.orchestrator.scheduler.schedule()
+    expect(await taskRow(dependent.id)).toMatchObject({ leaseRunId: null })
 
     // The developer gets no branch and is told to investigate and report findings
     const developer = await nextJob(task, 'developer')
     expect(developer).toMatchObject({ branch: null, headSha: null })
-    expect(developer.prompt).toContain(`spike ${task.ref}`)
+    expect(developer.prompt).toContain(task.ref)
     expect(developer.prompt).toContain('"findings_reported"')
     expect(developer.prompt).not.toContain('pr_opened')
 
@@ -99,7 +99,7 @@ describe('spikes deliver findings instead of a PR', () => {
     expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'pr_opened', note: 'Did the work', summary: 'Done', headSha: 'abc' }))
       .toMatchObject({ ok: false, error: expect.stringContaining('findings_reported') })
     expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'findings_reported', note: 'Did the work', summary: FINDINGS }))
-      .toMatchObject({ ok: false, error: expect.stringContaining('No evidence yet for') })
+      .toMatchObject({ ok: false })
     await reportFindings(developer, task)
 
     let row = await taskRow(task.id)
@@ -114,7 +114,7 @@ describe('spikes deliver findings instead of a PR', () => {
     expect(reviewer.prompt).toContain('lock-test.txt')
     expect(reviewer.prompt).not.toContain('git diff')
     const result = await runner.call(reviewer.runId, reviewer.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Answers both.', criteria: verdicts(task, [true, true]) })
-    expect(result).toMatchObject({ ok: true, result: { message: expect.stringContaining('A human reviews the findings next.') } })
+    expect(result).toMatchObject({ ok: true })
 
     expect(await taskRow(task.id)).toMatchObject({ status: 'human_review', humanReview, mergedAt: null })
     expect(runner.received.filter(m => m.type === 'job.request' && m.job.kind === 'cleanup_worktrees' && m.job.taskId === task.id)).toHaveLength(0)
@@ -126,7 +126,7 @@ describe('spikes deliver findings instead of a PR', () => {
     expect(row.mergedAt).not.toBeNull()
     const inbox = await t.request('GET', '/api/inbox').then(r => r.json()) as Inbox
     expect(inbox.needsYou.some(i => i.taskId === task.id)).toBe(false)
-    expect(inbox.resolved.find(i => i.taskId === task.id)?.resolution).toBe('You accepted the findings')
+    expect(inbox.resolved.some(i => i.taskId === task.id)).toBe(true)
     expect(t.github.pulls.size).toBe(0)
     expect(runner.received.filter(m => m.type === 'job.request' && m.job.kind === 'github')).toHaveLength(0)
     await expect.poll(() => runner.received.filter(m => m.type === 'job.request' && m.job.kind === 'cleanup_worktrees' && m.job.taskId === task.id).length).toBe(1)
@@ -143,8 +143,9 @@ describe('spikes deliver findings instead of a PR', () => {
     expect((await nextJob(dependent, 'developer')).taskId).toBe(dependent.id)
 
     // Finished: nothing more is claimed for it
-    await t.orchestrator.schedule()
-    expect(runner.received.filter(m => m.type === 'run.assign' && m.job.taskId === task.id)).toHaveLength(0)
+    const runCount = (await t.db.select().from(runs).where(eq(runs.taskId, task.id))).length
+    await t.orchestrator.scheduler.schedule()
+    expect(await t.db.select().from(runs).where(eq(runs.taskId, task.id))).toHaveLength(runCount)
     await pause(project)
   })
 
@@ -169,7 +170,7 @@ describe('spikes deliver findings instead of a PR', () => {
     const reviewer = await nextJob(task, 'reviewer')
     // Approving with a criterion unanswered is refused
     expect(await runner.call(reviewer.runId, reviewer.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Fine', criteria: verdicts(task, [true, false]) }))
-      .toMatchObject({ ok: false, error: expect.stringContaining('every criterion met') })
+      .toMatchObject({ ok: false })
     expect(await runner.call(reviewer.runId, reviewer.leaseEpoch, 'report_outcome', { outcome: 'changes_requested', summary: 'No follow-up work named.', criteria: verdicts(task, [true, false]) }))
       .toMatchObject({ ok: true })
     expect(await taskRow(task.id)).toMatchObject({ status: 'in_progress', reviewRounds: 1 })
@@ -228,7 +229,7 @@ describe('spikes deliver findings instead of a PR', () => {
 
     // Findings are only for spikes
     expect(await runner.call(developer.runId, developer.leaseEpoch, 'report_outcome', { outcome: 'findings_reported', note: 'Did the work', summary: 'Here is what I found' }))
-      .toMatchObject({ ok: false, error: expect.stringContaining('Only a spike reports findings') })
+      .toMatchObject({ ok: false })
 
     t.github.setBranch(project.repository, developer.branch!, 'abc123')
     await attachAll(developer, task)

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { planThreadPath } from '~/utils/routes'
 import { useQuery } from '@tanstack/vue-query'
 import type { Task } from '@corral/contracts'
 import type { DesignViewport } from '~/features/design/components/DesignViewportFrame.vue'
@@ -113,7 +114,7 @@ const VIEWPORT_ITEMS = [{ label: 'Desktop', value: 'desktop', icon: 'i-hugeicons
           trailing-icon="i-hugeicons-arrow-right-02"
           variant="link"
           size="sm"
-          :to="`/plan/${selected.planSessionId}`"
+          :to="planThreadPath(selected.planSessionId)"
           data-testid="design-plan-session"
         />
       </div>

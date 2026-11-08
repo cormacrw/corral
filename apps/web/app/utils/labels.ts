@@ -1,27 +1,30 @@
 import { TONE_TEXT } from '~/lib/tone'
 import type { Tone } from '~/lib/tone'
-import { isTaskDone } from '@corral/core'
-import { AGENT_RUNTIMES, cacheWritesUnknown, weightedRunCost } from '@corral/contracts/client'
-import type { Agent, AgentRuntime, AuditEntry, CliStatus, Epic, EpicFixRun, RunnerInfo, RunnerRole, RunnerStatus, InboxItem, PlanStatus, Project, Run, RunSessionStart, Task } from '@corral/contracts'
-import type { AgentRole, DesignVersionStatus, EpicFixKind, EpicReviewMode, EpicReviewState, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
+import { deliveryCounts, DONE_STATUS, isActiveRun, AGENT_RUNTIME_IDS, AGENT_RUNTIMES, parseTaskRef, ROLE_LABELS, TASK_STATUS_LABELS } from '@corral/core'
+import { cacheWritesUnknown, EPIC_PR_ACTIVITY, weightedRunCost } from '@corral/contracts/client'
+import type { Agent, AuditEntry, CliStatus, Epic, EpicFixRun, EpicPrEvent, RunnerInfo, RunnerRole, RunnerStatus, InboxItem, Project, Run, Task } from '@corral/contracts'
+import type { AgentRuntime, CliId, MergeMethod, PlanStatus, RunSessionStart, DesignVersionStatus, EpicFixKind, EpicReviewMode, EpicReviewState, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
+import { epicPath, taskPath } from './routes'
+import { inboxBadge } from './inbox-kinds'
 
 export type Color = Tone
 
 // Status colours from design/README.md (D10). Always shown with the label.
-export const STATUS: Record<TaskStatus, { label: string, color: Color }> = {
-  draft: { label: 'Draft', color: 'neutral' },
-  backlog: { label: 'Backlog', color: 'neutral' },
-  ready: { label: 'Ready', color: 'info' },
-  in_progress: { label: 'In progress', color: 'primary' },
-  agent_review: { label: 'Agent review', color: 'primary' },
-  human_review: { label: 'Human review', color: 'warning' },
-  ready_to_merge: { label: 'Ready to merge', color: 'success' },
-  approved: { label: 'Complete', color: 'success' },
-  merged: { label: 'Complete', color: 'success' },
-  blocked: { label: 'Blocked', color: 'error' },
-  failed: { label: 'Failed', color: 'error' },
-  parent: { label: 'With subtasks', color: 'neutral' }
+const STATUS_COLOR: Record<TaskStatus, Color> = {
+  draft: 'neutral',
+  backlog: 'neutral',
+  ready: 'info',
+  in_progress: 'primary',
+  agent_review: 'primary',
+  human_review: 'warning',
+  ready_to_merge: 'success',
+  approved: 'success',
+  merged: 'success',
+  blocked: 'error',
+  failed: 'error',
+  parent: 'neutral'
 }
+export const STATUS = Object.fromEntries((Object.keys(STATUS_COLOR) as TaskStatus[]).map(status => [status, { label: TASK_STATUS_LABELS[status], color: STATUS_COLOR[status] }])) as Record<TaskStatus, { label: string, color: Color }>
 
 // Tasks counted by status label, in STATUS order, so merged tasks and approved
 // designs share one Complete count.
@@ -61,6 +64,12 @@ export const EPIC_REVIEW_MODE: Record<EpicReviewMode, { label: string, descripti
   direct: { label: 'Direct', description: 'Each subtask merges straight into the target branch' }
 }
 
+export const MERGE_METHOD: Record<MergeMethod, string> = {
+  squash: 'Squash and merge',
+  merge: 'Merge commit',
+  rebase: 'Rebase and merge'
+}
+
 // Where an epic PR is in its review (D27)
 export const EPIC_REVIEW_STATE: Record<EpicReviewState, { label: string, color: Color }> = {
   open: { label: 'Open', color: 'neutral' },
@@ -72,24 +81,6 @@ export const EPIC_REVIEW_STATE: Record<EpicReviewState, { label: string, color: 
   merged: { label: 'Merged', color: 'success' }
 }
 
-// Epic PR audit events, worded to follow the actor's name in the Activity tab.
-const EPIC_PR_HISTORY: Record<string, string> = {
-  opened: 'opened the task\'s PR',
-  review_started: 'started the task\'s integration review',
-  approved: 'approved the task\'s PR',
-  changes_requested: 'requested changes on the task\'s PR',
-  human_approved: 'approved the task\'s PR',
-  human_changes_requested: 'requested changes on the task\'s PR',
-  rebase_requested: 'asked to rebase the task\'s PR onto the target branch',
-  rebased: 'rebased the task\'s PR; CI runs again',
-  conflict: 'found a conflict on the task\'s PR',
-  rebase_handed_off: 'handed the task\'s PR rebase to a developer',
-  ci_failed: 'saw CI fail on the task\'s PR',
-  merge_refused: 'stopped retrying after GitHub refused the task\'s PR merge',
-  closed: 'saw the task\'s PR closed on GitHub',
-  merged: 'merged the task\'s PR'
-}
-
 // Everything listEpicHistory returns: the audit rows whose detail has the epicId.
 export function epicHistoryText(entry: Pick<AuditEntry, 'action' | 'detail'>): string {
   const d = entry.detail
@@ -98,7 +89,7 @@ export function epicHistoryText(entry: Pick<AuditEntry, 'action' | 'detail'>): s
     case 'task.promoted': return 'added the first subtask to this task'
     case 'epic.updated': return `edited ${(d.changed as string[] | undefined)?.join(', ') ?? 'the task'}`
     case 'merge.refused': return `reported GitHub refused the merge: ${String(d.message)}`
-    case 'epic.pr': return [EPIC_PR_HISTORY[String(d.event)] ?? 'updated the task\'s PR', d.summary].filter(Boolean).join(': ')
+    case 'epic.pr': return [EPIC_PR_ACTIVITY[d.event as EpicPrEvent] ?? 'updated the task\'s PR', d.summary].filter(Boolean).join(': ')
     default: return 'updated the task'
   }
 }
@@ -106,14 +97,7 @@ export function epicHistoryText(entry: Pick<AuditEntry, 'action' | 'detail'>): s
 // The counts an epic should show, from live tasks: the server only sends an
 // epic again when the epic itself changes
 export function epicWithLiveCounts<E extends Epic>(epic: E, tasks: Pick<Task, 'epicId' | 'status' | 'type'>[]): E {
-  const counted = tasks.filter(t => t.epicId === epic.id && t.status !== 'draft' && t.status !== 'backlog')
-  return { ...epic, taskCount: counted.length, mergedCount: counted.filter(isTaskDone).length }
-}
-
-// An epic with work left: unmerged tasks, or an epic PR still to merge (D22, D27)
-export function epicInProgress(epic: Pick<Epic, 'reviewMode' | 'branch' | 'reviewState' | 'taskCount' | 'mergedCount'>): boolean {
-  if (epic.taskCount === 0) return false
-  return epic.mergedCount < epic.taskCount || (epic.reviewMode !== 'direct' && epic.branch !== null && epic.reviewState !== 'merged')
+  return { ...epic, ...deliveryCounts(tasks.filter(t => t.epicId === epic.id)) }
 }
 
 // A developer run on an epic, with no task (D29)
@@ -126,9 +110,6 @@ export const EPIC_FIX: Record<EpicFixKind, { active: string, past: string }> = {
 }
 
 export const epicStoppedLabel = (fix: EpicFixKind | null | undefined) => fix === 'ci' || fix === 'review' ? 'Fix stopped' : 'Rebase stopped'
-
-// A developer's page for one run
-export const runPath = (developer: string, runId: string) => `/agents/${developer.toLowerCase()}/${runId}`
 
 // What the developer reported, and whether review followed
 export function epicFixResult(run: Pick<EpicFixRun, 'behaviourChanged' | 'reReviewed'>): string[] {
@@ -167,16 +148,15 @@ export const PRIORITY: Record<TaskPriority, { label: string, color: Color }> = {
   low: { label: 'Low', color: 'neutral' }
 }
 
-export const ROLE: Record<AgentRole, string> = { pm: 'PM', developer: 'Developer', designer: 'Designer', reviewer: 'Reviewer' }
-
 // Runtime names in the UI. Never "Claude Code" (agent-runtime-and-auth.md, branding).
-export const RUNTIME: Record<AgentRuntime, string> = { 'claude-code': 'Claude', 'codex': 'Codex' }
+const CLI_NAMES: Record<CliId, string> = { claude: 'Claude', codex: 'Codex' }
+export const RUNTIME = Object.fromEntries(AGENT_RUNTIME_IDS.map(runtime => [runtime, CLI_NAMES[AGENT_RUNTIMES[runtime]]])) as Record<AgentRuntime, string>
 export function runtimeLabel(runtime: string): string {
   return RUNTIME[runtime as AgentRuntime] ?? runtime
 }
 // Runners (design/settings.md, Runner): a runner turned away for an old
 // protocol needs updating; otherwise it's online or offline
-const RUNNER_ROLE: Record<RunnerRole, string> = { ...ROLE, design: 'Design' }
+const RUNNER_ROLE: Record<RunnerRole, string> = { ...ROLE_LABELS, design: 'Design' }
 export function runnerRoles(roles: RunnerRole[]): string {
   return roles.map(r => RUNNER_ROLE[r]).join(', ')
 }
@@ -197,32 +177,11 @@ export function runnerSummary(status: RunnerStatus | null): string {
 export function detectedRuntimes(clis: Pick<CliStatus, 'id' | 'version'>[]): AgentRuntime[] {
   return (Object.keys(AGENT_RUNTIMES) as AgentRuntime[]).filter(r => clis.some(c => c.id === AGENT_RUNTIMES[r] && c.version))
 }
-// How to sign a CLI in inside the runner container (D12, D18)
-export function cliLoginCommand(id: CliStatus['id']): string {
-  return `docker exec -it corral-runner ${id === 'codex' ? 'codex login --device-auth' : 'claude'}`
-}
 
-// design/inbox.md item type badges
-export function inboxTypeBadge(type: InboxItem['type']): { label: string, color: Color } {
-  return ({
-    release_notes: { label: 'Release notes', color: 'neutral' as const },
-    epic_activity: { label: 'Task\'s PR', color: 'neutral' as const },
-    epic_review: { label: 'Task\'s PR', color: 'warning' as const },
-    epic_conflict: { label: 'Task conflict', color: 'error' as const },
-    runner_update: { label: 'Runner', color: 'error' as const },
-    human_review: { label: 'Human review', color: 'warning' as const },
-    question: { label: 'Question', color: 'info' as const },
-    blocked: { label: 'Blocked', color: 'error' as const },
-    failed: { label: 'Failed', color: 'error' as const },
-    stopped: { label: 'Stopped', color: 'warning' as const },
-    activity: { label: 'Activity', color: 'neutral' as const },
-    plan_thread: { label: 'Plan', color: 'primary' as const }
-  })[type]
-}
-
-// An item's badge: a stopped epic shares the conflict's type, not its meaning
+// An item's badge: a stopped task-with-subtasks shares the conflict's type,
+// not its meaning
 export function inboxItemBadge(item: Pick<InboxItem, 'type'> & { stopped?: unknown }): { label: string, color: Color } {
-  return item.stopped ? { label: 'Task stopped', color: 'error' } : inboxTypeBadge(item.type)
+  return item.stopped ? { label: 'Task stopped', color: 'error' } : inboxBadge(item)
 }
 
 export const TASK_TYPE: Record<Task['type'], string> = {
@@ -247,12 +206,6 @@ export function taskTypeIcon(type: Task['type']): string {
   return taskTypeBadge(type)?.icon ?? 'i-hugeicons-checkmark-square-02'
 }
 
-// A run that hasn't finished yet
-const LIVE_RUN_STATES: readonly string[] = ['queued', 'starting', 'running', 'waiting_for_input', 'stopping']
-export function isLiveRun(run: Pick<Run, 'state'>): boolean {
-  return LIVE_RUN_STATES.includes(run.state)
-}
-
 // design/agent.md: what a run was for. Only a task or an epic's integration
 // review has a title of its own, and only a PM run is a turn.
 export function runRef(run: Pick<Run, 'taskRef' | 'epicId'>): string {
@@ -265,7 +218,7 @@ export function runTitle(run: Pick<Run, 'taskTitle' | 'epicTitle' | 'summary' | 
 
 // design/agent.md outcome badges
 export function runBadge(run: Pick<Run, 'state' | 'outcome' | 'role'>): { label: string, color: Color } {
-  if (isLiveRun(run)) return { label: 'Live', color: 'primary' }
+  if (isActiveRun(run.state)) return { label: 'Live', color: 'primary' }
   const outcome = run.outcome as RunOutcome | null
   switch (outcome) {
     case 'pr_opened': return { label: 'PR opened', color: 'primary' }
@@ -294,12 +247,8 @@ export const STATUS_DOT: Record<Color, string> = { neutral: 'bg-neutral-400', in
 // Where an Inbox item's task lives: an epic's activity is about the epic, and
 // its taskRef is only one of the epic's tasks
 export function inboxItemLink(item: { taskRef: string | null, epicId?: string | null }) {
-  if (item.epicId) return { to: `/epics/${item.epicId}`, label: 'Task' }
-  return item.taskRef ? { to: `/tasks/${item.taskRef}`, label: 'Task' } : null
-}
-export const prNumberLabel = (prUrl: string | null | undefined) => {
-  const number = prUrl?.match(/\/pull\/(\d+)/)?.[1]
-  return number ? `#${number}` : 'Open PR'
+  if (item.epicId) return { to: epicPath(item.epicId), label: 'Task' }
+  return item.taskRef ? { to: taskPath(item.taskRef), label: 'Task' } : null
 }
 
 export const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`
@@ -384,11 +333,16 @@ export function isWorking(agent: Agent): boolean {
   return agent.activeRuns > 0
 }
 
-// Idle has no marker. Explicit pause takes precedence over a usage cooldown.
-// Layouts that already indicate work can request exception markers only.
-export function agentStatus(agent: Pick<Agent, 'paused' | 'pausedUntil' | 'activeRuns'>, now = Date.now(), showWorking = true): { label: string, color: Color } | null {
+// Explicit pause takes precedence over a usage cooldown
+export function waitingOnUsageLimit(agent: Pick<Agent, 'paused' | 'pausedUntil'>, now = Date.now()): boolean {
+  return !agent.paused && !!agent.pausedUntil && new Date(agent.pausedUntil).getTime() > now
+}
+
+// Idle has no marker. Most layouts already indicate work, so Working is only
+// marked on request.
+export function agentStatus(agent: Pick<Agent, 'paused' | 'pausedUntil' | 'activeRuns'>, now = Date.now(), showWorking = false): { label: string, color: Color } | null {
   if (agent.paused) return { label: 'Paused', color: 'neutral' }
-  if (agent.pausedUntil && new Date(agent.pausedUntil).getTime() > now) return { label: 'Waiting on usage limit', color: 'neutral' }
+  if (waitingOnUsageLimit(agent, now)) return { label: 'Waiting on usage limit', color: 'neutral' }
   if (showWorking && agent.activeRuns > 0) return { label: 'Working', color: 'success' }
   return null
 }
@@ -399,14 +353,15 @@ export function epicTitle(epics: { id: string, title: string }[] | undefined, id
 }
 
 // Sidebar counts: the Board counts open work only, so merged tasks drop out
+const DONE_STATUSES: readonly Task['status'][] = Object.values(DONE_STATUS)
 export function taskCounts(tasks: Pick<Task, 'status'>[]): { board: number, backlog: number } {
   return {
-    board: tasks.filter(t => t.status !== 'backlog' && t.status !== 'merged' && t.status !== 'approved').length,
+    board: tasks.filter(t => t.status !== 'backlog' && !DONE_STATUSES.includes(t.status)).length,
     backlog: tasks.filter(t => t.status === 'backlog').length
   }
 }
 
 // The number in a task ref: COR-123 is 123
-export const taskNumber = (ref: string) => Number(ref.split('-').at(-1))
+export const taskNumber = (ref: string) => parseTaskRef(ref)?.number ?? Number.NaN
 
 export const priorityText = (task: Pick<Task, 'priority'>) => TONE_TEXT[PRIORITY[task.priority].color]

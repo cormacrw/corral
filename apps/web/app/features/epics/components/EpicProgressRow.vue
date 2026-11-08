@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { epicPath } from '~/utils/routes'
 import type { Epic } from '@corral/contracts'
 
 // With an epic, the row also shows its review mode, review state and PR
@@ -10,7 +11,7 @@ defineProps<{ id: string, title: string, merged: number, total: number, epic?: E
     <div class="flex justify-between gap-2 text-sm">
       <NuxtLink
         v-if="id !== 'none'"
-        :to="`/epics/${id}`"
+        :to="epicPath(id)"
         class="truncate font-medium"
       >{{ title }}</NuxtLink>
       <span

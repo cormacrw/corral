@@ -1,7 +1,7 @@
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, expect, expectTypeOf, it } from 'vitest'
-import { type ApprovePlanCommand, type PlanTaskWrite } from './plan.ts'
+import { type ApprovePlanCommand, type PlanTaskWrite } from './plan-proposals.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 
 let t: TestApp

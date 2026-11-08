@@ -3,7 +3,7 @@
 export type DeviceMode = 'mobile' | 'web'
 export type DeviceOverride = 'auto' | 'desktop' | 'mobile'
 
-export const DEVICE_OVERRIDES: DeviceOverride[] = ['auto', 'desktop', 'mobile']
+const DEVICE_OVERRIDES: DeviceOverride[] = ['auto', 'desktop', 'mobile']
 
 // A small touch screen, or the installed PWA
 export const NARROW_TOUCH_QUERY = '(max-width: 767px) and (pointer: coarse)'

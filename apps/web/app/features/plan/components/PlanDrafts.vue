@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { planThreadPath } from '~/utils/routes'
 import type { DraftSession } from '@corral/contracts'
 import { PRIORITY, TASK_TYPE, taskTypeIcon, priorityText } from '~/utils/labels'
 import { PLAN_STATUS_BADGE } from '~/features/plan/utils/plan-attention'
@@ -31,7 +32,7 @@ defineProps<{ sessions: DraftSession[], mobile?: boolean }>()
           content-class="px-0"
         >
           <PlanSessionRow
-            :to="`/plan/${session.sessionId}`"
+            :to="planThreadPath(session.sessionId)"
             :title="session.title"
             :updated-at="session.updatedAt"
             :badge="session.planStatus === 'proposed' ? PLAN_STATUS_BADGE.needs_approval : null"
@@ -45,7 +46,7 @@ defineProps<{ sessions: DraftSession[], mobile?: boolean }>()
               :key="draft.taskId"
             >
               <NuxtLink
-                :to="{ path: `/plan/${session.sessionId}`, query: { task: draft.ref } }"
+                :to="{ path: planThreadPath(session.sessionId), query: { task: draft.ref } }"
                 :class="['flex w-full items-center gap-3 px-4 text-sm hover:bg-muted', mobile ? 'min-h-12 py-3' : 'py-2']"
                 data-testid="plan-drafts-draft"
               >

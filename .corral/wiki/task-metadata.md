@@ -6,10 +6,9 @@ nonblank reason; every other status has `reason: null`.
 and clears irrelevant reasons. The transition boundary rejects blank block/fail
 reasons, and resolving clears the reason in the same database update.
 
-Task DTOs (HTTP and SSE) expose `pr: { number, url } | null`, replacing the
-independent `prNumber` and `prUrl` properties. They expose
-`draftSession: { id, title } | null`, replacing `planSessionId` and
-`planSessionTitle`. Only Draft can carry that object; Blocked/Failed require
+Task DTOs (HTTP and SSE) expose the PR as one `pr: { number, url } | null`
+and a Draft's Plan session as `draftSession: { id, title } | null`, rather
+than separate fields. Only Draft can carry that object; Blocked/Failed require
 `statusReason: string`, and other statuses require null. Draft ownership is
 derived from Plan history, never stored on a task. Historical Plan links stay
 intact after approval, but are not exposed as a non-Draft task's session.

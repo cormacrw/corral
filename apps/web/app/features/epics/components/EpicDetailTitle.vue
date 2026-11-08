@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { projectPath } from '~/utils/routes'
+import type { DetailMode } from '~/composables/useTaskFlyout'
 import type { EpicDetail, Project } from '@corral/contracts'
 
 // What names an epic in its header, for each mode
-defineProps<{ mode: 'flyout' | 'page' | 'mobile', epic: EpicDetail | null, project: Project | null, saved: boolean }>()
+defineProps<{ mode: DetailMode, epic: EpicDetail | null, project: Project | null, saved: boolean }>()
 </script>
 
 <template>
@@ -35,6 +37,6 @@ defineProps<{ mode: 'flyout' | 'page' | 'mobile', epic: EpicDetail | null, proje
   </template>
   <AppBreadcrumb
     v-else
-    :items="[{ label: project?.name ?? 'Project', to: project ? `/projects/${project.slug}` : '/' }, { label: epic?.title ?? 'Task' }]"
+    :items="[{ label: project?.name ?? 'Project', to: project ? projectPath(project.slug) : '/' }, { label: epic?.title ?? 'Task' }]"
   />
 </template>

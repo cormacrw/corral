@@ -1,10 +1,12 @@
-import { runLifecycleSchema, type Agent, type CreateAgentInput, type Evidence, type PatchAgentInput, type Review, type Run, type RunTimings } from '@corral/contracts'
-import { ACTIVE_RUN_STATES, taskRef, type Actor, type AgentRole, type RunState } from '@corral/core'
+import { runLifecycleSchema, type Agent, type CreateAgentInput, type Evidence, type PatchAgentInput, type Review, type Run, type RunEvent } from '@corral/contracts'
+import { ACTIVE_RUN_STATES, AGENT_ROLES, taskRef, type Actor, type AgentRole, type RunState } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, desc, eq, gte, inArray, type SQL } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import { ApiFailure, notFound } from './errors.ts'
 import { avatarUrl } from './avatars.ts'
+import type { BlobHandle, BlobStore } from './blob-store.ts'
+import type { Transcripts } from './transcripts.ts'
 
 const { agents, epics, evidence, projects, reviews, runs, tasks } = schema
 
@@ -57,7 +59,7 @@ function toRun({ run, agentName, agentRuntime, prefix, taskNumber, taskTitle, ep
     rateLimitResetAt: run.rateLimitResetAt?.toISOString() ?? null,
     queuedAt: run.queuedAt.toISOString(),
     startedAt: run.startedAt?.toISOString() ?? null,
-    timings: run.timings as RunTimings | null,
+    timings: run.timings,
     // The checks on the runs table allow only what this accepts
     ...runLifecycleSchema.parse({ role: run.role, state: run.state, outcome: run.outcome, endedAt: run.endedAt?.toISOString() ?? null })
   }
@@ -106,11 +108,17 @@ export async function getRun(db: Executor, runId: string): Promise<Run> {
   return run
 }
 
+// From its blob once the run has ended, from its spool while it's live
+export async function readRunTranscript(db: Executor, transcripts: Pick<Transcripts, 'read'>, runId: string): Promise<RunEvent[]> {
+  const [row] = await db.select({ blob: runs.transcriptBlob }).from(runs).where(eq(runs.id, runId))
+  if (!row) throw notFound()
+  return transcripts.read(runId, row.blob)
+}
+
 export async function listAgents(db: Executor): Promise<Agent[]> {
   // PM, developer, designer, reviewer, then by age: the default agents share one
   // creation time, so that alone would let them shuffle
-  const order = { pm: 0, developer: 1, designer: 2, reviewer: 3 } as const
-  const rows = (await db.select().from(agents).orderBy(agents.createdAt, agents.name)).sort((a, b) => order[a.role] - order[b.role])
+  const rows = (await db.select().from(agents).orderBy(agents.createdAt, agents.name)).sort((a, b) => AGENT_ROLES.indexOf(a.role) - AGENT_ROLES.indexOf(b.role))
   const active = await db.select({ agentId: runs.agentId, n: count() }).from(runs)
     .where(inArray(runs.state, [...ACTIVE_RUN_STATES]))
     .groupBy(runs.agentId)
@@ -128,7 +136,7 @@ export async function listAgents(db: Executor): Promise<Agent[]> {
   }))
 }
 
-export function toEvidence(row: typeof evidence.$inferSelect): Evidence {
+function toEvidence(row: typeof evidence.$inferSelect): Evidence {
   return {
     id: row.id,
     taskId: row.taskId,
@@ -197,6 +205,13 @@ export function toReview(row: typeof reviews.$inferSelect): Review {
 export async function listReviews(db: Executor, taskId: string): Promise<Review[]> {
   const rows = await db.select().from(reviews).where(eq(reviews.taskId, taskId)).orderBy(desc(reviews.createdAt))
   return rows.map(toReview)
+}
+
+// An evidence item's file; none for a note
+export async function readEvidenceFile(db: Executor, blobs: BlobStore, evidenceId: string): Promise<{ file: BlobHandle, contentType: string | null, fileName: string | null } | null> {
+  const [row] = await db.select().from(evidence).where(eq(evidence.id, evidenceId))
+  const file = row?.blob ? await blobs.open(row.blob) : null
+  return row && file ? { file, contentType: row.contentType, fileName: row.fileName } : null
 }
 
 export async function listEvidence(db: Executor, taskId: string): Promise<Evidence[]> {

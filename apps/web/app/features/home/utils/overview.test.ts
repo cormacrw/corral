@@ -1,6 +1,7 @@
 import type { Epic } from '@corral/contracts'
 import { describe, expect, it } from 'vitest'
-import { mergedByDay, openWork, recentEpics, startOfDay, weekOverWeek } from './overview'
+import { mergedByDay, openWork, recentEpics, weekOverWeek } from './figures'
+import { startOfDay } from '~/utils/days'
 
 const now = new Date(2026, 10, 4, 15, 0).getTime()
 const daysAgo = (n: number, hour = 12) => new Date(2026, 10, 4 - n, hour).toISOString()

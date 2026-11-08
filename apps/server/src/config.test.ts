@@ -11,7 +11,10 @@ describe('loadConfig', () => {
       port: 4100,
       databaseUrl: undefined,
       publicUrl: 'http://localhost:3000',
-      demo: false
+      demo: false,
+      buildSha: 'development',
+      slowRequestMs: 500,
+      slowQueryMs: 200
     })
   })
 
@@ -21,14 +24,20 @@ describe('loadConfig', () => {
       CORRAL_SERVER_HOST: '0.0.0.0',
       CORRAL_SERVER_PORT: '8080',
       CORRAL_DATABASE_URL: 'postgres://corral@postgres/corral',
-      CORRAL_PUBLIC_URL: 'https://corral.example.com/'
+      CORRAL_PUBLIC_URL: 'https://corral.example.com/',
+      CORRAL_BUILD_SHA: 'abc123',
+      CORRAL_SLOW_REQUEST_MS: '10',
+      CORRAL_SLOW_QUERY_MS: '0'
     })).toEqual({
       dataDir: '/data/server',
       host: '0.0.0.0',
       port: 8080,
       databaseUrl: 'postgres://corral@postgres/corral',
       publicUrl: 'https://corral.example.com',
-      demo: false
+      demo: false,
+      buildSha: 'abc123',
+      slowRequestMs: 10,
+      slowQueryMs: 0
     })
   })
 
@@ -43,6 +52,10 @@ describe('loadConfig', () => {
     for (const value of ['4200', 'host:0', 'host:65536', 'http://host:4200']) {
       expect(() => loadConfig({ CORRAL_RUNNER_LISTEN: value, CORRAL_RUNNER_TOKEN: 'secret' })).toThrow(/CORRAL_RUNNER_LISTEN/)
     }
+  })
+
+  it('falls back to the default slow thresholds for a bad value', () => {
+    expect(loadConfig({ CORRAL_SLOW_REQUEST_MS: 'soon', CORRAL_SLOW_QUERY_MS: '-1' })).toMatchObject({ slowRequestMs: 500, slowQueryMs: 200 })
   })
 
   it('rejects a port that is not a number', () => {

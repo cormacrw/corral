@@ -10,7 +10,7 @@ vi.stubGlobal('ref', ref)
 vi.stubGlobal('watch', watch)
 vi.stubGlobal('useShell', () => shellData)
 vi.stubGlobal('useAllProjectLists', vi.fn())
-vi.stubGlobal('usePendingPlan', () => ({ entries: ref({}) }))
+vi.mock('~/queries/plan', () => ({ usePlanStarts: () => ({ entries: ref({}) }) }))
 const route = reactive({ path: '/home', fullPath: '/home' })
 vi.stubGlobal('useRoute', () => route)
 vi.stubGlobal('useRouter', () => ({ replace: vi.fn(), options: { history: { go: vi.fn() } } }))
@@ -35,10 +35,9 @@ describe('mobile layout', () => {
   it.each(['/settings', '/settings/runner'])('selects the Settings tab on %s', (path) => {
     route.path = route.fullPath = path
     const wrapper = mount(MobileLayout, { global, slots: { default: () => h(AppPanel, () => h(MobilePageHeader)) } })
-    expect(wrapper.get('nav [aria-current="page"]').text()).toBe('Settings')
+    expect(wrapper.get('nav [aria-current="page"]').attributes('href')).toBe('/settings')
     expect(wrapper.find('[data-testid="mobile-page-header"] [aria-label="Back to Home"]').exists()).toBe(false)
     if (path !== '/settings') expect(wrapper.get('[data-testid="mobile-page-header"] [aria-label="Back to Settings"]').attributes('href')).toBe('/settings')
-    wrapper.unmount()
   })
 
   it('returns from an agent to Home without selecting a tab and keeps Agent settings', () => {
@@ -47,14 +46,12 @@ describe('mobile layout', () => {
     expect(wrapper.get('[data-testid="mobile-page-header"] [aria-label="Back to Home"]').attributes('href')).toBe('/home')
     expect(wrapper.get('[data-testid="mobile-page-header"] [aria-label="Agent settings"]').attributes('href')).toBe('/settings/agents')
     expect(wrapper.find('nav [aria-current="page"]').exists()).toBe(false)
-    wrapper.unmount()
   })
 
   it('keeps Project settings on the project overview', () => {
     route.path = route.fullPath = '/projects/corral'
     const wrapper = mount(MobileLayout, { global, slots: { default: () => h(AppPanel, () => h(MobilePageHeader)) } })
     expect(wrapper.get('[data-testid="mobile-page-header"] [aria-label="Project settings"]').attributes('href')).toBe('/projects/corral/settings')
-    wrapper.unmount()
   })
 
   it.each([
@@ -74,7 +71,6 @@ describe('mobile layout', () => {
     const wrapper = mount(MobilePageHeader, { global })
     expect(wrapper.get(`[aria-label="${label}"]`).attributes('href')).toBe(target)
     expect(wrapper.get('h1').text()).toBe(title)
-    wrapper.unmount()
   })
 
   it.each(['Home', 'Plan', 'Inbox', 'Projects', 'Settings'])('selects the %s tab on its root and adds no header of its own', (title) => {
@@ -82,8 +78,7 @@ describe('mobile layout', () => {
     const wrapper = mount(MobileLayout, { global, slots: { default: () => h(AppPanel, () => h('p', 'Content')) } })
     expect(wrapper.find('[data-testid="mobile-page-header"]').exists()).toBe(false)
     expect(wrapper.find('h1').exists()).toBe(false)
-    expect(wrapper.get('nav [aria-current="page"]').text()).toBe(title)
-    wrapper.unmount()
+    expect(wrapper.get('nav [aria-current="page"]').attributes('href')).toBe(`/${title.toLowerCase()}`)
   })
 
   it('uses the Inbox item context above its task ref', () => {
@@ -93,7 +88,6 @@ describe('mobile layout', () => {
     expect(wrapper.get('h1').text()).toBe('COR-5')
     expect(wrapper.get('p').text()).toBe('Inbox · 1 of 3')
     expect(wrapper.get('[aria-label="Back to Inbox"]').attributes('href')).toBe('/inbox')
-    wrapper.unmount()
   })
 
   it('renders working actions in the compact row', async () => {
@@ -105,7 +99,6 @@ describe('mobile layout', () => {
     })
     await wrapper.get('[data-testid="mobile-page-actions"] button').trigger('click')
     expect(click).toHaveBeenCalledOnce()
-    wrapper.unmount()
   })
 
   it.each(['/plan/session-1', '/inbox/item-1', '/tasks/COR-1', '/agents/atlas/run-1'])('leaves full-height screens without a shell header or tab bar on %s', (path) => {
@@ -113,6 +106,5 @@ describe('mobile layout', () => {
     const wrapper = mount(MobileLayout, { global })
     expect(wrapper.find('header').exists()).toBe(false)
     expect(wrapper.find('nav').exists()).toBe(false)
-    wrapper.unmount()
   })
 })

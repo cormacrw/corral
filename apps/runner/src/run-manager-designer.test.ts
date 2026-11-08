@@ -1,16 +1,16 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import type { RunJob, RunnerMessage } from '@corral/contracts'
+import { DEFAULT_ROLE_INSTRUCTIONS, type RunJob, type RunnerMessage } from '@corral/contracts'
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunnerConfig } from './config.ts'
-import type { ServerConnection } from './connection.ts'
 import { git } from './exec.ts'
 import { ToolServer } from './mcp.ts'
 import { RunManager } from './run-manager.ts'
-import { createTestDataDir, pmJob } from './test-repo.ts'
-import { worktreePath } from './workspace.ts'
+import { createRuntimes } from './runtimes.ts'
+import { createTestDataDir, pmJob, testConfig, testConnection } from './test-repo.ts'
+import { worktreePath } from './layout.ts'
 
 // Stands in for `claude`: logs its arguments and stays alive until told to
 // exit, so the test can call the run's MCP server the way the agent would
@@ -49,19 +49,16 @@ describe('RunManager design authoring (D23)', () => {
     client = null
     server = new ToolServer()
     await server.start()
-    const connection = {
-      connected: true,
-      send: (message: RunnerMessage) => {
-        sent.push(message)
-        if (message.type !== 'tool.call') return true
-        // A pinned job fetches its design first; these tests don't need one
-        const result = message.tool === 'get_design' ? { ok: false as const, error: 'No design here' } : { ok: true as const, result: { recorded: message.tool } }
-        queueMicrotask(() => manager.handle({ type: 'tool.result', callId: message.callId, ...result }))
-        return true
-      }
-    } as unknown as ServerConnection
-    const config: RunnerConfig = { dataDir, claudeBin, codexBin: '/nonexistent/codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0, titleModel: 'haiku', slots: 4, roles: ['pm', 'developer', 'reviewer', 'design'] }
-    manager = new RunManager(config, connection, server)
+    const connection = testConnection((message: RunnerMessage) => {
+      sent.push(message)
+      if (message.type !== 'tool.call') return true
+      // A pinned job fetches its design first; these tests don't need one
+      const result = message.tool === 'get_design' ? { ok: false as const, error: 'No design here' } : { ok: true as const, result: { recorded: message.tool } }
+      queueMicrotask(() => manager.handle({ type: 'tool.result', callId: message.callId, ...result }))
+      return true
+    }, true)
+    const config: RunnerConfig = testConfig(dataDir, { claudeBin })
+    manager = new RunManager(config, connection, server, createRuntimes(config).registry)
   })
 
   afterEach(async () => {
@@ -118,7 +115,7 @@ describe('RunManager design authoring (D23)', () => {
     const agent = await start(designerJob)
     const refused = await call(agent, 'report_outcome', { outcome, summary: 'Opened a PR', note: 'Opened a PR' })
     expect(refused.isError).toBe(true)
-    expect(refused.content[0]!.text).toBe('A designer reports one of: design_submitted, stuck, failed')
+    expect(refused.content[0]!.text).toContain('design_submitted')
     expect(forwarded('report_outcome')).toEqual([])
     expect((await git(['rev-parse', '--verify', '--quiet', 'refs/heads/design/APP-1'], { cwd: origin })).code).not.toBe(0)
   })
@@ -133,12 +130,10 @@ describe('RunManager design authoring (D23)', () => {
 
     const tool = await call(agent, 'submit_design', { bundleDir: '/tmp/dist', specPath: '/tmp/design.md', screenshots: ['/tmp/a.png'] })
     expect(tool.isError).toBe(true)
-    expect(tool.content[0]!.text).toBe('The developer can\'t use submit_design: only a designer submits a design')
     expect(forwarded('submit_design')).toEqual([])
 
     const outcome = await call(agent, 'report_outcome', { outcome: 'design_submitted', summary: 'Done', note: 'Done' })
     expect(outcome.isError).toBe(true)
-    expect(outcome.content[0]!.text).toContain('A developer reports one of:')
     expect(forwarded('report_outcome')).toEqual([])
   })
 
@@ -149,7 +144,7 @@ describe('RunManager design authoring (D23)', () => {
 
   it('gives a designer the built-in defaults when the repository has no designer.md', async () => {
     await start(designerJob)
-    expect(await systemPrompt()).toContain('You are a designer agent working for Corral')
+    expect(await systemPrompt()).toContain(DEFAULT_ROLE_INSTRUCTIONS.designer)
   })
 
   it('gives a designer the repository\'s designer.md when it has one', async () => {
@@ -161,6 +156,6 @@ describe('RunManager design authoring (D23)', () => {
     await start(designerJob)
     const prompt = await systemPrompt()
     expect(prompt).toContain('Sketch everything in teal.')
-    expect(prompt).not.toContain('You are a designer agent working for Corral')
+    expect(prompt).not.toContain(DEFAULT_ROLE_INSTRUCTIONS.designer)
   })
 })

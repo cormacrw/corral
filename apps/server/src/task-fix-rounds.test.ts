@@ -1,14 +1,13 @@
-import type { Project, RunJob } from '@corral/contracts'
+import { ciExcerpt, MAX_EXCERPT_CHARS, type Project, type RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { eq } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { ciExcerpt, MAX_EXCERPT_CHARS } from './ci-output.ts'
 import { flowMetrics } from './flow-metrics.ts'
 import { ciFixesInARow } from './task-base.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
+import { FakeRunner } from './fake-runner.ts'
 
 // What the developer reports decides whether a round is reviewed again (D29)
 let t: TestApp
@@ -63,8 +62,8 @@ async function ciRound(options: { humanCheck?: boolean } = {}): Promise<{ task: 
   t.github.pulls.get(pr.number)!.mergeable = true
   await t.db.update(schema.tasks).set({ status: 'ready_to_merge', branch, headSha: head, prNumber: pr.number, prUrl: pr.url }).where(eq(schema.tasks.id, task.id))
   t.github.setChecks(head, [{ name: 'lint', conclusion: 'failure', url: `https://github.com/cormacrw/test-app/actions/runs/1/job/${task.number}` }])
-  await t.orchestrator.merges.tick()
-  await t.orchestrator.schedule()
+  await t.orchestrator.mergePass()
+  await t.orchestrator.scheduler.schedule()
   const dev = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
   return { task, dev, branch }
 }
@@ -97,7 +96,7 @@ describe('a round started by a CI failure', () => {
     const fixed = `fixed-${task.number}`
     t.github.setBranch(project.repository, branch, fixed)
     expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', behaviourChanged: false, note: 'Fixed the lint rule', summary: 'Fixed lint', headSha: fixed })).toMatchObject({ ok: true })
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge', headSha: fixed, ciFix: null })
     expect(await reviewerRuns(task.id)).toEqual([])
     const reviews = await t.db.select().from(schema.reviews).where(eq(schema.reviews.taskId, task.id))
@@ -137,11 +136,11 @@ describe('a round started by a CI failure', () => {
       expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', behaviourChanged: false, note: 'Fixed the lint rule', summary: 'Fixed lint', headSha: head })).toMatchObject({ ok: true })
       await t.mergePass()
       if (n === 3) break
-      await t.orchestrator.schedule()
+      await t.orchestrator.scheduler.schedule()
       dev = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
     }
     expect(await taskRow(task.id)).toMatchObject({ status: 'failed', statusReason: expect.stringContaining('after 3 fixes in a row: lint'), retryStop: expect.objectContaining({ capped: true, sessionId: null }) })
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     expect((await t.db.select().from(schema.runs).where(eq(schema.runs.taskId, task.id))).filter(r => r.role === 'developer')).toHaveLength(3)
   })
 
@@ -154,7 +153,7 @@ describe('a round started by a CI failure', () => {
       t.github.setChecks(head, [{ name: 'lint', conclusion: 'failure', url: null }])
       expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', behaviourChanged: false, note: 'Fixed the lint rule', summary: 'Fixed lint', headSha: head })).toMatchObject({ ok: true })
       await t.mergePass()
-      await t.orchestrator.schedule()
+      await t.orchestrator.scheduler.schedule()
     }
     const next = async (seen: Set<string>) => {
       const { job } = await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer' && !seen.has(m.job.runId))
@@ -168,7 +167,7 @@ describe('a round started by a CI failure', () => {
     expect(await taskRow(task.id)).toMatchObject({ status: 'failed' })
 
     expect((await t.request('POST', `/api/inbox/${task.id}/actions`, { action: 'resolve', to: 'ready' })).status).toBe(200)
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const retry = await next(seen)
     await fail(retry, 4)
     expect(await ciFixesInARow(t.db, task.id)).toBe(0)
@@ -207,7 +206,7 @@ describe('a rebase-only round', () => {
     t.github.setBranch(project.repository, branch, head)
     await t.db.update(schema.tasks).set({ status: 'in_progress', branch, headSha: head, approvedHeadSha: head, rebaseOnly: true }).where(eq(schema.tasks.id, task.id))
     await t.db.update(schema.projects).set({ paused: false }).where(eq(schema.projects.id, project.id))
-    await t.orchestrator.schedule()
+    await t.orchestrator.scheduler.schedule()
     const dev = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
     const rebased = `rebased-${task.number}`
     t.github.setBranch(project.repository, branch, rebased)

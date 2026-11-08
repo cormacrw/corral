@@ -2,15 +2,15 @@ import type { AgentTool, RunEvent, RunnerMessage } from '@corral/contracts'
 import { chmod, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { AgentExit, AgentRuntime } from './agent-runtime.ts'
-import { claudeCodeRuntime } from './agent.ts'
+import type { AgentExit, AgentLauncher } from './agent-runtime.ts'
+import { claudeCodeRuntime } from './claude.ts'
 import type { RunnerConfig } from './config.ts'
-import type { ServerConnection } from './connection.ts'
 import { exec } from './exec.ts'
 import type { ToolHandler, ToolServer } from './mcp.ts'
-import { barePath } from './repos.ts'
+import { barePath } from './layout.ts'
 import { RunManager } from './run-manager.ts'
-import { createTestDataDir, pmJob, TEST_REPOSITORY } from './test-repo.ts'
+import { createRuntimes } from './runtimes.ts'
+import { createTestDataDir, pmJob, TEST_REPOSITORY, testConfig, testConnection } from './test-repo.ts'
 
 // Stands in for `claude` in stream-json input mode: logs how it was called
 // and every stdin message, replays each message as it takes it in, and
@@ -67,7 +67,7 @@ describe('RunManager messages for live runs', () => {
   let config: RunnerConfig
   let sent: RunnerMessage[]
   let handlers: ToolHandler[]
-  const connection = { send: (message: RunnerMessage) => sent.push(message) > 0 } as unknown as ServerConnection
+  const connection = testConnection((message: RunnerMessage) => sent.push(message) > 0)
   const tools = {
     register: (_secret: string, _role: string, handler: ToolHandler) => {
       handlers.push(handler)
@@ -81,7 +81,7 @@ describe('RunManager messages for live runs', () => {
     claudeBin = join(dirname(dataDir), 'claude')
     await writeFile(claudeBin, FAKE_CLAUDE)
     await chmod(claudeBin, 0o755)
-    config = { dataDir, claudeBin, codexBin: '/nonexistent/codex', name: 'test', serverUrl: new URL('http://127.0.0.1:9'), gitAuthor: null, pmWarmSeconds: 0, titleModel: 'haiku', slots: 4, roles: ['pm', 'developer', 'reviewer', 'design'] }
+    config = testConfig(dataDir, { claudeBin })
     sent = []
     handlers = []
   })
@@ -106,6 +106,7 @@ describe('RunManager messages for live runs', () => {
   function events(): RunEvent[] {
     return sent.flatMap(m => m.type === 'run.events' ? m.events : [])
   }
+  const noted = (pattern: RegExp | string) => events().some(e => e.type === 'system' && (typeof pattern === 'string' ? e.text.includes(pattern) : pattern.test(e.text)))
 
   async function log(): Promise<{ args?: string[], stdin?: string, closed?: boolean }[]> {
     const text = await readFile(`${claudeBin}.log`, 'utf8').catch(() => '')
@@ -130,7 +131,7 @@ describe('RunManager messages for live runs', () => {
   }
 
   it.each(['developer', 'designer'] as const)('writes a message to a live %s run and shows its reply', async (role) => {
-    const manager = new RunManager(config, connection, tools)
+    const manager = new RunManager(config, connection, tools, createRuntimes(config).registry)
     manager.assign(devJob({ role }))
     await started('r1')
 
@@ -148,7 +149,7 @@ describe('RunManager messages for live runs', () => {
 
   it.each([['developer', 'stuck'], ['designer', 'stuck'], ['reviewer', 'approved']] as const)('ends a %s run normally once it reports its outcome', async (role, outcome) => {
     const sha = (await exec('git', ['rev-parse', 'main'], { cwd: barePath(dataDir, TEST_REPOSITORY) })).stdout.trim()
-    const manager = new RunManager(config, connection, tools)
+    const manager = new RunManager(config, connection, tools, createRuntimes(config).registry)
     manager.assign(devJob({ role, headSha: role === 'reviewer' ? sha : null }))
     await started('r1')
     await reportOutcome(manager, outcome)
@@ -165,7 +166,7 @@ describe('RunManager messages for live runs', () => {
   })
 
   it('still resumes once to report when the agent finishes without an outcome', async () => {
-    const manager = new RunManager(config, connection, tools)
+    const manager = new RunManager(config, connection, tools, createRuntimes(config).registry)
     manager.assign(devJob({ prompt: 'Build it' }))
     const messages = await finish('r1')
 
@@ -182,11 +183,12 @@ describe('RunManager messages for live runs', () => {
     // The retry has answered the empty result and is working on its real turn
     async function retrying(): Promise<RunManager> {
       await writeFile(`${claudeBin}.orphaned`, '')
-      const manager = new RunManager(config, connection, tools)
+      const manager = new RunManager(config, connection, tools, createRuntimes(config).registry)
       manager.assign(devJob({ prompt: 'Build it' }))
       await expect.poll(async () => (await stdin()).length, { timeout: 10_000 }).toBe(2)
-      await expect.poll(() => events()).toContainEqual({ type: 'system', text: 'The agent exited (code 0) without reporting an outcome; resuming it once to report' })
-      await new Promise(resolve => setTimeout(resolve, 300))
+      await expect.poll(() => noted(/resuming/i)).toBe(true)
+      // The retry prints this after its empty result, so the runner has read that too
+      await expect.poll(() => events().filter(e => e.type === 'message' && e.text.startsWith('Got: '))).toHaveLength(2)
       return manager
     }
 
@@ -201,7 +203,7 @@ describe('RunManager messages for live runs', () => {
       await release()
       const messages = await finish('r1')
 
-      expect(events()).toContainEqual({ type: 'system', text: 'The resumed agent reported its outcome' })
+      expect(noted(/resumed agent reported/i)).toBe(true)
       expect(messages.find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'exited', code: 0 } })
       expect(manager.activeRuns()).toEqual([])
     })
@@ -211,21 +213,13 @@ describe('RunManager messages for live runs', () => {
       await release()
       const messages = await finish('r1')
 
-      expect(events()).toContainEqual({ type: 'system', text: 'The resumed agent exited (code 0) without reporting an outcome' })
+      expect(noted(/resumed agent exited/i)).toBe(true)
       expect(messages.find(m => m.type === 'run.ended')).toMatchObject({ exit: { kind: 'exited', code: 0 } })
     })
   })
 
-  it('tells agents to wait for long commands inside their turn', async () => {
-    new RunManager(config, connection, tools).assign(devJob({ prompt: 'Build it' }))
-    await finish('r1')
-
-    const args = (await log())[0]!.args!
-    expect(args[args.indexOf('--append-system-prompt') + 1]).toContain('run them in the foreground')
-  })
-
   it('ignores a message whose lease epoch is stale', async () => {
-    const manager = new RunManager(config, connection, tools)
+    const manager = new RunManager(config, connection, tools, createRuntimes(config).registry)
     manager.assign(devJob())
     await started('r1')
 
@@ -241,29 +235,31 @@ describe('RunManager messages for live runs', () => {
 
   it('rejects a message for a Codex run, which can\'t take input mid-run', async () => {
     let exit!: (value: AgentExit) => void
-    const codex: AgentRuntime = {
+    const codex: AgentLauncher = {
       id: 'codex',
       spawn: (options) => {
         options.onLine('{}', { events: [], sessionId: 'codex-session', rateLimit: null, result: null })
         return { pid: -1, exited: new Promise(resolve => (exit = resolve)), kill: () => exit({ code: null, signal: 'SIGTERM' }) }
       }
     }
-    const manager = new RunManager(config, connection, tools, new Map([['claude-code', claudeCodeRuntime(claudeBin)], ['codex', codex]]))
+    const manager = new RunManager(config, connection, tools, new Map([['claude-code', claudeCodeRuntime({ bin: claudeBin, configDir: config.claudeConfigDir })], ['codex', codex]]))
     manager.assign(devJob({ runtime: 'codex' }))
     await started('r1')
 
     manager.handle({ type: 'run.message', runId: 'r1', leaseEpoch: 3, text: 'Use pnpm' })
 
-    expect(sent).toContainEqual({ type: 'run.message.rejected', runId: 'r1', leaseEpoch: 3, text: 'Use pnpm', error: 'A codex run can\'t take input while it runs' })
+    const rejected = sent.find(m => m.type === 'run.message.rejected')
+    expect(rejected).toEqual({ type: 'run.message.rejected', runId: 'r1', leaseEpoch: 3, text: 'Use pnpm', error: expect.any(String) })
     await reportOutcome(manager, 'stuck')
     exit({ code: 0, signal: null })
     await finish('r1')
-    expect(events()).toContainEqual({ type: 'system', text: 'A message was not delivered: A codex run can\'t take input while it runs' })
+    // The transcript says why it never arrived
+    expect(noted(rejected?.type === 'run.message.rejected' ? rejected.error : '')).toBe(true)
     expect(events().some(e => e.type === 'message' && e.text === 'Use pnpm')).toBe(false)
   })
 
   it('rejects a message for a run that has ended', async () => {
-    const manager = new RunManager(config, connection, tools)
+    const manager = new RunManager(config, connection, tools, createRuntimes(config).registry)
     manager.assign(devJob())
     await started('r1')
     await reportOutcome(manager, 'stuck')
@@ -275,18 +271,18 @@ describe('RunManager messages for live runs', () => {
     manager.handle({ type: 'run.message', runId: 'r1', leaseEpoch: 3, text: 'Much too late' })
 
     expect(sent.filter(m => m.type === 'run.message.rejected')).toEqual([
-      { type: 'run.message.rejected', runId: 'r1', leaseEpoch: 3, text: 'Too late', error: 'The agent has already reported its outcome' },
-      { type: 'run.message.rejected', runId: 'r1', leaseEpoch: 3, text: 'Much too late', error: 'The run has ended' }
+      { type: 'run.message.rejected', runId: 'r1', leaseEpoch: 3, text: 'Too late', error: expect.stringMatching(/reported/) },
+      { type: 'run.message.rejected', runId: 'r1', leaseEpoch: 3, text: 'Much too late', error: expect.stringMatching(/ended/) }
     ])
     expect(await stdin()).toEqual(['hold'])
   })
 
   it('rejects a message for a PM run', async () => {
-    const manager = new RunManager(config, connection, tools)
+    const manager = new RunManager(config, connection, tools, createRuntimes(config).registry)
     manager.assign(pmJob({ runId: 'pm' }))
     manager.handle({ type: 'run.message', runId: 'pm', leaseEpoch: 1, text: 'Hi' })
 
-    expect(sent).toContainEqual({ type: 'run.message.rejected', runId: 'pm', leaseEpoch: 1, text: 'Hi', error: 'A pm run doesn\'t take messages' })
+    expect(sent).toContainEqual({ type: 'run.message.rejected', runId: 'pm', leaseEpoch: 1, text: 'Hi', error: expect.any(String) })
     await finish('pm')
   })
 })

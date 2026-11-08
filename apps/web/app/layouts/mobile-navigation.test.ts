@@ -16,7 +16,7 @@ const { default: Mobile } = await import('./mobile.vue')
 const { recordAppHistoryPosition, resetAppHistory } = await import('~/utils/app-history')
 const Link = defineComponent({
   name: 'LinkStub',
-  props: ['to'],
+  props: ['to', 'custom'],
   setup: (props, { slots }) => () => slots.default?.({ href: props.to })
 })
 function shell() {
@@ -43,7 +43,6 @@ describe('mobile tab navigation', () => {
     await wrapper.get('[href="/inbox"]').trigger('click', { button: 0 })
     expect(go).not.toHaveBeenCalled()
     expect(replace).toHaveBeenCalledWith(tap('/inbox'))
-    wrapper.unmount()
   })
 
   it('waits for traversal from a detail/deep link and uses the latest tab tap', async () => {
@@ -56,7 +55,6 @@ describe('mobile tab navigation', () => {
     window.dispatchEvent(new PopStateEvent('popstate'))
     await flushPromises()
     expect(replace).toHaveBeenCalledExactlyOnceWith(forced('/settings'))
-    wrapper.unmount()
   })
 
   it('honours a new tap while replacement is still settling', async () => {
@@ -71,7 +69,6 @@ describe('mobile tab navigation', () => {
     await flushPromises()
     expect(replace.mock.calls.map(args => args[0])).toEqual([tap('/inbox'), tap('/settings')])
     expect(go).not.toHaveBeenCalled()
-    wrapper.unmount()
   })
 
   it('goes back only to Corral\'s first entry when the browser tab had earlier pages', async () => {
@@ -85,7 +82,6 @@ describe('mobile tab navigation', () => {
     window.dispatchEvent(new PopStateEvent('popstate'))
     await flushPromises()
     expect(replace).toHaveBeenCalledExactlyOnceWith(forced('/inbox'))
-    wrapper.unmount()
   })
 
   it('stays put on Corral\'s first entry instead of leaving the app', async () => {
@@ -96,7 +92,6 @@ describe('mobile tab navigation', () => {
     await wrapper.get('[href="/inbox"]').trigger('click', { button: 0 })
     expect(go).not.toHaveBeenCalled()
     expect(replace).toHaveBeenCalledExactlyOnceWith(tap('/inbox'))
-    wrapper.unmount()
   })
 
   it('forces the replace after traversal so a tab root pushed from a page keeps its URL', async () => {
@@ -109,7 +104,6 @@ describe('mobile tab navigation', () => {
     window.dispatchEvent(new PopStateEvent('popstate'))
     await flushPromises()
     expect(replace).toHaveBeenCalledExactlyOnceWith(forced('/inbox'))
-    wrapper.unmount()
   })
 
   it('keeps modified clicks as ordinary links', async () => {
@@ -117,6 +111,5 @@ describe('mobile tab navigation', () => {
     await wrapper.get('[href="/inbox"]').trigger('click', { button: 0, ctrlKey: true })
     expect(go).not.toHaveBeenCalled()
     expect(replace).not.toHaveBeenCalled()
-    wrapper.unmount()
   })
 })

@@ -5,7 +5,7 @@ import { attachmentUrl } from '@corral/core'
 import { uploadAttachment } from '~/queries/attachments'
 import { readDraft, writeDraft } from '~/composables/useDraft'
 import { useDevice } from '~/composables/useDevice'
-import { attachmentProblem, withAttachments } from '~/utils/attachments'
+import { attachmentProblem, IMAGE_ACCEPT, withAttachments } from '~/utils/attachments'
 import { Comment, Fragment, useSlots, type VNode } from 'vue'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from '~/components/ui/input-group'
 
@@ -274,7 +274,7 @@ function onPick(event: Event) {
           <input
             ref="picker"
             type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
+            :accept="IMAGE_ACCEPT"
             multiple
             class="hidden"
             aria-label="Choose images to attach"

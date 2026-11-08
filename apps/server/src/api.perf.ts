@@ -1,3 +1,4 @@
+import { needsStatusReason } from '@corral/core'
 import { schema } from '@corral/db'
 import { sql } from 'drizzle-orm'
 import { randomUUID } from 'node:crypto'
@@ -55,7 +56,7 @@ it('measures the hot read paths', async () => {
     const values = ids.map((id, i) => {
       const n = i + 1
       const status = statusFor(n)
-      return sql`(${id}::uuid, ${project.id}::uuid, ${n}, ${`Task number ${n}`}, ${description}::jsonb, ${status}::task_status, 'task'::task_type, ${status === 'blocked' || status === 'failed' ? 'A reason' : null}, ${actor}, ${n <= 450 ? sql`now()` : sql`null`}, now() - (${TASKS - n} * interval '10 minutes'))`
+      return sql`(${id}::uuid, ${project.id}::uuid, ${n}, ${`Task number ${n}`}, ${description}::jsonb, ${status}::task_status, 'task'::task_type, ${needsStatusReason(status) ? 'A reason' : null}, ${actor}, ${n <= 450 ? sql`now()` : sql`null`}, now() - (${TASKS - n} * interval '10 minutes'))`
     })
     await t.db.execute(sql`insert into tasks (id, project_id, number, title, description, status, type, status_reason, created_by, merged_at, created_at) values ${sql.join(values, sql`, `)}`)
     await t.db.execute(sql`insert into acceptance_criteria (task_id, position, text) select t.id, g, 'A criterion that can be verified' from tasks t, generate_series(0, 2) g where t.project_id = ${project.id}`)

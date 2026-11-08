@@ -4,7 +4,7 @@ Turbo's local cache would otherwise live in each worktree's `.turbo/cache`, so
 every new task started cold and ran lint, typecheck and build again for
 packages it never touched. The runner instead gives every agent process
 `TURBO_CACHE_DIR=<dataDir>/turbo-cache/<projectId>` (`agentEnv` in
-`apps/runner/src/agent.ts`, path from `turboCachePath` in `workspace.ts`).
+`apps/runner/src/agent-process.ts`, path from `turboCachePath` in `layout.ts`).
 
 - **Where it lives.** One folder per project under the runner's data dir, which
   is the runner's Docker volume, so it survives container rebuilds. Keyed by
@@ -22,7 +22,7 @@ packages it never touched. The runner instead gives every agent process
 ## Pruning
 
 Turbo never evicts local entries. Every `sweep_worktrees` job also runs
-`pruneTurboCaches` (`workspace.ts`). An entry is a task hash's files
+`pruneTurboCaches` (`sweep.ts`). An entry is a task hash's files
 (`<hash>.tar.zst`, `<hash>-meta.json`, `<hash>-manifest.json`); its last use is the newest atime or
 mtime of those files. Per project folder:
 

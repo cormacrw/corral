@@ -4,11 +4,7 @@ import type { InboxComposerContext } from '~/features/inbox/composables/useInbox
 
 // The panel's composer, for an action that takes words: it's open until the
 // action is sent or cancelled. A failed item opens on its Retry note.
-const props = defineProps<{
-  ctx: InboxComposerContext
-  // Sends in place of ctx.submit, for a host that follows what's sent
-  onSubmit?: (text: string) => Promise<boolean>
-}>()
+const props = defineProps<{ ctx: InboxComposerContext }>()
 const noteId = useId()
 const retryNote = computed(() => props.ctx.item.type === 'failed' && props.ctx.action === 'resolve')
 const composer = ref<{ focus: () => void, send: () => Promise<boolean>, uploading: boolean, hasImages: boolean } | null>(null)
@@ -94,7 +90,7 @@ defineExpose({ send, hasImages: computed(() => composer.value?.hasImages ?? fals
       :rows="1"
       :project="ctx.item.project.slug"
       :draft-key="ctx.draftKey"
-      :on-submit="onSubmit ?? ctx.submit"
+      :on-submit="ctx.submit"
       @update:model-value="ctx.setText"
     />
   </div>

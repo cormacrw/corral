@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { useQueryClient } from '@tanstack/vue-query'
 import { startShell } from '~/queries/shell'
+import { useLive } from '~/queries/stream'
+import { isIos } from '~/utils/install'
 
 useHead({
-  meta: [
-    { name: 'viewport', content: 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover' }
-  ],
   link: [
     // Relative in the prototype, which runs from a sub-path
     { rel: 'icon', href: import.meta.prototype ? 'favicon.ico' : '/favicon.ico', sizes: '32x32' },
@@ -40,9 +39,7 @@ onMounted(() => live.connect())
 // app shell so navigation never adds more listeners; leave desktop gestures alone.
 const preventGestureZoom = (event: Event) => event.preventDefault()
 onMounted(() => {
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
-    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-  if (!isIOS) return
+  if (!isIos(navigator.userAgent, navigator.maxTouchPoints)) return
   document.addEventListener('gesturestart', preventGestureZoom, { passive: false })
   document.addEventListener('gesturechange', preventGestureZoom, { passive: false })
 })

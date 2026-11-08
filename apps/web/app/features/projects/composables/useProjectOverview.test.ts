@@ -11,7 +11,7 @@ const api = vi.hoisted(() => ({
   runs: { list: vi.fn() },
   tasks: { history: vi.fn() }
 }))
-vi.mock('~/composables/useApi', () => ({ api }))
+vi.mock('~/queries/api', () => ({ api }))
 vi.mock('~/features/projects/utils/projects', () => ({ projectNeedsYou: () => 0 }))
 for (const [name, value] of Object.entries({ computed, ref, shallowRef, watch, onMounted, onBeforeUnmount })) vi.stubGlobal(name, value)
 vi.stubGlobal('useShell', () => ({ agents: [] }))

@@ -5,7 +5,7 @@ import { filterLabel } from '~/features/board/utils/board'
 // "All …" at the top to clear the selection. An empty selection means all.
 const props = defineProps<{
   items: { value: string, label: string }[]
-  // "Parent": the aria label; the trigger reads "All parents" or "N parents"
+  // "Status": the aria label; the trigger reads "All statuses" or "N statuses"
   name: string
   plural: string
   icon: string

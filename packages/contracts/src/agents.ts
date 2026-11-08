@@ -1,15 +1,18 @@
 import {
   ACTIVE_RUN_STATES,
+  AGENT_ROLES,
   DESIGNER_RUN_OUTCOMES,
   DEVELOPER_RUN_OUTCOMES,
   PM_RUN_OUTCOMES,
   REVIEWER_RUN_OUTCOMES,
   TERMINAL_RUN_STATES,
-  type AgentRole
+  type AgentRole,
+  type RunSessionStart,
+  type RunTimings
 } from '@corral/core'
 import { z } from 'zod'
 import { agentRuntime } from './agent-runtimes.ts'
-import type { RunnerInfo, RunTimings } from './runner.ts'
+import type { RunnerInfo } from './runner-status.ts'
 import type { Comment } from './tasks.ts'
 
 // ── Control panel (PRD §7.11) ────────────────────────────────────────────────
@@ -28,7 +31,7 @@ export interface ServerStatus extends GlobalStatus {
 // New agents. There is only one PM (D13), so only developers, designers and reviewers.
 export const createAgentInput = z.object({
   name: z.string().trim().min(1).max(80),
-  role: z.enum(['developer', 'designer', 'reviewer'], { message: 'Only one PM agent exists; the role must be developer, designer or reviewer' }),
+  role: z.enum(AGENT_ROLES).exclude(['pm'], { message: 'Only one PM agent exists; the role must be developer, designer or reviewer' }),
   runtime: agentRuntime,
   concurrency: z.number().int().positive().default(1)
 })
@@ -44,8 +47,6 @@ export const patchAgentInput = z.object({
   runtime: agentRuntime.optional()
 })
 export type PatchAgentInput = z.infer<typeof patchAgentInput>
-
-// ── Agents and runs ─────────────────────────────────────────────────────────
 
 export interface Agent {
   id: string
@@ -72,7 +73,16 @@ export const runMessageInput = z.object({
   text: z.string().trim().min(1).max(20_000),
   attachments: z.array(z.uuid()).max(10).default([])
 })
-export type RunMessageInput = z.infer<typeof runMessageInput>
+
+// GET /runs. `since` is an ISO time: every run queued since then, for the
+// Agents page's history. `active=1` keeps only live runs.
+export const runListQuery = z.object({
+  agentId: z.string().optional(),
+  taskId: z.string().optional(),
+  since: z.string().optional().refine(text => !text || !Number.isNaN(new Date(text).getTime()), 'Expected an ISO time')
+    .transform(text => text ? new Date(text) : undefined),
+  active: z.string().optional().transform(value => value === '1')
+})
 
 // 202 from POST /projects/:slug/runs/:runId/messages: the message went to the
 // runner and is kept as the comment. The runner may still turn it down
@@ -134,6 +144,3 @@ interface RunFields {
   queuedAt: string
   startedAt: string | null
 }
-
-// How an author run's session began: a warm resume still has the prompt cache
-export type RunSessionStart = 'fresh' | 'resumed_warm' | 'resumed_cold'

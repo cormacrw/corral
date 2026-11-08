@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/vue-query'
 import type { Agent, CreateAgentInput, PatchAgentInput } from '@corral/contracts'
-import { api } from '~/composables/useApi'
+import { api } from '~/queries/api'
 import { defineMutation } from './dependencies'
 import { keys } from './keys'
 

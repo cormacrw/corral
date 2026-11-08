@@ -1,5 +1,6 @@
 import type { Agent, Inbox, Task } from '@corral/contracts'
 import { onBoard } from '~/features/board/utils/board.ts'
+import { isTaskDone } from '@corral/core'
 
 // What a project's card on the mobile Projects tab shows (design/mobile.md)
 export interface ProjectCardSummary {
@@ -11,7 +12,6 @@ export interface ProjectCardSummary {
   working: { agent: string, role: Agent['role'] } | null
 }
 
-// A project's share of Needs you
 export function projectNeedsYou(inbox: Inbox | null, projectId: string | undefined) {
   return inbox?.needsYou.filter(i => i.project?.id === projectId) ?? []
 }
@@ -25,7 +25,7 @@ export function projectCardSummary(
   now = Date.now()
 ): ProjectCardSummary {
   // Work in flight: the Board's columns without recently merged tasks
-  const board = tasks.filter(t => t.status !== 'merged' && t.status !== 'approved' && onBoard(t, now)).length
+  const board = tasks.filter(t => !isTaskDone(t) && onBoard(t, now)).length
   const backlog = tasks.filter(t => t.status === 'backlog').length
   const needs = needsYou > 0 ? `${needsYou} needs you.` : ''
   const leased = tasks.filter(t => t.lease)

@@ -1,12 +1,10 @@
-import { writeFile } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { inspectEpicRebase, prepareEpicRebase, pushEpicRebase } from './epic-rebase.ts'
 import { exec } from './exec.ts'
-import { barePath } from './repos.ts'
+import { barePath } from './layout.ts'
 import { createTestDataDir, TEST_REPOSITORY as repository } from './test-repo.ts'
-
-vi.setConfig({ testTimeout: 30_000 })
 
 let dataDir: string
 let origin: string
@@ -37,6 +35,11 @@ beforeEach(async () => {
   origin = join(dirname(dataDir), 'origin')
   await run('config', 'receive.denyCurrentBranch', 'ignore')
   await run('branch', 'epic', 'main')
+})
+
+afterEach(async () => {
+  vi.unstubAllEnvs()
+  await rm(dirname(dataDir), { recursive: true, force: true })
 })
 
 it('rebases cleanly in isolation, leaving every shared ref alone until the push', async () => {

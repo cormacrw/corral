@@ -17,14 +17,15 @@ vi.mock('./exec.ts', () => ({
   }
 }))
 
-const { barePath, syncRepository, withRepoLock } = await import('./repos.ts')
+const { barePath } = await import('./layout.ts')
+const { openRepo } = await import('./repos.ts')
 
 function overlaps(list: typeof calls): boolean {
   const sorted = [...list].sort((a, b) => a.start - b.start)
   return sorted.some((call, i) => i > 0 && call.start < sorted[i - 1]!.end)
 }
 
-describe('syncRepository', () => {
+describe('Repo.sync', () => {
   let dataDir: string
 
   beforeEach(async () => {
@@ -39,17 +40,17 @@ describe('syncRepository', () => {
   })
 
   it('shares one fetch between callers that arrive before it starts', async () => {
-    const results = await Promise.all([1, 2, 3].map(() => syncRepository(dataDir, 'acme/app')))
+    const results = await Promise.all([1, 2, 3].map(() => openRepo(dataDir, 'acme/app').sync()))
     expect(results).toEqual([null, null, null])
     expect(calls.filter(c => c.args[0] === 'fetch')).toHaveLength(1)
   })
 
   it('never joins a fetch already running: callers during it share the next one', async () => {
-    const first = syncRepository(dataDir, 'acme/app')
+    const first = openRepo(dataDir, 'acme/app').sync()
     await vi.waitFor(() => expect(calls.some(c => c.args[0] === 'fetch')).toBe(true), { timeout: 5000, interval: 1 })
     expect(calls.filter(c => c.args[0] === 'fetch')[0]!.end).toBe(0)
 
-    const later = [syncRepository(dataDir, 'acme/app'), syncRepository(dataDir, 'acme/app')]
+    const later = [openRepo(dataDir, 'acme/app').sync(), openRepo(dataDir, 'acme/app').sync()]
     await Promise.all([first, ...later])
 
     const fetches = calls.filter(c => c.args[0] === 'fetch')
@@ -58,27 +59,27 @@ describe('syncRepository', () => {
   })
 
   it('starts a new fetch once the last has finished', async () => {
-    await syncRepository(dataDir, 'acme/app')
-    await syncRepository(dataDir, 'acme/app')
+    await openRepo(dataDir, 'acme/app').sync()
+    await openRepo(dataDir, 'acme/app').sync()
     expect(calls.filter(c => c.args[0] === 'fetch')).toHaveLength(2)
   })
 
   it('fetches different repos in parallel', async () => {
-    await Promise.all([syncRepository(dataDir, 'acme/app'), syncRepository(dataDir, 'acme/other')])
+    await Promise.all([openRepo(dataDir, 'acme/app').sync(), openRepo(dataDir, 'acme/other').sync()])
     const fetches = calls.filter(c => c.args[0] === 'fetch')
     expect(new Set(fetches.map(f => f.cwd)).size).toBe(2)
     expect(overlaps(fetches)).toBe(true)
   })
 })
 
-describe('withRepoLock', () => {
-  it('runs the next job after one that failed', async () => {
+describe('Repo.withLock', () => {
+  it('runs the next job after one that failed, across handles to the same clone', async () => {
     const order: string[] = []
-    const first = withRepoLock('/repo', async () => {
+    const first = openRepo('/data', 'acme/app').withLock(async () => {
       order.push('first')
       throw new Error('boom')
     })
-    const second = withRepoLock('/repo', async () => {
+    const second = openRepo('/data', 'acme/app').withLock(async () => {
       order.push('second')
       return 2
     })

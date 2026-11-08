@@ -2,14 +2,14 @@
 import { VueQueryPlugin } from '@tanstack/vue-query'
 import { testQueryClient } from '~/queries/mount-with-query'
 import { keys } from '~/queries/keys'
-import { api } from '~/composables/useApi'
+import { api } from '~/queries/api'
 import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EffectScope, Ref } from 'vue'
 import { computed, defineComponent, effectScope, h, nextTick, reactive, ref, watch } from 'vue'
 import type { PlanSession } from '@corral/contracts'
 
-vi.mock('~/composables/useApi', () => ({ api: { plan: { sessions: vi.fn() } } }))
+vi.mock('~/queries/api', () => ({ api: { plan: { sessions: vi.fn() } } }))
 
 const session = (id: string, closed = false): PlanSession => ({
   id, closed, projectId: 'p-1', title: id, preview: '', runtime: 'codex',
@@ -42,11 +42,7 @@ describe('open Plan threads', () => {
     vi.stubGlobal('computed', computed)
     vi.stubGlobal('watch', watch)
     vi.stubGlobal('effectScope', effectScope)
-    vi.stubGlobal('useLocalStorage', (key: string) => {
-      expect(key).toBe('corral.plan.tabs')
-      return stored
-    })
-    vi.stubGlobal('usePendingPlan', () => ({ entries: ref({}) }))
+    vi.stubGlobal('useLocalStorage', () => stored)
     vi.stubGlobal('useRoute', () => route)
   })
   afterEach(() => {
@@ -79,7 +75,7 @@ describe('open Plan threads', () => {
     route.params.sessionId = 'a'
     const first = await setup()
     const second = await setup()
-    first.close(session('a'))
+    first.remove('a')
     expect(second.sessions.value.map(s => s.id)).not.toContain('a')
     expect(route.params.sessionId).toBe('a')
     expect(state.value.planSessions.some(s => s.id === 'a')).toBe(true)

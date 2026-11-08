@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { SECTIONS } from '~/utils/routes'
 // What every /projects/:slug route shows for a project that doesn't exist,
 // such as one just removed
 const device = useDevice()
@@ -20,7 +21,7 @@ useSeoMeta({ title: 'Project not found · Corral' })
       </p>
       <AppButton
         label="All projects"
-        to="/projects"
+        :to="SECTIONS.projects.to"
         color="neutral"
         variant="outline"
       />

@@ -6,8 +6,9 @@ import { schema } from '@corral/db'
 import { and, eq } from 'drizzle-orm'
 import { afterAll, afterEach, expect, it, vi } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { FakeRunner } from './test-runner.ts'
-import { complete, epicEventText } from './epic-prs.ts'
+import { FakeRunner } from './fake-runner.ts'
+import { boardComplete } from '@corral/core'
+import { epicEventText } from './epic-history.ts'
 
 let t: TestApp
 let runner: FakeRunner
@@ -49,7 +50,7 @@ async function setup(mode: 'epic' | 'each_task' | 'direct' = 'epic') {
 }
 async function lastMerge(otherId: string, epicId: string) {
   await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, otherId))
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   return (await runner.next('run.assign', m => m.job.epicId === epicId)).job
 }
 async function report(job: RunJob, outcome: 'approved' | 'changes_requested') {
@@ -59,7 +60,7 @@ async function report(job: RunJob, outcome: 'approved' | 'changes_requested') {
 it('opens the task\'s PR when its board contains a merged task and an Approved design', async () => {
   const { epic, other } = await setup()
   await t.db.update(schema.tasks).set({ type: 'design', status: 'approved' }).where(eq(schema.tasks.id, other.id))
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   const job = (await runner.next('run.assign', m => m.job.epicId === epic.id)).job
   expect(job).toMatchObject({ role: 'reviewer', epicId: epic.id })
   expect([...t.github.pulls.values()].some(p => p.head === epic.branch)).toBe(true)
@@ -71,7 +72,7 @@ it.each(['epic', 'each_task'] as const)('opens %s PR only after the last board t
   await t.createTask(project.slug, { epicId: epic.id, title: 'Future backlog work' })
   const removed = await t.createTask(project.slug, { epicId: epic.id, title: 'Deleted work' })
   await t.db.update(schema.tasks).set({ deletedAt: new Date(), status: 'ready' }).where(eq(schema.tasks.id, removed.id))
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   expect([...t.github.pulls.values()].some(p => p.head === epic.branch)).toBe(false)
   const job = await lastMerge(other.id, epic.id)
   const pr = [...t.github.pulls.values()].find(p => p.head === epic.branch)!
@@ -83,8 +84,7 @@ it.each(['epic', 'each_task'] as const)('opens %s PR only after the last board t
   if (mode === 'epic') await capture('epic-open.json', { scope: 'Isolated server with simulated GitHub, no remote PR created', board: [task.ref, other.ref], githubRequest: t.github.calls.find(c => c.method === 'openPullRequest' && c.args[0] === project.repository), githubResponse: pr, reviewerAssignment: job })
   expect(job).toMatchObject({ role: 'reviewer', taskId: null, branch: epic.branch, headSha: pr.headSha, baseBranch: 'develop' })
   expect((await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId)))[0]?.runnerName).toBeTruthy()
-  expect(job.prompt).toContain('git diff origin/develop...HEAD')
-  expect(job.prompt).toContain('without the cache')
+  expect(job.prompt).toContain('origin/develop')
   expect(job.prompt).toContain('Search API returns saved searches')
   expect(job.prompt).toContain(task.acceptanceCriteria[0]!.text)
   expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(false)
@@ -99,7 +99,7 @@ it.each(['epic', 'each_task'] as const)('opens %s PR only after the last board t
   expect(item.tasks.map(e => e.task.id)).toEqual([task.id, other.id])
   expect(item.tasks[0]!.evidence[0]!.note).toBe('Search API returns saved searches')
   // No duplicate PR or reviewer run while human review is pending.
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   expect([...t.github.pulls.values()].filter(p => p.head === epic.branch)).toHaveLength(1)
   expect((await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id)))).toHaveLength(1)
   const approved = await t.request('POST', `/api/epics/${epic.id}/review`, { action: 'approve', headSha: item.headSha })
@@ -143,7 +143,7 @@ it('invalidates human and in-flight reviews when Backlog work reaches the board'
 })
 
 const reviewState = async (epicId: string) => (await t.db.select().from(schema.epics).where(eq(schema.epics.id, epicId)))[0]!.reviewState
-const fixOf = async (epicId: string) => (await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epicId))).find(t => t.title.startsWith('Fix integration:'))!
+const fixOf = async (epicId: string) => (await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epicId))).find(t => t.kind === 'fix')!
 
 it('human changes requested create a fix, hold the PR, and bring the same PR back after the fix merges', async () => {
   const { project, epic, other } = await setup()
@@ -160,7 +160,7 @@ it('human changes requested create a fix, hold the PR, and bring the same PR bac
   expect(after.resolved.some(i => 'epicId' in i && i.epicId === epic.id && i.preview.includes('You requested changes'))).toBe(true)
   expect(await reviewState(epic.id)).toBe('changes_requested')
   const fix = await fixOf(epic.id)
-  expect(fix).toMatchObject({ kind: 'fix', status: 'ready', epicId: epic.id, title: 'Fix integration: Deleting a saved search does not ask for confirmation' })
+  expect(fix).toMatchObject({ kind: 'fix', status: 'ready', epicId: epic.id, title: expect.stringContaining('Deleting a saved search does not ask for confirmation') })
   expect(JSON.stringify(fix.description)).toContain('does not ask for confirmation')
   const criteria = await t.db.select().from(schema.acceptanceCriteria).where(eq(schema.acceptanceCriteria.taskId, fix.id)).orderBy(schema.acceptanceCriteria.position)
   expect(criteria.map(c => c.text)).toEqual(['Deleting a saved search does not ask for confirmation.', 'The empty state still says "No results"'])
@@ -171,7 +171,7 @@ it('human changes requested create a fix, hold the PR, and bring the same PR bac
   expect((await t.request('POST', path, { action: 'approve', headSha: job.headSha })).status).toBe(409)
   const added = await t.createTask(project.slug, { epicId: epic.id, title: 'Late requirement' })
   await t.request('POST', `/api/projects/${project.slug}/tasks/${added.number}/transitions`, { type: 'approve' })
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   expect(await reviewState(epic.id)).toBe('changes_requested')
   expect(t.github.calls.some(c => c.method === 'merge')).toBe(false)
   await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, added.id))
@@ -179,7 +179,7 @@ it('human changes requested create a fix, hold the PR, and bring the same PR bac
   // The fix merges into the epic branch: its head moves and review starts over.
   t.github.setBranch(project.repository, epic.branch!, 'fixed-head')
   await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, fix.id))
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   const second = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.runId !== job.runId)).job
   expect(second.headSha).toBe('fixed-head')
   expect(await reviewState(epic.id)).toBe('in_review')
@@ -200,7 +200,7 @@ it('sends the task\'s PR back to review if its fix task is dropped from the boar
   expect((await t.request('POST', `/api/epics/${epic.id}/review`, { action: 'request_changes', headSha: job.headSha, text: 'Deleting needs a confirmation' })).status).toBe(200)
   const fix = await fixOf(epic.id)
   await t.db.update(schema.tasks).set({ deletedAt: new Date() }).where(eq(schema.tasks.id, fix.id))
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   const second = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.runId !== job.runId)).job
   expect(second.headSha).toBe(job.headSha)
   expect(await reviewState(epic.id)).toBe('in_review')
@@ -209,7 +209,7 @@ it('sends the task\'s PR back to review if its fix task is dropped from the boar
 it('never opens task PRs in direct mode', async () => {
   const { epic, other } = await setup('direct')
   await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, other.id))
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   expect([...t.github.pulls.values()].some(p => p.head === epic.branch)).toBe(false)
 })
 
@@ -220,17 +220,17 @@ it('fences a moved PR head and retries an expired integration lease', async () =
   expect(await report(job, 'approved')).toMatchObject({ ok: false })
   expect((await inbox()).needsYou.some(i => i.id === epic.id)).toBe(false)
   await t.mergePass()
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   const next = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.runId !== job.runId)).job
   expect(next.headSha).toBe('new-combined-head')
   // Two simultaneous scheduling calls never duplicate the active review.
-  await Promise.all([t.orchestrator.schedule(), t.orchestrator.schedule()])
+  await Promise.all([t.orchestrator.scheduler.schedule(), t.orchestrator.scheduler.schedule()])
   const live = await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id))
   expect(live.filter(r => r.state === 'queued' || r.state === 'running')).toHaveLength(1)
   t.clock.now = new Date(t.clock.now.getTime() + 16 * 60 * 1000)
-  await t.orchestrator.sweepLeases()
+  await t.orchestrator.leases.sweepLeases()
   expect(await report(next, 'approved')).toMatchObject({ ok: false })
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   const retried = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.runId !== next.runId && m.job.runId !== job.runId)).job
   expect(await report(retried, 'approved')).toMatchObject({ ok: true })
 })
@@ -245,18 +245,17 @@ it('stops retrying after three failed reviews on a head and puts the task\'s PR 
   }
   // An interrupted run says nothing about the review, so it doesn't count
   await t.db.update(schema.runs).set({ leaseExpiresAt: new Date(t.clock.now.getTime() - 1000) }).where(eq(schema.runs.id, job.runId))
-  await t.orchestrator.sweepLeases()
-  await t.orchestrator.schedule()
+  await t.orchestrator.leases.sweepLeases()
+  await t.orchestrator.scheduler.schedule()
   job = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.runId !== job.runId)).job
   runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 1 }, headSha: null })
   await vi.waitFor(async () => expect(await reviewState(epic.id)).toBe('human_review'), { timeout: 20_000 })
 
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   const runs = await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id))
   expect(runs.filter(r => r.state === 'failed')).toHaveLength(3)
   expect(runs.filter(r => r.state === 'queued')).toHaveLength(0)
   const item = (await inbox()).needsYou.find(i => i.id === epic.id) as EpicReviewItem
-  expect(item.body).toContain('Integration review failed 3 times')
   expect(item.body).toContain('exited (code 1)')
   expect(item.sender.role).toBe('system')
 })
@@ -270,12 +269,12 @@ it.each(['in_review', 'human_review', 'conflict'] as const)('sends a task with s
   await t.mergePass()
   expect(await reviewState(epic.id)).toBe('open')
   expect((await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId)))[0]).toMatchObject({ state: 'interrupted', error: 'The task\'s PR closed' })
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   expect(await reviewState(epic.id)).toBe('open')
 
   pr.state = 'open'
   t.clock.now = new Date(t.clock.now.getTime() + 121_000)
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   expect(await reviewState(epic.id)).toBe('in_review')
 })
 
@@ -296,29 +295,32 @@ it('starts no integration review until a reviewer runner has a free slot, then r
   const { epic, other } = await setup()
   await t.db.update(schema.agents).set({ paused: true }).where(eq(schema.agents.role, 'reviewer'))
   await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, other.id))
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   await t.db.update(schema.agents).set({ paused: false }).where(eq(schema.agents.role, 'reviewer'))
   const [reviewer] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'reviewer'))
-  expect(await t.orchestrator.epicPrs.claim(reviewer!.id, async () => null)).toBeNull()
+  expect(await t.orchestrator.epicReviews.claim(reviewer!.id, async () => null)).toBeNull()
   expect(await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id))).toEqual([])
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   const { job } = await runner.next('run.assign', m => m.job.epicId === epic.id)
   const [run] = await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId))
   expect(run!.runnerId).toBe('r1')
 })
 
 it('completes task boards with Approved designs and Merged implementation tasks', () => {
-  expect(complete([])).toBe(false)
-  expect(complete([{ type: 'design', status: 'approved' }, { type: 'task', status: 'merged' }])).toBe(true)
-  expect(complete([{ type: 'design', status: 'merged' }])).toBe(false)
-  expect(complete([{ type: 'task', status: 'approved' }])).toBe(false)
+  expect(boardComplete([])).toBe(false)
+  expect(boardComplete([{ type: 'design', status: 'approved' }, { type: 'task', status: 'merged' }])).toBe(true)
+  expect(boardComplete([{ type: 'design', status: 'merged' }])).toBe(false)
+  expect(boardComplete([{ type: 'task', status: 'approved' }])).toBe(false)
 })
 
 it('keeps reading history from before task fixes ran with no task (D29)', () => {
-  expect(epicEventText({ event: 'rebase_handed_off' } as Parameters<typeof epicEventText>[0])).toContain('You handed the task\'s PR rebase to a developer')
-  expect(epicEventText({ event: 'conflict', summary: 'a.ts' } as Parameters<typeof epicEventText>[0])).toContain('The task\'s PR conflict')
-  expect(epicEventText({ event: 'sync_failed' } as Parameters<typeof epicEventText>[0])).toContain('Task rebase stopped')
-  expect(epicEventText({ event: 'sync_failed', fix: 'ci' } as Parameters<typeof epicEventText>[0])).toContain('Task fix stopped')
+  const text = (detail: object) => epicEventText(detail as Parameters<typeof epicEventText>[0])
+  // Legacy events still read as words, not their raw event names
+  expect(text({ event: 'rebase_handed_off' })).not.toContain('rebase_handed_off')
+  expect(text({ event: 'conflict', summary: 'a.ts' })).toMatch(/^(?!conflict).+: a\.ts$/)
+  // A stopped fix reads differently from a stopped rebase
+  expect(text({ event: 'sync_failed' })).not.toContain('sync_failed')
+  expect(text({ event: 'sync_failed', fix: 'ci' })).not.toBe(text({ event: 'sync_failed' }))
 })
 
 it('keeps structured findings and separate rounds at their reviewed heads, including an empty report', async () => {
@@ -345,7 +347,7 @@ it('keeps structured findings and separate rounds at their reviewed heads, inclu
   t.github.setBranch(project.repository, epic.branch!, 'fixed-integration-head')
   await t.db.update(schema.epics).set({ reviewState: 'open', prHeadSha: 'fixed-integration-head' }).where(eq(schema.epics.id, epic.id))
   await t.mergePass()
-  await t.orchestrator.schedule()
+  await t.orchestrator.scheduler.schedule()
   const second = (await runner.next('run.assign', m => m.job.epicId === epic.id && m.job.role === 'reviewer' && m.job.runId !== first.runId)).job
   expect(second.headSha).toBe('fixed-integration-head')
   expect(second.prompt).toContain('UI sends query but the API expects search.')

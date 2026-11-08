@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { taskPath } from '~/utils/routes'
 import type { EpicReviewTaskRow } from '@corral/contracts'
 import { plural } from '~/utils/labels'
 
@@ -36,7 +37,7 @@ const owes = (row: EpicReviewTaskRow) => props.canTick && (row.humanReview || ro
       data-testid="inbox-epic-task"
     >
       <NuxtLink
-        :to="`/tasks/${row.ref}`"
+        :to="taskPath(row.ref)"
         class="block min-w-0 px-3 py-2 text-sm hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-primary"
       >
         <span class="break-words"><span class="font-mono text-xs text-muted-foreground">{{ row.ref }}</span> {{ row.title }}</span>

@@ -1,13 +1,14 @@
-import { AVATAR_CONTENT_TYPES, AVATAR_MAX_BYTES, type PatchProfileInput, type Profile } from '@corral/contracts'
+import { isUuid } from '@corral/core'
+import { AVATAR_MAX_BYTES, type ImageContentType, type PatchProfileInput, type Profile } from '@corral/contracts'
 import { schema, type Executor } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import type { BlobStore } from './blob-store.ts'
-import { ApiFailure, notFound } from './errors.ts'
-import { declaredImageType, hasImageSignature } from './images.ts'
+import { blobVersion, type BlobStore } from './blob-store.ts'
+import { notFound } from './errors.ts'
+import { validateImage } from './images.ts'
 
 const { agents, users } = schema
 
-type AvatarType = typeof AVATAR_CONTENT_TYPES[number]
+type AvatarType = ImageContentType
 
 // The write boundary accepts a complete image or removal, never separate fields.
 export type AvatarImage = { data: Uint8Array, type: AvatarType } | null
@@ -25,17 +26,11 @@ async function storeAvatar(blobs: BlobStore, image: AvatarImage): Promise<Avatar
 // store like evidence; the row keeps the hash and type. URLs carry part of
 // the hash, so a new picture is a new URL and the old one can be cached.
 export function avatarUrl(path: string, blob: string | null): string | null {
-  return blob ? `/api/${path}/avatar?v=${blob.slice(0, 12)}` : null
+  return blob ? `/api/${path}/avatar?v=${blobVersion(blob)}` : null
 }
 
 export function checkAvatar(data: Uint8Array, contentType: string | undefined): AvatarType {
-  const type = declaredImageType(contentType)
-  const invalid = (message: string) => new ApiFailure(400, { code: 'invalid_input', issues: [{ path: ['avatar'], message }] })
-  if (!type || !AVATAR_CONTENT_TYPES.includes(type)) throw invalid('Use a PNG, JPEG, WebP or GIF image')
-  if (data.byteLength === 0) throw invalid('The image is empty')
-  if (data.byteLength > AVATAR_MAX_BYTES) throw invalid('The image is over 2 MB')
-  if (!hasImageSignature(data, type)) throw invalid(`The file isn't a ${type.slice(6).toUpperCase()} image`)
-  return type
+  return validateImage(data, contentType, { maxBytes: AVATAR_MAX_BYTES, field: 'avatar' })
 }
 
 export async function getProfile(db: Executor, userId: string): Promise<Profile> {
@@ -55,19 +50,16 @@ export async function setUserAvatar(db: Executor, blobs: BlobStore, userId: stri
   return getProfile(db, userId)
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
 export async function setAgentAvatar(db: Executor, blobs: BlobStore, agentId: string, image: AvatarImage): Promise<void> {
-  if (!UUID.test(agentId)) throw notFound()
+  if (!isUuid(agentId)) throw notFound()
   const [agent] = await db.select({ id: agents.id }).from(agents).where(eq(agents.id, agentId))
   if (!agent) throw notFound()
   const avatar = await storeAvatar(blobs, image)
   await db.update(agents).set({ ...avatar, updatedAt: new Date() }).where(eq(agents.id, agentId))
 }
 
-// The stored picture, for the avatar endpoints
 export async function readAvatar(db: Executor, blobs: BlobStore, owner: { userId: string } | { agentId: string }): Promise<{ data: Uint8Array, type: string } | null> {
-  if ('agentId' in owner && !UUID.test(owner.agentId)) return null
+  if ('agentId' in owner && !isUuid(owner.agentId)) return null
   const [row] = 'userId' in owner
     ? await db.select({ blob: users.avatarBlob, type: users.avatarContentType }).from(users).where(eq(users.id, owner.userId))
     : await db.select({ blob: agents.avatarBlob, type: agents.avatarContentType }).from(agents).where(eq(agents.id, owner.agentId))

@@ -1,24 +1,29 @@
-import type { Comment, OutcomeReport } from '@corral/contracts'
-import { feedbackSimilarity, nextDesignVersion, reviewFeedbackText, transition, humanCheckTally, taskRef, type EpicDecisionRequest, type ReviewVerdict } from '@corral/core'
-import { schema, type Executor } from '@corral/db'
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { DESIGN_TOO_LARGE, DESIGN_VERSION_MAX_BYTES, outcomeName, SPIKE_OPENS_NO_PR, toolName, type Comment, type OutcomeReport } from '@corral/contracts'
+import { errorText, feedbackSimilarity, humanCheckTally, isAuthoringRole, isPrFree, nextDesignVersion, reviewFeedbackText, SERVER_ACTOR, shortSha, taskRef, transition, type EpicDecisionRequest, type ReviewVerdict } from '@corral/core'
+import { schema, type Database, type Executor, type ProjectRow, type TaskRow } from '@corral/db'
+import { and, desc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { appendAudit, auditEvent } from './audit.ts'
 import { bundleProblem } from './designs.ts'
 import { raiseDecision, recordResolutionReview } from './epic-rebase-approval.ts'
-import type { PullRequest } from './github.ts'
-import { carryOverApproval, checkTrivialRebase } from './rebase-review.ts'
+import type { GitHubClient, PullRequest } from './github.ts'
+import type { BlobStore } from './blob-store.ts'
+import type { EventBus } from './events.ts'
+import { feedbackComment, findingsComment, noteProblem, WORK_NOTE_RULE } from './outcome-text.ts'
+import { carryOverApproval } from './rebase-review.ts'
 import { triageBlocked } from './retry-recovery.ts'
 import { evidenceState, isEpicRebaseTask, isEpicResolution, taskBase } from './task-base.ts'
 import { recordTaskSubmission } from './task-submissions.ts'
-import { addComment, applyTransition, toTaskState, type ProjectRow, type TaskRow } from './tasks.ts'
-import { ToolError, server, type RunContext, type RunCore } from './run-context.ts'
+import { applyTransition } from './tasks.ts'
+import { runActor, type RunContext, type RunContexts } from './run-context.ts'
+import type { RunEnding } from './run-ending.ts'
+import { ToolError } from './tool-error.ts'
+import { addComment, addCommentWithTransition } from './comments.ts'
+import { toTaskState } from './task-rows.ts'
+import { checkTrivialRebase } from './github-diff.ts'
+import { taskCriteria } from './criteria.ts'
 
-const { acceptanceCriteria, comments, designVersions, reviews, taskSubmissions, tasks } = schema
-
-// The developer's one-line work note, posted as a comment on every outcome
-export const MAX_NOTE_LENGTH = 200
-const NOTE_EXAMPLE = 'Rebased onto 6e67d6f; resolved conflict in docs/architecture.md keeping main’s SSE wording'
+const { designVersions, reviews, taskSubmissions, tasks } = schema
 
 // What the runner sends for submit_design (D20)
 const designSchema = z.object({
@@ -28,36 +33,28 @@ const designSchema = z.object({
   screenshots: z.array(z.object({ fileName: z.string().min(1), contentType: z.string().regex(/^image\//), dataBase64: z.string().min(1) })).min(1, 'Add at least one screenshot')
 })
 
-const MAX_DESIGN_BYTES = 25 * 1024 * 1024
-
 // What stands in for a commit on a spike's submission: reviews are kept per
 // submission, and a spike has no commits to tell them apart
-export function findingsMarker(runId: string): string {
+function findingsMarker(runId: string): string {
   return `findings-${runId}`
 }
 
-// Why a developer's work note is not acceptable, if it isn't
-export function noteProblem(note: string | undefined): string | null {
-  if (!note) return 'The work note is missing.'
-  if (/[\r\n]/.test(note)) return 'The work note must be a single line.'
-  if (note.length > MAX_NOTE_LENGTH) return `The work note is ${note.length} characters; the limit is ${MAX_NOTE_LENGTH}.`
-  return null
-}
-
-// The review as a comment the developer reads next round
-export function feedbackComment(summary: string, verdicts: { criterionId: string, met: boolean | null, note: string }[], criteria: { id: string, text: string }[]): string {
-  const lines = verdicts.map((v) => {
-    const text = criteria.find(c => c.id === v.criterionId)?.text ?? v.criterionId
-    return `- ${v.met === null ? 'Needs human check:' : v.met ? '✅' : '❌'} ${text}${v.note ? ` — ${v.note}` : ''}`
-  })
-  return [summary.trim(), '', ...lines].join('\n').trim()
+export interface RunOutcomesDeps {
+  db: Database
+  events: EventBus
+  github: GitHubClient
+  blobs: BlobStore
+  // Where people open Corral, for links in PR bodies
+  publicUrl: string
+  runs: Pick<RunContexts, 'lockHeld'>
+  ending: Pick<RunEnding, 'failRun' | 'finished' | 'endRunIn' | 'postNote'>
 }
 
 export class RunOutcomes {
-  #c: RunCore
+  #d: RunOutcomesDeps
 
-  constructor(core: RunCore) {
-    this.#c = core
+  constructor(deps: RunOutcomesDeps) {
+    this.#d = deps
   }
 
   async reportOutcome(ctx: RunContext, report: OutcomeReport): Promise<unknown> {
@@ -70,18 +67,18 @@ export class RunOutcomes {
           if (!ctx.task?.rebaseOnly && !(ctx.task && isEpicResolution(ctx.task))) throw new ToolError('Only a rebase review can report blocked.')
           return this.#blockedRebaseReview(ctx, report.summary, report.decision)
         case 'failed':
-          await this.#c.ending.failRun(ctx, report.summary, { summary: report.summary, headSha: report.headSha })
-          this.#c.ending.finished(ctx, 'Reported failed')
+          await this.#d.ending.failRun(ctx, report.summary, { summary: report.summary, headSha: report.headSha })
+          this.#d.ending.finished(ctx, 'Reported failed')
           return { ok: true, message: 'Recorded. You can stop now.' }
       }
       throw new ToolError('A reviewer reports approved, changes_requested, blocked (rebase review only) or failed')
     }
-    if (ctx.run.role === 'developer' || ctx.run.role === 'designer') {
+    if (isAuthoringRole(ctx.run.role)) {
       const problem = noteProblem(report.note)
-      if (problem) throw new ToolError(`Not reported. ${problem} Add \`note\`: one line of at most ${MAX_NOTE_LENGTH} characters saying what this run did, e.g. "${NOTE_EXAMPLE}". Then report again.`)
+      if (problem) throw new ToolError(`Not reported. ${problem} Add \`note\`: ${WORK_NOTE_RULE}. Then report again.`)
       const spike = ctx.task!.type === 'spike'
       const design = ctx.task!.type === 'design'
-      const prFree = ctx.task!.integrationProtocol > 0
+      const prFree = isPrFree(ctx.task!)
       const expected = design ? 'design_submitted' : spike ? 'findings_reported' : prFree ? 'commit_submitted' : 'pr_opened or pr_updated'
       switch (report.outcome) {
         case 'commit_submitted':
@@ -91,11 +88,11 @@ export class RunOutcomes {
         case 'pr_opened':
         case 'pr_updated':
         case 'pr_rebased':
-          if (prFree) throw new ToolError('Not submitted. This subtask opens no PR: report commit_submitted.')
+          if (prFree) throw new ToolError(`Not submitted. This subtask opens no PR: report ${outcomeName('commit_submitted')}.`)
           if (ctx.task!.rebaseOnly && report.outcome !== 'pr_rebased') throw new ToolError('Not submitted. A rebase-only round expects pr_rebased.')
           if (!ctx.task!.rebaseOnly && report.outcome === 'pr_rebased') throw new ToolError('Not submitted. This round expects pr_opened or pr_updated, not pr_rebased.')
-          if (spike) throw new ToolError('Not submitted. A spike opens no PR: report your findings with outcome findings_reported.')
-          if (design) throw new ToolError('Not submitted. A design task opens no PR: call submit_design, then report design_submitted.')
+          if (spike) throw new ToolError(`Not submitted. ${SPIKE_OPENS_NO_PR}`)
+          if (design) throw new ToolError(`Not submitted. A design task opens no PR: call ${toolName('submit_design')}, then report ${outcomeName('design_submitted')}.`)
           if (report.outcome === 'pr_rebased') {
             if (!report.review) throw new ToolError('Not submitted. Add review: trivial or needs_review.')
             if (!report.conflictedFiles?.length) throw new ToolError('Not submitted. Add conflictedFiles: every file in which you resolved a conflict.')
@@ -111,8 +108,8 @@ export class RunOutcomes {
         case 'stuck':
           return this.#stuck(ctx, report.summary, report.note!, report.decision)
         case 'failed':
-          await this.#c.ending.failRun(ctx, report.summary, { summary: report.summary, headSha: report.headSha }, report.note)
-          this.#c.ending.finished(ctx, 'Reported failed')
+          await this.#d.ending.failRun(ctx, report.summary, { summary: report.summary, headSha: report.headSha }, report.note)
+          this.#d.ending.finished(ctx, 'Reported failed')
           return { ok: true, message: 'Recorded. You can stop now.' }
       }
       throw new ToolError(spike
@@ -133,7 +130,7 @@ export class RunOutcomes {
   async #behaviourComment(tx: Executor, ctx: RunContext, report: OutcomeReport, reviewed: boolean): Promise<Comment | null> {
     if (report.behaviourChanged === undefined) return null
     const said = report.behaviourChanged ? 'The developer reported that behaviour changed.' : 'The developer reported that behaviour did not change.'
-    return addComment(tx, ctx.task!.id, { body: `${said} ${reviewed ? 'It goes to Agent review.' : 'No reviewer looks at it again; CI runs on the new head.'}`, pinned: false }, server)
+    return addComment(tx, ctx.task!.id, { body: `${said} ${reviewed ? 'It goes to Agent review.' : 'No reviewer looks at it again; CI runs on the new head.'}`, pinned: false }, SERVER_ACTOR)
   }
 
   // flows.md steps 6–7: record the verdict for this commit. Changes
@@ -141,10 +138,10 @@ export class RunOutcomes {
   // posted as a comment; an approval moves the task to Human review or
   // Ready to merge, where the merge orchestrator takes over.
   async #review(ctx: RunContext, report: Extract<OutcomeReport, { outcome: ReviewVerdict }>, verdict: ReviewVerdict) {
-    const { db } = this.#c.d
+    const { db } = this.#d
     const task = ctx.task!
     if (task.rebaseOnly && verdict === 'approved') return this.#approvedRebaseReview(ctx, report)
-    const criteria = await db.select().from(acceptanceCriteria).where(eq(acceptanceCriteria.taskId, task.id)).orderBy(asc(acceptanceCriteria.position))
+    const criteria = await taskCriteria(db, task.id)
     const verdicts = report.criteria ?? []
     const missing = criteria.filter(c => !c.checkedByHuman && !verdicts.some(v => v.criterionId === c.id))
     if (missing.length > 0) {
@@ -164,10 +161,10 @@ export class RunOutcomes {
     const summary = report.summary
     const feedback = task.rebaseOnly ? `Rebase review changes requested: ${report.summary.trim()}` : verdict === 'approved' ? `Approved: ${kept.some(v => v.met === null) ? humanCheckTally(kept.filter(v => v.met).length, kept.filter(v => v.met === null).length) : `all ${kept.length} criteria met`}. ${report.summary.trim()}`.trim() : feedbackComment(report.summary, kept, criteria)
 
-    const prFree = task.integrationProtocol > 0
-    const branchHead = prFree ? await this.#c.d.github.branchHead(ctx.project!.repository, task.branch!) : null
+    const prFree = isPrFree(task)
+    const branchHead = prFree ? await this.#d.github.branchHead(ctx.project!.repository, task.branch!) : null
     const next = await db.transaction(async (tx) => {
-      const locked = await this.#c.runs.lockHeld(tx, ctx)
+      const locked = await this.#d.runs.lockHeld(tx, ctx)
       const headSha = locked.task.headSha!
       await this.#bindVerdict(tx, locked.task, report, verdict, branchHead)
       if (verdict === 'approved' && isEpicResolution(locked.task)) await recordResolutionReview(tx, task.id, { runId: ctx.run.id, headSha, preserved: report.preservesApproval === true, summary: report.summary })
@@ -175,20 +172,20 @@ export class RunOutcomes {
       // one requested changes too; near-identical feedback blocks the task
       const similarity = verdict === 'changes_requested' ? await this.#feedbackSimilarity(tx, task.id, locked.task.reviewRounds, report.summary, kept) : undefined
       await tx.insert(reviews).values({
-        taskId: task.id, runId: ctx.run.id, round: locked.task.reviewRounds, headSha, verdict, summary, criteria: kept, author: this.#c.runs.actor(ctx)
+        taskId: task.id, runId: ctx.run.id, round: locked.task.reviewRounds, headSha, verdict, summary, criteria: kept, author: runActor(ctx)
       })
-      await tx.insert(comments).values({ taskId: task.id, author: this.#c.runs.actor(ctx), body: feedback })
-      await appendAudit(tx, { projectId: ctx.run.projectId, taskId: task.id, actor: this.#c.runs.actor(ctx) }, auditEvent('review.recorded', { runId: ctx.run.id, verdict, headSha, round: locked.task.reviewRounds, met: kept.filter(v => v.met).length, of: kept.length, ...(similarity !== undefined && { similarity }) }))
+      await addCommentWithTransition(tx, task.id, { body: feedback }, runActor(ctx))
+      await appendAudit(tx, { projectId: ctx.run.projectId, taskId: task.id, actor: runActor(ctx) }, auditEvent('review.recorded', { runId: ctx.run.id, verdict, headSha, round: locked.task.reviewRounds, met: kept.filter(v => v.met).length, of: kept.length, ...(similarity !== undefined && { similarity }) }))
       // Changes requested → the developer; approved → Human review when
       // flagged, otherwise Ready to merge (D10). PR-free work always takes
       // Ready to merge: the human sees it at the epic review (D27)
-      const state = await applyTransition(tx, locked.task, locked.project, verdict === 'approved' ? { type: 'review_approved' } : { type: 'changes_requested', similarity }, server, { event: verdict === 'approved' ? 'review_approved' : 'changes_requested', runId: ctx.run.id, headSha, ...(similarity !== undefined && { similarity }) })
+      const state = await applyTransition(tx, locked.task, locked.project, verdict === 'approved' ? { type: 'review_approved' } : { type: 'changes_requested', similarity }, SERVER_ACTOR, { event: verdict === 'approved' ? 'review_approved' : 'changes_requested', runId: ctx.run.id, headSha, ...(similarity !== undefined && { similarity }) })
       // The review-round cap and repeated feedback get the PM's diagnosis first (D11)
-      if (state.status === 'blocked') await triageBlocked(tx, ctx, locked.task)
-      await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: verdict, summary: report.summary, headSha })
+      if (state.status === 'blocked') await triageBlocked(tx, ctx.run, locked.task)
+      await this.#d.ending.endRunIn(tx, ctx, { state: 'completed', outcome: verdict, summary: report.summary, headSha })
       return state
     })
-    this.#c.ending.finished(ctx, `Review recorded: ${verdict}`, { handoff: true })
+    this.#d.ending.finished(ctx, `Review recorded: ${verdict}`, { handoff: true })
     const spike = task.type === 'spike'
     return {
       ok: true,
@@ -210,7 +207,7 @@ export class RunOutcomes {
   // head, so this is where a moved branch or checkout is caught (D27).
   async #bindVerdict(tx: Executor, task: TaskRow, report: OutcomeReport, verdict: ReviewVerdict, branchHead: string | null) {
     const headSha = task.headSha!
-    const prFree = task.integrationProtocol > 0
+    const prFree = isPrFree(task)
     const reviewed = report.headSha ?? (prFree ? null : headSha)
     if (reviewed !== headSha) throw new ToolError(`Not recorded. This verdict is for ${reviewed ?? 'an unknown commit'}, but the submitted commit is ${headSha}. Check out the submitted commit and review it, or report failed.`)
     if (!prFree) return
@@ -235,16 +232,16 @@ export class RunOutcomes {
   // D24: the reviewer found the rebase clean, so the earlier approval stands
   async #approvedRebaseReview(ctx: RunContext, report: OutcomeReport) {
     const task = ctx.task!
-    const branchHead = task.integrationProtocol > 0 ? await this.#c.d.github.branchHead(ctx.project!.repository, task.branch!) : null
-    await this.#c.d.db.transaction(async (tx) => {
-      const locked = await this.#c.runs.lockHeld(tx, ctx)
+    const branchHead = isPrFree(task) ? await this.#d.github.branchHead(ctx.project!.repository, task.branch!) : null
+    await this.#d.db.transaction(async (tx) => {
+      const locked = await this.#d.runs.lockHeld(tx, ctx)
       await this.#bindVerdict(tx, locked.task, report, 'approved', branchHead)
-      const carried = await carryOverApproval(tx, locked, { actor: this.#c.runs.actor(ctx), runId: ctx.run.id, via: 'a reviewed rebase', note: report.summary })
+      const carried = await carryOverApproval(tx, locked, { actor: runActor(ctx), runId: ctx.run.id, via: 'a reviewed rebase', note: report.summary })
       if (!carried.ok) throw new ToolError(`Not recorded. ${carried.problem}`)
-      await tx.insert(comments).values({ taskId: locked.task.id, author: this.#c.runs.actor(ctx), body: `Rebase review approved: ${report.summary.trim()}` })
-      await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'approved', summary: report.summary, headSha: locked.task.headSha! })
+      await addCommentWithTransition(tx, locked.task.id, { body: `Rebase review approved: ${report.summary.trim()}` }, runActor(ctx))
+      await this.#d.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'approved', summary: report.summary, headSha: locked.task.headSha! })
     })
-    this.#c.ending.finished(ctx, 'Review recorded: approved', { handoff: true })
+    this.#d.ending.finished(ctx, 'Review recorded: approved', { handoff: true })
     return { ok: true, message: 'Approval carried over. Corral handles any human check, CI and the merge from here. You can stop now.' }
   }
 
@@ -252,15 +249,15 @@ export class RunOutcomes {
   async #blockedRebaseReview(ctx: RunContext, reason: string, structured?: EpicDecisionRequest) {
     if (!reason.trim()) throw new ToolError('Explain the substantial change and the affected criteria for the human.')
     const decision = this.#decisionFor(ctx, reason, structured)
-    await this.#c.d.db.transaction(async (tx) => {
-      const { task, project } = await this.#c.runs.lockHeld(tx, ctx)
-      await tx.insert(comments).values({ taskId: task.id, author: this.#c.runs.actor(ctx), body: `Rebase review blocked: ${reason.trim()}` })
-      if (decision) await raiseDecision(tx, task, project, decision, ctx.run.id, this.#c.runs.actor(ctx))
-      await applyTransition(tx, task, project, { type: 'block', reason: decision?.question ?? reason }, server, { event: 'blocked', runId: ctx.run.id })
-      await triageBlocked(tx, ctx, task)
-      await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'blocked', summary: reason })
+    await this.#d.db.transaction(async (tx) => {
+      const { task, project } = await this.#d.runs.lockHeld(tx, ctx)
+      await addCommentWithTransition(tx, task.id, { body: `Rebase review blocked: ${reason.trim()}` }, runActor(ctx))
+      if (decision) await raiseDecision(tx, task, project, decision, ctx.run.id, runActor(ctx))
+      await applyTransition(tx, task, project, { type: 'block', reason: decision?.question ?? reason }, SERVER_ACTOR, { event: 'blocked', runId: ctx.run.id })
+      await triageBlocked(tx, ctx.run, task)
+      await this.#d.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'blocked', summary: reason })
     })
-    this.#c.ending.finished(ctx, 'Rebase review blocked: waiting on PM triage')
+    this.#d.ending.finished(ctx, 'Rebase review blocked: waiting on PM triage')
     return { ok: true, message: 'The task is Blocked for PM triage. You can stop now.' }
   }
 
@@ -277,24 +274,24 @@ export class RunOutcomes {
   // Holds the task for PM diagnosis before any human question (D11).
   async #stuck(ctx: RunContext, question: string, note: string, structured?: EpicDecisionRequest) {
     const decision = this.#decisionFor(ctx, question, structured)
-    const comment = await this.#c.d.db.transaction(async (tx) => {
-      const { task, project } = await this.#c.runs.lockHeld(tx, ctx)
-      const comment = await this.#c.ending.postNote(tx, ctx, note)
-      if (decision) await raiseDecision(tx, task, project, decision, ctx.run.id, this.#c.runs.actor(ctx))
-      await applyTransition(tx, task, project, { type: 'block', reason: decision?.question ?? question }, server, { event: 'stuck', runId: ctx.run.id })
-      await triageBlocked(tx, ctx, task)
-      await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'stuck', summary: question })
+    const comment = await this.#d.db.transaction(async (tx) => {
+      const { task, project } = await this.#d.runs.lockHeld(tx, ctx)
+      const comment = await this.#d.ending.postNote(tx, ctx, note)
+      if (decision) await raiseDecision(tx, task, project, decision, ctx.run.id, runActor(ctx))
+      await applyTransition(tx, task, project, { type: 'block', reason: decision?.question ?? question }, SERVER_ACTOR, { event: 'stuck', runId: ctx.run.id })
+      await triageBlocked(tx, ctx.run, task)
+      await this.#d.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'stuck', summary: question })
       return comment
     })
-    this.#c.d.events.publish({ type: 'comment.created', comment })
-    this.#c.ending.finished(ctx, 'Stuck: waiting on PM triage')
+    this.#d.events.publish({ type: 'comment.created', comment })
+    this.#d.ending.finished(ctx, 'Stuck: waiting on PM triage')
     return { ok: true, message: 'The task is Blocked for PM triage. You can stop now.' }
   }
 
   // What every code submission must pass before anything changes: the branch
   // is at the pushed commit, and the criteria have this round's evidence
   async #checkSubmission(ctx: RunContext, headSha: string) {
-    const { db, github } = this.#c.d
+    const { db, github } = this.#d
     const task = ctx.task!
     const head = await github.branchHead(ctx.project!.repository, task.branch!)
     const { criteria, attached, missing } = await evidenceState(db, task)
@@ -306,7 +303,7 @@ export class RunOutcomes {
       type: 'submit',
       branchAtExpectedCommit: head === headSha,
       evidenceComplete: missing.length === 0
-    }, server)
+    }, SERVER_ACTOR)
     if (!check.ok) {
       const problems = [
         head !== headSha ? `The branch on GitHub is at ${head ?? 'nothing'}, not your commit ${headSha}.` : '',
@@ -320,14 +317,14 @@ export class RunOutcomes {
   // D27: the pushed commit is the submission. It goes to Agent review with its
   // own record, and nothing touches a PR or the shared epic branch.
   async #submitCommit(ctx: RunContext, report: OutcomeReport & { outcome: 'commit_submitted' }) {
-    const { db } = this.#c.d
+    const { db } = this.#d
     const task = ctx.task!
     const { headSha, baseSha } = report
     if (!headSha || !baseSha || headSha === baseSha) throw new ToolError('There is no commit to submit. Commit your work on this branch, then report again.')
     await this.#checkSubmission(ctx, headSha)
 
     const posted = await db.transaction(async (tx) => {
-      const locked = await this.#c.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
+      const locked = await this.#d.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
       const ciFix = locked.task.ciFix !== null
       // D29: a CI fix that changes nothing keeps its approval on the new commit
       const carried = ciFix && report.behaviourChanged === false && locked.task.approvedHeadSha
@@ -336,27 +333,27 @@ export class RunOutcomes {
       if (!carried) {
         await applyTransition(tx, locked.task, locked.project, {
           type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
-        }, server, { event: 'commit_submitted', runId: ctx.run.id, headSha, pr: null })
+        }, SERVER_ACTOR, { event: 'commit_submitted', runId: ctx.run.id, headSha, pr: null })
       }
       const submission = await recordTaskSubmission(tx, { taskId: task.id, submittedHeadSha: headSha, baseSha }).catch((error: unknown) => {
-        throw new ToolError(`Not submitted. ${error instanceof Error ? error.message : String(error)}`)
+        throw new ToolError(`Not submitted. ${errorText(error)}`)
       })
       if (carried) await tx.update(taskSubmissions).set({ agentApprovedHeadSha: headSha }).where(eq(taskSubmissions.id, submission.id))
       await tx.update(tasks).set({ ciFix: null, ...(carried && { headSha }) }).where(eq(tasks.id, task.id))
-      const comment = await this.#c.ending.postNote(tx, ctx, report.note!)
+      const comment = await this.#d.ending.postNote(tx, ctx, report.note!)
       const said = await this.#behaviourComment(tx, ctx, report, !carried)
-      await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'commit_submitted', summary: report.summary, headSha, behaviourChanged: report.behaviourChanged, ...(ciFix && { fixKind: 'ci' as const, reReviewed: !carried }), ...(locked.task.rebaseOnly && { fixKind: 'conflict' as const, reReviewed: true }) })
+      await this.#d.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'commit_submitted', summary: report.summary, headSha, behaviourChanged: report.behaviourChanged, ...(ciFix && { fixKind: 'ci' as const, reReviewed: !carried }), ...(locked.task.rebaseOnly && { fixKind: 'conflict' as const, reReviewed: true }) })
       return said ? [comment, said] : [comment]
     })
-    for (const comment of posted) this.#c.d.events.publish({ type: 'comment.created', comment })
-    this.#c.ending.finished(ctx, 'Outcome accepted', { handoff: true })
-    return { ok: true, commit: headSha, message: `Commit ${headSha.slice(0, 10)} on ${task.branch} is ready for review. You can stop now.` }
+    for (const comment of posted) this.#d.events.publish({ type: 'comment.created', comment })
+    this.#d.ending.finished(ctx, 'Outcome accepted', { handoff: true })
+    return { ok: true, commit: headSha, message: `Commit ${shortSha(headSha)} on ${task.branch} is ready for review. You can stop now.` }
   }
 
   // flows.md step 5: validate the developer's submission, open or update the
   // PR, then move the task to Agent review
   async #submit(ctx: RunContext, report: OutcomeReport & { outcome: 'pr_opened' | 'pr_updated' | 'pr_rebased' }) {
-    const { db, github } = this.#c.d
+    const { db, github } = this.#d
     const task = ctx.task!
     if (!report.headSha) throw new ToolError('There is no commit to submit. Commit your work, then report again.')
     const { criteria, attached } = await this.#checkSubmission(ctx, report.headSha)
@@ -386,7 +383,7 @@ export class RunOutcomes {
       : null
 
     const { posted, verified, ciCarried } = await db.transaction(async (tx) => {
-      const locked = await this.#c.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
+      const locked = await this.#d.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
       await tx.update(tasks).set({ headSha: report.headSha, ...(pr && { prNumber: pr.number, prUrl: pr.url }) }).where(eq(tasks.id, task.id))
       const carried = rebaseCheck && !rebaseCheck.error && rebaseCheck.failures.length === 0
         ? await this.#carryVerifiedRebase(tx, ctx, { task: { ...locked.task, headSha: report.headSha!, prNumber: pr?.number ?? locked.task.prNumber }, project: locked.project }, report)
@@ -401,16 +398,16 @@ export class RunOutcomes {
         const checkResult = rebaseCheck && { checkFailures: rebaseCheck.failures, ...(checkError && { checkError }) }
         await applyTransition(tx, locked.task, locked.project, {
           type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
-        }, server, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr?.number ?? null, ...checkResult })
+        }, SERVER_ACTOR, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr?.number ?? null, ...checkResult })
       }
-      const note = await this.#c.ending.postNote(tx, ctx, report.note!)
+      const note = await this.#d.ending.postNote(tx, ctx, report.note!)
       const skipped = Boolean(carried?.comment) || ciCarried
       const said = await this.#behaviourComment(tx, ctx, report, !skipped)
-      await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome, summary: report.summary, headSha: report.headSha, behaviourChanged: report.behaviourChanged, ...(report.outcome === 'pr_rebased' ? { review: report.review, conflictedFiles: report.conflictedFiles, fixKind: 'conflict' as const, reReviewed: !skipped } : {}), ...(ciFix && { fixKind: 'ci' as const, reReviewed: !skipped }) })
+      await this.#d.ending.endRunIn(tx, ctx, { state: 'completed', outcome: report.outcome, summary: report.summary, headSha: report.headSha, behaviourChanged: report.behaviourChanged, ...(report.outcome === 'pr_rebased' ? { review: report.review, conflictedFiles: report.conflictedFiles, fixKind: 'conflict' as const, reReviewed: !skipped } : {}), ...(ciFix && { fixKind: 'ci' as const, reReviewed: !skipped }) })
       return { posted: [note, ...said ? [said] : [], ...carried?.comment ? [carried.comment] : []], verified: Boolean(carried?.comment), ciCarried }
     })
-    for (const comment of posted) this.#c.d.events.publish({ type: 'comment.created', comment })
-    this.#c.ending.finished(ctx, 'Outcome accepted', { handoff: true })
+    for (const comment of posted) this.#d.events.publish({ type: 'comment.created', comment })
+    this.#d.ending.finished(ctx, 'Outcome accepted', { handoff: true })
     if (!pr) return { ok: true, message: 'The rebased task\'s branch is ready for review. You can stop now.' }
     if (ciCarried) return { ok: true, pr: pr.url, message: 'The approval carried over. CI runs on your new head, and Corral merges once it passes. You can stop now.' }
     if (verified) return { ok: true, pr: pr.url, message: 'The server verified your trivial rebase, so the approval carried over. Corral handles any human check, CI and the merge from here. You can stop now.' }
@@ -421,7 +418,7 @@ export class RunOutcomes {
   // verdicts carry to the new head, which CI still has to pass. False when
   // they can't: the round then goes to Agent review.
   async #carryCiFix(tx: Executor, ctx: RunContext, locked: { task: TaskRow, project: ProjectRow }, report: OutcomeReport): Promise<boolean> {
-    const carried = await carryOverApproval(tx, locked, { actor: server, runId: ctx.run.id, via: 'a CI fix reported as not changing behaviour', note: report.summary })
+    const carried = await carryOverApproval(tx, locked, { actor: SERVER_ACTOR, runId: ctx.run.id, via: 'a CI fix reported as not changing behaviour', note: report.summary })
     return carried.ok
   }
 
@@ -430,14 +427,14 @@ export class RunOutcomes {
   async #carryVerifiedRebase(tx: Executor, ctx: RunContext, locked: { task: TaskRow, project: ProjectRow }, report: OutcomeReport): Promise<{ comment?: Comment, problem?: string }> {
     const files = report.conflictedFiles!.map(file => `\`${file}\``).join(', ')
     const carried = await carryOverApproval(tx, locked, {
-      actor: server,
+      actor: SERVER_ACTOR,
       runId: ctx.run.id,
       via: 'a server-verified trivial rebase',
       note: `Only the conflicted files changed (${report.conflictedFiles!.join(', ')}) and no project doc moved on the base.`
     })
     if (!carried.ok) return { problem: carried.problem }
-    await appendAudit(tx, { projectId: locked.project.id, taskId: locked.task.id, actor: server }, auditEvent('rebase.verified', { runId: ctx.run.id, pr: locked.task.prNumber, approvedHeadSha: locked.task.approvedHeadSha, headSha: report.headSha, conflictedFiles: report.conflictedFiles }))
-    return { comment: await addComment(tx, locked.task.id, { body: `Trivial rebase verified without review: only the conflicted files changed (${files}) and no project doc changed on the base. The approval carried over to ${report.headSha}.`, pinned: false }, server) }
+    await appendAudit(tx, { projectId: locked.project.id, taskId: locked.task.id, actor: SERVER_ACTOR }, auditEvent('rebase.verified', { runId: ctx.run.id, pr: locked.task.prNumber, approvedHeadSha: locked.task.approvedHeadSha, headSha: report.headSha, conflictedFiles: report.conflictedFiles }))
+    return { comment: await addComment(tx, locked.task.id, { body: `Trivial rebase verified without review: only the conflicted files changed (${files}) and no project doc changed on the base. The approval carried over to ${report.headSha}.`, pinned: false }, SERVER_ACTOR) }
   }
 
   // D19: a spike's findings are its deliverable. Like a submission they
@@ -446,7 +443,7 @@ export class RunOutcomes {
   // them. The submission is marked by this run, in place of a commit, so
   // each report gets its own review.
   async #reportFindings(ctx: RunContext, report: OutcomeReport) {
-    const { db } = this.#c.d
+    const { db } = this.#d
     const task = ctx.task!
     const { missing } = await evidenceState(db, task)
     if (missing.length > 0) {
@@ -454,18 +451,18 @@ export class RunOutcomes {
     }
     const marker = findingsMarker(ctx.run.id)
     const posted = await db.transaction(async (tx) => {
-      const locked = await this.#c.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
+      const locked = await this.#d.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
       await applyTransition(tx, locked.task, locked.project, {
         type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
-      }, server, { event: 'findings_reported', runId: ctx.run.id, headSha: marker })
+      }, SERVER_ACTOR, { event: 'findings_reported', runId: ctx.run.id, headSha: marker })
       await tx.update(tasks).set({ headSha: marker }).where(eq(tasks.id, task.id))
-      const note = await this.#c.ending.postNote(tx, ctx, report.note!)
-      const findings = await addComment(tx, task.id, { body: `## Findings\n\n${report.summary.trim()}`, pinned: false }, this.#c.runs.actor(ctx))
-      await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'findings_reported', summary: report.summary })
+      const note = await this.#d.ending.postNote(tx, ctx, report.note!)
+      const findings = await addComment(tx, task.id, { body: findingsComment(report.summary), pinned: false }, runActor(ctx))
+      await this.#d.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'findings_reported', summary: report.summary })
       return [note, findings]
     })
-    for (const comment of posted) this.#c.d.events.publish({ type: 'comment.created', comment })
-    this.#c.ending.finished(ctx, 'Findings accepted for review', { handoff: true })
+    for (const comment of posted) this.#d.events.publish({ type: 'comment.created', comment })
+    this.#d.ending.finished(ctx, 'Findings accepted for review', { handoff: true })
     return { ok: true, message: 'Your findings are on the task and go to the reviewer next. You can stop now.' }
   }
 
@@ -473,7 +470,7 @@ export class RunOutcomes {
   // bundle must be a sound archive with index.html at its root so the
   // preview can serve it.
   async submitDesign(ctx: RunContext, input: unknown) {
-    const { db, github, blobs } = this.#c.d
+    const { db, github, blobs } = this.#d
     const task = ctx.task!
     if (task.type !== 'design') throw new ToolError('Only a design task submits a design')
     const parsed = designSchema.safeParse(input)
@@ -481,7 +478,7 @@ export class RunOutcomes {
     const submission = parsed.data
     const bundle = Buffer.from(submission.bundle.dataBase64, 'base64')
     const shots = submission.screenshots.map(s => ({ ...s, data: Buffer.from(s.dataBase64, 'base64') }))
-    if (bundle.length + shots.reduce((n, s) => n + s.data.length, 0) > MAX_DESIGN_BYTES) throw new ToolError('Not submitted. A design version is limited to 25 MB.')
+    if (bundle.length + shots.reduce((n, s) => n + s.data.length, 0) > DESIGN_VERSION_MAX_BYTES) throw new ToolError(DESIGN_TOO_LARGE)
     const problem = bundleProblem(bundle)
     if (problem) throw new ToolError(`Not submitted. ${problem}`)
     const head = await github.branchHead(ctx.project!.repository, task.branch!)
@@ -492,19 +489,19 @@ export class RunOutcomes {
     const screenshots: { blob: string, fileName: string, contentType: string }[] = []
     for (const shot of shots) screenshots.push({ blob: await blobs.put(shot.data), fileName: shot.fileName, contentType: shot.contentType })
     const version = await db.transaction(async (tx) => {
-      await this.#c.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
+      await this.#d.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
       const existing = await tx.select({ version: designVersions.version, status: designVersions.status }).from(designVersions).where(eq(designVersions.taskId, task.id))
       const [row] = await tx.insert(designVersions).values({
         taskId: task.id, version: nextDesignVersion(existing), bundleBlob, specBlob, screenshots, branch: task.branch!, commitSha: submission.headSha
       }).returning()
-      await appendAudit(tx, { projectId: ctx.run.projectId, taskId: task.id, actor: this.#c.runs.actor(ctx) }, auditEvent('design.submitted', { runId: ctx.run.id, version: row!.version, headSha: submission.headSha, screenshots: screenshots.length }))
+      await appendAudit(tx, { projectId: ctx.run.projectId, taskId: task.id, actor: runActor(ctx) }, auditEvent('design.submitted', { runId: ctx.run.id, version: row!.version, headSha: submission.headSha, screenshots: screenshots.length }))
       return row!
     })
     return {
       ok: true,
       version: version.version,
       commitSha: version.commitSha,
-      message: `Design v${version.version} recorded at ${version.commitSha.slice(0, 10)}. Attach evidence for every criterion, then call report_outcome with outcome design_submitted.`
+      message: `Design v${version.version} recorded at ${shortSha(version.commitSha)}. Attach evidence for every criterion, then call ${toolName('report_outcome')} with outcome ${outcomeName('design_submitted')}.`
     }
   }
 
@@ -512,37 +509,37 @@ export class RunOutcomes {
   // version exists for the branch's current commit and every criterion has
   // evidence. Nothing is opened on GitHub.
   async #reportDesign(ctx: RunContext, report: OutcomeReport) {
-    const { db, github } = this.#c.d
+    const { db, github } = this.#d
     const task = ctx.task!
-    if (!report.headSha) throw new ToolError('There is no commit to submit. Commit your work, call submit_design, then report again.')
+    if (!report.headSha) throw new ToolError(`There is no commit to submit. Commit your work, call ${toolName('submit_design')}, then report again.`)
     const head = await github.branchHead(ctx.project!.repository, task.branch!)
     const [version] = await db.select().from(designVersions)
       .where(and(eq(designVersions.taskId, task.id), eq(designVersions.commitSha, report.headSha))).orderBy(desc(designVersions.version)).limit(1)
     const { missing } = await evidenceState(db, task)
     const problems = [
       head !== report.headSha ? `The branch on GitHub is at ${head ?? 'nothing'}, not your commit ${report.headSha}.` : '',
-      !version ? `No design version was submitted at your latest commit ${report.headSha}: call submit_design first.` : '',
+      !version ? `No design version was submitted at your latest commit ${report.headSha}: call ${toolName('submit_design')} first.` : '',
       missing.length > 0 ? `No evidence yet for: ${missing.map(c => `[${c.id}] ${c.text}`).join('; ')}.` : ''
     ].filter(Boolean)
     if (problems.length > 0) throw new ToolError(`Not submitted. ${problems.join(' ')} Fix this and report again.`)
 
     const comment = await db.transaction(async (tx) => {
-      const locked = await this.#c.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
+      const locked = await this.#d.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
       await applyTransition(tx, locked.task, locked.project, {
         type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
-      }, server, { event: 'design_submitted', runId: ctx.run.id, headSha: report.headSha, version: version!.version })
+      }, SERVER_ACTOR, { event: 'design_submitted', runId: ctx.run.id, headSha: report.headSha, version: version!.version })
       await tx.update(tasks).set({ headSha: report.headSha }).where(eq(tasks.id, task.id))
-      const comment = await this.#c.ending.postNote(tx, ctx, report.note!)
-      await this.#c.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'design_submitted', summary: report.summary, headSha: report.headSha })
+      const comment = await this.#d.ending.postNote(tx, ctx, report.note!)
+      await this.#d.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'design_submitted', summary: report.summary, headSha: report.headSha })
       return comment
     })
-    this.#c.d.events.publish({ type: 'comment.created', comment })
-    this.#c.ending.finished(ctx, `Design v${version!.version} submitted for review`, { handoff: true })
+    this.#d.events.publish({ type: 'comment.created', comment })
+    this.#d.ending.finished(ctx, `Design v${version!.version} submitted for review`, { handoff: true })
     return { ok: true, message: `Design v${version!.version} goes to the reviewer next, then to the human. You can stop now.` }
   }
 
   #prBody(ref: string, title: string, summary: string, criteria: { id: string, text: string, checkedByHuman: boolean }[], attached: { criterionId: string | null }[]): string {
-    const link = `${this.#c.d.publicUrl}/tasks/${ref}`
+    const link = `${this.#d.publicUrl}/tasks/${ref}`
     // Table cells can't hold newlines or bare pipes
     const cell = (text: string) => text.replace(/\s*\n\s*/g, ' ').replaceAll('|', '\\|')
     return [

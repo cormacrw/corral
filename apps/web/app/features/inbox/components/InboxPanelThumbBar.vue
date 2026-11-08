@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { InboxActionInput } from '@corral/contracts'
 import { actionDisabled, actionOpensComposer, type InboxComposerContext, type ResolveTo } from '~/features/inbox/composables/useInboxPanel'
-import { RESOLVE_TARGETS } from '~/features/inbox/utils/inbox-actions'
+import { RETRY_TARGETS } from '~/features/inbox/utils/inbox-actions'
 
 // The panel's actions on a phone (design/mobile.md): each one a large target at
 // the bottom of the screen, in thumb reach. The composer opens just above them.
@@ -49,7 +49,7 @@ function tap(value: string) {
       <span>Retry into</span>
       <AppSelectMenu
         :model-value="ctx.resolveTo"
-        :items="RESOLVE_TARGETS"
+        :items="RETRY_TARGETS"
         aria-label="Retry into"
         class="w-36"
         @update:model-value="ctx.setResolveTo($event as ResolveTo)"

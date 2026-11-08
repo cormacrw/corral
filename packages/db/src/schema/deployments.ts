@@ -1,3 +1,4 @@
+import type { DeploymentCommit } from '@corral/core'
 import { jsonb, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core'
 import { createdAt } from './columns.ts'
 import { deploymentNotesStatus } from './enums.ts'
@@ -14,7 +15,7 @@ export const deployments = pgTable('deployments', {
   fromSha: text(),
   toSha: text().notNull(),
   // Newest first, as `git log` lists them
-  commits: jsonb().$type<{ sha: string, subject: string }[]>().notNull().default([]),
+  commits: jsonb().$type<DeploymentCommit[]>().notNull().default([]),
   // Markdown release notes
   notes: text(),
   notesStatus: deploymentNotesStatus().notNull().default('pending'),

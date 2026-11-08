@@ -1,7 +1,5 @@
-import type { AgentRole, EpicFixKind, EpicRebaseDecision, EpicReviewMode, EpicReviewState, TaskKind } from '@corral/core'
+import { RESOLVE_TARGETS, type AgentRole, type InboxAction, type AgentRuntime, type EpicFixKind, type EpicRebaseDecision, type EpicReviewFinding, type EpicReviewMode, type EpicReviewState, type TaskKind } from '@corral/core'
 import { z } from 'zod'
-import type { EpicReviewFinding } from './runner.ts'
-import type { AgentRuntime } from './agent-runtimes.ts'
 import type { Deployment } from './deployments.ts'
 import type { Plan, PlanQuestion } from './plans.ts'
 import type { PullRequestDetail, PullRequestFile, PullRequestStatus } from './pull-requests.ts'
@@ -9,8 +7,9 @@ import type { Evidence, Task, TaskCommit } from './tasks.ts'
 
 // ── Inbox (D11, design/inbox.md) ───────────────────────────────────────────
 
-export type TaskInboxItemType = 'human_review' | 'question' | 'blocked' | 'failed' | 'stopped' | 'activity'
-export type InboxItemType = TaskInboxItemType | 'plan_thread' | 'epic_review' | 'release_notes' | 'epic_conflict' | 'runner_update' | 'epic_activity'
+export const TASK_INBOX_ITEM_TYPES = ['human_review', 'question', 'blocked', 'failed', 'stopped', 'activity'] as const
+export type TaskInboxItemType = typeof TASK_INBOX_ITEM_TYPES[number]
+export const INBOX_ITEM_TYPES = [...TASK_INBOX_ITEM_TYPES, 'plan_thread', 'epic_review', 'release_notes', 'epic_conflict', 'runner_update', 'epic_activity'] as const
 
 interface InboxItemBase {
   project: { id: string, slug: string, name: string, thumbnailColor: string | null, thumbnailUrl: string | null }
@@ -322,7 +321,7 @@ export interface Inbox {
 // POST /inbox/read: the human opened an item. Plan threads and release notes
 // have their own read routes.
 export const inboxReadInput = z.object({
-  type: z.enum(['human_review', 'question', 'blocked', 'failed', 'stopped', 'activity', 'epic_review', 'epic_conflict', 'runner_update', 'epic_activity']),
+  type: z.enum(INBOX_ITEM_TYPES).exclude(['plan_thread', 'release_notes']),
   id: z.string().min(1)
 })
 export type InboxReadInput = z.infer<typeof inboxReadInput>
@@ -335,7 +334,7 @@ export const inboxActionInput = z.discriminatedUnion('action', [
   z.object({ action: z.literal('decide'), alternative: z.number().int().min(0).optional(), text: z.string().trim().min(1).optional() }).refine(d => d.alternative !== undefined || d.text, 'Pick an alternative or write an answer'),
   z.object({ action: z.literal('send_back') }),
   // Failed or Blocked: resolve to a status (D10). Also releases a no-progress stop
-  z.object({ action: z.literal('resolve'), to: z.enum(['backlog', 'ready', 'in_progress']), text: z.string().trim().optional() }),
+  z.object({ action: z.literal('resolve'), to: z.enum(RESOLVE_TARGETS), text: z.string().trim().optional() }),
   // Stopped without progress: try again from the status it stopped in
   z.object({ action: z.literal('retry'), text: z.string().trim().optional() }),
   // Human review
@@ -344,3 +343,5 @@ export const inboxActionInput = z.discriminatedUnion('action', [
   z.object({ action: z.literal('delete'), text: z.string().trim().optional() })
 ])
 export type InboxActionInput = z.infer<typeof inboxActionInput>
+// Every Inbox action has an input shape here
+true satisfies (InboxAction extends InboxActionInput['action'] ? true : false)

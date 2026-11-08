@@ -1,7 +1,7 @@
-import { DEFAULT_LIMITS } from '@corral/core'
+import { DEFAULT_LIMITS, PROJECT_PREFIX_PATTERN } from '@corral/core'
 import { sql } from 'drizzle-orm'
 import { boolean, check, integer, pgTable, text, uuid } from 'drizzle-orm/pg-core'
-import { createdAt, updatedAt } from './columns.ts'
+import { createdAt, sqlLiteral, updatedAt } from './columns.ts'
 import { epicReviewMode, mergeMethod } from './enums.ts'
 
 // One project per Git repository (PRD §4.1, D13)
@@ -30,6 +30,6 @@ export const projects = pgTable('projects', {
   createdAt: createdAt(),
   updatedAt: updatedAt()
 }, t => [
-  check('projects_prefix_format', sql`${t.prefix} ~ '^[A-Z]{2,5}$'`),
+  check('projects_prefix_format', sql`${t.prefix} ~ ${sqlLiteral(PROJECT_PREFIX_PATTERN.source)}`),
   check('projects_caps_positive', sql`${t.reviewRoundCap} > 0 and ${t.failedRunCap} > 0`)
 ])

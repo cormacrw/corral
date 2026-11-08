@@ -1,7 +1,7 @@
 # Evidence videos
 
 Agents record `.webm` with agent-browser, and Safari on macOS and iOS often
-can't decode that. `#readEvidence` in `apps/runner/src/run-manager.ts` therefore
+can't decode that. `readEvidence` in `apps/runner/src/evidence.ts` therefore
 sends any video other than MP4 through `convertToMp4`
 (`apps/runner/src/evidence-video.ts`). The stored evidence is then `video/mp4`
 with the same base name and an `.mp4` extension. An attached `.mp4` is never

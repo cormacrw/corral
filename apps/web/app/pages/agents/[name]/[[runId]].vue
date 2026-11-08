@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AgentRuns } from '~/features/runs/composables/useAgentRuns'
+import type { AgentRuns } from '~/features/agents/composables/useAgentRuns'
 
 // The transcript of the selected run, inside the agent page. On mobile this
 // route only shows with a run in the URL (design/mobile.md).
