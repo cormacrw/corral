@@ -73,3 +73,15 @@ export function designerStats(runs: Run[], designs: { taskId: string, versions: 
   }
   return { submitted, approved }
 }
+
+// The icon beside each of an agent page's stat tiles, by its label
+export function tileIcon(label: string): string {
+  if (/^(Runs|Reviews|Turns) this week$/.test(label)) return 'i-hugeicons-play'
+  if (label.startsWith('Avg')) return 'i-hugeicons-clock-01'
+  if (label === 'Usage today') return 'i-hugeicons-coins-01'
+  if (label === 'PRs opened') return 'i-hugeicons-git-pull-request'
+  if (label === 'Stuck') return 'i-hugeicons-alert-02'
+  if (label === 'Changes requested') return 'i-hugeicons-pencil-edit-02'
+  if (label === 'Design versions submitted') return 'i-hugeicons-task-01'
+  return 'i-hugeicons-checkmark-circle-02'
+}
