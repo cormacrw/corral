@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { shortSha } from '@corral/core'
 import type { EpicReview, EpicReviewFeedback, EpicReviewRound, EpicReviewTaskRow, Evidence } from '@corral/contracts'
 import type { EpicInboxItem } from '~/features/inbox/composables/useInboxView'
 import { EPIC_REVIEW_MODE, plural } from '~/utils/labels'
@@ -39,7 +40,7 @@ const event = computed(() => props.item.type === 'epic_activity' ? props.item.ev
 const squash = computed(() => {
   const sha = event.value === 'merged' ? props.review?.mergeCommitSha : null
   const url = props.review?.pr?.url
-  return sha ? { sha: sha.slice(0, 7), url: url ? url.replace(/\/pull\/\d+$/, `/commit/${sha}`) : null } : null
+  return sha ? { sha: shortSha(sha), url: url ? url.replace(/\/pull\/\d+$/, `/commit/${sha}`) : null } : null
 })
 const next = computed(() => event.value === 'human_approved' && props.review?.state === 'ready_to_merge'
   ? `CI runs next. Once it passes, Corral squash-merges into ${props.review.targetBranch}.`

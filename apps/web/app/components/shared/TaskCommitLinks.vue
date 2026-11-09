@@ -1,10 +1,10 @@
 <script setup lang="ts">
+import { shortSha } from '@corral/core'
 import type { Task } from '@corral/contracts'
 
 // Where a task's work is: its PR, or without one the commits Corral recorded
 // (D27). Integrated is on the epic branch; until then, the latest submission.
 const props = defineProps<{ task: Pick<Task, 'pr' | 'submission'> }>()
-const short = (sha: string) => sha.slice(0, 10)
 const integrated = computed(() => props.task.submission?.integrated ?? null)
 const reviewed = computed(() => props.task.submission?.approved ?? props.task.submission?.submitted ?? null)
 </script>
@@ -25,14 +25,14 @@ const reviewed = computed(() => props.task.submission?.approved ?? props.task.su
         target="_blank"
         rel="noopener"
         class="text-brand hover:underline"
-      >Integrated <span class="font-mono text-xs">{{ short(integrated.sha) }}</span></a>
+      >Integrated <span class="font-mono text-xs">{{ shortSha(integrated.sha) }}</span></a>
       <a
         v-if="reviewed"
         :href="reviewed.url"
         target="_blank"
         rel="noopener"
         class="text-brand hover:underline"
-      >{{ task.submission?.approved ? 'Approved' : 'Submitted' }} <span class="font-mono text-xs">{{ short(reviewed.sha) }}</span></a>
+      >{{ task.submission?.approved ? 'Approved' : 'Submitted' }} <span class="font-mono text-xs">{{ shortSha(reviewed.sha) }}</span></a>
     </template>
   </span>
 </template>

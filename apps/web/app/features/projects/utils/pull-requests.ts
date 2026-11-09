@@ -1,3 +1,4 @@
+import { shortSha } from '@corral/core'
 import type { PullRequestStatus } from '@corral/contracts'
 import type { MergeGate } from '@corral/core'
 import type { Color } from '~/utils/labels'
@@ -23,7 +24,7 @@ export function reviewCell(pr: Pick<PullRequestStatus, 'review'>): Cell {
   const { review } = pr
   if (!review) return { label: 'Not reviewed', color: 'neutral' }
   const label = review.verdict === 'approved' ? 'Approved' : 'Changes requested'
-  if (!review.forHeadCommit) return { label, color: 'neutral', detail: `For an older commit (${review.headSha.slice(0, 7)})` }
+  if (!review.forHeadCommit) return { label, color: 'neutral', detail: `For an older commit (${shortSha(review.headSha)})` }
   return { label, color: review.verdict === 'approved' ? 'success' : 'error' }
 }
 

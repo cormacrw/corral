@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { shortSha } from '@corral/core'
 import { useMutation } from '@tanstack/vue-query'
 import type { RunnerInfo } from '@corral/contracts'
 import { updateRunner } from '~/queries/system'
@@ -13,7 +14,7 @@ const label = computed(() => {
   if (r.updateState === 'building') return 'Building update'
   if (r.draining) return 'Waiting for updater'
   if (r.behind) return 'Behind server'
-  return `Up to date · ${r.commit.slice(0, 7)}`
+  return `Up to date · ${shortSha(r.commit)}`
 })
 </script>
 
@@ -26,7 +27,7 @@ const label = computed(() => {
     <span
       v-if="runner.behind"
       class="text-muted-foreground"
-    >{{ runner.commit.slice(0, 7) }} → {{ runner.serverCommit.slice(0, 7) }}</span>
+    >{{ shortSha(runner.commit) }} → {{ shortSha(runner.serverCommit) }}</span>
     <span
       v-if="runner.toolContractReason"
       class="text-destructive"

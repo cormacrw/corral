@@ -1,3 +1,4 @@
+import { shortSha } from '@corral/core'
 import type { AuditEntry, Comment } from '@corral/contracts'
 import type { AgentRole } from '@corral/core'
 
@@ -31,11 +32,11 @@ export function historyText(entry: AuditEntry): string {
     case 'task.claimed': return `claimed it (${words(d.from)} → ${words(d.to)})`
     case 'task.transition': return `${words(d.from)} → ${words(d.to)}${d.error ? `: ${String(d.error)}` : ''}`
     case 'run.ended': return `run #${String(d.runNumber)} ended ${String(d.state)}${d.outcome ? ` (${String(d.outcome)})` : ''}${d.error ? `: ${String(d.error)}` : ''}`
-    case 'review.recorded': return `review: ${words(d.verdict)} (${String(d.met)} of ${String(d.of)} criteria met) on ${String(d.headSha).startsWith('findings-') ? 'the findings' : String(d.headSha).slice(0, 10)}`
+    case 'review.recorded': return `review: ${words(d.verdict)} (${String(d.met)} of ${String(d.of)} criteria met) on ${String(d.headSha).startsWith('findings-') ? 'the findings' : shortSha(String(d.headSha))}`
     case 'merge.refused': return `GitHub refused the merge: ${String(d.message)}`
     case 'rebase.verified': return 'verified the trivial rebase without review'
     case 'branch.update_requested': return 'asked GitHub to update the branch from the base'
-    case 'branch.head_moved': return `branch moved to ${String(d.to).slice(0, 10)}${d.approvalKept ? ' (approval kept)' : ''}`
+    case 'branch.head_moved': return `branch moved to ${shortSha(String(d.to))}${d.approvalKept ? ' (approval kept)' : ''}`
     case 'worktrees.cleaned': return 'worktrees removed on the runner'
     case 'task.human_approved': return 'approved the merge'
     case 'design.approved': return `approved design v${String(d.version)}`

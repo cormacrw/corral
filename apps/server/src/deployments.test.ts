@@ -1,3 +1,4 @@
+import { shortSha } from '@corral/core'
 import { databaseFixture } from '@corral/db/testing'
 import type { Inbox, Deployment } from '@corral/contracts'
 import { schema } from '@corral/db'
@@ -38,7 +39,7 @@ describe.each(['pglite', 'postgres'] as const)('POST /api/deployments on %s', (d
     const pending = await getInbox()
     const item = pending.activity.find(i => i.id === deployment.id)!
     expect(pending.needsYou.some(i => (i.id as string) === deployment.id)).toBe(false)
-    expect(item).toMatchObject({ type: 'release_notes', fromSha: '1111111', toSha: '2222222', notesStatus: 'pending', unread: true, sender: { role: 'pm' }, project: { id: project.id } })
+    expect(item).toMatchObject({ type: 'release_notes', fromSha: shortSha(sha('1')), toSha: shortSha(sha('2')), notesStatus: 'pending', unread: true, sender: { role: 'pm' }, project: { id: project.id } })
     expect(pending.count).toBe(before.count)
     expect(t.events).toContainEqual(expect.objectContaining({ type: 'deployment.updated', deployment: expect.objectContaining({ id: deployment.id }) }))
     const read = await t.request('POST', `/api/deployments/${deployment.id}/read`)

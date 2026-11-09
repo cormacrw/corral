@@ -52,7 +52,7 @@ export async function loadInbox(db: Executor, runner: Pick<RunnerHub, 'status'>)
     id: d.id, type: 'release_notes', deploymentId: d.id, project: projectTag(project),
     subject: 'Release notes', preview: d.notesStatus === 'pending' ? 'Writing release notes…' : d.notes ?? '',
     sender: { name: pm?.name ?? 'PM', role: 'pm' }, at: d.createdAt.toISOString(),
-    fromSha: d.fromSha?.slice(0, 7) ?? null, toSha: d.toSha.slice(0, 7), notes: d.notes,
+    fromSha: d.fromSha ? shortSha(d.fromSha) : null, toSha: shortSha(d.toSha), notes: d.notes,
     notesStatus: d.notesStatus, unread: !d.readAt, taskId: null, taskRef: null, prUrl: null,
     resolution: d.dismissedAt ? 'You dismissed these release notes' : null
   }))

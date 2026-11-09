@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { shortSha } from '@corral/core'
 import type { PullRequestDetail } from '@corral/contracts'
 import { PULL_REQUEST_LINE_LIMIT } from '@corral/contracts/client'
 import type { PullRequestGuideState } from '~/features/inbox/composables/usePullRequestGuide'
@@ -150,7 +151,7 @@ const truncatedTitle = computed(() => `Showing ${props.pr.files.length} of ${plu
         variant="subtle"
         icon="i-hugeicons-git-commit"
         title="Made for an older commit"
-        :description="`The PR has moved on to ${pr.headSha.slice(0, 7)} since this guide was made, so some steps may not match the diff.`"
+        :description="`The PR has moved on to ${shortSha(pr.headSha)} since this guide was made, so some steps may not match the diff.`"
         :actions="[{ label: 'Regenerate', icon: 'i-hugeicons-refresh', onClick: g.generate }]"
         data-testid="inbox-guide-stale"
       />
@@ -192,7 +193,7 @@ const truncatedTitle = computed(() => `Showing ${props.pr.files.length} of ${plu
           <span
             v-if="g.guide.value?.generatedAt"
             class="min-w-0 truncate"
-          >Made {{ timeAgo(g.guide.value.generatedAt) }} for {{ g.guide.value.headSha?.slice(0, 7) }}</span>
+          >Made {{ timeAgo(g.guide.value.generatedAt) }} for {{ shortSha(g.guide.value.headSha) }}</span>
         </div>
         <div
           class="flex gap-1"

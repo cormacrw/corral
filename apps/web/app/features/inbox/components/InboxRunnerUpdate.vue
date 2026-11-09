@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { shortSha } from '@corral/core'
 import { settingsPath } from '~/utils/routes'
 import type { RunnerUpdateItem } from '@corral/contracts'
 import { useMutation } from '@tanstack/vue-query'
@@ -28,7 +29,7 @@ const retry = useMutation(updateRunner)
           {{ item.subject }}
         </h1>
         <p class="font-mono text-xs text-muted-foreground">
-          {{ item.commit.slice(0, 7) }} → {{ item.serverCommit.slice(0, 7) }}
+          {{ shortSha(item.commit) }} → {{ shortSha(item.serverCommit) }}
         </p>
       </header>
       <AppAlert

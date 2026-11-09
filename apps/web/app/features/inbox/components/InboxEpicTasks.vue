@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { shortSha } from '@corral/core'
 import { taskPath } from '~/utils/routes'
 import type { EpicReviewTaskRow } from '@corral/contracts'
 import { plural } from '~/utils/labels'
@@ -12,7 +13,6 @@ const confirmedTasks = defineModel<string[]>('confirmedTasks', { required: true 
 const passedBy = (row: EpicReviewTaskRow) => row.reviewedBy === 'human' ? 'You passed it' : row.reviewedBy === 'reviewer' ? 'Reviewer passed it' : 'Not passed yet'
 const KIND = { fix: 'Fix task', conflict: 'Conflict task' } as const
 const kindLabel = (row: EpicReviewTaskRow) => row.kind === 'normal' ? null : KIND[row.kind]
-const shortSha = (sha: string) => sha.slice(0, 7)
 // Only what's owed is ticked here. Other checks were settled on the task.
 const owedCriteria = (row: EpicReviewTaskRow) => row.criteria.filter(c => row.humanChecks.includes(c.id)).map(c => ({ ...c, checkedByHuman: true }))
 const owes = (row: EpicReviewTaskRow) => props.canTick && (row.humanReview || row.humanChecks.length > 0)

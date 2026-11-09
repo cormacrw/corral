@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { shortSha } from '@corral/core'
 import { planThreadPath } from '~/utils/routes'
 import { useQuery } from '@tanstack/vue-query'
 import type { Task } from '@corral/contracts'
@@ -85,7 +86,7 @@ const VIEWPORT_ITEMS = [{ label: 'Desktop', value: 'desktop', icon: 'i-hugeicons
           variant="subtle"
           size="sm"
         />
-        <span>v{{ selected.version }} · <TimeAgo :at="selected.createdAt" /> · <span class="font-mono">{{ selected.branch }}@{{ selected.commitSha.slice(0, 7) }}</span></span>
+        <span>v{{ selected.version }} · <TimeAgo :at="selected.createdAt" /> · <span class="font-mono">{{ selected.branch }}@{{ shortSha(selected.commitSha) }}</span></span>
         <span
           v-if="selected.status === 'superseded'"
           class="text-warning"

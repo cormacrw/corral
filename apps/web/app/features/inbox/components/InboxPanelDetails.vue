@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { shortSha } from '@corral/core'
 import type { InboxPanel, InboxPanelContext } from '~/features/inbox/composables/useInboxPanel'
 import { verdictMark } from '~/features/inbox/utils/inbox-summary'
 import { timeAgo } from '~/utils/labels'
@@ -36,7 +37,7 @@ const reviews = computed(() => props.p.history.value)
       />
       <div class="min-w-0 flex-1">
         <p class="text-xs text-muted-foreground">
-          Round {{ r.round + 1 }} · {{ r.verdict === 'approved' ? 'Approved' : 'Changes requested' }} · {{ r.headSha.slice(0, 7) }} · {{ timeAgo(r.createdAt) }}
+          Round {{ r.round + 1 }} · {{ r.verdict === 'approved' ? 'Approved' : 'Changes requested' }} · {{ shortSha(r.headSha) }} · {{ timeAgo(r.createdAt) }}
         </p>
         <MarkdownText :text="r.summary" />
       </div>
