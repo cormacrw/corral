@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Stepper, StepperDescription, StepperIndicator, StepperItem, StepperSeparator, StepperTitle, StepperTrigger } from '~/components/ui/stepper'
 
-export interface StepItem { title: string, description?: string, value?: string | number, icon?: string, disabled?: boolean }
+interface StepItem { title: string, description?: string, value?: string | number, icon?: string, disabled?: boolean }
 
 const props = defineProps<{ items: readonly StepItem[], linear?: boolean, class?: string }>()
 const model = defineModel<string | number>()

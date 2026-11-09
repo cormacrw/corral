@@ -32,7 +32,7 @@ const { attachments, projects, runs, tasks } = schema
 // A run.message no runner took, which rolls its comment back
 class Undelivered extends Error {}
 
-export interface HumanActionsDeps {
+interface HumanActionsDeps {
   db: Database
   events: EventBus
   runner: Pick<RunnerHub, 'isOnline' | 'send' | 'cleanupWorktrees'>
@@ -101,7 +101,7 @@ export class HumanActions {
     const noRunner = { notLive: 'No runner is connected to deliver the message' }
     if (!task || !roleTakesMessages(run.role)) return { notLive: `Run #${run.number} is a ${run.role} run; only developer, designer and reviewer runs take messages` }
     if (run.state === 'queued') return { notLive: `Run #${run.number} hasn't started yet` }
-    if (!isActiveRun(run.state) || run.state === 'stopping') return { notLive: `Run #${run.number} has ended` }
+    if (!isActiveRun(run.state)) return { notLive: `Run #${run.number} has ended` }
     if (task.leaseRunId !== run.id || task.leaseEpoch !== run.leaseEpoch) return { notLive: `Run #${run.number} no longer holds ${taskRef(ctx.project!.prefix, task.number)}` }
     if (!runner.isOnline(run.runnerId)) return noRunner
 
@@ -143,7 +143,7 @@ export class HumanActions {
     if (!ctx || ctx.run.leaseEpoch !== task.leaseEpoch) return
     const { run, project } = ctx
     if (!project || !roleTakesMessages(run.role)) return
-    if (!isActiveRun(run.state) || run.state === 'stopping') return
+    if (!isActiveRun(run.state)) return
 
     const current = await loadTask(db, taskId)
     const criteria = await taskCriteria(db, taskId)

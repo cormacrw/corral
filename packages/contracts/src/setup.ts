@@ -25,7 +25,7 @@ export const repoListQuery = z.object({ refresh: z.string().optional().transform
 
 export const checkRepoInput = z.object({ repository: repositoryName })
 
-export interface SetupCheck {
+interface SetupCheck {
   id: 'can_push' | 'not_used' | 'cloned'
   ok: boolean
   title: string

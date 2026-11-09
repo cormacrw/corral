@@ -34,7 +34,7 @@ export function toProject(row: ProjectRow): Project {
   }
 }
 
-export function slugify(name: string): string {
+function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'project'
 }
 
@@ -88,7 +88,7 @@ export async function createProject(db: Executor, input: CreateProjectInput, act
 }
 
 // Content hashes version the URL without adding a second source of truth.
-export function thumbnailUrl(project: Pick<ProjectRow, 'slug' | 'thumbnailBlob'>): string | null {
+function thumbnailUrl(project: Pick<ProjectRow, 'slug' | 'thumbnailBlob'>): string | null {
   return project.thumbnailBlob ? `/api/projects/${encodeURIComponent(project.slug)}/thumbnail?v=${blobVersion(project.thumbnailBlob)}` : null
 }
 

@@ -48,7 +48,7 @@ export const planMessageFields = z.discriminatedUnion('role', [
     })
   ])
 ])
-export type PlanMessageFields = z.output<typeof planMessageFields>
+type PlanMessageFields = z.output<typeof planMessageFields>
 export type NewPlanMessageFields = z.input<typeof planMessageFields>
 
 export type PlanMessage = PlanMessageFields & {

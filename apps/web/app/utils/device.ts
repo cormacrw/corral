@@ -9,7 +9,7 @@ const DEVICE_OVERRIDES: DeviceOverride[] = ['auto', 'desktop', 'mobile']
 export const NARROW_TOUCH_QUERY = '(max-width: 767px) and (pointer: coarse)'
 export const STANDALONE_QUERY = '(display-mode: standalone)'
 
-export interface DeviceMedia {
+interface DeviceMedia {
   narrowTouch: boolean
   standalone: boolean
 }

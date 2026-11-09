@@ -1,5 +1,5 @@
 import { toolName, type PlanMessage, type PlanSession, type PlanSessionDetail } from '@corral/contracts'
-import { ACTIVE_RUN_STATES, DEFAULT_AGENT_RUNTIME, errorText, isDesignPinStale, LIVE_RUN_STATES, TASK_STATUS_LABELS, taskRef, type Actor, type AgentRuntime, type TaskStatus } from '@corral/core'
+import { ACTIVE_RUN_STATES, clip, DEFAULT_AGENT_RUNTIME, errorText, isDesignPinStale, TASK_STATUS_LABELS, taskRef, type Actor, type AgentRuntime, type TaskStatus } from '@corral/core'
 import { schema, type Database, type Executor, type PlanSessionRow, type ProjectRow } from '@corral/db'
 import { and, asc, desc, eq, gt, inArray, isNull, lte, or } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
@@ -25,7 +25,7 @@ const { designVersions, planMessages, planSessions, planTasks, plans, projects, 
 const TITLE_MAX_WORDS = 6
 const TITLE_MAX_LENGTH = 60
 
-export interface PlanDeps {
+interface PlanDeps {
   db: Database
   events: EventBus
   runner: RunnerHub
@@ -277,7 +277,7 @@ export class PlanService {
     // One turn at a time per session; other sessions, in this project or
     // another, aren't held back, since the PM has no concurrency (D9, D13)
     const [active] = await db.select({ id: runs.id }).from(runs)
-      .where(and(eq(runs.role, 'pm'), eq(runs.planSessionId, sessionId), inArray(runs.state, [...LIVE_RUN_STATES])))
+      .where(and(eq(runs.role, 'pm'), eq(runs.planSessionId, sessionId), inArray(runs.state, [...ACTIVE_RUN_STATES])))
     if (active || this.#pendingTurns.has(sessionId)) throw new ApiFailure(409, { code: 'conflict', constraint: 'pm_turn_in_progress' })
 
     const attached = await this.#attached(project, input.taskRef)
@@ -421,7 +421,7 @@ export function cleanSessionTitle(raw: string): string | null {
 
 function titleFrom(text: string): string {
   const line = text.split('\n')[0]!.trim()
-  return line.length > TITLE_MAX_LENGTH ? `${line.slice(0, TITLE_MAX_LENGTH - 3)}…` : line || 'New session'
+  return clip(line, TITLE_MAX_LENGTH) || 'New session'
 }
 
 // The human's first message in a design's build session (D20)

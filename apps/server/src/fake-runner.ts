@@ -24,7 +24,7 @@ export function runStartHandled(bus: EventBus, runId: string): Promise<void> {
 }
 
 // What fake runners, in tests and the demo, say is installed
-export const FAKE_CLIS = [{ id: 'claude', version: '2.1.0', signedIn: true }, { id: 'codex', version: '0.52.0', signedIn: true }] as const satisfies Extract<SetupJobResult, { kind: 'detect_clis' }>['clis']
+const FAKE_CLIS = [{ id: 'claude', version: '2.1.0', signedIn: true }, { id: 'codex', version: '0.52.0', signedIn: true }] as const satisfies Extract<SetupJobResult, { kind: 'detect_clis' }>['clis']
 
 // Answers to the setup jobs any fake runner can do the same way
 export function answerSetupJob(job: Extract<ServerMessage, { type: 'job.request' }>['job']): SetupJobResult | null {

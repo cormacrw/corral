@@ -1,4 +1,4 @@
-import { errorMessage } from '~/lib/errors'
+import { errorText } from '@corral/core'
 import { useMutation } from '@tanstack/vue-query'
 import type { Project } from '@corral/contracts'
 import { removeProject } from '~/queries/projects'
@@ -30,7 +30,7 @@ export function useProjectRemoval(project: () => Project) {
       const next = projects.value?.find(x => x.id !== p.id)
       await router.push(next ? projectPath(next.slug) : SETUP_PATH)
     } catch (e) {
-      toast.add({ title: 'Not removed', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Not removed', description: errorText(e), color: 'error' })
     } finally {
       removing.value = null
     }

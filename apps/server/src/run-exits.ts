@@ -1,7 +1,7 @@
 import type { RunEvent, RunExit, RunnerMessage } from '@corral/contracts'
 import { isActiveRun, isUuid } from '@corral/core'
 import { schema, type Database, type RunRow } from '@corral/db'
-import { and, eq, inArray, isNull, lt, or } from 'drizzle-orm'
+import { and, eq, isNull, lt, or } from 'drizzle-orm'
 import type { EventBus } from './events.ts'
 import type { LeaseReconcile } from './lease-reconcile.ts'
 import type { PlanService } from './plan.ts'
@@ -16,7 +16,7 @@ import { lockLiveTask } from './task-rows.ts'
 
 const { agents, runs } = schema
 
-export interface RunExitsDeps {
+interface RunExitsDeps {
   db: Database
   events: EventBus
   transcripts: Pick<Transcripts, 'append' | 'read' | 'finish'>
@@ -79,7 +79,7 @@ export class RunExits {
         // Only runs that record how their session began
         ...(message.resumeFailed && ctx.run.sessionStart ? { sessionStart: 'fresh' as const } : {}),
         ...(message.initialHeadSha && ctx.run.retryContext ? { retryContext: { ...ctx.run.retryContext, head: message.initialHeadSha } } : {}) })
-        .where(and(eq(runs.id, ctx.run.id), inArray(runs.state, ['queued', 'starting'])))
+        .where(and(eq(runs.id, ctx.run.id), eq(runs.state, 'queued')))
       this.#d.leases.confirmLease(ctx, message.sentAt)
       if (ctx.kind === 'pm' && ctx.run.planSessionId) await this.#d.plans.onRunStarted(ctx.run.planSessionId, message.agentSessionId)
       await this.#d.ending.publish(ctx)

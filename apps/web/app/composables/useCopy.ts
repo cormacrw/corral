@@ -1,4 +1,4 @@
-import { errorMessage } from '~/lib/errors'
+import { errorText } from '@corral/core'
 // Copies to the clipboard and says how that went. navigator.clipboard is
 // missing on plain HTTP, which a home server can be.
 export function useCopy() {
@@ -9,7 +9,7 @@ export function useCopy() {
       await navigator.clipboard.writeText(text)
       toast.add({ title, color: 'success' })
     } catch (e) {
-      toast.add({ title: 'Could not copy', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Could not copy', description: errorText(e), color: 'error' })
     }
   }
 }

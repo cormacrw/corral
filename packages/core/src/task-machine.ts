@@ -42,7 +42,7 @@ export function normalizeTaskState(task: TaskStateFields & { status: TaskStatus,
   return { ...task, status: task.status, reason: null }
 }
 
-export interface TaskLimits {
+interface TaskLimits {
   reviewRoundCap: number
   failedRunCap: number
 }

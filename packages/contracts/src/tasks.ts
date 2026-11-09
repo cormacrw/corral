@@ -2,7 +2,7 @@ import { EVIDENCE_KINDS, RESOLVE_TARGETS, REVIEW_VERDICTS, richTextIssue, TASK_P
 import { z } from 'zod'
 
 // Structural safety only; semantic Ready checks belong in core.
-export const richTextDocument = z.looseObject({ type: z.literal('doc') }).superRefine((doc, ctx) => {
+const richTextDocument = z.looseObject({ type: z.literal('doc') }).superRefine((doc, ctx) => {
   const issue = richTextIssue(doc)
   if (issue) ctx.addIssue({ code: 'custom', ...issue })
 })

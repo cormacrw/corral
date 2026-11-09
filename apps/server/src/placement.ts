@@ -16,7 +16,7 @@ export function describeRunner(runner: Pick<RunnerHub, 'status'>, runnerId: stri
   return name ? `runner ${name}` : 'a runner this server no longer knows'
 }
 
-export interface PlacementDeps {
+interface PlacementDeps {
   runner: Pick<RunnerHub, 'available' | 'send' | 'name'>
   gate: Pick<RunGate, 'stopped'>
   runs: Pick<RunContexts, 'fenced'>

@@ -13,14 +13,15 @@ export type MergeGate = keyof MergeGateFacts
 
 // The order gates are checked and reported in; the first failure is the one
 // the PR page leads with
-export const MERGE_GATES = [
+const MERGE_GATES = [
   'approvalIsForHeadCommit',
   'requiredChecksPassed',
   'evidenceComplete',
   'mergeable'
 ] as const satisfies readonly MergeGate[]
 
-// Stops compiling when a fact in MergeGateFacts has no place in MERGE_GATES
+// Stops compiling when a fact in MergeGateFacts has no place in MERGE_GATES.
+// Exported only so lint counts it as used.
 type MustBeEmpty<Gates extends never> = Gates
 export type UnorderedMergeGate = MustBeEmpty<Exclude<MergeGate, (typeof MERGE_GATES)[number]>>
 

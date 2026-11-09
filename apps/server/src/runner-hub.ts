@@ -24,7 +24,7 @@ import { randomUUID } from 'node:crypto'
 import { ApiFailure } from './errors.ts'
 import type { EventBus } from './events.ts'
 
-export interface RunnerSocket {
+interface RunnerSocket {
   send(data: string): void
   close(code?: number, reason?: string): void
 }
@@ -442,6 +442,6 @@ function parseCapacity(message: Extract<RunnerMessage, { type: 'hello' }>, fallb
 // even if the socket hasn't closed (e.g. a sleeping laptop)
 export const RUNNER_STALE_MS = RUNNER_HEARTBEAT_MS * 3
 
-export function runnerOffline(): ApiFailure {
+function runnerOffline(): ApiFailure {
   return new ApiFailure(503, { code: 'runner_offline' })
 }

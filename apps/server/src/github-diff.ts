@@ -16,7 +16,7 @@ function changeOf(file: ChangedFile): string | null {
   return change === null ? null : JSON.stringify([file.status, file.previousFilename ?? null, change])
 }
 
-export interface TrivialRebaseCheck {
+interface TrivialRebaseCheck {
   failures: RebaseCheckFailure[]
   // Set when the check couldn't run, so it proved nothing
   error?: string

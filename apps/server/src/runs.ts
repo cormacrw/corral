@@ -67,7 +67,7 @@ function toRun({ run, agentName, agentRuntime, prefix, taskNumber, taskTitle, ep
 
 // A history window (`since`) returns every run queued since then, up to this
 // many, so a dashboard's chart isn't cut at the default page of 50
-export const RUN_HISTORY_LIMIT = 2000
+const RUN_HISTORY_LIMIT = 2000
 
 export async function listRuns(db: Executor, filter: { agentId?: string, taskId?: string, projectId?: string, role?: AgentRole, state?: RunState, active?: boolean, since?: Date }, limit?: number): Promise<Run[]> {
   const where: SQL[] = []

@@ -5,7 +5,7 @@ import { isTaskImmutable, type CompletionState } from './completion.ts'
 //   soft:        stop the run, close the PR, delete the branch when safe, then
 //                hide the task but keep it and its audit history
 //   not_allowed: Merged tasks are immutable history
-export type Deletion = 'hard' | 'soft' | 'not_allowed'
+type Deletion = 'hard' | 'soft' | 'not_allowed'
 
 export function deletionFor(task: CompletionState): Deletion {
   if (isTaskImmutable(task)) return 'not_allowed'

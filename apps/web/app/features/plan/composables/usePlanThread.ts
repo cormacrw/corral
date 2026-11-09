@@ -1,8 +1,7 @@
-import { errorMessage } from '~/lib/errors'
 import { computed, ref, watch } from 'vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import type { Plan } from '@corral/contracts'
-import { approvedPlanSummary, type PlanApprovalTarget } from '@corral/core'
+import { approvedPlanSummary, errorText, type PlanApprovalTarget } from '@corral/core'
 import { useDraft, writeDraft } from '~/composables/useDraft'
 import { holdsInbox } from '~/queries/inbox'
 import { approvePlan, sendPlanMessage, usePlanStarts, useThreadSession } from '~/queries/plan'
@@ -11,7 +10,7 @@ import { withoutMessages } from '~/features/runs/utils/tool-steps'
 import { latestPlan, previousPlan } from '~/features/plan/utils/plan-versions'
 import { usePlanRunner } from '~/features/plan/composables/usePlanRunner'
 
-export interface PlanThreadOptions {
+interface PlanThreadOptions {
   // Where the thread's draft is kept: Plan and the Inbox keep theirs apart
   draftKey?: (id: string) => string
   // The PM's turn as the screen knew it before the session loaded (an Inbox item)
@@ -97,7 +96,7 @@ export function usePlanThread(id: () => string, options: PlanThreadOptions = {})
       }
       return true
     } catch (e) {
-      toast.add({ title: 'Could not send', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Could not send', description: errorText(e), color: 'error' })
       return false
     } finally {
       if (id() === sendingTo) busy.value = false
@@ -128,7 +127,7 @@ export function usePlanThread(id: () => string, options: PlanThreadOptions = {})
     try {
       approved = await approval.mutateAsync({ planId: plan.id, to })
     } catch (e) {
-      toast.add({ title: 'Could not approve', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Could not approve', description: errorText(e), color: 'error' })
       return false
     } finally {
       if (id() === approvingIn) approving.value = null

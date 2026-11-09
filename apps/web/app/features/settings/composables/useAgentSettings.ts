@@ -1,4 +1,4 @@
-import { errorMessage } from '~/lib/errors'
+import { errorText } from '@corral/core'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import type { Agent, PatchAgentInput } from '@corral/contracts'
 import { agentsQuery, patchAgent as patchAgentMutation, setAgentAvatar } from '~/queries/agents'
@@ -29,7 +29,7 @@ export function useAgentSettings() {
       await agentPatch.mutateAsync({ id: agent.id, input })
       toast.add({ title: 'Saved', color: 'success' })
     } catch (e) {
-      toast.add({ title: 'Not saved', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Not saved', description: errorText(e), color: 'error' })
     }
   }
   // A blank name is refused, so the field goes back to the one it had
@@ -52,14 +52,14 @@ export function useAgentSettings() {
     try {
       await stopping.mutateAsync()
     } catch (e) {
-      toast.add({ title: 'Could not stop', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Could not stop', description: errorText(e), color: 'error' })
     }
   }
   async function resumeAll() {
     try {
       await resuming.mutateAsync()
     } catch (e) {
-      toast.add({ title: 'Could not resume', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Could not resume', description: errorText(e), color: 'error' })
     }
   }
 

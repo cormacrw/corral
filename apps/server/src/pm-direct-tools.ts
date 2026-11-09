@@ -27,7 +27,7 @@ const RUN_TEXT_MAX = 2_000
 const TOOL_INPUT_MAX = 200
 const TOOL_OUTPUT_MAX = 500
 
-export interface PmDirectToolsDeps {
+interface PmDirectToolsDeps {
   db: Database
   runner: RunnerHub
   transcripts: Transcripts

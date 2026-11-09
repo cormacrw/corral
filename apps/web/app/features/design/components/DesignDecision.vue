@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { useMutation } from '@tanstack/vue-query'
 import type { DesignVersion, Task } from '@corral/contracts'
-import { isDesignDecidable } from '@corral/core'
+import { errorText, isDesignDecidable } from '@corral/core'
 import { actOnInboxItem } from '~/queries/inbox'
-import { errorMessage } from '~/lib/errors'
 import { approveDesign, moveTask } from '~/queries/tasks'
 
 // The human's say on a design version: Approve, Request changes, or Reopen
@@ -22,7 +21,7 @@ const feedback = ref('')
 // Saved on the task and sent to the PM in the build Plan session
 const note = ref('')
 function fail(e: unknown) {
-  toast.add({ title: 'Not saved', description: errorMessage(e), color: 'error' })
+  toast.add({ title: 'Not saved', description: errorText(e), color: 'error' })
 }
 async function approve() {
   const { version } = props.selected

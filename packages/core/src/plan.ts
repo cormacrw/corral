@@ -13,7 +13,7 @@ export type PlanStatus = typeof PLAN_STATUSES[number]
 // What the PM proposes with `propose_plan` (D9). Keys are the PM's own
 // handles for epics and tasks inside one plan, so dependencies and
 // revisions can refer to them before anything exists.
-export interface ProposedEpic {
+interface ProposedEpic {
   key: string
   title: string
   summary: string
@@ -69,7 +69,7 @@ export interface ProposedPlan {
   tasks: ProposedTask[]
 }
 
-export type PlanProblem =
+type PlanProblem =
   | EpicDependencyProblem
   | { code: 'no_tasks' }
   | { code: 'duplicate_epic_key', key: string }

@@ -1,6 +1,6 @@
 import { errorText } from '@corral/core'
 import { detectResources } from './resources.ts'
-import { printReady, shortenHome } from './banner.ts'
+import { printReady, shortenHome } from '@corral/contracts/banner'
 import { gitAuthorWarning, loadConfig } from './config.ts'
 import { ServerConnection } from './connection.ts'
 import { loadRunnerId } from './identity.ts'

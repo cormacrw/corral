@@ -5,7 +5,7 @@ import { Alert, AlertDescription, AlertTitle } from '~/components/ui/alert'
 import { TONE_CLASSES } from '~/lib/tone'
 import type { Appearance, ButtonAppearance, Tone } from '~/lib/tone'
 
-export interface AlertAction {
+interface AlertAction {
   label: string
   color?: Tone
   variant?: ButtonAppearance

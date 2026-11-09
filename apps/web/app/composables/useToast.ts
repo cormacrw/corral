@@ -1,7 +1,7 @@
 import { toast } from 'vue-sonner'
 import type { Tone } from '~/lib/tone'
 
-export interface ToastOptions {
+interface ToastOptions {
   title: string
   description?: string
   color?: Tone

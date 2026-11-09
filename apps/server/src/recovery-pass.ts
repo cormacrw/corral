@@ -22,7 +22,7 @@ function triagePrompt(ref: string, reason: string): string {
   return `Automatic recovery for ${ref} stopped: ${reason}. This is its one PM triage turn for this stop. Read ${toolName('get_task')}, ${toolName('list_runs')} and ${toolName('get_run')} for its failures, then inspect the relevant code and project docs. Resolve implementation problems yourself: propose concrete follow-up work with ${toolName('propose_plan')} or leave actionable findings with ${toolName('add_comment')} on ${ref}. Do not ask the human to debug or decide implementation details. Do not approve a plan, reset counters, or restart unchanged work. Only ${toolName('ask_question')} if requirements, authority or a recovery decision genuinely require the human. State what is blocked, what recovery was tried and why it stopped, the decision needed, and a recommendation (or why none is safe). Keep the recommendation in ${toolName('ask_question')}'s recommendation field. Leave a comment on ${ref} linking your findings or proposal. For a recovery question, set retryOptions to only the exact answer choices (or recommendation) that authorize retrying or continuing work. Never include leaving stopped, refusal, or clarification in retryOptions. Human plan approval still applies.`
 }
 
-export interface RecoveryPassDeps {
+interface RecoveryPassDeps {
   db: Database
   events: EventBus
   github: GitHubClient

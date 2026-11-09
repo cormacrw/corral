@@ -14,7 +14,7 @@ const missingCriteria = 'Give a verdict for every acceptance criterion'
 
 // What an epic rebase's developer or reviewer asks the human when keeping both
 // sides would mean choosing product behaviour (COR-291)
-export const epicDecisionInput = z.object({
+const epicDecisionInput = z.object({
   question: z.string().trim().min(1).describe('One focused question for the human'),
   bindingDecision: z.string().trim().min(1).optional().describe('The binding decision that changed, if that is the cause, e.g. "D31 in docs/decisions.md"'),
   alternatives: z.array(z.object({
@@ -24,7 +24,7 @@ export const epicDecisionInput = z.object({
   })).min(2, 'Give at least two alternatives').max(5),
   affectedChanges: z.array(z.string().trim().min(1)).min(1, 'Name the changes affected').describe('The commits, files or tasks on each side this decision affects')
 })
-export const epicReviewFindingSchema = z.object({
+const epicReviewFindingSchema = z.object({
   level: z.enum(FINDING_LEVELS),
   text: z.string().trim().min(1),
   taskRefs: z.array(z.string().trim().min(1))
@@ -40,12 +40,12 @@ export const reportOutcomeInput = z.object({
   outcome: REPORTED_OUTCOMES.describe('One of the outcomes listed for your role'),
   summary: z.string().trim().min(1, 'Add a summary').describe('Plain-English summary of what you did, or your question when stuck'),
   review: z.enum(REBASE_REVIEWS).optional().describe('Required for pr_rebased: trivial only for combining both sides with no new logic, renames or behaviour changes; otherwise needs_review'),
-  conflictedFiles: z.array(z.string().trim().min(1)).min(1, 'conflictedFiles must contain at least one file').optional().describe('Required for pr_rebased: every file in which you resolved a conflict'),
+  conflictedFiles: z.array(z.string().trim().min(1)).min(1, 'conflictedFiles must contain at least one file').optional().describe('Required for pr_rebased, and for pr_updated on a task conflict fix: every file in which you resolved a conflict'),
   behaviourChanged: z.boolean().optional().describe('Required for pr_rebased, for a round started by a CI failure, and on a task fix: true if this changes what the code does; false only if approved behaviour is unchanged, so no reviewer looks at it again'),
   note: z.string().trim().optional().describe(`Developer only, required: one line of at most ${MAX_NOTE_LENGTH} characters saying what this run did, posted as a comment on the task, e.g. "Addressed review: dropped idle-thread fixture"`),
   criteria: z.array(criterionVerdict).optional().describe('Reviewer only: a verdict per acceptance criterion'),
   preservesApproval: z.boolean().optional().describe('Reviewer of a task rebase resolution only, when approving: true only if the approved behaviour is unchanged; false restarts the task\'s normal review'),
-  decision: epicDecisionInput.optional().describe('Task rebase resolutions only, with stuck or blocked: the question for the human, with alternatives and the changes affected. Without it the summary is asked as the question and the human can only answer in words'),
+  decision: epicDecisionInput.optional().describe('A task\'s conflicts only (its conflict fix, or a review of its rebase resolution), with stuck or blocked: the question for the human, with alternatives and the changes affected. Without it the summary is asked as the question and the human can only answer in words'),
   findings: z.array(epicReviewFindingSchema).optional().describe('Task reviewer only: integration problems, marked blocking or non_blocking, with the task refs they concern')
 })
 

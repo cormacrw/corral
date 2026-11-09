@@ -1,9 +1,8 @@
-import { errorMessage } from '~/lib/errors'
 import { prefixTaken } from '~/queries/client'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { CliStatus, RepoCheck, RepoChoice } from '@corral/contracts'
 import { cliLoginCommand } from '@corral/contracts/client'
-import { PROJECT_PREFIX_HINT, PROJECT_PREFIX_PATTERN, type MergeMethod } from '@corral/core'
+import { errorText, type MergeMethod, PROJECT_PREFIX_HINT, PROJECT_PREFIX_PATTERN } from '@corral/core'
 import { suggestPrefix } from '~/utils/prefix'
 import { agentsQuery, patchAgent } from '~/queries/agents'
 import { createProject, projectsQuery } from '~/queries/projects'
@@ -65,7 +64,7 @@ export function useSetup() {
       await profileMutation.mutateAsync({ name: userName.value.trim() })
       return true
     } catch (e) {
-      toast.add({ title: 'Could not save your name', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Could not save your name', description: errorText(e), color: 'error' })
       return false
     } finally {
       savingName.value = false
@@ -113,7 +112,7 @@ export function useSetup() {
       if (check.value.defaultBranch) defaultBranch.value = check.value.defaultBranch
     } catch (e) {
       if (version !== pickVersion) return
-      toast.add({ title: 'Check failed', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Check failed', description: errorText(e), color: 'error' })
     } finally {
       if (version === pickVersion) checking.value = false
     }
@@ -157,7 +156,7 @@ export function useSetup() {
         step.value = 'repo'
         return
       }
-      toast.add({ title: 'Could not finish', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Could not finish', description: errorText(e), color: 'error' })
     } finally {
       finishing.value = false
     }

@@ -3,7 +3,7 @@ import { resolveComponent } from 'vue'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '~/components/ui/dropdown-menu'
 import type { Tone } from '~/lib/tone'
 
-export interface MenuItem {
+interface MenuItem {
   label: string
   icon?: string
   color?: Tone

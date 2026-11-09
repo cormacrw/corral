@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 
 // Everything environment-specific comes from env vars (D12). The defaults are
 // for local development only; the Docker images set every value explicitly.
-export interface ServerConfig {
+interface ServerConfig {
   runnerToken: string | undefined
   runnerListen: { host: string, port: number } | undefined
   // Holds pgdata/ and blobs/ (docs/architecture.md, Layout on disk)

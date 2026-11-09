@@ -1,5 +1,5 @@
 import { normalizeProposedPlan, toolName, type DraftSession, type Plan, type ProposedPlanInput } from '@corral/contracts'
-import { checkPlan, checkPlanEpicDependencies, requiresHumanReview, designPinKey, diffPlans, LIVE_RUN_STATES, markdownToRichText, optionalMarkdownToRichText, parseTaskRef, revisionProblem, richTextToMarkdown, TASK_REF_PATTERN, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
+import { checkPlan, checkPlanEpicDependencies, requiresHumanReview, designPinKey, diffPlans, ACTIVE_RUN_STATES, markdownToRichText, optionalMarkdownToRichText, parseTaskRef, revisionProblem, richTextToMarkdown, TASK_REF_PATTERN, taskRef, type Actor, type DesignPin, type DesignPinTarget, type PlanDependencyContext, type PlanRef, type ProposedPlan, type ProposedTask } from '@corral/core'
 import { schema, type Database, type Executor, type PlanRevision, type PlanSessionRow, type ProjectRow } from '@corral/db'
 import { and, asc, desc, eq, inArray, isNull, ne } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
@@ -58,7 +58,7 @@ async function insertPlanTasks(tx: Executor, items: PlanTaskWrite[]) {
   await tx.insert(planTasks).values(items)
 }
 
-export interface PlanProposalsDeps {
+interface PlanProposalsDeps {
   db: Database
   events: EventBus
   sessions: Pick<PlanSessions, 'publish' | 'messageSaved'>
@@ -160,7 +160,7 @@ export class PlanProposals {
       // when close stops its run. Serialize its writes with the close.
       const [current] = await tx.select().from(planSessions).where(eq(planSessions.id, session.id)).for('update')
       const [active] = await tx.select({ id: runs.id }).from(runs)
-        .where(and(eq(runs.id, runId), inArray(runs.state, [...LIVE_RUN_STATES])))
+        .where(and(eq(runs.id, runId), inArray(runs.state, [...ACTIVE_RUN_STATES])))
       if (current!.closedAt || !active) throw new ToolError('This Plan turn has stopped; the plan was not saved.')
       // Each epic the revision still names keeps its row; a lone epic is
       // kept even if its key changed

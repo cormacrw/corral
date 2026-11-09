@@ -4,7 +4,7 @@ import { ensureAgents, ensureOwner } from './bootstrap.ts'
 import { startServer, type RunningServer } from './server.ts'
 import { createServices, type ServiceOptions, type Services } from './services.ts'
 
-export interface BootOptions extends ServiceOptions {
+interface BootOptions extends ServiceOptions {
   // A runner-only listener never mounts the API (D25)
   listeners?: { host: string, port: number, runnerOnly?: boolean | undefined }[]
   runnerToken?: string | undefined

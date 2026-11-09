@@ -1,9 +1,9 @@
 // Installing Corral as an app (D17, design/mobile.md). Chrome and Android
 // offer a prompt through `beforeinstallprompt`; iOS has none, so it gets the
 // Add to Home Screen steps instead. Nothing is offered once installed.
-export type InstallMode = 'prompt' | 'ios'
+type InstallMode = 'prompt' | 'ios'
 
-export interface InstallEnvironment {
+interface InstallEnvironment {
   standalone: boolean
   promptAvailable: boolean
   ios: boolean

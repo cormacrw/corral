@@ -11,7 +11,7 @@ const HOUR = 3_600_000
 
 // What a run's bar on the timeline says about it. Rate limits and
 // interruptions aren't failures (D3), so they're quiet rather than red.
-export type RunTone = 'live' | 'done' | 'changes' | 'failed' | 'quiet'
+type RunTone = 'live' | 'done' | 'changes' | 'failed' | 'quiet'
 export const RUN_TONE: Record<RunTone, { label: string, color: string }> = {
   live: { label: 'Live', color: 'var(--series-1)' },
   done: { label: 'Finished', color: 'var(--chart-3)' },
@@ -108,7 +108,7 @@ export function dayBars(runs: Run[], days: number, now: number): RunBar[] {
 
 // Ended runs per local day by how they ended, oldest first, for the
 // Outcomes chart. Live runs haven't ended, so they're left out.
-export type EndTone = Exclude<RunTone, 'live'>
+type EndTone = Exclude<RunTone, 'live'>
 export const END_TONES = ['done', 'changes', 'failed', 'quiet'] as const satisfies readonly EndTone[]
 export interface OutcomeDay { date: Date, index: number, byTone: Record<EndTone, number>, total: number }
 export function outcomesByDay(runs: Pick<Run, 'state' | 'outcome' | 'queuedAt'>[], days: number, now: number): OutcomeDay[] {

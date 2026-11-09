@@ -7,7 +7,7 @@ export interface PerfColumn<Row> {
   strong?: boolean
 }
 
-export type VitalRating = 'good' | 'needs-improvement' | 'poor'
+type VitalRating = 'good' | 'needs-improvement' | 'poor'
 
 // Google's Web Vitals thresholds: good up to the first, poor above the second
 const VITAL_THRESHOLDS: Record<keyof PerfVitals, [good: number, poor: number]> = {

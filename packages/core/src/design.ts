@@ -10,7 +10,7 @@ export interface DesignVersionState {
   status: DesignVersionStatus
 }
 
-export type DesignApprovalResult<V extends DesignVersionState> =
+type DesignApprovalResult<V extends DesignVersionState> =
   | { ok: true, versions: V[] }
   | { ok: false, error: string }
 

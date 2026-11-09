@@ -26,7 +26,7 @@ const { agents, projects, runs, tasks } = schema
 
 const ASSIGN_RETRY_MS = 60_000
 
-export interface SchedulerDeps {
+interface SchedulerDeps {
   db: Database
   github: GitHubClient
   runner: Pick<RunnerHub, 'online' | 'name'>

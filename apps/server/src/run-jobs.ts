@@ -23,7 +23,7 @@ import { taskCriteria } from './criteria.ts'
 
 const { comments, designVersions, epics, reviews, runs, taskDesignPins, tasks } = schema
 
-export interface RunJobsDeps {
+interface RunJobsDeps {
   db: Database
   github: GitHubClient
   runner: RunnerHub

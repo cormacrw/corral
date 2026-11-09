@@ -32,7 +32,7 @@ const RETRY_DELAY_MS = 60_000
 const CHECKPOINT_POLL_MS = 30_000
 const CHECKPOINT_IDLE_MS = LONGEST_POLL_MS
 
-export interface EpicSyncDeps extends BranchWriterDeps {
+interface EpicSyncDeps extends BranchWriterDeps {
   // Told about every task whose status this changed
   settled: (taskId: string) => Promise<void>
 }

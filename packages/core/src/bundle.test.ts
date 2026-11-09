@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process'
-import { linkSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { linkSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { bundlePath, BundleError, packBundle, unpackBundle } from './bundle.ts'
+import { bundlePath, BundleError, unpackBundle } from './bundle.ts'
 
 const text = (s: string) => new TextEncoder().encode(s)
 
@@ -80,22 +80,7 @@ describe('bundlePath', () => {
 })
 
 describe('bundle archives', () => {
-  it('round-trips files, including long paths', () => {
-    const long = `${'deep/'.repeat(30)}file.js`
-    const files = [
-      { path: 'index.html', data: text('<h1>Hi</h1>') },
-      { path: 'assets/app.js', data: new Uint8Array(1500).fill(7) },
-      { path: long, data: text('long') },
-      { path: 'empty.txt', data: new Uint8Array() }
-    ]
-    const archive = packBundle(files)
-    expect(archive.byteLength % 512).toBe(0)
-    const unpacked = unpackBundle(archive)
-    expect([...unpacked.keys()]).toEqual(['index.html', 'assets/app.js', long, 'empty.txt'])
-    for (const f of files) expect(unpacked.get(f.path)).toEqual(f.data)
-  })
-
-  it('reads archives written by tar, and tar reads ours', () => {
+  it('reads archives written by tar', () => {
     const dir = mkdtempSync(join(tmpdir(), 'corral-bundle-'))
     const src = join(dir, 'dist')
     mkdirSync(join(src, 'assets', 'x'.repeat(90)), { recursive: true })
@@ -105,23 +90,10 @@ describe('bundle archives', () => {
     const unpacked = unpackBundle(new Uint8Array(archive))
     expect(new TextDecoder().decode(unpacked.get('index.html'))).toBe('<p>tar</p>')
     expect(new TextDecoder().decode(unpacked.get(`assets/${'x'.repeat(90)}/${'y'.repeat(40)}.css`))).toBe('p{}')
-
-    const ours = join(dir, 'ours.tar')
-    const long = `${'z'.repeat(120)}.js`
-    writeFileSync(ours, packBundle([{ path: 'a/b.txt', data: text('b') }, { path: long, data: text('l') }]))
-    const out = join(dir, 'out')
-    mkdirSync(out)
-    execFileSync('tar', ['-xf', ours, '-C', out])
-    expect(readFileSync(join(out, 'a/b.txt'), 'utf8')).toBe('b')
-    expect(readFileSync(join(out, long), 'utf8')).toBe('l')
   })
 
   it('skips entries whose names would leave the bundle', () => {
-    const archive = packBundle([
-      { path: '../evil.js', data: text('x') },
-      { path: '/etc/passwd', data: text('x') },
-      { path: 'ok.js', data: text('ok') }
-    ])
+    const archive = tar(entry('../evil.js', 'x'), entry('/etc/passwd', 'x'), entry('ok.js', 'ok'), END)
     expect([...unpackBundle(archive).keys()]).toEqual(['ok.js'])
   })
 
@@ -197,7 +169,7 @@ describe('bundle archives', () => {
   })
 
   it('rejects a bad checksum, naming the entry, path and offset', () => {
-    const archive = packBundle([{ path: 'index.html', data: text('x') }, { path: 'assets/app.js', data: text('y') }])
+    const archive = tar(entry('index.html', 'x'), entry('assets/app.js', 'y'), END)
     archive[BLOCK * 2 + 3] = archive[BLOCK * 2 + 3]! ^ 1
     expect(failure(archive)).toBe('Bad header checksum in entry 2 ("assdts/app.js") at offset 1024')
   })
@@ -211,7 +183,7 @@ describe('bundle archives', () => {
   })
 
   it('rejects truncation at every point', () => {
-    const archive = packBundle([{ path: 'a.js', data: new Uint8Array(2000) }, { path: 'b.js', data: text('b') }])
+    const archive = tar(entry('a.js', new Uint8Array(2000)), entry('b.js', 'b'), END)
     expect(failure(archive.subarray(0, 1024))).toBe('Truncated tar archive: entry 1 ("a.js") at offset 0 needs 2048 bytes of data, 512 left')
     expect(failure(archive.subarray(0, 2500))).toBe('Truncated tar archive: entry 1 ("a.js") at offset 0 needs 2048 bytes of data, 1988 left')
     expect(failure(archive.subarray(0, 2560 + 100))).toBe('Truncated tar archive: entry 2 at offset 2560 has 100 of 512 header bytes')

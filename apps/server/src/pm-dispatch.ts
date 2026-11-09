@@ -14,7 +14,7 @@ import type { RunnerHub } from './runner-hub.ts'
 
 const { agents, planSessions, runs } = schema
 
-export interface PmDispatchDeps {
+interface PmDispatchDeps {
   db: Database
   runner: Pick<RunnerHub, 'online' | 'name' | 'status'>
   gate: RunGate

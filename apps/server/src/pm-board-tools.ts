@@ -23,7 +23,7 @@ import { ToolError } from './tool-error.ts'
 
 const { agents, auditLog, comments, epicDependencies, epics, plans, runs, taskDependencies, tasks } = schema
 
-export interface PmBoardToolsDeps {
+interface PmBoardToolsDeps {
   db: Database
   blobs: BlobStore
   sessions: Pick<PlanSessions, 'post'>

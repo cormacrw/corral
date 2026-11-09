@@ -1,6 +1,6 @@
 import { marked, type Token, type Tokens } from 'marked'
 
-export interface RichTextIssue {
+interface RichTextIssue {
   path: (string | number)[]
   message: string
 }
@@ -88,7 +88,7 @@ interface Mark {
   type: string
   attrs?: Record<string, unknown>
 }
-export type RichTextDocument = {
+type RichTextDocument = {
   type: 'doc'
   content: RichNode[]
 }

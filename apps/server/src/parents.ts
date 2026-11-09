@@ -236,7 +236,7 @@ export async function parentDependents(db: Executor, epicId: string): Promise<st
 
 type SubRow = Pick<TaskRow, 'epicId' | 'status' | 'type' | 'deletedAt'>
 
-export interface ParentFacts {
+interface ParentFacts {
   // Rollups by parent task ID
   rollups: Map<string, ParentRollup>
   // What a parent shows of its delivery record

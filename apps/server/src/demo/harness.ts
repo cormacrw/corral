@@ -16,7 +16,7 @@ import { DemoGitHub, demoSha } from './demo-github.ts'
 // use: a fake runner plays the agents and a fake GitHub holds the repos. Every
 // state the demo shows is one the server reached itself.
 
-export interface DemoTaskInput extends Omit<Partial<CreateTaskInput>, 'description' | 'implementationPlan'> {
+interface DemoTaskInput extends Omit<Partial<CreateTaskInput>, 'description' | 'implementationPlan'> {
   title: string
   // Markdown
   description?: string

@@ -1,10 +1,10 @@
+import { errorText } from '@corral/core'
 import { ref, watch, type ComputedRef } from 'vue'
 import { useMutation } from '@tanstack/vue-query'
 import type { PatchTaskInput, Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
 import { moveTask, patchTask, removeTask, resumeTask, type TaskAddress } from '~/queries/tasks'
 import { useSavedNote } from '~/composables/useSavedNote'
-import { errorMessage } from '~/lib/errors'
 import { refusedNotReady } from '~/queries/client'
 import { boardMove } from '~/features/board/utils/board'
 
@@ -35,7 +35,7 @@ export function useTaskActions({ task, address }: TaskTarget, onRemoved: () => v
   })
 
   function fail(e: unknown) {
-    toast.add({ title: 'Not saved', description: errorMessage(e), color: 'error' })
+    toast.add({ title: 'Not saved', description: errorText(e), color: 'error' })
   }
   function failMove(e: unknown) {
     if (refusedNotReady(e)) toast.add({ title: 'Not ready yet', description: e.message, color: 'warning' })

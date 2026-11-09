@@ -31,7 +31,7 @@ declare const typeOnly: unique symbol
 export interface Reply<T> { readonly [typeOnly]?: T }
 const reply = <T>(): Reply<T> => ({})
 // A body sent as it is (an image, a form) instead of as JSON
-export interface RawBody<T> { readonly raw: true, readonly [typeOnly]?: T }
+interface RawBody<T> { readonly raw: true, readonly [typeOnly]?: T }
 const raw = <T extends Blob | FormData>(): RawBody<T> => ({ raw: true })
 
 type PmCoverage =

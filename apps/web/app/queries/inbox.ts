@@ -19,7 +19,7 @@ export const actOnInboxItem = defineMutation<{ task: Task | null }, { taskId: st
 })
 
 // Plan threads and release notes are read through their session and deployment
-export type ReadTarget = Pick<InboxItem, 'type' | 'id'>
+type ReadTarget = Pick<InboxItem, 'type' | 'id'>
 const sendRead = ({ type, id }: ReadTarget): Promise<unknown> =>
   type === 'plan_thread' ? api.plan.read(id) : type === 'release_notes' ? api.deployments.read(id) : api.inbox.read({ type, id })
 

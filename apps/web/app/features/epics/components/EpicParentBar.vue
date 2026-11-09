@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { errorMessage } from '~/lib/errors'
+import { errorText } from '@corral/core'
 import { useMutation } from '@tanstack/vue-query'
 import { removeTask } from '~/queries/tasks'
 
@@ -21,7 +21,7 @@ async function remove() {
     confirming.value = false
     emit('deleted')
   } catch (e) {
-    error.value = errorMessage(e)
+    error.value = errorText(e)
   }
 }
 </script>

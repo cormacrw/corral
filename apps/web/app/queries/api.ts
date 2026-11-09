@@ -8,7 +8,7 @@ type Body<K extends WebEndpoint> = undefined extends EndpointBody<K> ? { body?: 
 type Query<K extends WebEndpoint> = undefined extends EndpointQuery<K> ? { query?: undefined } : { query: EndpointQuery<K> }
 // What a call to an endpoint sends: path parameters, JSON or raw body, query.
 // keepalive outlives the page, for a request sent as it unloads.
-export type ApiRequest<K extends WebEndpoint> = Params<K> & Body<K> & Query<K> & { keepalive?: boolean }
+type ApiRequest<K extends WebEndpoint> = Params<K> & Body<K> & Query<K> & { keepalive?: boolean }
 
 type Optional<K extends WebEndpoint> = object extends ApiRequest<K> ? [request?: ApiRequest<K>] : [request: ApiRequest<K>]
 

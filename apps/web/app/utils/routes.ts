@@ -13,7 +13,7 @@ export const SECTIONS = {
   projects: { label: 'Projects', to: '/projects' },
   settings: { label: 'Settings', to: '/settings' }
 } as const
-export type Section = keyof typeof SECTIONS
+type Section = keyof typeof SECTIONS
 
 // The phone's tab bar, in order. Tasks and their subtasks belong to a project.
 const MOBILE_TABS = [
@@ -42,7 +42,7 @@ export const SETTINGS_SECTIONS = [
   { section: 'performance', label: 'Performance', icon: 'i-hugeicons-dashboard-speed-02', fullBleed: false },
   { section: 'appearance', label: 'Appearance', icon: 'i-hugeicons-paint-board', fullBleed: false }
 ] as const
-export type SettingsSection = typeof SETTINGS_SECTIONS[number]['section']
+type SettingsSection = typeof SETTINGS_SECTIONS[number]['section']
 
 export const projectPath = (slug: string, page?: ProjectPage) => `/projects/${slug}${page ? `/${page}` : ''}`
 export const agentPath = (name: string) => `/agents/${name.toLowerCase()}`

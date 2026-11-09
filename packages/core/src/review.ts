@@ -38,7 +38,7 @@ export interface CriterionVerdict {
 
 // An integration review's finding, with the task refs it concerns (D23)
 export const FINDING_LEVELS = ['blocking', 'non_blocking'] as const
-export type FindingLevel = typeof FINDING_LEVELS[number]
+type FindingLevel = typeof FINDING_LEVELS[number]
 export interface EpicReviewFinding {
   level: FindingLevel
   text: string
@@ -67,7 +67,7 @@ export interface TargetFileChange {
 }
 
 // A choice of product behaviour that a resolution can't make for itself
-export interface EpicDecisionAlternative {
+interface EpicDecisionAlternative {
   label: string
   effect: string
   // Taking this option changes what was approved, so review starts over

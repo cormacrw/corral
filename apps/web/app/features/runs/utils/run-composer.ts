@@ -19,7 +19,6 @@ export function runComposer(run: Pick<Run, 'state' | 'role'>, agent: Pick<Agent,
     return { kind: 'disabled', reason: `${runtimeLabel(agent.runtime)} can't take messages mid-run. Comment on the task and ${agent.name} reads it on its next run.` }
   }
   if (run.state === 'queued') return { kind: 'disabled', reason: `This run hasn't started yet. You can message ${agent.name} once it starts.` }
-  if (run.state === 'stopping') return { kind: 'disabled', reason: 'This run is stopping.' }
   if (!runnerOnline) return { kind: 'disabled', reason: 'The runner is offline, so a message can\'t reach the agent.' }
   return { kind: 'open' }
 }

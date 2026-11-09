@@ -13,7 +13,7 @@ export interface GuideHunk {
   // The line cap cut this hunk partway: only its first lines are here
   partial: boolean
 }
-export interface GuideStep {
+interface GuideStep {
   id: string
   title: string
   why: string

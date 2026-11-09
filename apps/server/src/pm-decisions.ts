@@ -17,7 +17,7 @@ const { designVersions } = schema
 
 type PmInboxAction = Exclude<InboxActionInput, { action: 'decide' }>
 
-export interface PmDecisionsDeps {
+interface PmDecisionsDeps {
   db: Database
   human: Pick<HumanActions, 'inboxAction' | 'approveDesign' | 'clarify'>
 }

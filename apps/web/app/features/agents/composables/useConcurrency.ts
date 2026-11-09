@@ -1,8 +1,8 @@
+import { errorText } from '@corral/core'
 import { useMutation, useQueryClient } from '@tanstack/vue-query'
 import type { Agent } from '@corral/contracts'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useSavedNote } from '~/composables/useSavedNote'
-import { errorMessage } from '~/lib/errors'
 import { patchAgent } from '~/queries/agents'
 import { keys } from '~/queries/keys'
 
@@ -67,7 +67,7 @@ export function useConcurrency(agent: () => Pick<Agent, 'id' | 'concurrency'>) {
         pending.value = null
         show(saved)
       }
-      toast.add({ title: 'Not saved', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Not saved', description: errorText(e), color: 'error' })
     } finally {
       inFlight = false
       // A debounce that expired during this request is ready now. Otherwise

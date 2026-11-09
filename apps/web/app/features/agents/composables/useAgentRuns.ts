@@ -1,7 +1,6 @@
 import { taskNumber, agentStatus, tokens, waitingOnUsageLimit } from '~/utils/labels'
-import { errorMessage } from '~/lib/errors'
 import { useMutation, useQueries, useQuery } from '@tanstack/vue-query'
-import { isActiveRun } from '@corral/core'
+import { errorText, isActiveRun } from '@corral/core'
 import type { Run } from '@corral/contracts'
 import { patchAgent } from '~/queries/agents'
 import { messageRun, runsQuery, runTranscriptQuery, stopRun } from '~/queries/runs'
@@ -127,7 +126,7 @@ export function useAgentRuns() {
       await stopping.mutateAsync(run.id)
       toast.add({ title: 'Run stopped', description: 'The task is paused until you resume it.', color: 'neutral' })
     } catch (e) {
-      toast.add({ title: 'Could not stop', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Could not stop', description: errorText(e), color: 'error' })
     }
   }
   // Ends a usage-limit wait early; a real limit just pauses the agent again
@@ -137,7 +136,7 @@ export function useAgentRuns() {
     try {
       await patch.mutateAsync({ id: agent.value.id, input: { paused: false } })
     } catch (e) {
-      toast.add({ title: 'Could not resume', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Could not resume', description: errorText(e), color: 'error' })
     }
   }
   const project = (run: Run) => projects.value.find(p => p.id === run.projectId) ?? null
@@ -156,7 +155,7 @@ export function useAgentRuns() {
       ;(sent.value[run.id] ??= []).push(comment.body.trim())
       return true
     } catch (e) {
-      toast.add({ title: 'Message not sent', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Message not sent', description: errorText(e), color: 'error' })
       return false
     }
   }

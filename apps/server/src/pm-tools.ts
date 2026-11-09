@@ -48,7 +48,7 @@ function refused<T extends z.ZodType>(schema: T, input: unknown, message: (error
 
 type ReadInput<T extends PmTool> = T extends keyof typeof READERS ? ReturnType<typeof READERS[T]> : PmToolInput<T>
 // The project a scoped tool names is resolved into the call's `project`
-export type PmToolCallInput<T extends PmTool> = T extends ProjectScopedPmTool ? Omit<ReadInput<T>, 'project'> : ReadInput<T>
+type PmToolCallInput<T extends PmTool> = T extends ProjectScopedPmTool ? Omit<ReadInput<T>, 'project'> : ReadInput<T>
 
 export interface PmToolCall<T extends PmTool> {
   sessionId: string
@@ -60,7 +60,7 @@ export interface PmToolCall<T extends PmTool> {
   actor: Actor
 }
 
-export interface PmToolResult {
+interface PmToolResult {
   result: unknown
   // What the call did, in the words Activity shows. Audited tools only.
   summary?: string
@@ -69,7 +69,7 @@ export interface PmToolResult {
   target?: { taskId: string, taskRef: string }
 }
 
-export interface PmToolHandler<T extends PmTool> {
+interface PmToolHandler<T extends PmTool> {
   // Each call that acts straight away is audited (pm.tool_called) and shows
   // in Activity; this is what it was trying to do, for a failed one
   goal?: string
@@ -84,7 +84,7 @@ export interface PmToolHandler<T extends PmTool> {
 
 export type PmToolHandlers = { [T in PmTool]: PmToolHandler<T> }
 
-export interface PmToolsDeps {
+interface PmToolsDeps {
   db: Database
   handlers: PmToolHandlers
   // Posts the card; nothing changes until the human confirms

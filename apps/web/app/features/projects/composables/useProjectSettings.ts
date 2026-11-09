@@ -1,9 +1,8 @@
 import { useSavedNote } from '~/composables/useSavedNote'
-import { errorMessage } from '~/lib/errors'
 import { prefixTaken } from '~/queries/client'
 import { useMutation } from '@tanstack/vue-query'
 import type { PatchProjectInput, Project } from '@corral/contracts'
-import { DEFAULT_LIMITS, PROJECT_PREFIX_HINT, PROJECT_PREFIX_PATTERN } from '@corral/core'
+import { DEFAULT_LIMITS, errorText, PROJECT_PREFIX_HINT, PROJECT_PREFIX_PATTERN } from '@corral/core'
 import { patchProject } from '~/queries/projects'
 
 type SettingsForm = Required<Omit<PatchProjectInput, 'paused'>>
@@ -47,7 +46,7 @@ export function useProjectSettings() {
     } catch (e) {
       const conflict = prefixTaken(e)
       if (conflict) prefixConflict.value = conflict
-      else toast.add({ title: 'Not saved', description: errorMessage(e), color: 'error' })
+      else toast.add({ title: 'Not saved', description: errorText(e), color: 'error' })
     } finally {
       saving.value = false
     }
@@ -57,7 +56,7 @@ export function useProjectSettings() {
     try {
       await patch.mutateAsync({ slug: slug.value, input: { paused } })
     } catch (e) {
-      toast.add({ title: 'Could not change pause', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Could not change pause', description: errorText(e), color: 'error' })
     }
   }
 

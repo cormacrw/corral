@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { errorMessage } from '~/lib/errors'
+import { errorText } from '@corral/core'
 import { useMutation } from '@tanstack/vue-query'
 import type { EditorView } from '@tiptap/pm/view'
 import { uploadAttachment } from '~/queries/attachments'
@@ -33,7 +33,7 @@ async function uploadImage(file: File): Promise<{ id: string } | null> {
   try {
     return await uploadMutation.mutateAsync({ slug: props.slug ?? '', file, name })
   } catch (e) {
-    toast.add({ title: `Couldn't upload ${name}`, description: errorMessage(e), color: 'error' })
+    toast.add({ title: `Couldn't upload ${name}`, description: errorText(e), color: 'error' })
     return null
   } finally {
     uploading.value--

@@ -19,7 +19,6 @@ export const isInProgress = (status: TaskStatus): boolean => homeColumn(status) 
 
 // The stages in progress, each shown apart in open work
 export const IN_PROGRESS_STAGES = ['in_progress', 'agent_review', 'human_review', 'ready_to_merge'] as const satisfies readonly TaskStatus[]
-export type InProgressStage = typeof IN_PROGRESS_STAGES[number]
 export const OPEN_STAGES = ['ready', ...IN_PROGRESS_STAGES] as const satisfies readonly TaskStatus[]
 export type OpenStage = typeof OPEN_STAGES[number]
 

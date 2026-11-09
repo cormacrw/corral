@@ -17,7 +17,7 @@ export interface PullRequest {
 }
 
 // A PR as a reader sees it, with up to `fileLimit` of its changed files
-export interface PullRequestDiff {
+interface PullRequestDiff {
   number: number
   url: string
   title: string

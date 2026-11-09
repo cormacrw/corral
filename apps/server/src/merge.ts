@@ -40,7 +40,7 @@ function rebaseInstruction(defaultBranch: string): string {
   return `Rebase onto \`origin/${defaultBranch}\`, resolve the conflicts, and report pr_rebased.`
 }
 
-export interface MergeDeps {
+interface MergeDeps {
   db: Database
   events: EventBus
   github: GitHubClient
@@ -52,7 +52,7 @@ export interface MergeDeps {
 }
 
 // Whether a task may be merged right now, from live GitHub data
-export interface GateReport {
+interface GateReport {
   pr: PullRequest
   facts: MergeGateFacts
   checks: CheckResult[]

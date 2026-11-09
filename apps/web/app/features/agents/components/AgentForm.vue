@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { errorMessage } from '~/lib/errors'
+import { errorText } from '@corral/core'
 import { useMutation } from '@tanstack/vue-query'
 import type { CliStatus, CreateAgentInput } from '@corral/contracts'
 import type { AgentRuntime } from '@corral/core'
@@ -33,7 +33,7 @@ async function save() {
     toast.add({ title: `Added ${agent.name}`, color: 'success' })
     open.value = false
   } catch (e) {
-    toast.add({ title: 'Not added', description: errorMessage(e), color: 'error' })
+    toast.add({ title: 'Not added', description: errorText(e), color: 'error' })
   }
 }
 </script>

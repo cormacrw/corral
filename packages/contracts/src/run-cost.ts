@@ -1,6 +1,6 @@
 // Dollars per million tokens. Fresh input has no agreed weight, so the weighted
 // cost leaves it out and it's always shown beside the cost.
-export const CACHE_COST_WEIGHTS = { cacheRead: 0.2, cacheWrite: 8, output: 20 } as const
+const CACHE_COST_WEIGHTS = { cacheRead: 0.2, cacheWrite: 8, output: 20 } as const
 
 interface RunUsage {
   agentRuntime: string
