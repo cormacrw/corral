@@ -9,7 +9,7 @@ for empty tasks with subtasks and tasks with subtasks whose tasks have been dele
 remain readable using the event name as the label. No audit rows are rewritten.
 
 Human-authored events go to Resolved with their action and summary in
-`resolution`; other task events go to Activity. Both lists still mix task and
+`resolution`; other task events go to `activity`, which the web app doesn't list (D33). Both lists still mix task and
 task history (and dismissed releases in Resolved), sorted newest first before
 the existing limit. A live conflict remains an `epic_conflict` in Needs you.
 

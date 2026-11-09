@@ -2,7 +2,7 @@
 
 > **D31:** where this document says task, read task with subtasks. A task is the only work item a human sees, and `epics` is a task's delivery record.
 
-> **For agents:** This is the PRD as written. Decisions made afterwards are in [decisions.md](decisions.md) and **override this document** where they conflict. Most importantly, the POC is local-only (D1) and uses the user's own locally authenticated agent CLI (D2). Known inconsistencies in this document are listed in [open-recommendations.md](open-recommendations.md#inconsistencies-in-the-prd).
+> **For agents:** This is the PRD as written. Decisions made afterwards are in [decisions.md](decisions.md) and **override this document** where they conflict. Most importantly, the POC is local-only (D1) and uses the user's own locally authenticated agent CLI (D2).
 
 | | |
 |---|---|
@@ -123,9 +123,11 @@ Fields:
 - Pause state
 - Created and updated timestamps
 
-### 4.2 Task
+### 4.2 Task with subtasks
 
-A task groups related subtasks around a feature or product outcome.
+> **D31:** written as "Epic". A task with subtasks is an ordinary task row with status `parent`; its delivery record (branch, PR, review mode) is internally an `epic`.
+
+A task with subtasks groups related subtasks around a feature or product outcome.
 
 Fields:
 
@@ -150,7 +152,7 @@ Fields:
 - Acceptance criteria
 - Status
 - Priority
-- Task ID
+- The task it belongs to, when it's a subtask
 - Dependencies
 - Task type: Task, Bug, Spike or Design (D19, D20)
 - Human review flag
@@ -168,6 +170,8 @@ Fields:
 Each acceptance criterion must be individually verifiable.
 
 ### 4.4 Agent group
+
+> **Superseded by D13, D15, D18 and D23:** agents are global, each with one runtime. The roles are `pm`, `developer`, `designer` and `reviewer`, and concurrency applies to all but the PM.
 
 An agent group represents a role and its execution configuration.
 
@@ -239,39 +243,9 @@ Agents must read pinned comments before implementing or revising a task.
 
 ## 5. Task lifecycle
 
-### 5.1 Statuses
+### 5.1 Statuses and 5.2 Permitted transitions
 
-> **Superseded by D10:** statuses are Backlog, Ready, In progress, Agent review, Human review, Merged, Blocked, Failed. No Testing, no Cancelled. §5.1 and §5.2 below are kept for history; the transitions in [decisions.md](decisions.md#d10--task-statuses-and-transitions) are binding.
-
-| Status | Meaning |
-|---|---|
-| Needs refinement | The task is unclear or too large to implement safely |
-| Ready | Approved, sufficiently specified, and eligible for execution |
-| In progress | A developer run owns the task |
-| In review | A PR is open and awaits review |
-| Testing | Reserved for a future dedicated tester group |
-| Human review | Agent gates passed, but explicit human approval is required |
-| Merged | The PR has been merged successfully |
-| Blocked | Execution cannot safely continue without human intervention |
-
-Testing is reserved in the model but does not require a dedicated agent group in the MVP.
-
-### 5.2 Permitted transitions
-
-- New tasks start in Needs refinement or Draft within the PM planning workflow.
-- Only the human can approve a proposed task plan for execution.
-- Approved tasks enter Ready when all dependencies are Done.
-- The developer gate claims a Ready task and moves it to In progress.
-- Opening or updating a PR moves the task to In review.
-- Requested changes return the task to In progress.
-- Reviewer approval moves the task to Human review if human approval is required; otherwise it makes the task eligible for automated merge.
-- CI failures return the task to In progress with the failure details attached.
-- Retry caps, review caps, explicit agent escalation, or unrecoverable errors move the task to Blocked.
-- A human can approve a task in Human review or request changes.
-- Successful orchestrator merge moves the task to Merged.
-- Merged tasks are immutable history. Follow-up work creates a new task.
-
-Status transitions are enforced by the backend, not by agent instructions alone.
+> **Superseded by D10** (with D20's Approved status and D31's `parent` status). The statuses and transitions in [decisions.md](decisions.md#d10--task-statuses-and-transitions) are binding; the original tables are in git history.
 
 ### 5.3 Definition of Ready
 
@@ -285,6 +259,8 @@ A task can enter Ready only when:
 - Required repository and runner configuration is available.
 
 ### 5.4 Definition of Done
+
+> **Amended by D19, D20 and D27:** a spike is done when the human approves its findings, a design when the human approves a version (Approved), and a subtask in a task with subtasks when it's on the task's branch. The task itself is done when its PR merges (D22).
 
 A task is Done when:
 
@@ -461,10 +437,9 @@ Requirements:
 
 - Reviewer wakes for PRs requiring review, new commits, or required rebases.
 - Reviewer evaluates code against acceptance criteria.
-- Reviewer checks test results, evidence, and relevant documentation.
+- Reviewer checks evidence and relevant documentation, and leaves the gates to required CI (D26).
 - Reviewer returns an explicit approval or requests changes with actionable feedback.
-- Reviewer rebases branches when safe.
-- Trivial conflicts may be resolved; non-trivial conflicts return to the developer.
+- Reviewer stays read-only: the server does clean rebases and a developer resolves conflicts (D24, D29).
 - Reviewer cannot implement feature changes or merge PRs.
 - Review rounds are capped, with a default of five.
 - Repeated substantially identical feedback can trigger escalation.
@@ -562,18 +537,18 @@ Requirements:
   - Valid reviewer approval.
   - Required CI checks pass.
   - Required evidence is present and validated.
-  - The task is not Blocked or cancelled.
+  - The task is not Blocked or Failed.
   - Human review is not outstanding.
   - The PR is mergeable against the current base branch.
 - Pending CI waits without repeatedly waking agents.
-- Failing CI returns the task to In progress with failure output attached.
-- Rebase conflicts follow reviewer/developer handoff rules.
+- Failing CI returns the task to its developer with the failure output attached (D29).
+- Clean rebases are done by the server; conflicts go to the developer (D24, D29).
 - Merge outcomes and commit references are recorded.
-- Cancellation closes the PR and removes the Corral branch when safe, then archives the task.
+- Deletion stops any run, closes the PR, removes the Corral branch when safe, then soft-deletes the task (D10).
 
 Acceptance criteria:
 
-- Eligible Ready tasks can be merged without manual intervention.
+- Approved tasks in Ready to merge can be merged without manual intervention.
 - Tasks requiring human review cannot auto-merge.
 - The orchestrator independently verifies gates before merging.
 - Merge failure never incorrectly marks a task Merged.
@@ -626,54 +601,7 @@ MVP search can use full-text search and Markdown links. Vector search and automa
 
 ### 7.11 Human controls and visibility
 
-Required views:
-
-**PM chat**
-- Persistent conversation.
-- Clarifying questions and proposed plans.
-- Editable task cards.
-- Approval actions.
-- Delivery summaries.
-
-**Board**
-- Tasks grouped by status.
-- Filters and task grouping.
-- Agent identity, lock, dependency, and PR indicators.
-
-**Task detail**
-- Description and acceptance criteria.
-- Comments and pinned guidance.
-- PR and diff links.
-- Evidence and review rounds.
-- Run history and failure output.
-
-**Agents**
-- Active runs.
-- Role, task, elapsed time, and available usage data.
-- Live output.
-- Attach, interrupt, and stop controls.
-
-**Pull requests**
-- PR state.
-- Review verdict.
-- CI status.
-- Rebase status.
-- Evidence completeness.
-- Merge eligibility.
-
-**Human queue**
-> **Superseded by D11:** this is the **Inbox**: developer and reviewer items only. PM questions and plan approvals stay in Plan.
-
-- Tasks requiring human review.
-- Blocked tasks.
-- PM questions and unresolved decisions.
-
-**Control panel**
-- Concurrency and wake intervals.
-- Group pause/resume.
-- Global pause.
-- Kill switch.
-- Merge configuration.
+The views are specified page by page in [design/](design/README.md), which is binding for UI. The PRD's Human queue is the Inbox (D11), which lists only decisions waiting on the human (D33).
 
 Requirements:
 
@@ -877,16 +805,16 @@ The hosted scheduler must not assume that a disconnected runner is immediately s
 | Developer process crashes | Mark run failed after reconciliation, release lock, retry within cap |
 | Runner disconnects | Detect missing heartbeat, expire lease, reconcile before retry |
 | App or runner shuts down | Stop runs gracefully and mark them Interrupted |
-| CI fails | Attach output, return task to In progress |
+| CI fails | Attach output, return task to its developer (D29) |
 | Reviewer requests changes | Attach feedback and return task to In progress |
 | Review-round cap reached | Block task and notify human |
-| Failed-run cap reached | Block task and notify human |
-| Rebase conflict | Resolve trivial conflicts or hand back to developer |
+| Failed-run cap reached | Fail task and notify human (D10) |
+| Rebase conflict | Server rebases cleanly; a developer resolves conflicts (D24, D29) |
 | Non-trivial implementation ambiguity | Escalate to Blocked |
 | Evidence missing | Prevent approval or merge |
 | Human review required | Wait in Human review |
 | GitHub merge fails | Reconcile PR state and retry only if safe |
-| Task cancelled | Stop run, close PR, clean branch when safe, archive task |
+| Task deleted | Stop run, close PR, clean branch when safe, soft-delete task (D10) |
 | Runner resumes after lease expiry | Reject stale task operations and reconcile its state |
 | Usage limit reached *(added, D3)* | Pause the agent group until reset; not counted as a failure |
 
@@ -934,58 +862,11 @@ The PM conversation is the home screen. The board and operational views are seco
 
 ### 12.2 Required views
 
-**PM chat**
-- Persistent project conversation.
-- Clarifying questions.
-- Structured plans and editable task cards.
-- Dependency visualization where useful.
-- Approve-plan action.
-- Delivery summaries and follow-up suggestions.
-
-**Board**
-- Kanban by status.
-  > **D10:** approved work only. Backlog tasks live in a separate Backlog view.
-- Task and priority filters.
-- Lock and agent indicators.
-- Dependency and PR status.
-
-**Task detail**
-- Description and acceptance criteria.
-- Comments and pinned instructions.
-- PR link.
-- Evidence packets.
-- Review history.
-- Run history and failure details.
-
-**Agents**
-- Live runs and task assignment.
-- Elapsed time and usage metrics.
-- Transcript tail and tool activity.
-- Attach, interrupt, stop, and pause controls where supported.
-
-**Pull requests**
-- Review status.
-- CI and rebase state.
-- Evidence completeness.
-- Merge eligibility and waiting reasons.
-
-**Human queue**
-> **Superseded by D11:** the **Inbox**. Plan approvals and PM questions live in Plan, not here.
-
-- Tasks awaiting approval.
-- Blocked tasks.
-- PM questions.
-- Failed or escalated work.
-
-**Project control panel**
-- Agent concurrency.
-- Wake intervals.
-- Pause/resume.
-- Global pause.
-- Kill switch.
-- Merge settings and required checks.
+See [§7.11](#711-human-controls-and-visibility) and [design/](design/README.md).
 
 ## 13. Build phases
+
+> **History:** every phase below has been built. Kept as the original plan.
 
 The implementation should proceed in vertical slices, validating the end-to-end workflow early.
 
@@ -1104,7 +985,7 @@ Resolve these before or during implementation:
 - Which operating system is supported first by the local runner?
 - ~~Which authentication approach is supported for Claude Code execution in the runner environment?~~ **Resolved for the POC by D2:** the user's own locally authenticated CLI. Revisit before selling.
 - Should a task's first review be performed automatically immediately after the PR opens, or only after required CI completes?
-- Which checks are mandatory by default, and which are configurable per project? *(Partly addressed by D6; see R4.)*
+- Which checks are mandatory by default, and which are configurable per project? *(Settled by D6, D5 and D26: projects choose their required checks, and without any the reviewer runs the gates.)*
 - What is the initial evidence storage provider?
 - Should the PM use the same model as coding agents or a cheaper model by default?
 - How should the product enforce one active Corral installation per repository?

@@ -97,7 +97,7 @@ For ordinary tasks without the exceptions below, only the task flag sends a task
 
 **Decision:** Each project starts with basic CI, at minimum linting, configured as a required check. More checks can be added later.
 
-See R4 in [open-recommendations.md](open-recommendations.md) on whether lint alone is enough of a gate for auto-merge.
+A project with no required checks still auto-merges on the reviewer's approval (D5), and its reviewer runs every gate itself without the cache (D26).
 
 ---
 
@@ -105,7 +105,7 @@ See R4 in [open-recommendations.md](open-recommendations.md) on whether lint alo
 
 **Status:** Accepted
 
-**Decision:** Corral is a Turborepo + pnpm monorepo with three apps: `web` (Nuxt + Nuxt UI, UI only), `server` (Hono control plane, sole owner of the database, scheduler and orchestrator, single instance) and `runner` (Node/TS local daemon that dials out to the server over WebSocket and spawns agents). Shared code lives in `packages/contracts`, `packages/core` (pure domain logic) and `packages/db`. The database is PGlite + Drizzle, moving to Postgres when hosted. *(Amended by D14: the deployed instance uses Postgres now; PGlite stays for development and tests.)*
+**Decision:** Corral is a Turborepo + pnpm monorepo with three apps: `web` (Nuxt, UI only; built on shadcn-nuxt per D32, not Nuxt UI), `server` (Hono control plane, sole owner of the database, scheduler and orchestrator, single instance) and `runner` (Node/TS local daemon that dials out to the server over WebSocket and spawns agents). Shared code lives in `packages/contracts`, `packages/core` (pure domain logic) and `packages/db`. The database is PGlite + Drizzle, moving to Postgres when hosted. *(Amended by D14: the deployed instance uses Postgres now; PGlite stays for development and tests.)*
 
 **Why:** The runner is the piece that stays on the user's machine once the server is hosted, so it's separate even locally. The control plane's long-running loops shouldn't live in the request-driven web layer. TypeScript throughout lets every app share one contract package; the runner is I/O-bound, so TypeScript costs nothing in performance.
 
@@ -125,6 +125,7 @@ Full details, runner rules and resource estimates are in [architecture.md](archi
 - **web** only talks to the server API.
 - Evidence and transcripts are immutable, content-addressed blobs; the database stores pointers.
 - PRs link to Corral's evidence page instead of embedding images.
+- **GitHub calls go through the runner's `gh`.** The server decides every GitHub action (open and update PRs, read CI, update branches, merge) and remains the only process that talks to the PR/CI API in this decision's sense. It sends each REST call to a runner as a `github` setup job, which runs `gh api`, so the GitHub login never leaves the runner container (D2, D12). GitHub actions therefore need a runner online.
 
 Full table, disk layout, flows and the known POC push limitation are in [architecture.md § Storage](architecture.md#storage-d8).
 
@@ -134,7 +135,7 @@ Full table, disk layout, flows and the known POC push limitation are in [archite
 
 **Status:** Accepted
 
-**Decision:** Each PM chat turn is a runner job with role `pm`. The runner fetches the repo, updates a **read-only checkout of the default branch**, and runs `claude -p --resume <sessionId>` there. The PM gets its context from local files (code, `CORRAL.md`, wiki) and live board state through MCP tools (`list_tasks`, `get_task`, `add_comment`, `attach_evidence`, `get_run_outcomes`, `get_agent_activity`, `list_runs`, `get_run`, `ask_question`, `propose_plan`, `approve_plan`, `flag_stale_docs`). It has **no** tools to merge, edit docs or change task status, and it approves plans only on the human's say-so (below).
+**Decision:** Each PM chat turn is a runner job with role `pm`. The runner fetches the repo, updates a **read-only checkout of the default branch**, and runs `claude -p --resume <sessionId>` there. The PM gets its context from local files (code, `CORRAL.md`, wiki) and live board state through MCP tools: typed tools for every area (D30), listed in [flows.md](flows.md#pm-tools). It has **no** tools to merge, edit docs or change task status, and it approves plans only on the human's say-so (below).
 
 - The server stores the conversation and the `claude` session ID in the database. If the session is lost, the next turn starts fresh, seeded with a summary built from the database messages.
 - `propose_plan` results are validated by `core` (dependencies form a DAG, every task has acceptance criteria) and saved as versioned draft plans. Only the human approves one: with the plan flyout's buttons, or by asking Juno in chat ("looks good, add it to the board"), which then calls `approve_plan`. That approval is recorded as the human's, with the PM run that carried it out, and the server only accepts it when the human has written since the plan was proposed, so Juno can't approve a plan the human hasn't seen (amended 2026-10-28).
@@ -253,13 +254,13 @@ Both appear in the Inbox (D11) with their reason. When a human resolves a Failed
 - Plans awaiting the human's approval. Only the human authorizes a plan (D9).
 - Completed feature reviews: the task's PR after integration review, with the combined diff, evidence and outstanding human obligations (D27).
 - Explicitly required task-level approvals: standalone or legacy task reviews required by their flags or review mode, designs (D20), spikes (D19), and human checks under D28. Sensitive-review safeguards remain mandatory.
-- Exhausted recovery or an unsafe/unrecoverable failure needing a human choice, including retry/review caps, unresolved requirements and the task conflict handover required by D27.
+- Exhausted recovery or an unsafe/unrecoverable failure needing a human choice, including retry/review caps, unresolved requirements, a task conflict that needs a product decision, and a task fix stopped at its attempt bound (D29).
 
 An actionable item remains visible until its decision is resolved. Reading it, marking conversation read, acknowledging an error or dismissing informational activity must not clear an outstanding question, approval or exhausted-recovery decision. Show the reason, the decision needed and a recommendation when available. List actionable items newest first by when they began waiting; updates that keep the same wait do not reorder them.
 
 **Informational:** unread conversational replies, deploy/release notes, internal agent reviews, handoffs, progress and recoverable failures are Activity or conversation history. They do not count toward Needs you and need no acknowledgement to advance work. A Plan session with only an unread reply is informational; with a pending question or approval it remains actionable even after the reply is read. Deploy notes may be read or dismissed without authorizing work. System events such as usage limits and runner disconnects remain on Runs and runner status unless recovery requires a human decision.
 
-**Default feature loop:** the human agrees requirements and approves a plan for a cohesive feature in an `epic`-review task. Agents implement, review, revise and integrate ordinary internal task steps automatically, then present the completed feature for one task approval or request for changes. Requested changes run through internal fix tasks and integration review before the feature returns for a human decision. Internal review and handoff are informational, not extra approval checkpoints.
+**Default feature loop:** the human agrees requirements and approves a plan for a cohesive feature in an `epic`-review task. Agents implement, review, revise and integrate ordinary internal task steps automatically, then present the completed feature for one task approval or request for changes. The human's requested changes become a fix subtask, and the result goes through integration review before the feature returns for a human decision (D29). Internal review and handoff are informational, not extra approval checkpoints.
 
 This policy does not approve work or convert existing tasks with subtasks' review modes. D20, D27 and D28 still govern routing: `each_task`, `direct`, existing task PRs and explicit standalone/design/spike approvals keep their required reviews. PR-free subtasks retain sensitive flags and human checks as obligations confirmed at final task approval; agents neither judge nor auto-confirm them. Existing Human review tasks stay there. Approval invalidation, CI and merge gates remain unchanged.
 
@@ -310,7 +311,7 @@ PM questions and plan approvals remain in the same Plan session, actionable from
 | Plan (PM sessions), Inbox, agents, the runner, user settings | Overview, Board, Backlog, project settings (name, thumbnail, repo, default branch, merge method, required checks, task ID prefix, pause, limits) |
 
 - **Agents are global.** Juno (PM), Atlas (developer) and Vera (reviewer) are set up once, in Settings, and serve every project. Concurrency applies only to developer and reviewer agents, across all projects, not per project. Juno has none (amended 2026-10-29): PM turns are limited only to one per Plan session (D9), and `PATCH /api/agents/:id` refuses `concurrency` for the PM with 400 `concurrency_not_applicable`. The `agents.concurrency` column is kept and ignored for `role = 'pm'`. Role instructions stay in each repo (`.corral/agents/<role>.md` on the default branch), so the same agent can follow different project rules. More developers and reviewers can be added (`POST /api/agents`), each with one runtime whose CLI the runner has; there is only ever one PM. An agent's runtime can only change while it has no queued or running run.
-- **Plan sessions belong to one project.** The project is picked in the composer and locked once the session has messages. Juno works in a read-only checkout of that project, one per session (D9).
+- **A project's Plan sessions belong to that project** (D30 adds global sessions, which have none). The project is picked in the composer and locked once the session has messages. Juno works in a read-only checkout of that project, one per session (D9).
 - **The Inbox is global**, and every item carries its project (D11). The same goes for runs on the agent pages.
 - **Task IDs are `PREFIX-NUMBER`**, e.g. `COR-29`. Each project has a 2–5 letter prefix that is unique across projects, and numbers count up per project. PRs keep `#41` and runs keep `#128`.
 - **Pause is per project.** Pausing stops new runs for that project only.
@@ -422,7 +423,7 @@ The UI specs are in [design/](design/README.md).
 **Consequences for the build:**
 - New worker runs and merges must respect both hold phases. PM dispatch must respect the finishing phase while accepting messages in Plan and Inbox throughout. Count dispatched PM turns in `busy`, but exclude held jobs so the deploy can finish. The existing auto-deploy polling loop needs no change.
 - The hold endpoint sits on the same API as the rest of the app, behind Cloudflare Access. It needs proper auth when hosting arrives (D1).
-- **Recording the deploy (COR-127):** once `docker compose up -d` succeeds and `.corral/deploy/deployed` is written, the script waits for the new server to answer (bounded retries) and posts `POST /api/deployments` with the repository, the previous and new commit and the commits between them (`git log deployed..new`, or just the new commit on a first deploy). The project is found by its repository, and posting the same new commit again returns the existing record. Failing to report is logged as a warning and never fails or rolls back the deploy. A deploy that stops earlier (build or backup failed) records nothing. The PM's release notes for it are an Activity item in the Inbox (D11), not part of Needs you.
+- **Recording the deploy (COR-127):** once `docker compose up -d` succeeds and `.corral/deploy/deployed` is written, the script waits for the new server to answer (bounded retries) and posts `POST /api/deployments` with the repository, the previous and new commit and the commits between them (`git log deployed..new`, or just the new commit on a first deploy). The project is found by its repository, and posting the same new commit again returns the existing record. Failing to report is logged as a warning and never fails or rolls back the deploy. A deploy that stops earlier (build or backup failed) records nothing. The PM's release notes for it are informational, not part of Needs you; the web app doesn't list informational items for now (D33).
 
 ---
 
@@ -943,7 +944,7 @@ Each tool does one thing, with a typed input. The server validates it and applie
 
 ### Attribution
 
-Every agent action is attributed to the agent and session that made it, and shown in Activity and the audit log. An action the human confirmed records both: the human who confirmed it, and the agent and session that proposed it.
+Every agent action is attributed to the agent and session that made it, and recorded in the task's activity and the audit log. An action the human confirmed records both: the human who confirmed it, and the agent and session that proposed it.
 
 ### Confirm-required tools
 
@@ -982,7 +983,7 @@ Sessions can be **global** as well as tied to a project. A global session has **
 - **D10 (COR-240, reconciled with main):** Merged work stays immutable through both PM and human edits (`409 task_merged`). Task membership is fixed for PM edits once a task has a PR (`409 task_epic_locked`), preserving D27’s review-mode lock. The task UI stays read-only after merge; follow-up work remains a new task.
 - **D10 (COR-298):** a task can't enter or leave the `spike` or `design` type once it has left Draft or Backlog; `PATCH` and `update_task` return `409 task_type_locked`. Those types have their own end states, so a retyped task could otherwise skip them. Changing between `task` and `bug` stays open until the task is approved or awaiting merge, when its type is fixed (also `409 task_type_locked`).
 - **D10 (COR-246):** the one exception is the PM's `answer` transition, Blocked → In progress, for answering a developer's own `stuck` question. It's refused on a block from a cap, repeated feedback or a human decision (D24), and on a Stopped item, so it can't lift a cap. It keeps the review-round and failed-run counters, and clears the triage stop the question raised. `resolve` stays **Human only**.
-- **D11:** "the PM stays in Plan" no longer holds. The PM can read and act on the Inbox, with decisions on a confirm card, and its actions appear in Activity. **Unchanged:** it raises no Needs-you items of its own.
+- **D11:** "the PM stays in Plan" no longer holds. The PM can read and act on the Inbox, with decisions on a confirm card, and its actions are recorded as informational items (not shown in the web app's Inbox, D33). **Unchanged:** it raises no Needs-you items of its own.
 - **D13:** "Plan sessions belong to one project" and "every PM session has a `projectId`" no longer hold, because global sessions have none. A project session's project is still locked once it has messages.
 - **D16 (COR-241, COR-323):** set_update_hold now requires human confirmation because it can queue every PM turn. The updating banner offers Lift through DELETE /api/update-hold, including after finishing has latched. clear_update_hold remains direct but cannot execute from a queued turn.
 - **D20:** design approval stays **Human only**. The PM can propose it on a confirm card, and the rest of D20's approval flow follows from the human's click as usual.

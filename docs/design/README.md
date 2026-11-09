@@ -6,6 +6,8 @@ The mobile PWA design is on its own canvas: <https://claude.ai/artifact/VwiPAt4w
 
 These specs describe the UI only. Behaviour rules come from [decisions.md](../decisions.md) and [flows.md](../flows.md); where a spec and a decision disagree, the decision wins.
 
+Component names starting with `U` (`UInput`, `USwitch`, `UTabs`, `UPopover` and so on) come from Nuxt UI, which the specs were first written against. D32 replaced it with shadcn-nuxt: read each one as the matching stock component in `components/ui`, or the `App*` composite built on it in `components/app`. They describe the control, not the library.
+
 ## Pages
 
 | Page | Spec | Route | Scope |

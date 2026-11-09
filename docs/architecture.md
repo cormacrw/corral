@@ -9,7 +9,7 @@ Three processes. In development they're all started together by `turbo dev`; whe
 ```
 ┌─────────────┐  HTTP + SSE   ┌──────────────────────┐  WebSocket (runner dials out)  ┌──────────────────────┐
 │  apps/web   │ ────────────▶ │     apps/server      │ ◀────────────────────────────── │     apps/runner      │
-│ Nuxt + UI   │               │    control plane     │                                 │    local daemon      │
+│ Nuxt (UI)   │               │    control plane     │                                 │    local daemon      │
 └─────────────┘               │ API · scheduler ·    │                                 │ worktrees · git ·    │
                               │ locks · orchestrator │                                 │ spawns agent CLIs ·  │
                               │ · GitHub · DB        │                                 │ agent tool proxy     │
@@ -26,7 +26,7 @@ Three processes. In development they're all started together by `turbo dev`; whe
 - Task leases include the holding run’s `agentId`; working indicators, run links and agent filters use that identity. Unleased tasks use the latest run’s agent for the column’s role, or no agent until one claims the task.
 - Plan renders sessions through `PlanConversation`. The Inbox reuses its question card, composer, approval actions and plan flyout (via its `inbox` prop) for Plan threads (D11). Inbox actions hold the list and selection until the mutation completes, then advance to the item at the same position in the refetched list.
 - The one exception is `pnpm --filter web prototype` (D20): a static build of the same app on fixtures from `app/prototype/`, with no server, API or SSE. How to use it is in `.corral/agents/designer.md`.
-- Types come from the Hono typed client (`hc`) and `packages/contracts`.
+- Types come from `packages/contracts`: the web app's one `api` object (`apps/web/app/queries/api.ts`) types its inputs and outputs from the contracts. It doesn't use Hono's `hc` client, which would make the Nuxt typecheck compile the server's source.
 - Theme: `app/assets/css/theme.css` (tokens) and `dark-neutrals.css` (the dark palette picker). Layers, from the bottom: `components/ui` (stock shadcn-vue, never edited), `components/app` (the `App*` composites everything else uses), `components/shared`, and `features/<name>` (components, composables, utils). Pages only handle the route. See `.corral/wiki/frontend-structure.md`.
 
 ### `apps/server`: control plane
@@ -37,7 +37,7 @@ Three processes. In development they're all started together by `turbo dev`; whe
 - **Exactly one instance.** The scheduler and orchestrator are long-running loops inside this process. That's the reason it isn't folded into Nuxt's Nitro server: the web layer should be free to scale or redeploy on its own.
 - Serves the HTTP API (for web), SSE (to web), and the internal `/runner` WebSocket endpoint. An optional separate runner-only listener serves `/runner` and the authenticated, read-only `/runner/version` release metadata route, and returns 404 for other paths, including `/api/**` (D25). Both endpoints authenticate before registering a runner when a shared token is configured.
 - Project thumbnails: `PUT /api/projects/:slug/thumbnail` accepts one multipart `file`, PNG/JPEG/WebP/GIF with matching signature, at most 2 MiB. The existing `thumbnailBlob` stores its content hash; no image metadata migration is needed. `GET` infers the raster content type from the same signatures, sends `nosniff` and `private, no-cache`, and rejects stale `v` hashes. Project and inbox summaries expose nullable `thumbnailUrl` with a short hash query. `DELETE` clears the pointer while preserving the colour; upload and removal audit and broadcast `project.updated`. Blobs remain immutable and may be shared, so removal does not delete their bytes.
-- Inbox Needs you is one list, newest first by `at`: when a task entered its current status (its latest `task.transition` into it, else `updatedAt`), or when a Plan thread started waiting. Plan threads include only open sessions with a pending question, a proposed plan or a last turn that failed. Each carries a nullable question (text, recommendation, options), plan summary (id, version, title, summary, epicCount, taskCount) and failure (the turn's error), rather than a last-message body. The Needs you count is the list's length; unread replies stay in Plan and undismissed release notes in Activity.
+- Inbox Needs you is one list, newest first by `at`: when a task entered its current status (its latest `task.transition` into it, else `updatedAt`), or when a Plan thread started waiting. Plan threads include only open sessions with a pending question, a proposed plan or a last turn that failed. Each carries a nullable question (text, recommendation, options), plan summary (id, version, title, summary, epicCount, taskCount) and failure (the turn's error), rather than a last-message body. The Needs you count is the list's length; unread replies stay in Plan, and informational items such as release notes aren't listed (D33).
 
 ### Runner connections and ownership
 
@@ -133,11 +133,11 @@ packages/
 |---|---|---|
 | Monorepo | Turborepo + pnpm workspaces | |
 | Frontend | Nuxt + shadcn-nuxt (shadcn-vue on Reka UI) | D32 |
-| Server framework | Hono on Node | WebSocket + SSE helpers; typed client for Nuxt |
+| Server framework | Hono on Node | WebSocket + SSE helpers |
 | Database | Drizzle (Postgres dialect). Postgres in Docker when deployed; PGlite (embedded Postgres) in development and tests (D14) | One schema, two drivers, picked by `CORRAL_DATABASE_URL`. Supports atomic `UPDATE … WHERE status = 'ready' RETURNING` claims. PGlite is single-connection, so concurrency is only proven against Postgres in CI. Only the server opens the database, whichever driver. |
 | Runner | Node/TypeScript | Resolves PRD §8.2 "Rust or Node". Shares `contracts`. |
 | Evidence / blobs | Local filesystem behind a `BlobStore` interface → S3-compatible later | |
-| GitHub | Server uses the GitHub API (open PR, CI status, merge); runner does `git push` | Merge gates stay server-side. POC auth: the user's `gh` token. Later: GitHub App, plus per-run scoped tokens (R10). |
+| GitHub | Server decides every GitHub action (open PR, CI status, merge) and sends each API call to a runner as a `github` setup job running `gh api`; runner does `git push` | Merge gates stay server-side. The GitHub login stays in the runner container (D8). Later: GitHub App, plus per-run scoped tokens (R10). |
 
 ## Storage (D8)
 
@@ -145,7 +145,7 @@ Each kind of data has exactly one source of truth.
 
 | Store | What lives there | web | server | runner | agent (`claude` / `codex`) |
 |---|---|---|---|---|---|
-| **Database** (Postgres deployed, PGlite in dev; D14) | Projects, tasks with subtasks, tasks, criteria, dependencies, status, leases (with fencing epoch), runs, comments, reviews, evidence *records*, PM conversation, plans, settings, audit log | — | **R/W** (sole opener) | — | — |
+| **Database** (Postgres deployed, PGlite in dev; D14) | Projects, tasks and their subtasks, delivery records, criteria, dependencies, status, leases (with fencing epoch), runs, comments, reviews, evidence *records*, PM conversation, plans, settings, audit log | — | **R/W** (sole opener) | — | — |
 | **Blob store** (local folder → S3) | Screenshots, videos, test/CI logs, run transcripts. Immutable, content-addressed (sha256). | — | **R/W** (stores uploads, serves files) | — | — |
 | **Target repo: default branch** (GitHub) | Merged code, `CORRAL.md`, wiki, agent role instructions. Canonical docs = default branch. | — | — | **R** (`git fetch`) | **R**, PM only, through a read-only checkout (D9) |
 | **Target repo: task branches** (GitHub) | Work in progress per task | — | **R** (diffs for PR/gate checks) | **R/W** (`git push`, only to the branch it holds a lease for) | — |

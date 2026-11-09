@@ -22,4 +22,4 @@ Unread replies used to carry failed PM turns too: a failed turn is a `pm`/`error
 
 A question is read from the last human or question message, not the last message: `ask_question` tells the PM to finish its turn, and closing words are saved after it as a plain message. Only a human message clears it. A failure is read from the last message alone: when the server takes a PM run as lost and the runner then replays `run.ended`, the real reply lands after the error, and the turn didn't fail. An unanswered question under that reply comes back. The unread-reply row used to hide that gap.
 
-Undismissed release notes are in `activity`, so anything acting on the Activity tab must allow `ReleaseNotesItem`.
+Undismissed release notes are in `activity`, so anything reading `activity` must allow `ReleaseNotesItem`. The web app has no Activity tab (D33).
