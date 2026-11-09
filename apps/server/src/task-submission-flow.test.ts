@@ -1,4 +1,4 @@
-import { TASK_INTEGRATION_PROTOCOL, type RunJob } from '@corral/contracts'
+import type { RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest'
@@ -10,7 +10,8 @@ let runner: FakeRunner
 beforeAll(async () => {
   t = await createTestApp('pglite', { listen: true })
   await t.db.update(schema.agents).set({ concurrency: 50, wakeIntervalSeconds: null })
-  runner = await FakeRunner.connect(t.server!.url, [], 'r1', { taskIntegrationProtocols: [TASK_INTEGRATION_PROTOCOL] })
+  // Tests leave runs holding slots, so there are enough for all of them
+  runner = await FakeRunner.connect(t.server!.url, [], 'r1', { slots: 50 })
 })
 afterAll(async () => {
   runner?.close()
@@ -219,25 +220,12 @@ it.each(['spike', 'design'] as const)('leaves a %s with its own deliverable', as
   expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'commit_submitted', note: 'Wrong', summary: 'Wrong', headSha: 'h', baseSha: 'b' })).toMatchObject({ ok: false, error: expect.stringContaining(type === 'design' ? 'design_submitted' : 'findings_reported') })
 })
 
-it('keeps an subtask on a legacy runner, or with a PR already on its branch, on the PR path', async () => {
-  const legacy = await FakeRunner.connect(t.server!.url, [], 'legacy', {})
-  try {
-    const fresh = await epicTask()
-    await t.db.update(schema.agents).set({ wakeIntervalSeconds: null })
-    runner.close()
-    const job = await assigned(fresh.task, 'developer', legacy)
-    expect(job.integrationProtocol).toBe(0)
-    expect(job.prompt).toContain('"pr_opened"')
-    runner = await FakeRunner.connect(t.server!.url, [], 'r1', { taskIntegrationProtocols: [TASK_INTEGRATION_PROTOCOL] })
-    const { project, task } = await epicTask()
-    await t.db.update(schema.tasks).set({ branch: 'corral/recovered' }).where(eq(schema.tasks.id, task.id))
-    t.github.setBranch(project.repository, 'corral/recovered', 'head-0')
-    await t.github.openPullRequest(project.repository, { head: 'corral/recovered', base: 'main', title: 'Recovered', body: '' })
-    await t.orchestrator.scheduler.schedule()
-    const message = await Promise.race([runner.next('run.assign', m => 'taskId' in m.job && m.job.taskId === task.id), legacy.next('run.assign', m => 'taskId' in m.job && m.job.taskId === task.id)])
-    expect(message.job).toMatchObject({ integrationProtocol: 0 })
-    expect(message.job.prompt).toContain('"pr_opened"')
-  } finally {
-    legacy.close()
-  }
+it('keeps a subtask with a PR already on its branch on the PR path', async () => {
+  const { project, task } = await epicTask()
+  await t.db.update(schema.tasks).set({ branch: 'corral/recovered' }).where(eq(schema.tasks.id, task.id))
+  t.github.setBranch(project.repository, 'corral/recovered', 'head-0')
+  await t.github.openPullRequest(project.repository, { head: 'corral/recovered', base: 'main', title: 'Recovered', body: '' })
+  const job = await assigned(task, 'developer')
+  expect(job.integrationProtocol).toBe(0)
+  expect(job.prompt).toContain('"pr_opened"')
 })

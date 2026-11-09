@@ -283,14 +283,14 @@ The plan is approved and the scheduler claims #41 (section 2, step 2). E7 has no
 
 ### Step 2 — Approved subtasks integrate into the task's branch
 
-For eligible new task/bug submissions in `epic` mode, the PR-free path uses this sequence (COR-286 defines its persistence and negotiation, COR-287 implements steps 1 and 2, COR-288 steps 3 and 4):
+For eligible new task/bug submissions in `epic` mode, the PR-free path uses this sequence (COR-286 defines its persistence, COR-287 implements steps 1 and 2, COR-288 steps 3 and 4):
 
 1. The developer reports `commit_submitted`. The runner pushes the task branch and Corral records a new immutable submission with its head, base and target task branch. Do not open a task PR. Reviewers check out that exact head; a verdict from a different head, or while the branch has moved, is rejected.
 2. Record agent approval for that exact submitted head. That leads straight to Ready to merge and integration, with no task-level Human review: D5 flags and D28 human checks are kept as human obligations, which the human confirms at the final task approval (step 5). Changes requested create a new submission on revision; old heads and verdicts remain history.
 3. In Ready to merge, journal an integration operation with the expected task head and fenced runner. Rebase against a moved task branch under D24, with review of changed resolutions; never silently transfer approval to arbitrary new work. Integrate one commit per task, one subtask at a time per task, using a compare-and-swap push. The commit carries a `Corral-Submission` trailer, so the remote itself says whether a submission landed. Reconcile ambiguous pushes by reading the remote before retrying. Required checks are read on the exact candidate first, pushed to `corral/candidates/<operation>`: a failure returns the task to its developer, and a check that never appears on such a commit (a PR-only workflow) is left to the task PR's merge gate, so no task PR is needed.
 4. Record the confirmed integrated commit and timestamp and only then mark Merged. #42 may now start after #41 integrates, because they share E7. A dependent outside E7 waits for the task PR merge. A submission, approval or operation in progress does not satisfy dependencies.
 
-Only runners explicitly advertising the task's integration protocol can claim it. Missing support leaves it unleased; the runner receives an update reason and can still take legacy tasks. Existing task PRs keep their branch, PR link, evidence and approval history and finish through the following legacy flow. `each_task` also keeps that flow. `direct` tasks with subtasks are not converted.
+Existing task PRs keep their branch, PR link, evidence and approval history and finish through the following legacy flow. `each_task` also keeps that flow. `direct` tasks with subtasks are not converted.
 
 ### Legacy step 2 — Task PRs merge into the task's branch
 

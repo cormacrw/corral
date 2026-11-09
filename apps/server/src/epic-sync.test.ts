@@ -1,4 +1,3 @@
-import { TASK_INTEGRATION_PROTOCOL } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { and, eq, inArray, isNotNull } from 'drizzle-orm'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -15,7 +14,7 @@ import { EpicSynchronizer } from './epic-sync.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './fake-runner.ts'
 import { recordTaskSubmission } from './task-submissions.ts'
-import { asResolutionTasks } from './test-resolution-task.ts'
+import { passBeforeD29 } from './test-resolution-task.ts'
 
 // Real git processes, so these need more time than the default on a busy machine
 vi.setConfig({ testTimeout: 30_000 })
@@ -70,7 +69,7 @@ beforeAll(async () => {
     const files = await Promise.all(names.map(async ([status, filename]) => ({ filename, status: status === 'A' ? 'added' : status === 'D' ? 'removed' : 'modified', additions: 1, deletions: 0, sha: '', patch: await git('diff', mergeBase, head, '--', filename) })))
     return { mergeBase, files }
   }
-  runner = await FakeRunner.connect(t.server!.url, [], 'r1', { taskIntegrationProtocols: [TASK_INTEGRATION_PROTOCOL], taskIntegrationExecutor: true, epicRebaseExecutor: true })
+  runner = await FakeRunner.connect(t.server!.url)
   const fallback = runner.onJob
   runner.onJob = async (job) => {
     const real = async () => {
@@ -179,10 +178,7 @@ async function approved(epic: { id: string, branch: string }, file: string) {
 }
 
 // This file proves a resolution task from before D29 still finishes
-const tick = async () => {
-  await t.orchestrator.mergePass()
-  await asResolutionTasks(t.db, t.github)
-}
+const tick = () => passBeforeD29(t.db, t.github, () => t.orchestrator.mergePass())
 const ops = (epicId: string) => t.db.select().from(schema.taskIntegrationOperations).where(eq(schema.taskIntegrationOperations.epicId, epicId)).orderBy(schema.taskIntegrationOperations.leaseEpoch)
 const reload = async (id: string) => (await t.db.select().from(schema.epics).where(eq(schema.epics.id, id)))[0]!
 const epicApi = async (id: string) => (await t.request('GET', `/api/epics/${id}`)).json() as Promise<{ sync: unknown, reviewState: string | null }>
@@ -1091,7 +1087,7 @@ describe('developer runs on the epic', () => {
   beforeAll(async () => {
     const jobs = runner.onJob
     runner.close()
-    runner = await FakeRunner.connect(t.server!.url, [], 'r1', { taskIntegrationProtocols: [TASK_INTEGRATION_PROTOCOL], taskIntegrationExecutor: true, epicRebaseExecutor: true, epicFixExecutor: true })
+    runner = await FakeRunner.connect(t.server!.url)
     runner.onJob = jobs
   })
 

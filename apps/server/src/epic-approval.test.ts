@@ -1,6 +1,6 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { TASK_INTEGRATION_PROTOCOL, type EpicReviewItem, type Inbox, type RunJob } from '@corral/contracts'
+import type { EpicReviewItem, Inbox, RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, expect, it, vi } from 'vitest'
@@ -16,7 +16,7 @@ let runner: FakeRunner
 beforeAll(async () => {
   t = await createTestApp('pglite', { listen: true })
   await t.db.update(schema.agents).set({ concurrency: 50, wakeIntervalSeconds: null })
-  runner = await FakeRunner.connect(t.server!.url, [], 'r1', { taskIntegrationProtocols: [TASK_INTEGRATION_PROTOCOL] })
+  runner = await FakeRunner.connect(t.server!.url)
 })
 afterAll(async () => {
   runner?.close()

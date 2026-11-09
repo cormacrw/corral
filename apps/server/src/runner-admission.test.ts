@@ -78,22 +78,3 @@ it('keeps capacity provenance in runner status, tolerating older and malformed h
     { id: 'invalid', slots: 1, slotSource: undefined }
   ])
 })
-
-it('negotiates integration separately from envelope version and fences dispatch by exact support', async () => {
-  const hub = new RunnerHub(new EventBus())
-  for (const [id, taskIntegrationProtocols] of [['legacy', undefined], ['capable', [1]], ['future', [2]]] as const) {
-    const sent: ServerMessage[] = []
-    const peer = hub.connect({ send: raw => sent.push(JSON.parse(raw)), close: () => {} })
-    await peer.onMessage(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, toolContract: AGENT_TOOL_CONTRACT, runnerId: id, name: id, activeRuns: [], taskIntegrationProtocols }))
-    const detection = sent.find(m => m.type === 'job.request') as Extract<ServerMessage, { type: 'job.request' }>
-    await peer.onMessage(JSON.stringify({ type: 'job.result', jobId: detection.jobId, ok: true, result: { kind: 'detect_clis', clis: [] } }))
-    const job = {
-      runId: 'run', runNumber: 1, leaseEpoch: 1, runtime: 'codex', projectId: 'project', repository: 'cormacrw/test-app', defaultBranch: 'main',
-      agentSessionId: null, prompt: 'work', fallbackPrompt: null, model: null, timeoutSeconds: 60,
-      role: 'developer' as const, taskId: 'task', taskRef: 'TA-1', branch: 'corral/task', headSha: 'head', planSessionId: null, integrationProtocol: 1
-    }
-    expect(hub.send({ type: 'run.assign', job }, id)).toBe(id === 'capable')
-    expect(hub.send({ type: 'run.assign', job: { ...job, integrationProtocol: 0 } }, id)).toBe(true)
-    expect(hub.status().runners.find(r => r.id === id)?.integrationCompatibilityReason).toEqual(id === 'capable' ? null : expect.any(String))
-  }
-})

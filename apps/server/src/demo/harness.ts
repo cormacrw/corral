@@ -91,9 +91,29 @@ export class Seeder {
       // The fallback title is the first message, which reads fine
       case 'session_title': throw new Error('No title while seeding')
       case 'pr_guide': return { kind: 'pr_guide' as const, text: this.prGuide(job.prompt) }
+      case 'integration_prepare': {
+        // A subtask's approved commit applied to its task's branch: the
+        // candidate passes CI, as a runner's git and the real CI would show
+        const sha = demoSha(`integrated-${job.submissionId}`)
+        if (job.candidateRef) this.github.setBranch(job.repository, job.candidateRef, sha)
+        this.github.setChecks(sha, [{ name: 'ci', conclusion: 'success', url: null }])
+        this.#candidates.set(sha, job.submissionId)
+        return { kind: 'integration_prepare' as const, status: 'prepared' as const, targetSha: job.expectedTargetSha, commitSha: sha, files: [] }
+      }
+      case 'integration_push':
+        this.github.setBranch(job.repository, job.targetBranch, job.candidateSha)
+        this.#integrated.set(this.#candidates.get(job.candidateSha)!, job.candidateSha)
+        return { kind: 'integration_push' as const, pushed: true, error: null }
+      case 'integration_inspect':
+        return this.github.branchHead(job.repository, job.targetBranch)
+          .then(targetSha => ({ kind: 'integration_inspect' as const, targetSha, integratedSha: this.#integrated.get(job.submissionId) ?? null }))
       default: return answerSetupJob(job)
     }
   }
+
+  // Candidate commit → its submission, and submission → the commit that landed it
+  #candidates = new Map<string, string>()
+  #integrated = new Map<string, string>()
 
   async close(): Promise<void> {
     this.runner.close()

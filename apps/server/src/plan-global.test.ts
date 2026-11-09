@@ -82,7 +82,7 @@ describe('global and project Plan sessions', () => {
     expect(await call(job, 'update_task', { project: b.slug, taskRef: task.ref, title: 'Updated globally' })).toMatchObject({ ok: true, result: { title: 'Updated globally', projectId: b.id } })
     const [epic] = await t.db.insert(schema.epics).values({ projectId: b.id, title: 'Epic to edit', createdBy: t.actor }).returning()
     if (!epic) throw new Error('Epic fixture was not created')
-    expect(await call(job, 'update_epic', { project: b.slug, epicId: epic.id, title: 'Edited globally' })).toMatchObject({ ok: true, result: { title: 'Edited globally', projectId: b.id } })
+    expect(await call(job, 'update_parent', { project: b.slug, parentId: epic.id, title: 'Edited globally' })).toMatchObject({ ok: true, result: { title: 'Edited globally', projectId: b.id } })
     const move = await call(job, 'move_task', { project: b.slug, taskRef: task.ref, transition: { type: 'approve' } })
     expect(move).toMatchObject({ ok: true, result: { confirmationPending: true } })
     await finish(job, 'Confirm the board move.')
@@ -98,7 +98,7 @@ describe('global and project Plan sessions', () => {
     expect(otherTask).toMatchObject({ ok: true, result: { projectId: b.id } })
     expect(await call(projectJob, 'update_task', { taskRef: (defaultTask as { result: Task }).result.ref, title: 'Default edit' })).toMatchObject({ ok: true, result: { projectId: a.id, title: 'Default edit' } })
     expect(await call(projectJob, 'update_task', { project: b.slug, taskRef: (otherTask as { result: Task }).result.ref, title: 'Other edit' })).toMatchObject({ ok: true, result: { projectId: b.id, title: 'Other edit' } })
-    expect(await call(projectJob, 'update_epic', { project: b.slug, epicId: epic.id, title: 'Edited from another project' })).toMatchObject({ ok: true, result: { projectId: b.id } })
+    expect(await call(projectJob, 'update_parent', { project: b.slug, parentId: epic.id, title: 'Edited from another project' })).toMatchObject({ ok: true, result: { projectId: b.id } })
     await finish(projectJob, 'Both projects edited.')
   })
 
@@ -146,7 +146,7 @@ describe('global and project Plan sessions', () => {
     const job = (await runner.next('run.assign', m => m.job.planSessionId === global.id)).job
     expect(job).toMatchObject({ projectId: null, repository: '', defaultBranch: '' })
     expect(await call(job, 'list_tasks', { project: a.slug })).toMatchObject({ ok: true, result: { project: { prefix: 'TA' }, tasks: [{ ref: taskA.ref }] } })
-    for (const tool of ['list_tasks', 'get_task', 'propose_plan', 'flag_stale_docs', 'get_design', 'get_attachment', 'delete_task', 'create_task', 'update_task', 'move_task', 'approve_task', 'update_epic'] as const) {
+    for (const tool of ['list_tasks', 'get_task', 'propose_plan', 'flag_stale_docs', 'get_design', 'get_attachment', 'delete_task', 'create_task', 'update_task', 'move_task', 'approve_task', 'update_parent'] as const) {
       expect(await call(job, tool, {})).toMatchObject({ ok: false, error: expect.stringContaining('project') })
     }
     expect(await call(job, 'list_tasks', { project: 'missing' })).toMatchObject({ ok: false, error: expect.stringContaining('missing') })

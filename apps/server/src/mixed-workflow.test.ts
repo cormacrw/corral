@@ -1,4 +1,4 @@
-import { TASK_INTEGRATION_PROTOCOL, type EpicHistoryEntry, type EpicReviewItem, type Inbox, type RunJob } from '@corral/contracts'
+import type { EpicHistoryEntry, EpicReviewItem, Inbox, RunJob } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { and, asc, eq, sql } from 'drizzle-orm'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -9,7 +9,7 @@ import { exec } from '../../runner/src/exec.ts'
 import { inspectIntegration, prepareIntegration, pushIntegration } from '../../runner/src/integration.ts'
 import { createTestDataDir, TEST_REPOSITORY } from '../../runner/src/test-repo.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
-import { asResolutionTasks } from './test-resolution-task.ts'
+import { passBeforeD29 } from './test-resolution-task.ts'
 import { FakeRunner } from './fake-runner.ts'
 
 // The whole mixed workflow (D27): a real server, the real runner git code and a
@@ -23,8 +23,6 @@ vi.setConfig({ testTimeout: 60_000 })
 type Job = Parameters<FakeRunner['onJob']>[0]
 type Task = Awaited<ReturnType<TestApp['createTask']>>
 type Project = Awaited<ReturnType<TestApp['createProject']>>
-
-const MODERN = { taskIntegrationProtocols: [TASK_INTEGRATION_PROTOCOL], taskIntegrationExecutor: true, epicRebaseExecutor: true }
 
 let t: TestApp
 let runner: FakeRunner
@@ -110,8 +108,8 @@ function connectGitHub(): void {
   }
 }
 
-async function connectRunner(id = 'r1', capacity: Parameters<typeof FakeRunner.connect>[3] = MODERN): Promise<FakeRunner> {
-  const next = await FakeRunner.connect(t.server!.url, [], id, capacity)
+async function connectRunner(id = 'r1'): Promise<FakeRunner> {
+  const next = await FakeRunner.connect(t.server!.url, [], id)
   const fallback = next.onJob
   next.onJob = async (job) => {
     const real = async () => {
@@ -197,7 +195,7 @@ async function assigned(task: { id: string }, role: RunJob['role']) {
 // A developer run: real commit on the branch the job names, cut from the job's base
 async function develop(task: Task, file: string, text: string, outcome: 'commit_submitted' | 'pr_opened' = 'commit_submitted') {
   const job = await assigned(task, 'developer')
-  await git('branch', job.branch!, job.baseBranch!)
+  if (!await branchExists(job.branch!)) await git('branch', job.branch!, job.baseBranch!)
   const head = await commitOn(job.branch!, file, text)
   for (const c of task.acceptanceCriteria.filter(c => !c.checkedByHuman)) {
     expect(await runner.call(job.runId, job.leaseEpoch, 'attach_evidence', { criterionId: c.id, kind: 'note', note: `${file} works` })).toMatchObject({ ok: true })
@@ -339,18 +337,24 @@ it('lands a feature of several PR-free tasks through one task\'s PR and one huma
 })
 
 it('completes a task with subtasks mixing a grandfathered task PR with a PR-free task, keeping both contributions and their evidence', async () => {
-  // Before the upgrade: a runner that only knows task PRs opens one on the epic
-  runner = await connectRunner('r1', {})
+  // From before PR-free delivery: the subtask's branch already has a task PR
+  // into the task's branch, so its developer stays on the PR path
+  runner = await connectRunner()
   const epic = await createEpic()
-  const legacy = await createReadyTask(epic.id, { acceptanceCriteria: ['The API answers'] })
+  const epicBranch = `corral/epic-${epic.id}`
+  await git('branch', epicBranch, 'main')
+  await t.db.update(schema.epics).set({ branch: epicBranch }).where(eq(schema.epics.id, epic.id))
+  const legacy = await t.createTask(project.slug, { epicId: epic.id, humanReview: false, acceptanceCriteria: ['The API answers'] })
+  await git('branch', 'corral/legacy-task', epicBranch)
+  await t.db.update(schema.tasks).set({ branch: 'corral/legacy-task' }).where(eq(schema.tasks.id, legacy.id))
+  await t.github.openPullRequest(TEST_REPOSITORY, { head: 'corral/legacy-task', base: epicBranch, title: 'Legacy task PR', body: '' })
+  expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${legacy.number}/transitions`, { type: 'approve' })).status).toBe(200)
   const { head: legacyHead } = await develop(legacy, 'legacy.txt', 'legacy\n', 'pr_opened')
   const opened = await taskRow(legacy.id)
   expect(opened).toMatchObject({ integrationProtocol: 0, status: 'agent_review', prNumber: expect.any(Number) })
   const { prNumber, prUrl, branch: legacyBranch } = opened
 
-  // The runner is upgraded with that PR still open. Nothing converts it.
-  runner.close()
-  runner = await connectRunner()
+  // Nothing converts it
   await review(legacy, legacyHead, { outcome: 'changes_requested' })
   const revision = await assigned(legacy, 'developer')
   const legacyRevision = await commitOn(legacyBranch!, 'legacy.txt', 'legacy, revised\n')
@@ -395,42 +399,13 @@ it('completes a task with subtasks mixing a grandfathered task PR with a PR-free
   expect(await git('show', 'main:fresh.txt')).toBe('fresh')
   expect(await git('show', 'main:elsewhere.txt')).toBe('other team')
   await capture('mixed-epic.json', {
-    scenario: 'A task PR opened by a legacy runner stays open through a runner upgrade, a revision and a task rebase; a new task in the same task goes PR-free.',
+    scenario: 'A subtask PR from before PR-free delivery stays open through a revision and a task rebase; a new subtask in the same task goes PR-free.',
     legacyTask: { protocol: 0, status: finished.status, pr: { number: prNumber, url: prUrl, state: t.github.pulls.get(prNumber!)!.state, merged: t.github.pulls.get(prNumber!)!.merged }, closedByRollout: 0, submissions: 0, evidence: one!.evidence.map(e => e.note) },
     prFreeTask: { protocol: 1, status: 'merged', pr: null, submission: two!.task.submission, evidence: two!.evidence.map(e => e.note) },
     commitsOnTargetAfterMerge: await log(`${landed}~1..main`),
     filesOnTarget: (await git('ls-tree', '--name-only', 'main')).split('\n'),
     epicHistory: (await history(epic.id)).map(e => `${e.actor}: ${e.text}`)
   })
-})
-
-it('keeps PR-free tasks off a legacy runner, tells it why, and carries on once an executor connects', async () => {
-  runner = await connectRunner()
-  const epic = await createEpic()
-  const task = await deliver(epic.id, 'waiting.txt')
-
-  // Only an old build is left: approved work waits, and nothing counts as failed
-  runner.close()
-  await vi.waitFor(() => expect(t.runner.online).toBe(false), { timeout: 5000 })
-  runner = await connectRunner('old', {})
-  const pending = await t.createTask(project.slug, { epicId: epic.id, humanReview: false })
-  await t.db.update(schema.tasks).set({ integrationProtocol: 1 }).where(eq(schema.tasks.id, pending.id))
-  expect((await t.request('POST', `/api/projects/${project.slug}/tasks/${pending.number}/transitions`, { type: 'approve' })).status).toBe(200)
-  await t.orchestrator.scheduler.schedule()
-  await passes(2)
-  expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge' })
-  expect(await taskRow(pending.id)).toMatchObject({ status: 'ready', leaseRunId: null })
-  expect(await ops(epic.id)).toEqual([])
-  const status = await (await t.request('GET', '/api/runner')).json() as { runners: { id: string, online: boolean, integrationCompatibilityReason: string | null }[] }
-  const old = status.runners.find(r => r.id === 'old')!
-  expect(old.integrationCompatibilityReason).toEqual(expect.any(String))
-
-  runner.close()
-  await vi.waitFor(() => expect(t.runner.online).toBe(false), { timeout: 5000 })
-  runner = await connectRunner()
-  await passes(1)
-  expect(await taskRow(task.id)).toMatchObject({ status: 'merged' })
-  await capture('legacy-runner.json', { request: { method: 'GET', url: '/api/runner' }, response: old, approvedTaskWhileNoExecutor: 'ready_to_merge', pendingPrFreeTaskOnLegacyRunner: 'ready, unleased', operationsStarted: 0, afterExecutorConnected: 'merged' })
 })
 
 describe('restarting during an integration', () => {
@@ -555,8 +530,7 @@ describe('restarting during an epic rebase', () => {
 // The epic and target changed the same file. A developer rebases the candidate
 // the conflict task names, as `git rebase` and an edit would.
 async function conflictedResolution(epic: { id: string }, onto: string, file: string, text: string) {
-  await mergePasses(1)
-  await asResolutionTasks(t.db, t.github)
+  await passBeforeD29(t.db, t.github, () => mergePasses(1))
   const operation = (await ops(epic.id)).filter(o => o.kind === 'rebase').at(-1)
   const fix = await taskRow(operation!.resolutionTaskId!)
   await git('checkout', '--quiet', fix.branch!)
@@ -594,7 +568,6 @@ const decision = {
 }
 
 describe('a conflict before approval (COR-445)', () => {
-  const FIXES = { ...MODERN, epicFixExecutor: true }
   const rebases = async (epicId: string) => (await ops(epicId)).filter(o => o.kind === 'rebase')
   const fixRuns = (epicId: string) => t.db.select().from(schema.runs).where(and(eq(schema.runs.epicId, epicId), eq(schema.runs.role, 'developer')))
 
@@ -647,7 +620,7 @@ describe('a conflict before approval (COR-445)', () => {
   }
 
   it('carries on through integration and review, and resolves once after approval across two target moves', async () => {
-    runner = await connectRunner('r1', FIXES)
+    runner = await connectRunner('r1')
     const epic = await heldEpic('shared.txt', 'epic\n')
     await commitOn('main', 'shared.txt', 'target\n')
     // The rebase at this integration conflicts, and the task lands anyway
@@ -692,7 +665,7 @@ describe('a conflict before approval (COR-445)', () => {
   })
 
   it('waits for a rebase when the target moves during the merge, and counts no refused merge', async () => {
-    runner = await connectRunner('r1', FIXES)
+    runner = await connectRunner('r1')
     const epic = await humanApprovedEpic()
     passCi(epic.head)
     const { merge } = t.github
@@ -715,7 +688,7 @@ describe('a conflict before approval (COR-445)', () => {
   })
 
   it('clears the pending conflict when a later checkpoint rebases cleanly', async () => {
-    runner = await connectRunner('r1', FIXES)
+    runner = await connectRunner('r1')
     const epic = await heldEpic('shared.txt', 'epic\n')
     await commitOn('main', 'shared.txt', 'target\n')
     await finishHeld(epic, 'more.txt')
@@ -731,7 +704,7 @@ describe('a conflict before approval (COR-445)', () => {
   })
 
   it('sends a second conflict during final resolution the same way, and never merges it unresolved', async () => {
-    runner = await connectRunner('r1', FIXES)
+    runner = await connectRunner('r1')
     const epic = await heldEpic('shared.txt', 'epic\n')
     await commitOn('main', 'shared.txt', 'target\n')
     await finishHeld(epic, 'more.txt')
@@ -763,7 +736,7 @@ describe('a conflict before approval (COR-445)', () => {
   })
 
   it('returns the task through review and the human when approval cannot carry', async () => {
-    runner = await connectRunner('r1', FIXES)
+    runner = await connectRunner('r1')
     const epic = await heldEpic('shared.txt', 'epic\n')
     await commitOn('main', 'shared.txt', 'target\n')
     await finishHeld(epic, 'more.txt')
@@ -982,7 +955,7 @@ describe('a target update that conflicts', () => {
     expect(await taskRow(fix.id)).toMatchObject({ status: 'failed', deletedAt: null })
 
     const current = await commitOn('main', 'later.txt', 'later\n')
-    await mergePasses(2)
+    await passBeforeD29(t.db, t.github, () => mergePasses(2))
     const [old, fresh] = (await ops(epic.id)).filter(o => o.kind === 'rebase')
     expect(old).toMatchObject({ id: operation.id, state: 'failed' })
     expect(fresh).toMatchObject({ state: 'running', ontoSha: current, expectedTargetSha: epic.head })

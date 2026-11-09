@@ -96,12 +96,6 @@ describe('runner updates', () => {
     expect(await status()).toContainEqual(expect.objectContaining({ id: 'gaming-pc', behind: false, draining: false, toolContractReason: null }))
   }, 60000)
 
-  it('treats a runner from before tool contracts as different', async () => {
-    t = await createTestApp('pglite', { listen: true })
-    await connect('legacy', { commit: 'old', toolContract: undefined })
-    expect(await status()).toContainEqual(expect.objectContaining({ id: 'legacy', draining: true, toolContractReason: expect.stringContaining('before tool contracts') }))
-  }, 60000)
-
   it('keeps a failed update out of placement when its tools differ, and shows the error in Needs you until it updates', async () => {
     t = await createTestApp('pglite', { listen: true })
     const old = await connect('gaming-pc', { commit: 'old', toolContract: 'old-tools' })
@@ -112,6 +106,8 @@ describe('runner updates', () => {
     const inbox = await (await t.request('GET', '/api/inbox')).json() as Inbox
     expect(inbox.count).toBe(inbox.needsYou.length)
     expect(await status()).toContainEqual(expect.objectContaining({ id: 'gaming-pc', draining: false }))
+    // Nor does it take integration or rebase jobs
+    expect(t.runner.jobRunner()).toBeNull()
     await t.orchestrator.scheduler.schedule()
     await delivered('gaming-pc')
     expect(old.received.some(m => m.type === 'run.assign')).toBe(false)

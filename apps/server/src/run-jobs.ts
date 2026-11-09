@@ -1,4 +1,4 @@
-import { TASK_INTEGRATION_PROTOCOL, type RunJob } from '@corral/contracts'
+import type { RunJob } from '@corral/contracts'
 import { actorLabel, AUTHORING_ROLES, isPrFree, taskRef } from '@corral/core'
 import { schema, type Database, type Executor, type AgentRow, type TaskRow } from '@corral/db'
 import { and, asc, desc, eq, gt, inArray, isNotNull, ne, or } from 'drizzle-orm'
@@ -179,12 +179,9 @@ export class RunJobs {
     return comparison ? cappedBranchDiff(comparison.files) : null
   }
 
-  // D27 rollout: only a supporting runner may start the PR-free path, and a
-  // branch that already has a PR (one whose number was never recorded after a
-  // crash) finishes on the legacy path. When GitHub can't say, it stays legacy.
+  // A branch that already has a PR (one whose number was never recorded after
+  // a crash) finishes on the legacy path. When GitHub can't say, it stays legacy.
   async #canSkipTaskPr(ctx: RunContext, task: TaskRow, resumingBranch: boolean): Promise<boolean> {
-    const runner = this.#d.runner.status().runners.find(r => r.id === ctx.run.runnerId)
-    if (!runner?.taskIntegrationProtocols?.includes(TASK_INTEGRATION_PROTOCOL)) return false
     if (!resumingBranch || !task.branch) return true
     const pr = await this.#d.github.findOpenPullRequest(ctx.project!.repository, task.branch).catch(() => undefined)
     return pr === null

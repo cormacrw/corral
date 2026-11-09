@@ -152,7 +152,7 @@ export class Scheduler {
       }
     }
     if (agent.role === 'developer' && (agent.wakeIntervalSeconds === null || await this.#awake(agent))) {
-      const claimFix = () => placement.exclusive(() => this.#d.fixes.claim(agent.id, tx => placement.pickRunner(tx, 'developer', agent.runtime, { epicFix: true }), skip))
+      const claimFix = () => placement.exclusive(() => this.#d.fixes.claim(agent.id, tx => placement.pickRunner(tx, 'developer', agent.runtime), skip))
       for (let runId = await claimFix(); runId; runId = await claimFix()) {
         await this.#assignFix(runId, skip)
         if (this.#d.gate.halted) return
@@ -163,7 +163,7 @@ export class Scheduler {
     const role = runnerRoleFor(agent.role)
     const place: Place = async (tx, task) => {
       const previous = agent.role !== 'reviewer' ? await this.#d.jobs.previousAuthorRun(tx, task.id, agent.id, agent.role) : null
-      return placement.pickRunner(tx, role, agent.runtime, { previous: previous?.runnerId ?? null, integrationProtocol: task.integrationProtocol })
+      return placement.pickRunner(tx, role, agent.runtime, previous?.runnerId ?? null)
     }
     // With no slot on any runner that fits, a claim would lock and try every
     // ready task on every pass only to place none of them

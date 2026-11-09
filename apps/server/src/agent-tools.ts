@@ -1,4 +1,4 @@
-import { epicReviewReportSchema, IMAGE_CONTENT_TYPES, neutralPmCall, outcomeReportSchema, rebaseReviewReportSchema, toolDefinitions, toolName, toolRefusal, toolsForJob, type PmTool, type RunnerMessage } from '@corral/contracts'
+import { epicReviewReportSchema, IMAGE_CONTENT_TYPES, outcomeReportSchema, rebaseReviewReportSchema, toolDefinitions, toolName, toolRefusal, toolsForJob, type PmTool, type RunnerMessage } from '@corral/contracts'
 import { taskRef, richTextToMarkdown } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, eq, isNull } from 'drizzle-orm'
@@ -60,8 +60,7 @@ export class AgentTools {
     const ctx = await this.#d.runs.fenced(message.runId, message.leaseEpoch)
     if (!ctx || ctx.run.runnerId !== runnerId) throw new ToolError('This run no longer holds its task: its lease expired or was given to another run. Stop working.')
     try {
-      const { tool, input } = neutralPmCall(message.tool, message.input)
-      return await this.#tool(ctx, tool, input)
+      return await this.#tool(ctx, message.tool, message.input)
     } catch (error) {
       if (error instanceof ApiFailure && error.body.code === 'transition_rejected') {
         throw new ToolError(`Corral rejected this: ${JSON.stringify(error.body.reason)}`)

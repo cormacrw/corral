@@ -60,7 +60,7 @@ export class TaskIntegrator {
 
   async tick(): Promise<void> {
     const { db } = this.#d
-    if (!this.#d.runner.integrationRunner() && !this.#d.runner.epicRebaseRunner()) return
+    if (!this.#d.runner.jobRunner()) return
     const active = await db.select({ epicId: operations.epicId }).from(operations).where(inArray(operations.state, [...ACTIVE_OPERATION_STATES]))
     const waiting = await this.#waiting().then(rows => rows.map(r => ({ epicId: r.task.epicId! })))
     const due = await this.#d.sync.due().then(ids => ids.map(epicId => ({ epicId })))
@@ -157,7 +157,7 @@ export class TaskIntegrator {
     if (this.#d.gate.halted) return false
     if (task.status !== 'ready_to_merge' || task.deletedAt) return this.#fail(pending, ctx, endingText('cancelled'))
     if (task.paused || project.paused) return false
-    const runnerId = runner.integrationRunner()
+    const runnerId = runner.jobRunner()
     if (!runnerId) return false
     const operation = await moveOperation(db, pending, ['pending'], { state: 'running', runnerId, updatedAt: this.#now() })
     if (!operation) return false
@@ -275,7 +275,7 @@ export class TaskIntegrator {
   // it as it is for the next pass.
   async #reconcile(operation: OperationRow, ctx: Context): Promise<boolean> {
     const { runner } = this.#d
-    const runnerId = runner.integrationRunner()
+    const runnerId = runner.jobRunner()
     if (!runnerId) return false
     let remote
     try {

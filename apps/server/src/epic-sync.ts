@@ -41,7 +41,7 @@ interface EpicSyncDeps extends BranchWriterDeps {
 // reviewer. Only the runner's git can say so exactly as the push guard will, so
 // a runner that can't answer holds the review back rather than failing a run.
 export async function targetFileChanges(runner: RunnerHub, input: { repository: string, targetBranch: string, expectedHeadSha: string, candidateSha: string }) {
-  const runnerId = runner.epicRebaseRunner()
+  const runnerId = runner.jobRunner()
   if (!runnerId) throw new EpicBranchError('No runner can read the rebase candidate yet')
   try {
     const { targetFiles } = await runner.requestOn<'epic_rebase_inspect'>(runnerId, { kind: 'epic_rebase_inspect', ...input })
@@ -112,7 +112,7 @@ export class EpicSynchronizer {
   // by the epic row lock and the writer lock, so polls can't start a second one.
   async begin(epicId: string): Promise<OperationRow | null> {
     const { db, github, runner } = this.#d
-    if (this.#d.gate.halted || !runner.epicRebaseRunner()) return null
+    if (this.#d.gate.halted || !runner.jobRunner()) return null
     const [row] = await db.select({ epic: epics, project: projects }).from(epics).innerJoin(projects, eq(projects.id, epics.projectId)).where(eq(epics.id, epicId))
     if (!row || !this.#eligible(row.epic, row.project)) return null
     const { epic, project } = row
@@ -188,7 +188,7 @@ export class EpicSynchronizer {
   async #prepare(pending: OperationRow, ctx: Context): Promise<boolean> {
     const { db, runner } = this.#d
     if (this.#d.gate.halted || ctx.project.paused) return false
-    const runnerId = runner.epicRebaseRunner()
+    const runnerId = runner.jobRunner()
     if (!runnerId) return false
     const operation = await moveOperation(db, pending, ['pending'], { state: 'running', runnerId, updatedAt: this.#now() })
     if (!operation) return false
@@ -269,7 +269,7 @@ export class EpicSynchronizer {
   async #awaitFix(operation: OperationRow, ctx: Context): Promise<boolean> {
     const report = operation.fixReport
     if (!report || ctx.epic.syncError) return false
-    const runnerId = this.#d.runner.epicRebaseRunner()
+    const runnerId = this.#d.runner.jobRunner()
     if (!runnerId || await this.#held(ctx)) return false
     await this.#checkFix(operation, ctx, report)
     const reReviewed = report.behaviourChanged || operation.fix === 'review'
@@ -313,7 +313,7 @@ export class EpicSynchronizer {
     if (!task || task.deletedAt) return this.#fail(operation, ctx, 'The conflict resolution task was deleted')
     if (task.status === 'failed') return this.#outdateFailed(operation, ctx)
     if (task.status !== 'ready_to_merge' || task.leaseRunId || task.paused || !task.headSha || ctx.epic.syncError) return false
-    const runnerId = runner.epicRebaseRunner()
+    const runnerId = runner.jobRunner()
     if (!runnerId) return false
     if (await this.#held(ctx)) return false
     // Read now: the caller's copy can predate the review that freed the task

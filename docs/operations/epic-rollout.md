@@ -2,35 +2,27 @@
 
 For whoever runs a Corral deployment. It covers switching on PR-free subtasks and automatic task rebases, what to do with runners, how to tell what a task is waiting on, and how to get a stopped one moving. The rules behind it are in [D27](../decisions.md); the walkthrough is [flows.md section 4](../flows.md).
 
-`apps/server/src/mixed-workflow.test.ts` runs mixed tasks with subtasks, legacy runners, restarts, conflicts and simultaneous integrations against real git. Retry and pausing are covered by `epic-sync.test.ts`, `epic-merge.test.ts` and `task-integration.test.ts`.
+`apps/server/src/mixed-workflow.test.ts` runs mixed tasks with subtasks, restarts, conflicts and simultaneous integrations against real git. Retry and pausing are covered by `epic-sync.test.ts`, `epic-merge.test.ts` and `task-integration.test.ts`.
 
 ## Activating it
 
 There is no switch and no data migration. Deploying the server and runners activates it. Migrations `0051` to `0055` add tables and columns, change two constraints, and record the current head as the approved commit of tasks with subtasks already holding approval. They change no branches, PRs, reviews or evidence.
 
 1. Deploy the server. Tasks and tasks with subtasks keep working as they were.
-2. Update every runner to the same build (`docs/runner-wsl2.md` for a remote one). A runner opts in through its hello, so an old build stays legacy-only until it's updated.
+2. Update every runner to the same build (`docs/runner-wsl2.md` for a remote one). A runner on an older runner protocol is refused until it's updated.
 3. Nothing else. The next developer run on an eligible task selects the PR-free path.
 
 **Don't touch active task PRs.** Don't rewrite, rebase, close or reopen them for the rollout, and don't edit `integration_protocol` by hand. An open task PR finishes on the PR path, including its revisions and rebase rounds. No background job converts anything, and existing `direct` tasks with subtasks stay direct. A task can hold both kinds of task and lands as one task's PR.
 
 Selection is permanent for a task: once it's PR-free, every later developer run needs a runner that supports it.
 
-## Which runners do what
+## Runners
 
-| A runner that advertises | Can take |
-|---|---|
-| Nothing (an old build) | Task PR work only. PR-free tasks are never placed on it, and a developer run it picks up on a new eligible task keeps that task on the PR path |
-| `taskIntegrationProtocols: [1]` | PR-free developer and reviewer runs |
-| `taskIntegrationExecutor` | The git work that integrates approved tasks into task branches |
-| `epicRebaseExecutor` | The git work that rebases task branches |
+Every runner on the current build takes PR-free developer and reviewer runs, the git work that integrates approved tasks into task branches, the git work that rebases task branches, and fix runs. Hello carries no capability flags.
 
-Every current build advertises all three. The WebSocket protocol stays at version 3, so an old runner still connects. It's sent an update reason, which also appears as `integrationCompatibilityReason` in `GET /api/runner` and `GET /api/status`.
-
-While you have a mix of runners:
-
-- With no runner that supports protocol 1 online, a PR-free task stays unleased in its column. It isn't failed.
-- With no executor online, approved tasks wait in Ready to merge, and a task behind its target waits at its checkpoint. Neither counts as a failure, and both carry on once one connects.
+- A runner on an older runner protocol is refused when it connects. `GET /api/runner` shows it offline with `needsUpdate: true`, and Needs you has a `runner_update` item for it. It takes nothing until it's updated.
+- A runner whose agent tool contract differs from the server's (`toolContractReason` in `GET /api/runner`) is drained and takes no runs and no integration or rebase jobs until it's updated.
+- With no runner online, a PR-free task stays unleased in its column, approved tasks wait in Ready to merge, and a task behind its target waits at its checkpoint. None of these counts as a failure, and all carry on once a runner connects.
 
 ## Telling the two kinds of task apart
 
@@ -59,7 +51,7 @@ Start at the task page. The banner and the status come from `sync` on `GET /api/
 | Resolving a rebase conflict, naming the files and task | `resolving` | A developer and reviewer are working on a private candidate. The task's branch hasn't moved | Nothing. Follow the task on the board |
 | This rebase needs your decision | `deciding` | The two sides can't both hold, or a binding decision changed. The question, its alternatives and the affected changes are in your Inbox on the task (or on the resolution task, if one was already in progress) | Answer it in Needs you |
 | Rebase stopped, with **Retry** | `failed` | Three failures on the same commits, or GitHub won't merge an up-to-date PR. `sync.error` says why | Fix the cause, then **Retry** |
-| No banner, task in Ready to merge | `null` | Integration is queued or running, which `sync` doesn't show; check for an executor, then the journal below | Nothing, unless the project is paused, the kill switch is on or an update hold is set |
+| No banner, task in Ready to merge | `null` | Integration is queued or running, which `sync` doesn't show; check that a runner is online, then the journal below | Nothing, unless the project is paused, the kill switch is on or an update hold is set |
 | Waiting for your review | `null` | The Inbox has the task review | Approve or request changes |
 
 Anything that holds a task's writer lock also holds approval, task PR merges into that task, integration review and the task merge. That's why an approve can answer `409 epic_review_changed` during a rebase: reload, and approve the head shown now.
@@ -97,5 +89,5 @@ Pausing the project, the kill switch and an update hold all stop new writes, lea
 
 ## Tasks with subtasks (D31)
 
-The migration reports its counts in the server's output: `Parent tasks: N created, N one-task epics collapsed, N empty epics skipped`. It's forward-only. Keep `cc3d950e1d8050a1` in `COMPATIBLE_TOOL_CONTRACTS` until every runner has updated, then remove it.
+The migration reports its counts in the server's output: `Parent tasks: N created, N one-task epics collapsed, N empty epics skipped`. It's forward-only.
 

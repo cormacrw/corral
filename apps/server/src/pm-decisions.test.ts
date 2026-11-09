@@ -166,28 +166,12 @@ describe('PM tools for the Inbox, designs and agents', () => {
       expect(await statusOf(paused.id)).toMatchObject({ paused: false })
     })
 
-    it('confirms a card saved before D31, with its old tool, fields and wording', async () => {
-      const { id: projectId } = await (await t.request('GET', `/api/projects/${slug}`)).json() as { id: string }
-      const [epic] = await t.db.insert(schema.epics).values({ projectId, title: 'Saved', reviewMode: 'epic', createdBy: t.actor }).returning()
-      const card = await lowered('update_parent', { parentId: epic!.id, reviewMode: 'direct' }, 'direct')
-      const [row] = await t.db.select().from(schema.planMessages).where(eq(schema.planMessages.id, card.actionId))
-      const action = row!.pendingAction!
-      await t.db.update(schema.planMessages).set({ pendingAction: {
-        ...action,
-        tool: 'update_epic',
-        input: { epicId: epic!.id, reviewMode: 'direct' },
-        summary: action.summary.replaceAll('from task to direct', 'from epic to direct')
-      } }).where(eq(schema.planMessages.id, card.actionId))
-      expect((await resolve(card.actionId, 'confirm')).status).toBe(200)
-      expect((await t.db.select().from(schema.epics).where(eq(schema.epics.id, epic!.id)))[0]).toMatchObject({ reviewMode: 'direct' })
-    })
-
     it('takes a card for less review on an epic, not more', async () => {
       const { id: projectId } = await (await t.request('GET', `/api/projects/${slug}`)).json() as { id: string }
       const [epic] = await t.db.insert(schema.epics).values({ projectId, title: 'Gated', reviewMode: 'epic', createdBy: t.actor }).returning()
-      await lowered('update_epic', { epicId: epic!.id, reviewMode: 'direct' }, 'direct')
-      expect(await call('update_epic', { epicId: epic!.id, reviewMode: 'each_task' })).toMatchObject({ ok: true, result: { reviewMode: 'each_task' } })
-      await lowered('update_epic', { epicId: epic!.id, reviewMode: 'epic' }, 'each_task')
+      await lowered('update_parent', { parentId: epic!.id, reviewMode: 'direct' }, 'direct')
+      expect(await call('update_parent', { parentId: epic!.id, reviewMode: 'each_task' })).toMatchObject({ ok: true, result: { reviewMode: 'each_task' } })
+      await lowered('update_parent', { parentId: epic!.id, reviewMode: 'parent' }, 'each_task')
     })
 
     it('takes a card to lower a project\'s gates, and applies them on Confirm', async () => {
@@ -220,14 +204,14 @@ describe('PM tools for the Inbox, designs and agents', () => {
       const epicOf = async (reviewMode: 'each_task' | 'epic' | 'direct') => (await t.db.insert(schema.epics).values({ projectId, title: reviewMode, reviewMode, createdBy: t.actor }).returning())[0]!
       const [strict, plain, direct] = [await epicOf('each_task'), await epicOf('epic'), await epicOf('direct')]
       const inStrict = await task({ humanReview: false, epicId: strict.id })
-      await lowered('update_task', { taskRef: inStrict.ref, epicId: null }, /human review/i)
-      await lowered('update_task', { taskRef: inStrict.ref, epicId: direct.id }, /human review/i)
+      await lowered('update_task', { taskRef: inStrict.ref, parentId: null }, /human review/i)
+      await lowered('update_task', { taskRef: inStrict.ref, parentId: direct.id }, /human review/i)
       expect(await statusOf(inStrict.id)).toMatchObject({ epicId: strict.id })
       const loose = await task({ humanReview: false, epicId: direct.id })
-      expect(await call('update_task', { taskRef: loose.ref, epicId: plain.id })).toMatchObject({ ok: true, result: { ref: loose.ref } })
+      expect(await call('update_task', { taskRef: loose.ref, parentId: plain.id })).toMatchObject({ ok: true, result: { ref: loose.ref } })
       // Its own flag keeps a human on it wherever it goes
       const flagged = await task({ humanReview: true, epicId: strict.id })
-      expect(await call('update_task', { taskRef: flagged.ref, epicId: null })).toMatchObject({ ok: true, result: { ref: flagged.ref } })
+      expect(await call('update_task', { taskRef: flagged.ref, parentId: null })).toMatchObject({ ok: true, result: { ref: flagged.ref } })
     })
 
     it('takes a card to retype a spike into work with no human review', async () => {
@@ -285,7 +269,7 @@ describe('PM tools for the Inbox, designs and agents', () => {
   })
 
   describe('plans', () => {
-    const plan = (over: Record<string, unknown>, epics: unknown[] = []) => ({ title: 'Revision', summary: 'x', epics, tasks: [{ key: 'a', title: 'A', description: 'd', type: 'task', acceptanceCriteria: ['c'], ...over }] })
+    const plan = (over: Record<string, unknown>) => ({ title: 'Revision', summary: 'x', tasks: [{ key: 'a', title: 'A', description: 'd', type: 'task', acceptanceCriteria: ['c'], ...over }] })
     const refused = async (input: unknown, words: string) => {
       const reply = await call('propose_plan', input) as { ok: false, error: string }
       expect(reply).toMatchObject({ ok: false })
@@ -321,11 +305,14 @@ describe('PM tools for the Inbox, designs and agents', () => {
       expect(await statusOf(open.id)).toMatchObject({ humanReview: true })
     })
 
-    it('refuses a lower review mode on an epic with live work', async () => {
-      const live = { key: 'live', title: 'Live task', epic: 'e' }
-      expect(await call('propose_plan', plan(live, [{ key: 'e', title: 'Live', summary: 's', reviewMode: 'epic' }]))).toMatchObject({ ok: true })
+    it('refuses a lower review mode on a task with subtasks and live work', async () => {
+      const live = (reviewMode: string) => ({
+        title: 'Revision', summary: 'x', parents: [{ key: 'e', title: 'Live', summary: 's', reviewMode }],
+        tasks: ['Live task', 'Second live task'].map((title, i) => ({ key: `live${i}`, title, description: 'd', type: 'task', acceptanceCriteria: ['c'], parent: 'e' }))
+      })
+      expect(await call('propose_plan', live('parent'))).toMatchObject({ ok: true })
       await t.db.update(tasks).set({ status: 'backlog' }).where(and(eq(tasks.title, 'Live task'), eq(tasks.status, 'draft')))
-      await refused(plan(live, [{ key: 'e', title: 'Live', summary: 's', reviewMode: 'direct' }]), 'update_parent')
+      await refused(live('direct'), 'update_parent')
     })
   })
 

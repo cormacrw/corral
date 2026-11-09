@@ -1,6 +1,6 @@
 import type { Plan, PlanSessionDetail } from '@corral/contracts'
 import { schema } from '@corral/db'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { claimNextTask } from './claim.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
@@ -34,11 +34,12 @@ describe('epic dependencies in plans', { timeout: 30_000 }, () => {
 
   const proposal = (dependsOn: string[] | undefined = ['e1']) => ({
     title: 'Mobile delivery', summary: '',
-    epics: [
+    parents: [
       { key: 'e1', title: 'Mobile PWA', dependsOn: [] as string[] },
       { key: 'e2', title: 'Offline support', ...(dependsOn && { dependsOn }) }
     ],
-    tasks: ['e1', 'e2'].map((epic, i) => ({ key: `t${i + 1}`, epic, title: `Build ${epic}`, description: 'Build the feature', type: 'task', acceptanceCriteria: ['Works offline'], dependsOn: [] as string[] }))
+    // Two subtasks each: t1 and t2 in e1, t3 and t4 in e2
+    tasks: ['e1', 'e1', 'e2', 'e2'].map((parent, i) => ({ key: `t${i + 1}`, parent, title: `Build ${parent} part ${i + 1}`, description: 'Build the feature', type: 'task', acceptanceCriteria: ['Works offline'], dependsOn: [] as string[] }))
   })
 
   it('snapshots and inherits dependencies, approves keys and existing ids, and gates claims', async () => {
@@ -49,7 +50,7 @@ describe('epic dependencies in plans', { timeout: 30_000 }, () => {
     expect(v1.epics[1]?.dependsOn?.map(e => e.title)).toEqual(['Mobile PWA', 'Existing foundation'])
     expect(await t.db.select().from(schema.epicDependencies)).toEqual([])
     const revision = proposal()
-    delete (revision.epics[1] as { dependsOn?: string[] }).dependsOn
+    delete (revision.parents[1] as { dependsOn?: string[] }).dependsOn
     expect(await call(revision)).toMatchObject({ ok: true })
     const v2 = await latest()
     expect(v2.epics[1]?.dependsOn).toEqual(v1.epics[1]?.dependsOn)
@@ -65,9 +66,10 @@ describe('epic dependencies in plans', { timeout: 30_000 }, () => {
     expect(await runner.call(job.runId, job.leaseEpoch, 'list_tasks', {})).toMatchObject({ ok: true, result: { epics: expect.arrayContaining([{ id: b!.id, title: 'Offline support', reviewMode: 'epic', dependsOn: [a!.id, existing!.id] }]) } })
     const [dev] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'developer'))
     await t.db.update(schema.projects).set({ paused: false }).where(eq(schema.projects.id, project.id))
-    expect(await claimNextTask(t.db, dev!.id, new Date(), [approved.tasks[1]!.taskId!])).toBeNull()
-    await t.db.update(schema.tasks).set({ status: 'merged' }).where(eq(schema.tasks.id, approved.tasks[0]!.taskId!))
-    expect((await claimNextTask(t.db, dev!.id, new Date(), [approved.tasks[1]!.taskId!]))?.taskId).toBe(approved.tasks[1]!.taskId)
+    const waiting = approved.tasks[2]!.taskId!
+    expect(await claimNextTask(t.db, dev!.id, new Date(), [waiting])).toBeNull()
+    await t.db.update(schema.tasks).set({ status: 'merged' }).where(inArray(schema.tasks.id, [approved.tasks[0]!.taskId!, approved.tasks[1]!.taskId!]))
+    expect((await claimNextTask(t.db, dev!.id, new Date(), [waiting]))?.taskId).toBe(waiting)
   })
 
   it('rejects unknown, self, cyclic and task/epic deadlocked dependencies with epic names', async () => {
@@ -75,10 +77,10 @@ describe('epic dependencies in plans', { timeout: 30_000 }, () => {
     expect(await call(proposal(['missing']))).toMatchObject({ ok: false, error: expect.stringContaining('Offline support') })
     expect(await call(proposal(['e2']))).toMatchObject({ ok: false, error: expect.stringContaining('self_dependency') })
     const cycle = proposal()
-    cycle.epics[0]!.dependsOn = ['e2']
+    cycle.parents[0]!.dependsOn = ['e2']
     expect(await call(cycle)).toMatchObject({ ok: false, error: expect.stringContaining('Mobile PWA') })
     const deadlock = proposal()
-    deadlock.tasks[0]!.dependsOn = ['t2']
+    deadlock.tasks[0]!.dependsOn = ['t3']
     expect(await call(deadlock)).toMatchObject({ ok: false, error: expect.stringContaining('epic_task_deadlock') })
   })
 
@@ -92,16 +94,16 @@ describe('epic dependencies in plans', { timeout: 30_000 }, () => {
     expect(response.status).toBe(409)
     expect(await response.json()).toMatchObject({ error: { code: 'invalid_dependencies', problems: [expect.objectContaining({ code: 'epic_dependency', epics: expect.arrayContaining(['Offline support']) })] } })
     expect((await latest()).status).toBe('proposed')
-    expect((await latest()).tasks.map(t => t.status)).toEqual(['draft', 'draft'])
+    expect((await latest()).tasks.map(t => t.status)).toEqual(['draft', 'draft', 'draft', 'draft'])
   })
 
   it('rejects approval atomically when a Draft moved to an external epic creates a deadlock', async () => {
     const { project, call, latest } = await setup()
     const [existing] = await t.db.insert(schema.epics).values({ projectId: project.id, title: 'Existing foundation', createdBy: t.actor }).returning()
     const input = proposal([])
-    input.epics[0]!.dependsOn = [existing!.id]
-    input.epics.splice(1, 1)
-    input.tasks[1]!.epic = 'e1'
+    input.parents[0]!.dependsOn = [existing!.id]
+    input.parents.splice(1, 1)
+    for (const task of input.tasks) task.parent = 'e1'
     input.tasks[0]!.dependsOn = ['t2']
     expect(await call(input)).toMatchObject({ ok: true })
     const plan = await latest()

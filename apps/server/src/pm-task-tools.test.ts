@@ -77,19 +77,19 @@ describe('PM task and epic tools', () => {
   it('keeps task review mode locked after PM attempts to detach PR or merged work', async () => {
     const [epic] = await t.db.insert(schema.epics).values({ projectId, title: 'Locked review', reviewMode: 'epic', createdBy: t.actor }).returning()
     const [other] = await t.db.insert(schema.epics).values({ projectId, title: 'Other task', createdBy: t.actor }).returning()
-    const task = (await call('create_task', { title: 'Keep on task\'s branch', type: 'task', epicId: epic!.id }) as { result: Task }).result
+    const task = (await call('create_task', { title: 'Keep on task\'s branch', type: 'task', parentId: epic!.id }) as { result: Task }).result
     for (const state of [{ status: 'in_progress' as const, prNumber: 77, prUrl: 'https://github.com/cormacrw/test-app/pull/77' }, { status: 'merged' as const, prNumber: 77, prUrl: 'https://github.com/cormacrw/test-app/pull/77' }, { status: 'merged' as const, prNumber: null, prUrl: null }]) {
       await t.db.update(schema.tasks).set(state).where(eq(schema.tasks.id, task.id))
-      expect(await call('update_epic', { epicId: epic!.id, reviewMode: 'direct' })).toMatchObject({ ok: false })
+      expect(await call('update_parent', { parentId: epic!.id, reviewMode: 'direct' })).toMatchObject({ ok: false })
       if (state.status === 'merged') {
         expect(await request('PATCH', `/api/projects/${slug}/tasks/${task.number}`, { epicId: null })).toMatchObject({ status: 409, body: { error: { constraint: 'task_merged' } } })
       }
       for (const epicId of [null, other!.id]) {
-        expect(await call('update_task', { taskRef: task.ref, epicId })).toMatchObject({ ok: false, error: expect.stringContaining('conflict') })
+        expect(await call('update_task', { taskRef: task.ref, parentId: epicId })).toMatchObject({ ok: false, error: expect.stringContaining('conflict') })
       }
-      expect(await call('update_task', { taskRef: task.ref, epicId: epic!.id, title: 'Allowed metadata' })).toMatchObject({ ok: state.status !== 'merged' })
+      expect(await call('update_task', { taskRef: task.ref, parentId: epic!.id, title: 'Allowed metadata' })).toMatchObject({ ok: state.status !== 'merged' })
       expect((await get(task)).epicId).toBe(epic!.id)
-      expect(await call('update_epic', { epicId: epic!.id, reviewMode: 'direct' })).toMatchObject({ ok: false })
+      expect(await call('update_parent', { parentId: epic!.id, reviewMode: 'direct' })).toMatchObject({ ok: false })
       expect((await request('GET', `/api/epics/${epic!.id}`)).body).toMatchObject({ reviewMode: 'epic' })
     }
   })
@@ -118,11 +118,11 @@ describe('PM task and epic tools', () => {
     const task = await t.createTask(slug)
     const [epic] = await t.db.insert(schema.epics).values({ projectId, title: 'Editable group', createdBy: t.actor }).returning()
     const description = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Investigate the behavior' }] }] }
-    expect(await call('update_task', { taskRef: task.ref, description, type: 'spike', humanReview: true, epicId: epic!.id, dependsOn: [prerequisite.number] })).toMatchObject({ ok: true })
+    expect(await call('update_task', { taskRef: task.ref, description, type: 'spike', humanReview: true, parentId: epic!.id, dependsOn: [prerequisite.number] })).toMatchObject({ ok: true })
     expect(await get(task)).toMatchObject({ description, type: 'spike', humanReview: true, epicId: epic!.id, dependsOn: [prerequisite.ref] })
     expect(await call('update_task', { taskRef: prerequisite.ref, dependsOn: [task.number] })).toMatchObject({ ok: false })
     expect((await get(prerequisite)).dependsOn).toEqual([])
-    expect(await call('update_task', { taskRef: task.ref, dependsOn: [], epicId: null, description: null })).toMatchObject({ ok: true, result: { dependsOn: [], epicId: null, description: null } })
+    expect(await call('update_task', { taskRef: task.ref, dependsOn: [], parentId: null, description: null })).toMatchObject({ ok: true, result: { dependsOn: [], epicId: null, description: null } })
   })
 
   it('keeps the implementation plan apart from the description through create_task, update_task, PATCH and get_task', async () => {
@@ -257,7 +257,7 @@ describe('PM task and epic tools', () => {
       const task = await t.createTask(slug, { epicId: first.epic.id })
       await t.db.update(schema.tasks).set({ status: 'ready' }).where(eq(schema.tasks.id, task.id))
       const from = t.events.length
-      expect(await call('update_task', { taskRef: task.ref, epicId: second.epic.id })).toMatchObject({ ok: true })
+      expect(await call('update_task', { taskRef: task.ref, parentId: second.epic.id })).toMatchObject({ ok: true })
       expect(published(from)).toEqual([
         { type: 'epic.updated', id: first.epic.id, state: 'open' },
         { type: 'run.updated', id: first.run.id, state: 'interrupted' },
@@ -271,7 +271,7 @@ describe('PM task and epic tools', () => {
       const task = await t.createTask(slug, { epicId: first.epic.id })
       await t.db.update(schema.tasks).set({ status: 'ready' }).where(eq(schema.tasks.id, task.id))
       const from = t.events.length
-      expect(await call('update_task', { taskRef: task.ref, epicId: second.epic.id, dependsOn: [99_999] })).toMatchObject({ ok: false })
+      expect(await call('update_task', { taskRef: task.ref, parentId: second.epic.id, dependsOn: [99_999] })).toMatchObject({ ok: false })
       expect(published(from)).toEqual([])
       const [row] = await t.db.select({ state: schema.runs.state }).from(schema.runs).where(eq(schema.runs.id, first.run.id))
       expect(row!.state).toBe('running')
@@ -363,32 +363,32 @@ describe('PM task and epic tools', () => {
         }).where(eq(schema.tasks.id, task.id))
       }
       const activity = (await request('GET', `/api/epics/${epic!.id}/activity`)).body
-      expect(await call('update_epic', { epicId: epic!.id, title: 'Rejected PM edit', reviewMode: 'each_task' })).toMatchObject({ ok: false })
+      expect(await call('update_parent', { parentId: epic!.id, title: 'Rejected PM edit', reviewMode: 'each_task' })).toMatchObject({ ok: false })
       expect(await request('PATCH', `/api/epics/${epic!.id}`, { title: 'Rejected human edit', reviewMode: 'direct' })).toMatchObject({
         status: 409,
         body: { error: { code: 'invalid_input', issues: [{ message: expect.stringContaining('review mode') }] } }
       })
       expect((await request('GET', `/api/epics/${epic!.id}`)).body).toMatchObject({ title: state, reviewMode: 'epic' })
       expect((await request('GET', `/api/epics/${epic!.id}/activity`)).body).toEqual(activity)
-      expect(await call('update_epic', { epicId: epic!.id, reviewMode: 'epic', title: 'Allowed PM metadata' })).toMatchObject({ ok: true, result: { reviewMode: 'epic', title: 'Allowed PM metadata' } })
+      expect(await call('update_parent', { parentId: epic!.id, reviewMode: 'parent', title: 'Allowed PM metadata' })).toMatchObject({ ok: true, result: { reviewMode: 'epic', title: 'Allowed PM metadata' } })
       expect(await request('PATCH', `/api/epics/${epic!.id}`, { reviewMode: 'epic', title: 'Allowed human metadata' })).toMatchObject({ status: 200, body: { reviewMode: 'epic', title: 'Allowed human metadata' } })
     }
     const [editable] = await t.db.insert(schema.epics).values({ projectId, title: 'Before PR work', createdBy: t.actor }).returning()
     expect(await request('PATCH', `/api/epics/${editable!.id}`, { reviewMode: 'epic' })).toMatchObject({ status: 200, body: { reviewMode: 'epic' } })
-    expect(await call('update_epic', { epicId: editable!.id, reviewMode: 'each_task' })).toMatchObject({ ok: true, result: { reviewMode: 'each_task' } })
+    expect(await call('update_parent', { parentId: editable!.id, reviewMode: 'each_task' })).toMatchObject({ ok: true, result: { reviewMode: 'each_task' } })
   })
 
   it('edits task metadata and dependencies atomically, audits them and refuses foreign tasks with subtasks', async () => {
     const [first, second] = await t.db.insert(schema.epics).values(['Foundation', 'Application'].map(title => ({ projectId, title, createdBy: t.actor }))).returning()
-    expect(await call('update_epic', { epicId: second!.id, title: 'Application delivery', summary: 'Build on the foundation', reviewMode: 'each_task', dependsOn: [first!.id] })).toMatchObject({ ok: true, result: { title: 'Application delivery', reviewMode: 'each_task', dependsOn: [first!.id] } })
+    expect(await call('update_parent', { parentId: second!.id, title: 'Application delivery', summary: 'Build on the foundation', reviewMode: 'each_task', dependsOn: [first!.id] })).toMatchObject({ ok: true, result: { title: 'Application delivery', reviewMode: 'each_task', dependsOn: [first!.id] } })
     const activity = (await request('GET', `/api/epics/${second!.id}/activity`)).body as AuditEntry[]
     expect(activity).toContainEqual(expect.objectContaining({ actor: actor(), action: 'epic.updated', detail: { epicId: second!.id, changed: expect.arrayContaining(['title', 'description', 'reviewMode']) } }))
     expect(activity).toContainEqual(expect.objectContaining({ actor: actor(), detail: { epicId: second!.id, changed: ['dependsOn'], dependsOn: [first!.id] } }))
-    expect(await call('update_epic', { epicId: first!.id, title: 'Must roll back', dependsOn: [second!.id] })).toMatchObject({ ok: false })
+    expect(await call('update_parent', { parentId: first!.id, title: 'Must roll back', dependsOn: [second!.id] })).toMatchObject({ ok: false })
     expect(((await request('GET', `/api/epics/${first!.id}`)).body as EpicDetail).title).toBe('Foundation')
     const foreignProject = await t.createProject()
     const [foreign] = await t.db.insert(schema.epics).values({ projectId: foreignProject.id, title: 'Foreign', createdBy: t.actor }).returning()
-    expect(await call('update_epic', { epicId: foreign!.id, title: 'No' })).toMatchObject({ ok: false })
-    expect(await call('update_epic', { epicId: second!.id, dependsOn: [foreign!.id] })).toMatchObject({ ok: false })
+    expect(await call('update_parent', { parentId: foreign!.id, title: 'No' })).toMatchObject({ ok: false })
+    expect(await call('update_parent', { parentId: second!.id, dependsOn: [foreign!.id] })).toMatchObject({ ok: false })
   })
 })

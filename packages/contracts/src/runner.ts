@@ -2,16 +2,17 @@ import { CLI_IDS, RUN_PHASES, TASK_TYPES, type RunTimings } from '@corral/core'
 import { z } from 'zod'
 import { RUNNER_ROLES } from './runner-status.ts'
 import { agentToolSchema } from './tool-definitions.ts'
-import { COMPATIBLE_TOOL_CONTRACTS } from './wire-compat.ts'
 
 // The protocol between apps/server and apps/runner over WebSocket (D7). The
 // runner always dials out (D1), so the same messages work on localhost, the
 // Docker network (D12) and a hosted server later. Messages are JSON.
 
+// 5: every runner integrates tasks, rebases and fixes task branches, and sends
+//    its tool contract; hello no longer advertises capabilities (D27, D29)
 // 4: global PM jobs have a null projectId and no repository checkout (COR-242)
 // 3: build identity and drain state (COR-187)
 // 2: hello carries the runner's slots, runtimes and roles (COR-184)
-export const RUNNER_PROTOCOL_VERSION = 4
+export const RUNNER_PROTOCOL_VERSION = 5
 export const RUNNER_HEARTBEAT_MS = 30_000
 export const RUNNER_PATH = '/runner'
 // Both ends of the runner socket refuse a larger message by closing the
@@ -123,21 +124,15 @@ export type RunnerMessage = z.infer<typeof runnerMessageSchema>
 
 export type ServerMessage = z.infer<typeof serverMessageSchema>
 
-// Integration protocol is negotiated independently of the WebSocket envelope.
-// Omission means legacy only; do not advertise execution before implementing it.
+// The PR-free integration protocol a task records once it is on that path.
+// Every runner on this protocol version supports it.
 export const TASK_INTEGRATION_PROTOCOL = 1
-export function integrationCompatibilityReason(required: number, supported: readonly number[] = []): string | null {
-  return required === 0 || supported.includes(required)
-    ? null
-    : `Task requires integration protocol ${required}. Update the runner to a build supporting PR-free subtask integration; legacy PR work remains available.`
-}
 
-// Why a runner gets no new runs because its agent tools aren't the server's, or
-// null when they match. Missing means a runner older than the check, which is
-// a difference too: nothing says its tools match (COR-435).
-export function toolContractReason(runner: string | undefined, server: string): string | null {
-  if (runner === server || (runner && COMPATIBLE_TOOL_CONTRACTS.includes(runner))) return null
-  return `Its agent tools ${runner ? `(${runner})` : '(from before tool contracts)'} differ from the server's (${server}), so it takes no new runs until it has updated.`
+// Why a runner gets no runs or jobs because its agent tools aren't the
+// server's, or null when they match (COR-435).
+export function toolContractReason(runner: string, server: string): string | null {
+  if (runner === server) return null
+  return `Its agent tools (${runner}) differ from the server's (${server}), so it takes no new runs until it has updated.`
 }
 
 // Runtime boundaries: unknown fields are ignored for forward compatibility.
@@ -246,13 +241,14 @@ const slotSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('derived'), cpus: z.number().positive(), memoryBytes: z.number().positive(), slotCpus: z.number().positive(), slotMemoryBytes: z.number().positive() })
 ])
 
-const runnerHelloSchema = z.object({ type: z.literal('hello'), protocol: z.number(), taskIntegrationProtocols: z.array(z.number().int().positive()).optional(), taskIntegrationExecutor: z.boolean().optional(), epicRebaseExecutor: z.boolean().optional(), epicFixExecutor: z.boolean().optional(), commit: z.string().default('unknown').transform(commit => commit || 'unknown'), updateTarget: z.string().optional(), toolContract: z.string().optional(), updateState: z.string().optional(), updateError: z.string().optional(), draining: z.boolean().optional(), updateRequested: z.boolean().optional(), autoUpdate: z.boolean().optional(), runnerId: z.string(), name: z.string(), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })), slotSource: slotSourceSchema.optional().catch(undefined), slots: z.number().optional().transform(n => n !== undefined && Number.isInteger(n) && n > 0 ? n : undefined), runtimes: z.array(z.string()).optional(), roles: z.array(z.enum(RUNNER_ROLES)).optional() })
+const runnerHelloSchema = z.object({ type: z.literal('hello'), protocol: z.number(), commit: z.string().default('unknown').transform(commit => commit || 'unknown'), updateTarget: z.string().optional(), toolContract: z.string(), updateState: z.string().optional(), updateError: z.string().optional(), draining: z.boolean().optional(), updateRequested: z.boolean().optional(), autoUpdate: z.boolean().optional(), runnerId: z.string(), name: z.string(), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })), slotSource: slotSourceSchema.optional().catch(undefined), slots: z.number().optional().transform(n => n !== undefined && Number.isInteger(n) && n > 0 ? n : undefined), runtimes: z.array(z.string()).optional(), roles: z.array(z.enum(RUNNER_ROLES)).optional() })
 
 // Pre-capacity/build hello packets must still get the protocol-version refusal.
 // This schema is used only for rejecting a different version, never admission.
 export const legacyRunnerHelloSchema = runnerHelloSchema.extend({
-  name: z.string().default(''), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })).default([])
+  toolContract: z.string().optional(), name: z.string().default(''), activeRuns: z.array(z.object({ runId: z.string(), leaseEpoch: z.number() })).default([])
 })
+export type LegacyRunnerHello = z.infer<typeof legacyRunnerHelloSchema>
 
 export const runnerMessageSchema = z.discriminatedUnion('type', [
   runnerHelloSchema,
@@ -272,7 +268,7 @@ export const runnerMessageSchema = z.discriminatedUnion('type', [
 ])
 
 export const serverMessageSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('welcome'), integrationCompatibilityReason: z.string().nullable().optional(), toolContractReason: z.string().nullable().optional(), runnerId: z.string(), commit: z.string(), draining: z.boolean(), updateRequested: z.boolean() }),
+  z.object({ type: z.literal('welcome'), toolContractReason: z.string().nullable().optional(), runnerId: z.string(), commit: z.string(), draining: z.boolean(), updateRequested: z.boolean() }),
   // A short-lived acknowledgement of a live lease; expired acknowledgements never authorise a WIP push.
   z.object({ type: z.literal('run.lease'), runId: z.string(), leaseEpoch: z.number(), validUntil: z.string() }),
   z.object({ type: z.literal('runner.drain'), updateRequested: z.boolean() }),
