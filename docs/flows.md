@@ -75,7 +75,7 @@ Agents are told about images so they look at them: a PM turn whose message refer
 
 **Grilling.** A message that asks to be grilled ("grill me", `/grill-me`, or the Grill me button's message) gets the grill-me skill's instructions, adapted to Corral, put before it: work through the decisions in dependency order, one `ask_question` per decision, always with a `recommendation` and with `options` where the answer is one of a few; look up anything the code or board can answer instead of asking; and once the decisions are settled, or the human says to stop, call `propose_plan` straight away with the agreed decisions in its summary. Other messages don't get these instructions, so the PM never grills unless asked. A session rebuilt after it was lost keeps grilling if an earlier human message asked for it.
 
-The PM proposes all new work with `propose_plan`, even a single task, so the human sees it before anything is created. Its `create_task` tool creates a Backlog task directly, without a plan, and the PM uses it only when the human explicitly asks for a task to be created directly. The PM also has typed tools to edit tasks before they are Merged, pause unleased tasks or resume work (stopping a leased task requires stop_run and human confirmation), and edit task titles, summaries, subtask review modes and dependencies. Task Activity attribute these edits to the PM session. Task edits notify a live developer using the run-message service, falling back to a pinned comment when the runtime cannot accept input. Board transitions (move_task), Human review approval (approve_task) and deletion (delete_task) require the human to click Confirm, and reuse the board's server rules. The PM still has no tools to merge or edit docs (D30).
+The PM proposes all new work with `propose_plan`, even a single task, so the human sees it before anything is created. Its `create_task` tool creates a Backlog task directly, without a plan, and the PM uses it only when the human explicitly asks for a task to be created directly. The PM also has typed tools to edit tasks before they are Merged, pause unleased tasks or resume work (stopping a leased task requires stop_run and human confirmation), and edit task titles, summaries, subtask review modes and dependencies. The task's activity attributes these edits to the PM session. Task edits notify a live developer using the run-message service, falling back to a pinned comment when the runtime cannot accept input. Board transitions (move_task), Human review approval (approve_task) and deletion (delete_task) require the human to click Confirm, and reuse the board's server rules. The PM still has no tools to merge or edit docs (D30).
 
 ### Editing and approving a plan
 
@@ -304,7 +304,7 @@ Meanwhile the target branch has moved on with other work. Corral rebases the tas
 
 ### Step 3 — Corral opens the task's PR
 
-#42 was the last board task of E7 still unmerged. With all three Merged, the server opens the **task's PR** from the task's branch into the target branch. Its description lists the task's subtasks with their submitted, reviewed and integrated commits and evidence (and task PR links for legacy tasks). In the Inbox it's Activity: "The task's PR opened". E7 isn't done yet, so tasks with subtasks that depend on it (D22) are still waiting.
+#42 was the last board task of E7 still unmerged. With all three Merged, the server opens the **task's PR** from the task's branch into the target branch. Its description lists the task's subtasks with their submitted, reviewed and integrated commits and evidence (and task PR links for legacy tasks). It's recorded as an informational event, "The task's PR opened", not a Needs-you item (D33). E7 isn't done yet, so tasks with subtasks that depend on it (D22) are still waiting.
 
 ### Step 4 — Integration review
 
@@ -327,7 +327,7 @@ Before merging, the server compares the task's branch with the target branch thr
 The runner rebases the task's commits onto the target commit on a throwaway candidate, touching no shared ref.
 
 - **Clean rebase:** the runner publishes with a compare-and-swap on the expected head. The approval stands. CI runs again on the new head, and when it passes the task's PR goes to step 7.
-- **Conflict (this example):** another task changed the same route file on the target branch. The task's branch and the target branch stay as they were. At every earlier checkpoint a conflict only gets noted: E7 shows it as progress, nothing runs, and integration and review carry on (COR-445). This is the final checkpoint, because the human has approved, so the server schedules a developer run on E7, tied to the operation, with no separate subtask, and "Task rebase conflict sent to a developer" is posted to Activity. There's no Needs-you item: E7 shows the developer resolving the conflict, with the files.
+- **Conflict (this example):** another task changed the same route file on the target branch. The task's branch and the target branch stay as they were. At every earlier checkpoint a conflict only gets noted: E7 shows it as progress, nothing runs, and integration and review carry on (COR-445). This is the final checkpoint, because the human has approved, so the server schedules a developer run on E7, tied to the operation, with no separate subtask, and "Task rebase conflict sent to a developer" is recorded on the task's activity. There's no Needs-you item: E7 shows the developer resolving the conflict, with the files.
 
 The run's branch is a candidate, `corral/epic-rebase/<operation>`, cut from the task's head, with no PR. The operation holds the writer lock throughout, the run counts against developer concurrency, and it waits on pause, the kill switch or an update hold. The developer:
 
@@ -350,5 +350,5 @@ The final gate check (section 2, step 8) runs against live GitHub data for the t
 Then:
 
 - E7 is **done** (D22 as amended by D27). Tasks with subtasks that depend on it wake at once, as do tasks elsewhere that depended on #41–#45.
-- "The task's PR merged" is posted to Activity.
+- "The task's PR merged" is recorded on the task's activity.
 - The server deletes the task's branch, and the runner removes any worktrees left for it.

@@ -10,7 +10,7 @@ One place for everything an agent needs you to decide, from every project, with 
 
 Items come from two places:
 
-- **Developer and reviewer runs:** human reviews, blocked, failed and stopped tasks, questions, and Activity.
+- **Developer and reviewer runs:** human reviews, blocked, failed and stopped tasks, and questions. Their informational events aren't listed (D33).
 - **Plan sessions that need you** (D11): each open session with a question from Juno, a plan needing approval or a failed Juno turn is a **Plan thread** item. They can be handled from the Inbox or from Plan; both act on the same session. A session with only an unread reply is informational and stays in Plan. See [Plan threads](#plan-threads).
 
 There's no separate notifications feed.
@@ -216,9 +216,7 @@ Every task item uses `InboxEpicPanel`, Option D for a task, on desktop and mobil
 - Every icon-only control has an `aria-label`.
 - Pane dividers are `role="separator"` with `aria-valuenow` and work with the arrow keys.
 
-## Open questions
-
-- Should Activity items expire, or stay forever?
+## Mobile Plan threads
 
 Mobile Plan threads reuse Plan's `PlanQuestion`, composer and `PlanDetail` bottom sheet, without `PlanConversation`. `InboxMobile` renders its focused Plan thread through `InboxMobilePlanThread`; the Inbox header keeps Back to Inbox and Open in Plan (the session route), with Delete thread in the overflow menu. Deleting returns to `/inbox` at once and closes the session after the 5-second Undo toast (`usePlanThreadDelete`); list rows use `SwipeToDelete` for the same action. A waiting plan has View plan and side-by-side approval destinations. The thread provides a flyout host with sheets, so `useTaskFlyout` keeps a task or task opened from the plan sheet on the Inbox route (`?task=`/`?parent=`) in a taller sheet over the plan, and dismissing it goes back to the plan; either successful approval closes the sheet and returns to `/inbox`. Failed approvals keep the screen and sheet open.
 
