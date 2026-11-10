@@ -42,14 +42,6 @@ export function cliLoginCommand(id: CliId): string {
 export interface RunnerInfo extends RunnerCapacity {
   // Set while its agent tools differ from the server's; see toolContractReason
   toolContractReason?: string | null
-  taskIntegrationProtocols?: number[]
-  // Runs integration jobs; a runner that only submits and reviews doesn't
-  taskIntegrationExecutor?: boolean
-  // Runs epic_rebase jobs
-  epicRebaseExecutor?: boolean
-  // Takes developer runs on an epic, with no task (D29)
-  epicFixExecutor?: boolean
-  integrationCompatibilityReason?: string | null
   activeRunCount?: number
   updateState?: string
   updateError?: string

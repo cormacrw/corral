@@ -20,18 +20,16 @@ fence the target ref and reconcile unknown results before retrying. Database
 constraints protect shape; they do not replace executor authorization, lease
 checks or remote confirmation.
 
-Hello's optional `taskIntegrationProtocols` is independent of envelope version
-3. Missing means legacy only. Welcome and runner status explain how to update;
-claim placement and dispatch both reject unsupported requirements. Existing PR
-work stays available.
+Every runner on runner protocol 5 supports integration protocol 1, so placement
+doesn't check for it. Existing PR work stays available.
 
 ## Submitting and reviewing (COR-287)
 
-`#authorJob` calls `selectPrFreeProtocol` for a developer run placed on a runner
-advertising protocol 1, so the prompt, job and report agree from the first run.
+`#authorJob` calls `selectPrFreeProtocol` for a developer run, so the prompt,
+job and report agree from the first run.
 Selection is skipped when GitHub shows, or can't rule out, an open PR on a branch
 that already existed (a PR whose number was lost in a crash), or when the task's PR
-has merged. A legacy runner's run stays on the PR path. Once selected the task
+has merged. Once selected the task
 can't change task or type (409), because the database check and its submissions
 depend on them.
 
@@ -83,8 +81,8 @@ branch but GitHub still serves the commit.
 `TaskIntegrator` (`apps/server/src/task-integration.ts`) runs in the merge pass.
 The server decides and the runner does the git, in the bare clone
 (`apps/runner/src/integration.ts`), so the reviewed task branch and worktree are
-never touched. Only a runner saying `taskIntegrationExecutor` in its hello gets
-these jobs, so a build that only submits and reviews is never asked.
+never touched. Any available runner gets these jobs (`RunnerHub.jobRunner`): one
+that's online, not draining and on the server's tool contract.
 
 Each task has at most one active operation, enforced by the partial unique index
 `task_integration_one_active_per_epic`, and tasks go oldest first. Each tick

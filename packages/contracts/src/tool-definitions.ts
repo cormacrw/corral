@@ -4,7 +4,6 @@ import { EVIDENCE_MAX_BYTES, megabytes } from './limits.ts'
 import { reportOutcomeInput } from './outcome-report.ts'
 import { advertisedPlanInput } from './plan.ts'
 import { askQuestionInput, listTasksInput, pmActionTools, pmDirectTools, type ToolDefinition } from './pm-tools.ts'
-import { LEGACY_AGENT_TOOLS, RENAMED_INPUT_TOOLS } from './wire-compat.ts'
 
 // What agents are told they can call, by role. The runner serves these and the
 // server checks calls and reports against the same definitions, and both hash
@@ -127,7 +126,7 @@ export const toolDefinitions = {
 
 // Tools an agent can call. The runner forwards each one with the run's lease
 // epoch, so a stale run's calls are rejected (stale-runners-and-fencing.md).
-const AGENT_TOOLS = [...Object.keys(toolDefinitions) as (keyof typeof toolDefinitions)[], ...LEGACY_AGENT_TOOLS]
+const AGENT_TOOLS = Object.keys(toolDefinitions) as (keyof typeof toolDefinitions)[]
 export const agentToolSchema = z.enum(AGENT_TOOLS)
 export type AgentTool = typeof AGENT_TOOLS[number]
 export type DefinedTool = keyof typeof toolDefinitions
@@ -161,8 +160,6 @@ const roleToolDefinitions: Record<AgentRole, Partial<Record<DefinedTool, ToolDef
 
 type GeneralPmTool = { [T in keyof typeof generalTools]: typeof generalTools[T] extends { pm: true } ? T : never }[keyof typeof generalTools]
 export type PmTool = GeneralPmTool | keyof typeof pmActionTools | keyof typeof pmDirectTools
-// Older runners' renamed inputs must still name PM tools, or the shim stops applying
-RENAMED_INPUT_TOOLS satisfies readonly PmTool[]
 
 // The PM's tools, in the order it is offered them
 export const PM_TOOL_NAMES: PmTool[] = [

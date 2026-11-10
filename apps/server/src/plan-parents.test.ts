@@ -1,6 +1,5 @@
 import type { PlanSessionDetail, Task } from '@corral/contracts'
 import { schema } from '@corral/db'
-import { COMPATIBLE_TOOL_CONTRACTS } from '@corral/contracts'
 import { eq, ne } from 'drizzle-orm'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
@@ -111,30 +110,5 @@ describe('plans with tasks with subtasks', () => {
     const parent = (await listed(project.slug)).find(task => task.status === 'parent')!
     const next = await turn(project.id)
     expect(JSON.stringify(await next.propose({ parents: [{ key: 'p', ref: parent.ref, reviewMode: 'direct' }], tasks: [item('c', { parent: 'p' })] }))).toContain('update_parent')
-  })
-
-  it('collapses an old runner\'s one-task epic, and gives its two-task epic a task, on a previous tool contract', async () => {
-    const old = await FakeRunner.connect(t.server!.url, [], 'old-runner', { toolContract: COMPATIBLE_TOOL_CONTRACTS[0]! })
-    await t.db.update(agents).set({ paused: false })
-    const { runners: status } = await t.request('GET', '/api/runner').then(r => r.json()) as { runners: { id: string, toolContractReason?: string | null, draining: boolean }[] }
-    expect(status.find(r => r.id === 'old-runner')).toMatchObject({ draining: false })
-    expect(status.find(r => r.id === 'old-runner')?.toolContractReason ?? null).toBeNull()
-    const project = await t.createProject()
-    await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
-    runner.close()
-    const { propose, plans, job } = await turn(project.id, old)
-    expect(await propose({ epics: [{ key: 'one', title: 'One' }, { key: 'two', title: 'Two' }], tasks: [item('a', { epic: 'one' }), item('b', { epic: 'two' }), item('c', { epic: 'two' })] })).toMatchObject({ ok: true })
-    await approve(plans)
-    const all = await listed(project.slug)
-    expect(all.filter(task => task.status === 'parent').map(task => task.title)).toEqual(['Two'])
-    expect(all.find(task => task.title === 'Task a')).toMatchObject({ parentTask: null })
-    expect(all.find(task => task.title === 'Task a')!.epicId).not.toBeNull()
-    // What an older runner calls its tools, and a new one too: the same edit
-    const delivery = all.find(task => task.status === 'parent')!.rollup!.epicId
-    expect(await old.call(job.runId, job.leaseEpoch, 'update_epic', { epicId: delivery, title: 'Renamed by an old runner' })).toMatchObject({ ok: true })
-    expect((await t.db.select().from(epics).where(eq(epics.id, delivery)))[0]).toMatchObject({ title: 'Renamed by an old runner' })
-    expect(await old.call(job.runId, job.leaseEpoch, 'update_parent', { parentId: delivery, reviewMode: 'parent' })).toMatchObject({ ok: true })
-    old.close()
-    runner = await FakeRunner.connect(t.server!.url)
   })
 })

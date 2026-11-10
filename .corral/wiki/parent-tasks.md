@@ -28,9 +28,9 @@ SQL forms, held to them by `delivery-sql.test.ts`.
   every delete checks `status = 'parent'`.
 - The migration rebuilds `task_status`: a value added with `ALTER TYPE`
   cannot be used in the transaction that adds it.
-- `COMPATIBLE_TOOL_CONTRACTS` keeps runners on the previous build taking runs.
-  PM arguments keep `update_parent`, `parentId`, `parents` and
-  `defaultReviewMode`; `neutralPmCall` translates older calls and saved cards.
+- PM arguments are `update_parent`, `parentId`, `parents` and
+  `defaultReviewMode`. Only the wire names are accepted; `wire-compat.ts`
+  maps them to the stored ones.
 - Stored operation errors are compared by text. `ENDINGS` in `operations.ts`
   names each ending once with its stored text and the legacy wordings of both
   older vocabularies; newly generated messages use task/subtask wording

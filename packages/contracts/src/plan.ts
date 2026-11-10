@@ -6,8 +6,6 @@ const proposedTask = z.object({
   key: z.string().trim().min(1).describe('A short handle used by dependsOn, e.g. t1'),
   ref: z.string().trim().toUpperCase().optional().transform(ref => ref || undefined).describe('The ref of an existing Backlog or unclaimed Ready task this revises, e.g. COR-4; leave out for a new task'),
   parent: z.string().trim().optional().describe('The key of its parent in `parents`, or the ref of the task it belongs to; leave it out for a task on its own'),
-  // Runners from before parent tasks (D31) send `epic`, with keys from `epics`
-  epic: z.string().trim().optional().describe('Older name for the subtask’s parent'),
   title: z.string().trim().min(1),
   description: z.string().trim().describe('Markdown: one to three plain sentences a person reads to know what the task is and why. Put the approach, files and edge cases in implementationPlan'),
   implementationPlan: z.string().trim().optional().describe('Markdown for the agent that builds it: approach, file pointers, edge cases and test notes. On a task with a ref, include its current plan (from get_task) to keep it: a revision without one clears it'),
@@ -37,32 +35,20 @@ export const proposedPlanInput = z.object({
   title: z.string().trim().min(1),
   summary: z.string().trim().default(''),
   parents: z.array(z.object({ ...parentFields, reviewMode: planReviewModeInput.describe(REVIEW_MODE_HELP) })).default([]),
-  epics: z.array(z.object({
-    key: z.string().trim().min(1).describe('A short handle, e.g. e1'),
-    title: z.string().trim(),
-    summary: z.string().trim().default(''),
-    dependsOn: z.array(z.string().trim()).optional().describe('Keys in this list, or ids from list_tasks. Omit to keep dependencies in a revision; [] clears them.'),
-    // The project's default when left out (D27)
-    reviewMode: planReviewModeInput.describe('See parents')
-  })).default([]).describe('Older name for parents'),
-  tasks: z.array(proposedTask),
-  // Older PMs proposed a single epic without keys.
-  epic: z.object({ title: z.string().trim(), summary: z.string().trim().default('') }).optional()
+  tasks: z.array(proposedTask)
 })
 
-// What the PM is offered: the same plan without the names older runners send
+// What the PM is offered: the same plan, with review modes before they're stored
 export const advertisedPlanInput = {
-  ...proposedPlanInput.omit({ epics: true, epic: true, parents: true }).shape,
-  parents: z.array(z.object({ ...parentFields, reviewMode: advertisedPlanReviewMode.describe(REVIEW_MODE_HELP) })).default([]),
-  tasks: z.array(proposedTask.omit({ epic: true }))
+  ...proposedPlanInput.omit({ parents: true }).shape,
+  parents: z.array(z.object({ ...parentFields, reviewMode: advertisedPlanReviewMode.describe(REVIEW_MODE_HELP) })).default([])
 }
 
 // Keep wire compatibility and normalization at the boundary, outside core.
 export type ProposedPlanInput = z.output<typeof proposedPlanInput>
 
 export function normalizeProposedPlan(input: ProposedPlanInput): ProposedPlan {
-  const { epic, parents, ...plan } = input
-  const legacyEpic = epic && plan.epics.length === 0
+  const { parents, ...plan } = input
   const keys = new Set(plan.tasks.map(t => t.key))
   const dependency = (dep: string) => keys.has(dep) || !TASK_REF_PATTERN.test(dep) ? dep : dep.toUpperCase()
   const parentKeys = new Set(parents.map(p => p.key))
@@ -78,10 +64,10 @@ export function normalizeProposedPlan(input: ProposedPlanInput): ProposedPlan {
   const subTasks = (key: string) => plan.tasks.filter(t => parentOf(t) === key).map(t => t.key)
   return {
     ...plan,
-    epics: [...legacyEpic ? [{ key: 'main', ...epic }] : plan.epics, ...allParents.map(p => ({ ...p, asParent: true }))],
+    epics: allParents.map(p => ({ ...p, asParent: true })),
     tasks: plan.tasks.map(({ parent, ...t }) => ({
       ...t,
-      epic: parentOf({ parent }) || t.epic || (legacyEpic ? 'main' : undefined),
+      epic: parentOf({ parent }),
       humanReview: requiresHumanReview(t.type, t.humanReview ?? false),
       dependsOn: t.dependsOn.flatMap(dep => parentKeys.has(dep) ? subTasks(dep) : [dependency(dep)])
     }))

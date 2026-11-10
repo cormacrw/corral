@@ -1,6 +1,6 @@
 # Runner versions and draining
 
-Protocol 3 advertises the image's `CORRAL_BUILD_SHA` and update policy in hello. Welcome and protocol refusal (4000, JSON close reason) report the server commit. Different commits mean behind; there is no ancestry lookup. Auto-deploy supplies the same SHA to both image builds: the last commit that touched a backend input (`scripts/deploy/build-sha.sh`), so docs-only and web-only commits never mark a runner behind. Manual builds go through `scripts/deploy/compose.sh`, which sets it.
+Hello has advertised the image's `CORRAL_BUILD_SHA` and update policy since protocol 3. Protocol 5 (current) requires `toolContract` and drops the capability flags: every runner on it takes every kind of run and git job, and an older one is refused at hello and shows as a `runner_update` Needs you item until it updates. Welcome and protocol refusal (4000, JSON close reason) report the server commit. Different commits mean behind; there is no ancestry lookup. Auto-deploy supplies the same SHA to both image builds: the last commit that touched a backend input (`scripts/deploy/build-sha.sh`), so docs-only and web-only commits never mark a runner behind. Manual builds go through `scripts/deploy/compose.sh`, which sets it.
 
 `POST /api/runners/:runnerId/update` drains an online runner and sets `updateRequested`. Behind runners only drain automatically with `CORRAL_RUNNER_AUTO_UPDATE=true`. Drain removes runners from run placement, including affinity, without interrupting existing runs. Setup jobs prefer non-draining runners but use a draining runner if necessary; cleanup still broadcasts. A send-time guard also prevents assignments racing with drain.
 
@@ -41,9 +41,9 @@ not be mounted into agent containers. Host Python 3 is a documented prerequisite
 
 COR-431's `stuck` reports were refused for a missing `decision` the agents couldn't send: `gaming-pc` was still on an older build while the server enforced the field. Being behind doesn't stop work unless `CORRAL_RUNNER_AUTO_UPDATE=true`, and that flag was off with the host timer installed, so the timer logged "Behind; automatic updates disabled" until a human pressed Update now.
 
-Agent tool definitions now live in `@corral/contracts/agent-tools` (a Node-only entry). Hello carries `AGENT_TOOL_CONTRACT`, a hash of what each role's agent sees: names, descriptions, input schemas and outcomes. A hash that differs, or is missing, sets `toolContractReason`. The hub then:
+Agent tool definitions now live in `@corral/contracts/agent-tools` (a Node-only entry). Hello must carry `AGENT_TOOL_CONTRACT`, a hash of what each role's agent sees: names, descriptions, input schemas and outcomes. There's no list of compatible older hashes: a hash that differs sets `toolContractReason`. The hub then:
 
-- keeps the runner out of agent runs in `pickRunner` and at `send`, separately from `draining`, because a failed update releases the drain so that setup jobs keep working;
+- keeps the runner out of agent runs and integration and rebase jobs through `available()` and at `send`, separately from `draining`. A failed update releases the drain, so other setup jobs (CLI detection, repository lists) still reach it;
 - drains it whatever its auto-update flag says. The flag is the runner's own policy for being merely behind. `update-status.json` then says draining, and the timer's gate passes, so a host with the timer updates with no human step.
 
 ## Telling a human

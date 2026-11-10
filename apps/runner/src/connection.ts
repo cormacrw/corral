@@ -7,7 +7,6 @@ import {
   protocolMessageType,
   RUNNER_PATH,
   RUNNER_PROTOCOL_VERSION,
-  TASK_INTEGRATION_PROTOCOL,
   type RunnerCapacity,
   type RunnerMessage,
   type ServerMessage
@@ -147,7 +146,6 @@ export class ServerConnection {
       }
       const message = parsed.data
       if (message.type === 'welcome') {
-        if (message.integrationCompatibilityReason) console.warn(message.integrationCompatibilityReason)
         if (message.toolContractReason) console.warn(message.toolContractReason)
         // Only now has the server taken this runner: a socket that opens and is
         // refused has to keep backing off
@@ -187,7 +185,7 @@ export class ServerConnection {
     }
     // That took seconds, and the socket may have gone meanwhile
     if (this.#socket !== socket || socket.readyState !== WebSocket.OPEN) return
-    socket.send(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, taskIntegrationProtocols: [TASK_INTEGRATION_PROTOCOL], taskIntegrationExecutor: true, epicRebaseExecutor: true, epicFixExecutor: true, toolContract: AGENT_TOOL_CONTRACT, commit: this.updateStatus.commit, draining: this.updateStatus.draining, updateRequested: this.updateStatus.updateRequested, autoUpdate: this.updateStatus.autoUpdate, updateTarget: this.updateStatus.serverCommit ?? '', updateState: this.updateStatus.updateState, updateError: this.updateStatus.updateError, ...this.#identity, ...capacity, activeRuns: this.#handlers.activeRuns() } satisfies RunnerMessage))
+    socket.send(JSON.stringify({ type: 'hello', protocol: RUNNER_PROTOCOL_VERSION, toolContract: AGENT_TOOL_CONTRACT, commit: this.updateStatus.commit, draining: this.updateStatus.draining, updateRequested: this.updateStatus.updateRequested, autoUpdate: this.updateStatus.autoUpdate, updateTarget: this.updateStatus.serverCommit ?? '', updateState: this.updateStatus.updateState, updateError: this.updateStatus.updateError, ...this.#identity, ...capacity, activeRuns: this.#handlers.activeRuns() } satisfies RunnerMessage))
     this.#helloSent = true
     this.#heartbeat = setInterval(() => {
       // A half-open connection stays OPEN until the kernel gives up, so silence

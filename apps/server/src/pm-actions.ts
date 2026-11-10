@@ -1,4 +1,4 @@
-import { neutralPmCall, type PlanMessage, type PmActionDecision } from '@corral/contracts'
+import type { PlanMessage, PmActionDecision } from '@corral/contracts'
 import { SERVER_ACTOR, type Actor, type PmAction } from '@corral/core'
 import { schema, type Database } from '@corral/db'
 import { and, eq, sql } from 'drizzle-orm'
@@ -88,8 +88,7 @@ export class PmActions {
     } else {
       try {
         if (session.closedAt) throw new Error('This conversation is closed')
-        // A card saved before D31 keeps its old names
-        const { tool, input } = neutralPmCall(action.tool, action.input)
+        const { tool, input } = action
         const prepared = await this.#d.tools.prepare(sessionId, row.runId, tool, input)
         actionProjectId = prepared.projectId
         // The summary is what the human agreed to, so it also catches a task

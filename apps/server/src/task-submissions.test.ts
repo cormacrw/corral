@@ -3,7 +3,6 @@ import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { recordTaskSubmission } from './task-submissions.ts'
-import { FakeRunner } from './fake-runner.ts'
 
 let t: TestApp
 beforeAll(async () => {
@@ -53,20 +52,4 @@ it.each(['direct', 'each_task', 'spike', 'design', 'existing-pr', 'standalone', 
   if (path === 'epic-conflict') await t.db.update(schema.tasks).set({ branch: 'corral/epic-feature' }).where(eq(schema.tasks.id, task.id))
   await expect(recordTaskSubmission(t.db, { taskId: task.id, submittedHeadSha: 'head', baseSha: 'base' })).rejects.toThrow('existing path')
   expect(await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id))).toMatchObject([{ integrationProtocol: 0 }])
-})
-
-it('gives a legacy runner an actionable reason over WebSocket and leaves unsupported work unclaimed', async () => {
-  const { task, project } = await fixture()
-  await t.db.update(schema.tasks).set({ status: 'ready', integrationProtocol: 1 }).where(eq(schema.tasks.id, task.id))
-  const runner = await FakeRunner.connect(t.server!.url)
-  try {
-    const status = t.runner.status().runners.find(r => r.id === 'r1')!
-    expect(status.integrationCompatibilityReason).toEqual(expect.any(String))
-    expect(status.taskIntegrationProtocols).toEqual([])
-    await t.db.update(schema.agents).set({ wakeIntervalSeconds: null })
-    await t.db.update(schema.projects).set({ paused: false }).where(eq(schema.projects.id, project.id))
-    await t.orchestrator.scheduler.schedule()
-    const [row] = await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id))
-    expect(row).toMatchObject({ status: 'ready', leaseRunId: null, leaseEpoch: 0 })
-  } finally { runner.close() }
 })

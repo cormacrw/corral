@@ -1,13 +1,13 @@
 import { SERVER_ACTOR } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
-import { and, eq, isNotNull } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull } from 'drizzle-orm'
 import { appendAudit, auditEvent } from './audit.ts'
 import type { GitHubClient } from './github.ts'
 import { ensureParent } from './parents.ts'
 import { allocateTaskNumber } from './projects.ts'
 import { epicResolutionBranch } from './task-base.ts'
 
-const { acceptanceCriteria, epics, projects, taskIntegrationOperations: operations, tasks } = schema
+const { acceptanceCriteria, agents, epics, projects, taskIntegrationOperations: operations, tasks } = schema
 
 // Turns each epic fix waiting on a conflict into the resolution task a server
 // from before D29 would have made, for proving those still finish. Ready on
@@ -31,5 +31,17 @@ export async function asResolutionTasks(db: Executor, github: GitHubClient): Pro
       return task!.id
     })
     await db.update(operations).set({ resolutionTaskId: id, fix: null, fixBrief: null }).where(eq(operations.id, operation.id))
+  }
+}
+
+// A pass on a server from before D29, which had no fix runs: developers are
+// held back until each conflict it finds is a resolution task
+export async function passBeforeD29(db: Executor, github: GitHubClient, pass: () => Promise<unknown>): Promise<void> {
+  const held = await db.update(agents).set({ paused: true }).where(and(eq(agents.role, 'developer'), eq(agents.paused, false))).returning({ id: agents.id })
+  try {
+    await pass()
+    await asResolutionTasks(db, github)
+  } finally {
+    if (held.length) await db.update(agents).set({ paused: false }).where(inArray(agents.id, held.map(a => a.id)))
   }
 }

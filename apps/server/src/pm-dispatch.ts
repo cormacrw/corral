@@ -119,7 +119,7 @@ export class PmDispatch {
                 .where(and(eq(runs.planSessionId, w.planSessionId), ne(runs.id, w.id), isNotNull(runs.runnerId)))
                 .orderBy(desc(runs.number)).limit(1)
             : []
-          const runnerId = await placement.pickRunner(tx, 'pm', job.runtime, { previous: previous?.runnerId ?? null })
+          const runnerId = await placement.pickRunner(tx, 'pm', job.runtime, previous?.runnerId ?? null)
           // No PM runner free: the turn keeps its job and waits
           if (!runnerId) continue
           let note: string | null = null

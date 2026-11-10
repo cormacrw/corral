@@ -44,10 +44,12 @@ export class FakeRunner {
   // Answers setup jobs the server sends (e.g. cleanup_worktrees). Both CLIs
   // are installed and signed in unless a test says otherwise. Throwing
   // answers with an error; session titles fail unless a test says otherwise,
-  // so the fallback title stays. Release notes jobs are left to each test.
+  // so the fallback title stays, and it has no git to integrate or rebase
+  // with. Release notes jobs are left to each test.
   onJob: (job: Extract<ServerMessage, { type: 'job.request' }>['job']) => SetupJobResult | null | Promise<SetupJobResult | null> = (job) => {
     if (job.kind === 'inbox_message') throw new Error('No message in tests')
     if (job.kind === 'session_title') throw new Error('No title in tests')
+    if (job.kind.startsWith('integration_') || job.kind.startsWith('epic_rebase_')) throw new Error('No git in tests')
     return answerSetupJob(job)
   }
 

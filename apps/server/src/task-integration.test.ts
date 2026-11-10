@@ -1,4 +1,3 @@
-import { TASK_INTEGRATION_PROTOCOL } from '@corral/contracts'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { writeFile } from 'node:fs/promises'
@@ -49,7 +48,7 @@ beforeAll(async () => {
   project = await t.createProject({ repository: TEST_REPOSITORY })
   t.github.branchHead = async (_, branch) => git('rev-parse', '--verify', '--quiet', `refs/heads/${branch}`).catch(() => null)
   t.github.deleteBranch = async (_, branch) => void await git('branch', '-D', branch)
-  runner = await FakeRunner.connect(t.server!.url, [], 'r1', { taskIntegrationProtocols: [TASK_INTEGRATION_PROTOCOL], taskIntegrationExecutor: true })
+  runner = await FakeRunner.connect(t.server!.url)
   const fallback = runner.onJob
   runner.onJob = async (job) => {
     const real = async () => {

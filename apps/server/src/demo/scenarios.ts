@@ -55,7 +55,8 @@ interface DevelopInput {
   summary: string
   note: string
   files?: PullRequestFile[]
-  outcome?: 'pr_opened' | 'pr_updated'
+  // A subtask submits a commit, without a PR of its own
+  outcome?: 'pr_opened' | 'pr_updated' | 'commit_submitted'
   // Evidence per criterion, by position; a note by default
   evidence?: (t: Seeder, job: RunJob, task: Task) => Promise<void>
   checks?: 'success' | 'pending' | 'failure'
@@ -76,7 +77,9 @@ async function develop(t: Seeder, project: Project, task: Task, input: DevelopIn
   if (input.evidence) await input.evidence(t, job, task)
   else for (const c of task.acceptanceCriteria.filter(c => !c.checkedByHuman)) await t.evidenceNote(job, c.id, `Covered by a test: ${c.text.toLowerCase()}.`)
   await input.beforeReport?.()
-  await t.reportDeveloper(job, { outcome: input.outcome ?? 'pr_opened', summary: input.summary, note: input.note, headSha: sha })
+  const outcome = input.outcome ?? 'pr_opened'
+  const baseSha = outcome === 'commit_submitted' ? { baseSha: await t.github.branchHead(project.repository, job.baseBranch!) } : {}
+  await t.reportDeveloper(job, { outcome, summary: input.summary, note: input.note, headSha: sha, ...baseSha })
   return job
 }
 
@@ -248,6 +251,7 @@ async function wishlistParent(t: Seeder, shop: Project): Promise<void> {
   const store = await byTitle('Wishlist store that survives reloads')
   await ship(t, shop, store, {
     head: 'v1',
+    outcome: 'commit_submitted',
     summary: 'Added useWishlist, a Pinia store persisted to localStorage under acme.wishlist, with add, remove, toggle and has.',
     note: 'Added the persisted wishlist store',
     files: [patch('src/stores/wishlist.ts', ['+export const useWishlist = defineStore(\'wishlist\', () => {', '+  const ids = useLocalStorage<string[]>(\'acme.wishlist\', [])', '+  const toggle = (id: string) => has(id) ? remove(id) : add(id)', '+  return { ids, add, remove, toggle, has }', '+})'], 'added')],
@@ -258,6 +262,7 @@ async function wishlistParent(t: Seeder, shop: Project): Promise<void> {
   const button = await byTitle('Heart button on product cards')
   await ship(t, shop, button, {
     head: 'v1',
+    outcome: 'commit_submitted',
     minutes: 50,
     summary: 'Added WishlistButton to ProductCard and a saved count in the header. The toast names the product.',
     note: 'Added the heart button and header count',
@@ -277,6 +282,7 @@ async function wishlistParent(t: Seeder, shop: Project): Promise<void> {
   const page = await byTitle('Wishlist page')
   await ship(t, shop, page, {
     head: 'v1',
+    outcome: 'commit_submitted',
     summary: 'Added /wishlist with a row per saved product, Remove and Add to bag.',
     note: 'Added the wishlist page',
     files: [patch('src/pages/wishlist.vue', ['+<template>', '+  <h1>Your wishlist</h1>', '+  <WishlistRow v-for="p in products" :key="p.id" :product="p" @remove="wishlist.remove(p.id)" />', '+</template>'], 'added')],
@@ -286,6 +292,8 @@ async function wishlistParent(t: Seeder, shop: Project): Promise<void> {
     },
     review: 'Both criteria shown. Remove is optimistic, which is fine for local data.'
   })
+  // Its integration lands on the next pass
+  await t.mergePass()
   await t.advance('20m')
 
   // All three are in: the parent's PR opens and its reviewer checks them together

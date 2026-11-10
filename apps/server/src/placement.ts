@@ -1,4 +1,4 @@
-import { integrationCompatibilityReason, type RunJob, type RunnerRole } from '@corral/contracts'
+import type { RunJob, RunnerRole } from '@corral/contracts'
 import { ACTIVE_RUN_STATES } from '@corral/core'
 import { schema, type Executor } from '@corral/db'
 import { and, count, eq, inArray } from 'drizzle-orm'
@@ -48,9 +48,8 @@ export class Placement {
   // An online runner that takes the role, has a signed-in CLI for the runtime
   // and a free slot, the emptiest first. A run with a previous runner that's
   // still online waits for that one.
-  async pickRunner(tx: Executor, role: RunnerRole, runtime: string, options: { previous?: string | null, integrationProtocol?: number, epicFix?: boolean } = {}): Promise<string | null> {
-    const { previous = null, integrationProtocol = 0, epicFix = false } = options
-    const fit = this.#d.runner.available().filter(r => !r.toolContractReason && r.roles.includes(role) && r.runtimes.includes(runtime) && !integrationCompatibilityReason(integrationProtocol, r.taskIntegrationProtocols) && (!epicFix || r.epicFixExecutor))
+  async pickRunner(tx: Executor, role: RunnerRole, runtime: string, previous: string | null = null): Promise<string | null> {
+    const fit = this.#d.runner.available().filter(r => r.roles.includes(role) && r.runtimes.includes(runtime))
     if (!fit.length) return null
     const busy = await tx.select({ runnerId: runs.runnerId, n: count() }).from(runs)
       .where(and(inArray(runs.state, [...ACTIVE_RUN_STATES]), inArray(runs.runnerId, fit.map(r => r.id))))

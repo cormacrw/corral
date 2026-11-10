@@ -15,7 +15,7 @@ is invalid. D20 designers have role=designer and taskType=design, on their own
 named schema, and report through `DESIGNER_RUN_OUTCOMES`.
 
 taskType, designPinned and baseBranch remain optional for older servers.
-Hello's `toolContract` is compared separately; see
+Hello's required `toolContract` is compared separately; see
 [runner versions](runner-updates.md#tool-contracts-cor-435).
 Older hello metadata remains decodable so protocol-version mismatches still
 close with `RUNNER_CLOSE_CODES.protocol` (4000) and the server's protocol and
@@ -59,14 +59,10 @@ interrupted runs have no outcome, `rateLimitResetAt` may be null, and
 finished run directly must set `endedAt`.
 
 
-## Task integration negotiation (COR-286)
+## Task integration (COR-286)
 
-Envelope protocol stays 3. Optional hello `taskIntegrationProtocols` advertises
-exact supported integration versions; missing means legacy only. Task jobs
-carry optional `integrationProtocol` (missing/0 is legacy). Placement and the
-last dispatch check refuse unsupported requirements; welcome and runner status
-provide `integrationCompatibilityReason` with an update instruction. Runners
-must not advertise execution they don't implement. Hello's optional
-`taskIntegrationExecutor` says the runner takes the `integration_*` setup jobs;
-missing means it doesn't, whatever protocols it lists. See
-[PR-free task state](pr-free-task-state.md) for the staged rollout.
+Runner protocol 5 implies every capability: a runner on it takes PR-free runs,
+the `integration_*` and `epic_rebase_*` setup jobs and task fix runs, so hello
+advertises none. A runner on an older protocol is refused at hello (close 4000)
+and gets nothing. Task jobs carry optional `integrationProtocol` (missing/0 is
+the task-PR path). See [PR-free task state](pr-free-task-state.md).

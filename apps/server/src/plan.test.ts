@@ -634,57 +634,56 @@ describe('plan sessions', () => {
     expect(await getTask(ref)).toMatchObject({ title: 'Second cut', status: 'ready' })
   })
 
-  it('spans several epics, keeping each one a revision still names and deleting the one it drops', async () => {
+  it('spans several tasks with subtasks, keeping each one a revision still names and deleting the one it drops', async () => {
     const project = await t.createProject()
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
     const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan accounts' }).then(r => r.json()) as PlanSessionDetail
     const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
-    const epicsIn = [{ key: 'e1', title: 'Login' }, { key: 'e2', title: 'Billing' }, { key: 'e3', title: 'Audit' }]
+    const parents = [{ key: 'e1', title: 'Login' }, { key: 'e2', title: 'Billing' }, { key: 'e3', title: 'Audit' }]
+    const subtask = (key: string, parent: string, title: string, dependsOn: string[] = []) => ({ key, parent, title, description: 'Build it', type: 'task', acceptanceCriteria: ['It works'], dependsOn })
 
-    // A task can only name an epic the plan gives
-    const unknown = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', { ...plan([]), epics: epicsIn.slice(0, 1), tasks: plan([{}, {}]).tasks.map((x, i) => ({ ...x, epic: i === 0 ? 'e1' : 'e9' })) })
+    // A subtask can only name a parent the plan gives
+    const unknown = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', { ...plan([]), parents: parents.slice(0, 1), tasks: [subtask('t1', 'e1', 'Login form'), subtask('t2', 'e1', 'Logout'), subtask('t3', 'e9', 'Lost')] })
     expect(unknown).toMatchObject({ ok: false, error: expect.stringContaining('unknown_epic') })
     expect(await t.db.select().from(tasks).where(eq(tasks.projectId, project.id))).toEqual([])
 
     const v1 = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', {
-      ...plan([{ title: 'Login form' }, { title: 'Invoices', dependsOn: ['t1'] }, { title: 'Audit log' }]),
-      epics: epicsIn,
-      tasks: plan([{ title: 'Login form' }, { title: 'Invoices', dependsOn: ['t1'] }, { title: 'Audit log' }]).tasks.map((x, i) => ({ ...x, epic: `e${i + 1}` }))
+      ...plan([]),
+      parents,
+      tasks: [subtask('t1', 'e1', 'Login form'), subtask('t2', 'e1', 'Logout'), subtask('t3', 'e2', 'Invoices', ['t1']), subtask('t4', 'e2', 'Receipts'), subtask('t5', 'e3', 'Audit log'), subtask('t6', 'e3', 'Audit export')]
     })
     expect(v1).toMatchObject({ ok: true })
     const first = (await session(created.id)).plans[0]!
     expect(first.epics.map(e => [e.key, e.title])).toEqual([['e1', 'Login'], ['e2', 'Billing'], ['e3', 'Audit']])
     expect(first.epicId).toBe(first.epics[0]!.id)
-    expect(first.tasks.map(x => x.epicId)).toEqual(first.epics.map(e => e.id))
+    const [login, billing, audit] = first.epics.map(e => e.id)
+    expect(first.tasks.map(x => x.epicId)).toEqual([login, login, billing, billing, audit, audit])
 
     // v2 renames Billing, moves the login form into it and drops Audit
     const v2 = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', {
       ...plan([]),
-      epics: [{ key: 'e1', title: 'Login' }, { key: 'e2', title: 'Payments' }],
-      tasks: [
-        { key: 't1', epic: 'e2', title: 'Login form', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] },
-        { key: 't2', epic: 'e2', title: 'Invoices', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'], dependsOn: ['t1'] },
-        { key: 't4', epic: 'e1', title: 'Logout', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] }
-      ]
+      parents: [{ key: 'e1', title: 'Login' }, { key: 'e2', title: 'Payments' }],
+      tasks: [subtask('t1', 'e2', 'Login form'), subtask('t3', 'e2', 'Invoices', ['t1']), subtask('t4', 'e2', 'Receipts'), subtask('t2', 'e1', 'Logout'), subtask('t7', 'e1', 'Reset password')]
     })
-    expect(v2).toMatchObject({ ok: true, result: { tasks: [{ key: 't1', change: 'changed' }, { key: 't2', change: 'unchanged' }, { key: 't4', change: 'added' }, { key: 't3', change: 'removed' }] } })
+    expect(v2).toMatchObject({ ok: true, result: { tasks: expect.arrayContaining([{ key: 't1', change: 'changed' }, { key: 't3', change: 'unchanged' }, { key: 't7', change: 'added' }, { key: 't5', change: 'removed' }, { key: 't6', change: 'removed' }].map(change => expect.objectContaining(change))) } })
     const second = (await session(created.id)).plans[1]!
-    expect(second.epics.map(e => [e.key, e.id, e.title])).toEqual([['e1', first.epics[0]!.id, 'Login'], ['e2', first.epics[1]!.id, 'Payments']])
-    expect(second.tasks.filter(x => x.ref).map(x => x.epicId)).toEqual([first.epics[1]!.id, first.epics[1]!.id, first.epics[0]!.id])
-    expect(await t.db.select().from(epics).where(eq(epics.id, first.epics[2]!.id))).toEqual([])
+    expect(second.epics.map(e => [e.key, e.id, e.title])).toEqual([['e1', login, 'Login'], ['e2', billing, 'Payments']])
+    expect(second.tasks.filter(x => x.ref).map(x => x.epicId)).toEqual([billing, billing, billing, login, login])
+    expect(await t.db.select().from(epics).where(eq(epics.id, audit!))).toEqual([])
     await endTurn(job, 'Proposed.')
   })
 
-  it('gives a task that leaves out epic no epic, even when the plan has epics', async () => {
+  it('gives a task that leaves out parent no task, even when the plan has parents', async () => {
     const project = await t.createProject()
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
     const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan login' }).then(r => r.json()) as PlanSessionDetail
     const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
     const proposed = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', {
       ...plan([]),
-      epics: [{ key: 'e1', title: 'Login' }],
+      parents: [{ key: 'e1', title: 'Login' }],
       tasks: [
-        { key: 't1', epic: 'e1', title: 'Login form', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] },
+        { key: 't1', parent: 'e1', title: 'Login form', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] },
+        { key: 't3', parent: 'e1', title: 'Logout', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] },
         { key: 't2', title: 'Fix typo', description: 'Fix it', type: 'bug', acceptanceCriteria: ['It is spelt right'] }
       ]
     })
@@ -692,9 +691,9 @@ describe('plan sessions', () => {
     const [v1] = (await session(created.id)).plans
     expect(v1!.epics.map(e => e.title)).toEqual(['Login'])
     expect(v1!.epicId).toBe(v1!.epics[0]!.id)
-    expect(v1!.tasks.map(x => [x.title, x.epicId])).toEqual([['Login form', v1!.epics[0]!.id], ['Fix typo', null]])
-    const rows = await t.db.select().from(tasks).where(eq(tasks.projectId, project.id)).orderBy(tasks.number)
-    expect(rows.map(r => [r.title, r.epicId])).toEqual([['Login form', v1!.epics[0]!.id], ['Fix typo', null]])
+    expect(v1!.tasks.map(x => [x.title, x.epicId])).toEqual([['Login form', v1!.epics[0]!.id], ['Logout', v1!.epics[0]!.id], ['Fix typo', null]])
+    const rows = await t.db.select().from(tasks).where(and(eq(tasks.projectId, project.id), ne(tasks.status, 'parent'))).orderBy(tasks.number)
+    expect(rows.map(r => [r.title, r.epicId])).toEqual([['Login form', v1!.epics[0]!.id], ['Logout', v1!.epics[0]!.id], ['Fix typo', null]])
     expect(await t.db.select().from(epics).where(eq(epics.projectId, project.id))).toHaveLength(1)
     await endTurn(job, 'Proposed.')
   })
@@ -712,34 +711,34 @@ describe('plan sessions', () => {
     async function propose(reviewMode?: string, title = 'Login') {
       const input = {
         ...plan([]),
-        epics: [{ key: 'login', title, ...(reviewMode && { reviewMode }) }],
-        tasks: [{ ...plan([{}]).tasks[0]!, epic: 'login' }]
+        parents: [{ key: 'login', title, ...(reviewMode && { reviewMode }) }],
+        tasks: plan([{}, {}]).tasks.map(x => ({ ...x, parent: 'login' }))
       }
       return runner.call(job.runId, job.leaseEpoch, 'propose_plan', input)
     }
     expect(await propose('each_task')).toMatchObject({ ok: true })
     // A Draft revision with no PR work can still change the mode.
-    expect(await propose('epic')).toMatchObject({ ok: true })
+    expect(await propose('parent')).toMatchObject({ ok: true })
     const draft = await request('GET', `/api/plan/sessions/${created.id}`) as PlanSessionDetail
     const latest = draft.plans.at(-1)!
     const epicId = latest.epics[0]!.id
-    expect(latest).toMatchObject({ status: 'proposed', epics: [{ reviewMode: 'epic' }], tasks: [{ status: 'draft' }] })
+    expect(latest).toMatchObject({ status: 'proposed', epics: [{ reviewMode: 'epic' }], tasks: [{ status: 'draft' }, { status: 'draft' }] })
     await endTurn(job, 'Ready for approval.')
     const approved = await request('POST', `/api/plan/plans/${latest.id}/approve`) as Plan
-    expect(approved).toMatchObject({ status: 'approved', tasks: [{ status: 'ready' }] })
-    await t.db.update(tasks).set({ status: 'merged' }).where(eq(tasks.id, approved.tasks[0]!.taskId!))
+    expect(approved).toMatchObject({ status: 'approved', tasks: [{ status: 'ready' }, { status: 'ready' }] })
+    await t.db.update(tasks).set({ status: 'merged' }).where(inArray(tasks.id, approved.tasks.map(x => x.taskId!)))
     await request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Revisit the plan' })
     job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
     const before = await request('GET', `/api/plan/sessions/${created.id}`) as PlanSessionDetail
     for (const mode of ['direct', 'each_task']) {
       expect(await propose(mode, 'Must roll back')).toMatchObject({ ok: false, error: expect.stringContaining('review mode') })
       expect((await request('GET', `/api/plan/sessions/${created.id}`) as PlanSessionDetail).plans).toEqual(before.plans)
-      expect(await request('GET', `/api/epics/${epicId}`)).toMatchObject({ reviewMode: 'epic', title: 'Login', tasks: [{ status: 'merged' }] })
+      expect(await request('GET', `/api/epics/${epicId}`)).toMatchObject({ reviewMode: 'epic', title: 'Login', tasks: [{ status: 'merged' }, { status: 'merged' }] })
     }
     // The mode itself, not the fact of revising a live epic, is locked.
-    expect(await propose('epic', 'Allowed metadata')).toMatchObject({ ok: true })
+    expect(await propose('parent', 'Allowed metadata')).toMatchObject({ ok: true })
     expect(await propose(undefined, 'Mode omitted')).toMatchObject({ ok: true })
-    expect(await request('GET', `/api/epics/${epicId}`)).toMatchObject({ reviewMode: 'epic', title: 'Mode omitted', tasks: [{ status: 'merged' }] })
+    expect(await request('GET', `/api/epics/${epicId}`)).toMatchObject({ reviewMode: 'epic', title: 'Mode omitted', tasks: [{ status: 'merged' }, { status: 'merged' }] })
     const after = await request('GET', `/api/plan/sessions/${created.id}`) as PlanSessionDetail
     expect(after.plans).toHaveLength(before.plans.length + 2)
     expect(after.plans.at(-1)).toMatchObject({ status: 'proposed', epics: [{ reviewMode: 'epic' }] })
@@ -752,10 +751,10 @@ describe('plan sessions', () => {
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
     const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan login' }).then(r => r.json()) as PlanSessionDetail
     const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
-    const propose = (epicsIn: object[]) => runner.call(job.runId, job.leaseEpoch, 'propose_plan', {
+    const propose = (parentsIn: object[]) => runner.call(job.runId, job.leaseEpoch, 'propose_plan', {
       ...plan([]),
-      epics: epicsIn,
-      tasks: epicsIn.map((_, i) => ({ key: `t${i + 1}`, epic: `e${i + 1}`, title: `Task ${i + 1}`, description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] }))
+      parents: parentsIn,
+      tasks: parentsIn.flatMap((_, i) => ['a', 'b'].map(part => ({ key: `t${i + 1}${part}`, parent: `e${i + 1}`, title: `Task ${i + 1}${part}`, description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] })))
     })
 
     const bad = await propose([{ key: 'e1', title: 'Login', reviewMode: 'later' }])
@@ -1022,8 +1021,8 @@ describe('plan sessions', () => {
     // A lone epic under a new key is the same epic, so the tasks are unchanged
     const v2 = await runner.call(job.runId, job.leaseEpoch, 'propose_plan', {
       ...plan([]),
-      epics: [{ key: 'e1', title: 'Sign in' }],
-      tasks: plan([{ title: 'Login form' }, { title: 'Logout' }]).tasks.map(x => ({ ...x, epic: 'e1' }))
+      parents: [{ key: 'e1', title: 'Sign in' }],
+      tasks: plan([{ title: 'Login form' }, { title: 'Logout' }]).tasks.map(x => ({ ...x, parent: 'e1' }))
     })
     expect(v2).toMatchObject({ ok: true, result: { tasks: [{ key: 't1', change: 'unchanged' }, { key: 't2', change: 'unchanged' }] } })
     const second = (await session(created.id)).plans[1]!
@@ -1050,7 +1049,7 @@ describe('plan sessions', () => {
     const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Plan export' }).then(r => r.json()) as PlanSessionDetail
     const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
     const exports = plan([{ title: 'CSV export' }, { key: 't2', title: 'Export button', dependsOn: ['t1'] }])
-    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', { ...exports, epics: [{ key: 'e1', title: 'Login' }], tasks: exports.tasks.map(x => ({ ...x, epic: 'e1' })) })).toMatchObject({ ok: true })
+    expect(await runner.call(job.runId, job.leaseEpoch, 'propose_plan', { ...exports, parents: [{ key: 'e1', title: 'Login' }], tasks: exports.tasks.map(x => ({ ...x, parent: 'e1' })) })).toMatchObject({ ok: true })
     await endTurn(job, 'Proposed.')
     const [proposed] = (await session(created.id)).plans
 
@@ -1308,9 +1307,12 @@ describe('plan sessions', () => {
     await t.request('PATCH', `/api/projects/${project.slug}`, { requiredChecks: ['lint'] })
     const created = await t.request('POST', '/api/plan/sessions', { projectId: project.id, text: 'Ship it' }).then(r => r.json()) as PlanSessionDetail
     const job = (await runner.next('run.assign', m => m.job.role === 'pm' && m.job.projectId === project.id)).job
-    await runner.call(job.runId, job.leaseEpoch, 'propose_plan', { ...plan([]), epics: [{ key: 'e1', title: 'Ship' }], tasks: plan([{ title: 'Only task' }]).tasks.map(x => ({ ...x, epic: 'e1' })) })
+    await runner.call(job.runId, job.leaseEpoch, 'propose_plan', plan([{ title: 'Only task' }]))
     await endTurn(job, 'Proposed.')
     const planId = (await session(created.id)).plans[0]!.id
+    // Its only task is in a direct epic, so it merges through its own PR
+    const [epic] = await t.db.insert(epics).values({ projectId: project.id, title: 'Ship', reviewMode: 'direct', createdBy: t.actor }).returning()
+    await t.db.update(tasks).set({ epicId: epic!.id }).where(eq(tasks.projectId, project.id))
     await t.request('POST', `/api/plan/sessions/${created.id}/read`)
     await t.request('POST', `/api/plan/plans/${planId}/approve`)
 

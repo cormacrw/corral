@@ -1,5 +1,5 @@
 import { AGENT_TOOL_CONTRACT } from '@corral/contracts/agent-tools'
-import { RUNNER_HEARTBEAT_MS, RUNNER_PROTOCOL_VERSION, TASK_INTEGRATION_PROTOCOL, type RunnerCapacity, type RunnerMessage, type ServerMessage } from '@corral/contracts'
+import { RUNNER_HEARTBEAT_MS, RUNNER_PROTOCOL_VERSION, type RunnerCapacity, type RunnerMessage, type ServerMessage } from '@corral/contracts'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -115,7 +115,6 @@ describe('runner update status on the wire', () => {
   it('learns the server commit even when refused before welcome', async () => {
     await start(false, (socket, hello) => {
       expect(hello.protocol).toBe(RUNNER_PROTOCOL_VERSION)
-      expect(hello.taskIntegrationProtocols).toEqual([TASK_INTEGRATION_PROTOCOL])
       socket.close(4000, JSON.stringify({ protocol: RUNNER_PROTOCOL_VERSION + 1, commit: 'new' }))
     })
     await vi.waitFor(async () => expect(await status()).toMatchObject({ commit: 'old', serverCommit: 'new', behind: true, idle: true, activeRunCount: 0 }), { timeout: 5000 })
