@@ -36,7 +36,7 @@ Every runner on the current build takes PR-free developer and reviewer runs, the
 | Merged means | The PR squash-merged into the task's branch | The commit carrying its `Corral-Submission` trailer was read back from the task's branch |
 | Human review | On the task | On the task's final approval (`humanReview` and human checks are ticked there) |
 
-A task with neither `pr` nor `submission` hasn't submitted yet. At `integration_protocol` 0 it can still go either way, depending on the runner its developer run lands on. At `1` it's already PR-free, because selection happens when the developer run starts. Task fixes have no separate subtask: their developer runs have `epic_id` and `operation_id`.
+A task with neither `pr` nor `submission` hasn't submitted yet. At `integration_protocol` 0 it can still go either way: its next developer run selects protocol 1 unless its branch already has an open PR, or GitHub can't say (D27). At `1` it's already PR-free, because selection happens when the developer run starts. Task fixes have no separate subtask: their developer runs have `epic_id` and `operation_id`.
 
 A task's PR description and its review in the Inbox list both kinds together, with each task's PR or commits and its evidence.
 
