@@ -588,6 +588,34 @@ docker exec corral-server node -e "fetch('http://127.0.0.1:4100/api/runner').the
 
 ## Status
 
-Phase 1 is complete. Nothing has been removed yet.
+The approved groups have all merged. Everything above is the inventory as it was written; this section records the outcome.
 
-**Safety conditions (2026-11-08):** Cormac confirmed nothing is in flight on the live instance, so the conditions for Q1–Q8 are treated as met: no old resolution or hand-off conflict tasks, no `conflict` review state, no pending pre-D31 PM cards and no protocol-0 work in progress. The SQL was not run. The runner condition is met when the deployed runners are redeployed with the server, which a protocol bump enforces anyway. This section will record what was removed, what was kept and why, and what's waiting on a safety condition as each approved group merges.
+**Safety conditions (2026-11-08):** Cormac confirmed nothing was in flight on the live instance, so the conditions for Q1–Q8 were treated as met: no old resolution or hand-off conflict tasks, no `conflict` review state, no pending pre-D31 PM cards and no protocol-0 work in progress. The SQL was not run. The runner condition is enforced by the protocol bump in #386: a runner that hasn't been redeployed is refused at hello.
+
+### Removed
+
+| PR | Group | What went |
+|---|---|---|
+| #380 | G2 | Doc contradictions: the default review mode, D33 Activity lines, Nuxt UI names in the design docs, `hc` and the `gh` token in architecture.md, stale D9/D11/D13 text. Settled open recommendations, PRD banners, the wiki index, unused env vars and rename damage |
+| #381 | G1 | Dead code: unused exports, near-duplicate helpers, `packBundle` moved to tests, `@tiptap/markdown`, repeated prompt fragments and stale contract descriptions (D1–D4) |
+| #382 | G6 | The PM's duplicated tool catalogue: one copy in the first-turn intro (D4.1) |
+| #386 | G3 | Runner capability flags, `COMPATIBLE_TOOL_CONTRACTS`, old PM tool names and arguments, the old `propose_plan` input and hello without a tool contract (L1–L5). Runner protocol is now 5, hello advertises no capabilities, and a runner with a different tool contract gets no runs or setup jobs |
+| #383 | G4 | Resolution tasks (L6), COR-166 hand-off conflict tasks (L7) and developer-authored design sessions (L9), with their prompts, labels and tests |
+| #384 | G5 | The `conflict` review state, `epics.conflict_files` and `epics.rebase_requested` (L8), and the run states `starting`, `waiting_for_input` and `stopping` (D1), in migration `0068_kind_shinobi_shaw.sql` |
+| #385 | G8 | The `each_task` review mode as input (L11). The default review mode is `epic`, as the schema always said |
+| #387 | G9 | `decisions.md` rewritten as current state (1,037 → 697 lines), with history moved to [decisions-history.md](decisions-history.md) |
+
+### Deliberately kept
+
+- **`direct` review mode:** it's live and selectable.
+- **`legacyRunnerHelloSchema`:** it's what lets an old runner receive a readable refusal.
+- **`integration_protocol`:** it still separates PR tasks from PR-free tasks.
+- **`task_kind = 'conflict'`, `resolution_task_id`, `resolution_review`, the `rebase_handed_off` / `rebase_resolving` audit text, and `design_submitted` in developer outcomes:** history rows depend on them.
+- **The stored `each_task` value:** merged tasks still carry it, and the web app labels it as retired.
+- **The `epic` / `epics` / `parent` identifiers:** out of scope (D31 keeps them internal).
+- **`pm-route-coverage.ts`:** the D30 guard.
+- **The vendored shadcn exports:** D32 says `components/ui` isn't edited.
+
+### Waiting
+
+- **G7 — the protocol-0 PR path for `epic`-mode subtasks (L10).** On hold for a decision. A subtask whose branch already has an open PR, or whose PR GitHub can't confirm, still opens a PR into the task's branch instead of submitting a commit (`run-jobs.ts`, `#canSkipTaskPr`). D27 describes it as it is. Retiring it means deciding what happens to such a branch: refuse it, or close its PR. With it would go the PR-into-the-task's-branch machinery that `each_task` used to share.

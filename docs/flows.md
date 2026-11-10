@@ -103,7 +103,7 @@ The PM proposes all new work with `propose_plan`, even a single task, so the hum
 
 ## 2. A task from Ready to Merged
 
-The PR steps below describe standalone/direct tasks and the legacy task-PR path. D27's COR-286 amendment defines the PR-free task path and its staged rollout; section 4 describes it. Existing task PRs keep these steps through completion, including revisions. Spikes and designs retain their explicit exceptions below.
+The PR steps below describe standalone and `direct` tasks, and subtasks that still take a PR into the task's branch (protocol 0, D27). D27 defines the PR-free subtask path, and section 4 describes it. Spikes and designs retain their explicit exceptions below.
 
 Remember the D10 rule: **status = whose turn it is; the lease = whether a run is active.** The scheduler starts a run for a task in Ready, In progress or Agent review that has no lease, if its group has capacity.
 
@@ -321,7 +321,7 @@ With #44 merged, every board task is Merged again, and the same task PR goes bac
 
 ### Step 6 — Rebase before merge, and a conflict
 
-Before merging, the server compares the task's branch with the target branch through GitHub's compare API, because `mergeable_state` only says `behind` when branch protection requires it. This is the last of the checkpoints from D27's COR-290 amendment: the same check runs between task integrations, before integration review and while the task waits for the human. The target branch has moved, so the server journals a rebase operation. It holds the task's writer lock, the same one task integration uses, until it finishes.
+Before merging, the server compares the task's branch with the target branch through GitHub's compare API, because `mergeable_state` only says `behind` when branch protection requires it. This is the last of D27's checkpoints (COR-290): the same check runs between task integrations, before integration review and while the task waits for the human. The target branch has moved, so the server journals a rebase operation. It holds the task's writer lock, the same one task integration uses, until it finishes.
 
 The runner rebases the task's commits onto the target commit on a throwaway candidate, touching no shared ref.
 
@@ -346,6 +346,6 @@ The final gate check (section 2, step 8) runs against live GitHub data for the t
 
 Then:
 
-- E7 is **done** (D22 as amended by D27). Tasks with subtasks that depend on it wake at once, as do tasks elsewhere that depended on #41–#45.
+- E7 is **done** (D22). Tasks with subtasks that depend on it wake at once, as do tasks elsewhere that depended on #41–#45.
 - "The task's PR merged" is recorded on the task's activity.
 - The server deletes the task's branch, and the runner removes any worktrees left for it.
