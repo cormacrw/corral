@@ -30,8 +30,8 @@ describe('the actionable Inbox', () => {
       await applyTransition(tx, task, project, { type: 'run_failed' }, server, { event: 'run_failed', runId: crypto.randomUUID(), error: 'exit 1' })
     })
   }
-  async function reviewEpic(projectId: string, reviewState: 'human_review' | 'conflict') {
-    const [epic] = await t.db.insert(epics).values({ projectId, title: 'Feature', createdBy: t.actor, reviewMode: 'epic', branch: 'corral/epic', prNumber: 7, prHeadSha: 'head', reviewState, conflictFiles: reviewState === 'conflict' ? ['a.ts'] : null }).returning()
+  async function reviewEpic(projectId: string, syncError: string | null = null) {
+    const [epic] = await t.db.insert(epics).values({ projectId, title: 'Feature', createdBy: t.actor, reviewMode: 'epic', branch: 'corral/epic', prNumber: 7, prHeadSha: 'head', reviewState: 'human_review', syncError }).returning()
     return epic!
   }
 
@@ -71,7 +71,7 @@ describe('the actionable Inbox', () => {
 
   it('shows an epic awaiting approval once, with its integrated tasks and internal events in Activity only', async () => {
     const project = await t.createProject()
-    const epic = await reviewEpic(project.id, 'human_review')
+    const epic = await reviewEpic(project.id)
     const first = await t.createTask(project.slug, { title: 'One' })
     const second = await t.createTask(project.slug, { title: 'Two' })
     await t.db.update(tasks).set({ status: 'merged', epicId: epic.id }).where(eq(tasks.id, first.id))
@@ -88,13 +88,13 @@ describe('the actionable Inbox', () => {
     expect(activity.filter(i => i.taskId === first.id).map(i => i.type)).toEqual(['activity', 'activity'])
   })
 
-  it('shows one recovery decision for an epic whose review gave up, or that conflicts', async () => {
+  it('shows one recovery decision for an epic whose review gave up, or whose rebase stopped', async () => {
     const project = await t.createProject()
-    const gaveUp = await reviewEpic(project.id, 'human_review')
+    const gaveUp = await reviewEpic(project.id)
     const done = await t.createTask(project.slug)
     await t.db.update(tasks).set({ status: 'merged', epicId: gaveUp.id }).where(eq(tasks.id, done.id))
     await t.db.insert(auditLog).values({ projectId: project.id, actor: server, action: 'epic.pr', detail: { epicId: gaveUp.id, event: 'review_failed', headSha: 'head', summary: 'Stopped after 3 failures' } })
-    const conflict = await reviewEpic(project.id, 'conflict')
+    const conflict = await reviewEpic(project.id, 'Rebasing failed 3 times')
     const items = await mine(project.id)
     expect(items.map(i => i.id).sort()).toEqual([gaveUp.id, conflict.id].sort())
     expect(items.find(i => i.id === gaveUp.id)).toMatchObject({ type: 'epic_review', body: 'Stopped after 3 failures' })

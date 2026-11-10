@@ -389,7 +389,7 @@ describe('InboxEpicPanel', () => {
     expect(wrapper.get('[data-testid="inbox-epic-squash"] a').attributes('href')).toBe('https://github.com/o/r/commit/5d4c3b2a1f0e')
   })
 
-  const conflict = (fields: object) => ({ ...base, type: 'epic_conflict', sender: { name: 'Corral', role: 'system' }, headSha: 'head', targetBranch: 'main', files: ['a.ts'], since: null, newArtifacts: [], ...fields }) as unknown as EpicConflictItem
+  const conflict = (fields: object) => ({ ...base, type: 'epic_conflict', sender: { name: 'Corral', role: 'system' }, headSha: 'head', targetBranch: 'main', since: null, newArtifacts: [], ...fields }) as unknown as EpicConflictItem
 
   it('retries a stopped parent, showing the failure', async () => {
     const wrapper = render(conflict({ stopped: { fix: 'ci', error: '3 fixes have failed' }, files: [] }))
@@ -401,12 +401,11 @@ describe('InboxEpicPanel', () => {
     expect(review).toHaveBeenCalledWith('e', { action: 'rebase', headSha: 'head' })
   })
 
-  it('keeps a stopped parent\'s failure, files and question when the review can\'t load', async () => {
+  it('keeps a stopped parent\'s failure when the review can\'t load', async () => {
     getReview.mockRejectedValue(new Error('runner offline'))
     const wrapper = render(conflict({ stopped: { fix: 'ci', error: '3 fixes have failed' } }))
     await flushPromises()
     expect(wrapper.text()).toContain('3 fixes have failed')
-    expect(wrapper.text()).toContain('a.ts')
     expect(wrapper.text()).toContain('runner offline')
   })
 })

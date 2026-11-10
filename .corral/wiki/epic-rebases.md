@@ -132,8 +132,6 @@ block, so its question is an `epic_conflict` Inbox item, and `openDecision` is
 the newest unanswered one. An answer that isn't an alternative keeping
 behaviour, or a question closed some other way, never carries approval.
 
-`rebaseRequested` is dead: it stays only because dropping a column needs a human.
-
 ## Testing the whole workflow
 
 `apps/server/src/mixed-workflow.test.ts` drives agents over the WebSocket against

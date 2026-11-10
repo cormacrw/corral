@@ -121,7 +121,7 @@ export async function retrySync(db: Database, epicId: string, actor: Actor, now:
   await db.transaction(async (tx) => {
     const [epic] = await tx.select().from(epics).where(eq(epics.id, epicId)).for('update')
     if (!epic) throw notFound()
-    if (!epic.syncError && epic.reviewState !== 'conflict') throw new ApiFailure(409, { code: 'conflict', constraint: 'epic_sync_not_failed' })
+    if (!epic.syncError) throw new ApiFailure(409, { code: 'conflict', constraint: 'epic_sync_not_failed' })
     await tx.update(epics).set({ syncError: null, syncRetriedAt: now, updatedAt: now }).where(eq(epics.id, epicId))
     await tx.update(operations).set({ pushAttempts: 0, fixAttempts: 0 }).where(and(eq(operations.epicId, epicId), inArray(operations.state, [...ACTIVE_OPERATION_STATES])))
     const fix = (await activeRebase(tx, epicId))?.fix ?? undefined

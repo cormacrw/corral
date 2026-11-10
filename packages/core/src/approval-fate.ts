@@ -2,9 +2,8 @@ import type { EpicReviewState } from './project.ts'
 import { shortSha } from './ids.ts'
 import type { EpicFixKind, EpicFixReport, EpicRebaseDecision } from './review.ts'
 
-// The states in which a task's PR head carries an approval worth keeping.
-// Legacy `conflict` rows got there from one of the other two.
-export const APPROVED_STATES: readonly (EpicReviewState | null)[] = ['human_review', 'ready_to_merge', 'conflict']
+// The states in which a task's PR head carries an approval worth keeping
+export const APPROVED_STATES: readonly (EpicReviewState | null)[] = ['human_review', 'ready_to_merge']
 
 export interface ApprovalFate {
   kept: boolean

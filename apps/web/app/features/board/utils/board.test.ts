@@ -325,8 +325,7 @@ describe('parentStage', () => {
   const merged = [{ status: 'merged' as const }, { status: 'merged' as const }]
   const allMerged = { mergedCount: 2 }
 
-  it('blocks on a conflict or a Blocked or Failed task, ahead of everything else', () => {
-    expect(parentStage(epic({ ...allMerged, reviewState: 'conflict' }), merged)).toBe('blocked')
+  it('blocks on a Blocked or Failed task, ahead of everything else', () => {
     expect(parentStage(epic(), [{ status: 'merged' }, { status: 'blocked' }])).toBe('blocked')
     expect(parentStage(epic({ reviewState: 'human_review' }), [{ status: 'failed' }, { status: 'merged' }])).toBe('blocked')
   })
@@ -473,7 +472,7 @@ describe('overview epic filters', () => {
     expect(matchesOverviewEpicFilter({ ...epic, taskCount: 0 }, [], 'in-progress')).toBe(false)
     expect(matchesOverviewEpicFilter({ ...epic, taskCount: 0 }, [], 'closed')).toBe(false)
   })
-  it.each(['open', 'in_review', 'human_review', 'ready_to_merge', 'conflict', 'merged'] as const)('uses the done stage for epic PR state %s', (reviewState) => {
+  it.each(['open', 'in_review', 'human_review', 'ready_to_merge', 'merged'] as const)('uses the done stage for epic PR state %s', (reviewState) => {
     const reviewing = { ...epic, reviewMode: 'epic' as const, reviewState, mergedCount: 1 }
     const tasks = [{ status: 'merged' as const }]
     const done = parentStage(reviewing, tasks) === 'done'

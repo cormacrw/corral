@@ -68,7 +68,7 @@ export function parentHolds(delivery: DeliveryRecord, subtasks: readonly Subtask
 // no PR of their own, so their review state never counts.
 export function parentStage(delivery: ParentDelivery, tasks: readonly { status: TaskStatus }[]): ParentStage {
   const review = delivery.reviewMode === 'direct' ? null : delivery.reviewState
-  if (review === 'conflict' || tasks.some(t => t.status === 'blocked' || t.status === 'failed')) return 'blocked'
+  if (tasks.some(t => t.status === 'blocked' || t.status === 'failed')) return 'blocked'
   if (delivery.taskCount > 0 && !deliveryInProgress(delivery)) return 'done'
   if (review === 'ready_to_merge') return 'ready_to_merge'
   if (review === 'human_review') return 'human_review'

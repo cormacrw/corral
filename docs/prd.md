@@ -731,13 +731,12 @@ The runner resolves repository IDs and creates the appropriate workspace.
 Each run has one of the following states:
 
 - Queued
-- Starting
 - Running
-- Waiting for input
-- Stopping
 - Completed
 - Failed
 - Interrupted
+
+*(Amended 2026-11-08: Starting, Waiting for input and Stopping were never used and have been removed. A stopped run ends as Interrupted.)*
 
 The agent finishes a run by reporting a structured outcome, such as:
 

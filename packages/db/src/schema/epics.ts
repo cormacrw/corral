@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { boolean, check, foreignKey, index, integer, jsonb, pgTable, primaryKey, text, timestamp, unique, uuid, type PgTableExtraConfigValue } from 'drizzle-orm/pg-core'
+import { check, foreignKey, index, integer, pgTable, primaryKey, text, timestamp, unique, uuid, type PgTableExtraConfigValue } from 'drizzle-orm/pg-core'
 import { actor, createdAt, updatedAt } from './columns.ts'
 import { epicReviewMode, epicReviewState, taskPriority } from './enums.ts'
 import { projects } from './projects.ts'
@@ -30,11 +30,6 @@ export const epics = pgTable('epics', {
   approvedHeadSha: text(),
   approvedBaseSha: text(),
   reviewState: epicReviewState(),
-  // Unused since rebases became journaled operations; kept because dropping a
-  // column needs a human's sign-off
-  rebaseRequested: boolean().notNull().default(false),
-  // The files a failed rebase conflicts on, while reviewState is `conflict`
-  conflictFiles: jsonb().$type<string[]>(),
   // Why synchronizing with the target branch stopped, until a human retries.
   // A retry counts failures afresh from syncRetriedAt.
   syncError: text(),

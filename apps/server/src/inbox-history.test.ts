@@ -120,7 +120,7 @@ describe('inbox over stored audit rows', () => {
   it('reads every task\'s PR event without borrowing a task, preserving mixed history and live conflicts', async () => {
     const project = await t.createProject({ name: 'Task history', prefix: 'EPH', repository: 'cormacrw/test-app', defaultBranch: 'main' })
     await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true })
-    const [epic] = await t.db.insert(epics).values({ projectId: project.id, title: 'Task without tasks', createdBy: t.actor, prNumber: 12, prHeadSha: 'head', reviewState: 'conflict', conflictFiles: ['shared.ts'] }).returning()
+    const [epic] = await t.db.insert(epics).values({ projectId: project.id, title: 'Task without tasks', createdBy: t.actor, prNumber: 12, prHeadSha: 'head', reviewState: 'ready_to_merge', syncError: 'Rebasing failed 3 times' }).returning()
     const events = ['opened', 'review_started', 'approved', 'changes_requested', 'rebase_requested', 'rebased', 'conflict', 'ci_failed', 'merge_refused', 'closed', 'merged', 'future_event']
     const actions = ['human_approved', 'human_changes_requested', 'rebase_handed_off']
     const inserted = await t.db.insert(auditLog).values([
@@ -156,7 +156,7 @@ describe('inbox over stored audit rows', () => {
     expect(resolved.find(i => i.id === String(oldRows[1]!.id))).toMatchObject({ type: 'activity', taskId: task.id, resolution: expect.stringContaining('approved') })
     expect(resolved.some(i => i.type === 'release_notes' && i.notes === 'Old release notes')).toBe(true)
     for (const list of [activity, resolved]) expect(list.map(i => i.at)).toEqual(list.map(i => i.at).sort().reverse())
-    expect(result.needsYou.find(i => 'epicId' in i && i.epicId === epic!.id)).toMatchObject({ type: 'epic_conflict', taskId: null, taskRef: null, files: ['shared.ts'] })
+    expect(result.needsYou.find(i => 'epicId' in i && i.epicId === epic!.id)).toMatchObject({ type: 'epic_conflict', taskId: null, taskRef: null, stopped: { error: 'Rebasing failed 3 times' } })
     expect(await t.db.select().from(auditLog).orderBy(asc(auditLog.id))).toEqual(stored)
 
     // Deleting the last task cannot hide the epic's history either.

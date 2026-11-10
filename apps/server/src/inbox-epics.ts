@@ -52,7 +52,7 @@ function epicChanges(entries: EpicEntry[], board: EpicBoard, comments: Awaited<R
 }
 
 // The epics waiting on the human: an integration-approved PR on a complete
-// board, or a conflict. Everything that decides membership is here, so the
+// board, a fix's question, or recovery that stopped. Everything that decides membership is here, so the
 // Inbox and its count agree. Editing an epic while it waits does not
 // constitute a new arrival.
 async function waitingEpics(db: Executor, epicId?: string) {
@@ -64,7 +64,7 @@ async function waitingEpics(db: Executor, epicId?: string) {
   }))
   const fixOf = new Map(asking.map(o => [o.epicId, o.fix]))
   const rows = await db.select({ epic: epics, project: projects }).from(epics).innerJoin(projects, eq(projects.id, epics.projectId))
-    .where(and(or(inArray(epics.reviewState, ['human_review', 'conflict']), isNotNull(epics.syncError), decisionOf.size ? inArray(epics.id, [...decisionOf.keys()]) : undefined), epicId ? eq(epics.id, epicId) : undefined))
+    .where(and(or(eq(epics.reviewState, 'human_review'), isNotNull(epics.syncError), decisionOf.size ? inArray(epics.id, [...decisionOf.keys()]) : undefined), epicId ? eq(epics.id, epicId) : undefined))
   const open = rows.filter(({ epic }) => epic.reviewState !== 'merged' && (decisionOf.has(epic.id) || epic.syncError || (epic.prNumber && epic.prHeadSha)))
   if (open.length === 0) return []
   const ids = open.map(r => r.epic.id)
@@ -88,7 +88,6 @@ async function waitingEpics(db: Executor, epicId?: string) {
     if (decision) return [{ epic, project, board, review, failure: null, decision, stopped: null }]
     // Exhausted recovery stays in front of the human until Retry or the merge
     if (epic.syncError) return [{ epic, project, board, review, failure: null, decision: null, stopped: { error: epic.syncError, fix: fixOf.get(epic.id) ?? null } }]
-    if (epic.reviewState === 'conflict') return [{ epic, project, board, review, failure: null, decision: null, stopped: null }]
     if (rebasing.has(epic.id)) return []
     const given = failures.find(f => f.epicId === epic.id && f.headSha === epic.prHeadSha)
     const failure = given ? readAudit(given.detail).summary ?? REVIEW_FAILED : null
@@ -104,7 +103,7 @@ async function prepareEpicItems(db: Executor, epicId?: string): Promise<Prepared
   const comments = await listCommentsFor(db, changed)
   const rounds = await Promise.all(waiting.map(({ epic }) => listEpicRounds(db, epic.id)))
   const items = waiting.map(({ epic, project, review, failure, decision, stopped }, i): PreparedItem<EpicReviewItem | EpicConflictItem> => {
-    const type = decision || stopped || epic.reviewState === 'conflict' ? 'epic_conflict' : 'epic_review'
+    const type = decision || stopped ? 'epic_conflict' : 'epic_review'
     const all = entries.get(epic.id) ?? []
     const arrivals = all.filter(e => ARRIVAL_EVENTS[type].includes(e.event ?? ''))
     const at = (arrivals[0]?.createdAt ?? epic.updatedAt).toISOString()
@@ -118,16 +117,11 @@ async function prepareEpicItems(db: Executor, epicId?: string): Promise<Prepared
       const verdict = failure ?? review?.summary ?? 'Integration approved'
       return { item: { ...shared, type, preview: verdict, body: verdict, sender: failure || !review ? { name: 'Corral', role: 'system' } : { name: review.agent, role: 'reviewer' }, tasks: boards[i]!, reviewRounds: rounds[i]!, findings: rounds[i]!.at(-1)?.findings ?? [] }, arrival: arrivalKey({ id: epic.id, type, at }, arrivals) }
     }
-    const files = epic.conflictFiles ?? []
     if (decision) {
-      return { item: { ...shared, type, preview: decision.question, body: decision.question, sender: { name: 'Corral', role: 'system' }, targetBranch: project.defaultBranch, files: epic.conflictFiles ?? [], decision }, arrival: arrivalKey({ id: epic.id, type, at }, arrivals) }
+      return { item: { ...shared, type, preview: decision.question, body: decision.question, sender: { name: 'Corral', role: 'system' }, targetBranch: project.defaultBranch, decision }, arrival: arrivalKey({ id: epic.id, type, at }, arrivals) }
     }
-    if (stopped) {
-      const body = `Automatic recovery on this task has stopped. ${stopped.error} Retry starts it again; nothing moves until then.`
-      return { item: { ...shared, type, preview: stopped.error, body, sender: { name: 'Corral', role: 'system' }, targetBranch: project.defaultBranch, files, stopped }, arrival: arrivalKey({ id: epic.id, type, at }, arrivals) }
-    }
-    const body = `The task's PR can't rebase onto ${project.defaultBranch}. ${files.length ? `Conflicting files: ${files.join(', ')}.` : 'Corral couldn\'t work out which files conflict; the PR on GitHub shows them.'}`
-    return { item: { ...shared, type, preview: body, body, sender: { name: 'Corral', role: 'system' }, targetBranch: project.defaultBranch, files }, arrival: arrivalKey({ id: epic.id, type, at }, arrivals) }
+    const body = `Automatic recovery on this task has stopped. ${stopped!.error} Retry starts it again; nothing moves until then.`
+    return { item: { ...shared, type, preview: stopped!.error, body, sender: { name: 'Corral', role: 'system' }, targetBranch: project.defaultBranch, stopped: stopped! }, arrival: arrivalKey({ id: epic.id, type, at }, arrivals) }
   })
   return items.sort((a, b) => Number(a.item.type === 'epic_conflict') - Number(b.item.type === 'epic_conflict'))
 }

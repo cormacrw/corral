@@ -412,9 +412,9 @@ export class EpicSynchronizer {
       const onto = done.fix && done.fix !== 'conflict' ? locked!.approvedBaseSha : operation.ontoSha
       const reviewFix = done.fix === 'review'
       const approval = fate?.kept
-        ? { prHeadSha: commitSha, approvedBaseSha: onto, reviewState: locked!.reviewState === 'conflict' ? 'ready_to_merge' as const : locked!.reviewState }
+        ? { prHeadSha: commitSha, approvedBaseSha: onto }
         : fate || reviewFix ? { reviewState: 'open' as const, approvedHeadSha: null, approvedBaseSha: null } : {}
-      await tx.update(epics).set({ syncError: null, conflictFiles: null, ...approval, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
+      await tx.update(epics).set({ syncError: null, ...approval, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
       await appendAudit(tx, { projectId: project.id, actor: SERVER_ACTOR }, auditEvent('epic.pr', done.fix && done.fix !== 'conflict'
         ? { epicId: epic.id, event: 'fix_published', fix: done.fix, operationId: done.id, from: operation.expectedTargetSha, to: commitSha }
         : { epicId: epic.id, event: 'rebased', from: operation.expectedTargetSha, to: commitSha }))
@@ -446,5 +446,5 @@ export class EpicSynchronizer {
 
 // Cleared to merge, on the head that was cleared: the last rebase this epic
 // needs, so a conflict is worth a developer's run now. Any other head is about
-// to lose approval. `conflict` is an epic left there from before COR-290.
-const finalCheckpoint = (epic: EpicRow, head: string) => (epic.reviewState === 'ready_to_merge' || epic.reviewState === 'conflict') && epic.prHeadSha === head
+// to lose approval.
+const finalCheckpoint = (epic: EpicRow, head: string) => epic.reviewState === 'ready_to_merge' && epic.prHeadSha === head

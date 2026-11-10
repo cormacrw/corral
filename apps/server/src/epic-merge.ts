@@ -142,7 +142,7 @@ export class EpicMerger {
   // and reopening restarts integration review. A review of it has nothing left
   // to report on; a run ended here stops at the runner's next heartbeat.
   async #closed(epic: EpicRow, project: ProjectRow): Promise<void> {
-    const left = await this.#leave(epic, project, 'open', { approvedHeadSha: null, approvedBaseSha: null, conflictFiles: null }, { event: 'closed' }, epic.reviewState!)
+    const left = await this.#leave(epic, project, 'open', { approvedHeadSha: null, approvedBaseSha: null }, { event: 'closed' }, epic.reviewState!)
     if (!left) return
     await this.#d.db.transaction(tx => endActiveRuns(tx, eq(runs.epicId, epic.id), { state: 'interrupted', error: 'The task\'s PR closed' }, this.#now()))
   }
@@ -201,7 +201,7 @@ export class EpicMerger {
   async #recordMerged(epic: EpicRow, project: ProjectRow, pr: PullRequest): Promise<void> {
     const { db, events, github, runner } = this.#d
     await db.transaction(async (tx) => {
-      await tx.update(epics).set({ reviewState: 'merged', mergeCommitSha: pr.mergeCommitSha, mergedAt: this.#now(), prHeadSha: pr.headSha, conflictFiles: null, syncError: null, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
+      await tx.update(epics).set({ reviewState: 'merged', mergeCommitSha: pr.mergeCommitSha, mergedAt: this.#now(), prHeadSha: pr.headSha, syncError: null, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
       await endActiveRuns(tx, eq(runs.epicId, epic.id), { state: 'interrupted', error: 'The task\'s PR merged' }, this.#now())
       await appendAudit(tx, { projectId: project.id, actor: SERVER_ACTOR }, auditEvent('epic.pr', { epicId: epic.id, event: 'merged', pr: pr.number, mergeCommitSha: pr.mergeCommitSha }))
     })

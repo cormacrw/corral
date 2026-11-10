@@ -156,10 +156,10 @@ describe('stored conversational Inbox messages', () => {
     await t.db.update(epics).set({ updatedAt: at() }).where(eq(epics.id, epicId))
     const edited = (await inbox('Editing a waiting epic preserves its arrival')).needsYou.find(i => i.id === epicId)!
     expect(edited.at).toBe(oldAt)
-    await t.db.update(epics).set({ reviewState: 'conflict', conflictFiles: Array.from({ length: 200 }, (_, i) => `file-${i}.ts`), updatedAt: at() }).where(eq(epics.id, epicId))
-    await t.db.insert(auditLog).values({ projectId: project.id, actor: developer, action: 'epic.pr', detail: { epicId, event: 'conflict' }, createdAt: at() })
+    await t.db.update(epics).set({ syncError: `Rebasing failed in ${Array.from({ length: 200 }, (_, i) => `file-${i}.ts`).join(', ')}`, updatedAt: at() }).where(eq(epics.id, epicId))
+    await t.db.insert(auditLog).values({ projectId: project.id, actor: developer, action: 'epic.pr', detail: { epicId, event: 'sync_failed' }, createdAt: at() })
     t.bus.publish({ type: 'epic.updated', epic: await getEpic(t.db, epicId) })
-    const conflict = (await inbox('Epic conflict with long conflict list')).needsYou.find(i => i.id === epicId) as EpicConflictItem
+    const conflict = (await inbox('Epic stopped with a long failure')).needsYou.find(i => i.id === epicId) as EpicConflictItem
     expect(conflict.body.length).toBeGreaterThan(1000)
     expect(conflict.message!.split(/\s+/).length).toBeLessThanOrEqual(80)
   })

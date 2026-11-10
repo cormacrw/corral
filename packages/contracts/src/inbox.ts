@@ -278,8 +278,6 @@ export interface EpicConflictItem extends InboxItemBase, ReviewChanges {
   resolution: null
   headSha: string
   targetBranch: string
-  // Empty when the runner couldn't work them out
-  files: string[]
 }
 
 // A runner that can't update (COR-435). It belongs to no project: runners serve

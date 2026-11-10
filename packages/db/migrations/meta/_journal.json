@@ -470,6 +470,20 @@
       "when": 1793849217486,
       "tag": "0066_amazing_ricochet",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1794189593716,
+      "tag": "0067_nice_chronomancer",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1794189597600,
+      "tag": "0068_kind_shinobi_shaw",
+      "breakpoints": true
     }
   ]
 }

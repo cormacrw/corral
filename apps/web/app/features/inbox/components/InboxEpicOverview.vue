@@ -96,38 +96,10 @@ const next = computed(() => event.value === 'human_approved' && props.review?.st
       >
         {{ conflict.stopped.error }}
       </p>
-      <p
-        v-else-if="!conflict.decision"
-        class="text-sm break-words"
-      >
-        The task's PR can't rebase onto {{ conflict.targetBranch }}. Retry goes round the automatic rebase again, and a developer resolves a conflict that remains.
-      </p>
       <InboxEpicDecision
         v-if="conflict.decision"
         :item="{ epicId: conflict.epicId, headSha: conflict.headSha, decision: conflict.decision }"
       />
-      <section
-        v-if="conflict.files.length"
-        aria-label="Conflicting files"
-        class="min-w-0 rounded-lg border border-border"
-      >
-        <h2 class="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
-          {{ plural(conflict.files.length, 'conflicting file') }}
-        </h2>
-        <ul class="divide-y divide-border">
-          <li
-            v-for="file in conflict.files"
-            :key="file"
-            class="flex gap-2 px-3 py-2 font-mono text-sm break-all"
-          >
-            <Icon
-              name="i-hugeicons-file-not-found"
-              class="mt-0.5 size-4 shrink-0 text-destructive"
-            />
-            {{ file }}
-          </li>
-        </ul>
-      </section>
     </template>
 
     <p

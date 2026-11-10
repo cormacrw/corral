@@ -1,6 +1,6 @@
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it } from 'vitest'
 import { createFixTask, transitionTask } from './tasks.ts'
 import type { InvalidatedEpics } from './epic-review-state.ts'
 import { publishInvalidatedEpics } from './epics.ts'
@@ -153,18 +153,15 @@ it('publishes the interrupted review run after Plan approval commits', async () 
   expect(interrupted()).toEqual([{ id: run.id, state: 'interrupted' }])
 })
 
-it('retries the rebase of a conflicted epic without touching its review', async () => {
+it('retries the rebase of a stopped epic without touching its review', async () => {
   const { project, first } = await setup()
-  await t.db.update(schema.epics).set({ reviewState: 'conflict', prHeadSha: 'abc123' }).where(eq(schema.epics.id, first.id))
+  await t.db.update(schema.epics).set({ reviewState: 'ready_to_merge', syncError: 'Rebasing failed 3 times', prHeadSha: 'abc123' }).where(eq(schema.epics.id, first.id))
   const run = await activeReview(first.id, project.id)
   const response = await t.request('POST', `/api/epics/${first.id}/review`, { action: 'rebase', headSha: 'abc123' })
   expect(response.status).toBe(200)
-  expect(t.events.filter(e => e.type === 'epic.updated')).toMatchObject([{ epic: { id: first.id, reviewState: 'conflict' } }])
+  expect(t.events.filter(e => e.type === 'epic.updated')).toMatchObject([{ epic: { id: first.id, reviewState: 'ready_to_merge' } }])
   const [row] = await t.db.select().from(schema.epics).where(eq(schema.epics.id, first.id))
-  expect(row).toMatchObject({ reviewState: 'conflict', syncRetriedAt: expect.any(Date) })
+  expect(row).toMatchObject({ reviewState: 'ready_to_merge', syncError: null, syncRetriedAt: expect.any(Date) })
   expect(interrupted()).toEqual([])
   expect((await t.db.select().from(schema.runs).where(eq(schema.runs.id, run.id)))[0]!.state).toBe('running')
-  // Retry publishes an Inbox arrival asynchronously. Let its fallback persist
-  // before teardown closes PGlite underneath the pending query.
-  await vi.waitFor(async () => expect(await t.db.select().from(schema.inboxMessages)).toHaveLength(1), { timeout: 5000 })
 })

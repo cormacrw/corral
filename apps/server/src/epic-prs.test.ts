@@ -260,7 +260,7 @@ it('stops retrying after three failed reviews on a head and puts the task\'s PR 
   expect(item.sender.role).toBe('system')
 })
 
-it.each(['in_review', 'human_review', 'conflict'] as const)('sends a task with subtasks whose PR was closed in %s back to open, and reopening restarts review', async (state) => {
+it.each(['in_review', 'human_review'] as const)('sends a task with subtasks whose PR was closed in %s back to open, and reopening restarts review', async (state) => {
   const { epic, other } = await setup()
   const job = await lastMerge(other.id, epic.id)
   await t.db.update(schema.epics).set({ reviewState: state }).where(eq(schema.epics.id, epic.id))

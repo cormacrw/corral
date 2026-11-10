@@ -139,7 +139,7 @@ describe('inbox changes since the last review', () => {
     await capture('normal-kind.json', { request: { method: 'GET', path: normalPath }, status: read.status, response: readTask })
 
     const [projectRow] = await t.db.select().from(projects).where(eq(projects.id, project.id))
-    const [epic] = await t.db.insert(epics).values({ projectId: project.id, title: 'Conflict fixture', createdBy: t.actor, branch: 'corral/epic-conflict', prNumber: 1, prHeadSha: 'reviewed-head', reviewState: 'conflict' }).returning()
+    const [epic] = await t.db.insert(epics).values({ projectId: project.id, title: 'Conflict fixture', createdBy: t.actor, branch: 'corral/epic-conflict', prNumber: 1, prHeadSha: 'reviewed-head', reviewState: 'ready_to_merge' }).returning()
     const fixId = await t.db.transaction(tx => createFixTask(tx, projectRow!, epic!.id, 'Align the API and UI', { kind: 'agent', role: 'reviewer', runId: run }))
     const fix = (await t.db.select().from(tasks).where(eq(tasks.id, fixId)))[0]!
     const fixPath = `/api/projects/${project.slug}/tasks/${fix.number}`
