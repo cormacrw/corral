@@ -127,18 +127,20 @@ describe('epic scheduling', () => {
     const { a, first } = await setup()
     await t.db.update(epics).set({ reviewMode: 'epic' }).where(eq(epics.id, a.id))
     const patch = (input: object) => t.request('PATCH', `/api/epics/${a.id}`, input)
-    const saved = await patch({ reviewMode: 'each_task' })
+    // each_task is retired: nothing accepts it
+    expect((await patch({ reviewMode: 'each_task' })).status).toBe(400)
+    const saved = await patch({ reviewMode: 'direct' })
     expect(saved.status).toBe(200)
-    expect(await saved.json()).toMatchObject({ reviewMode: 'each_task', reviewModeLocked: false })
-    expect(await (await t.request('GET', `/api/epics/${a.id}`)).json()).toMatchObject({ reviewMode: 'each_task', reviewModeLocked: false })
+    expect(await saved.json()).toMatchObject({ reviewMode: 'direct', reviewModeLocked: false })
+    expect(await (await t.request('GET', `/api/epics/${a.id}`)).json()).toMatchObject({ reviewMode: 'direct', reviewModeLocked: false })
 
     await t.db.update(tasks).set({ prNumber: 7, prUrl: 'https://github.com/cormacrw/test-app/pull/7', deletedAt: new Date() }).where(eq(tasks.id, first.id))
     expect(await (await t.request('GET', `/api/epics/${a.id}`)).json()).toMatchObject({ reviewModeLocked: true })
-    const rejected = await patch({ reviewMode: 'direct' })
+    const rejected = await patch({ reviewMode: 'epic' })
     expect(rejected.status).toBe(409)
     expect(await rejected.json()).toMatchObject({ error: { code: 'invalid_input' } })
-    expect((await patch({ reviewMode: 'each_task', title: 'Renamed' })).status).toBe(200)
-    expect(await (await t.request('GET', `/api/epics/${a.id}`)).json()).toMatchObject({ reviewMode: 'each_task', title: 'Renamed' })
+    expect((await patch({ reviewMode: 'direct', title: 'Renamed' })).status).toBe(200)
+    expect(await (await t.request('GET', `/api/epics/${a.id}`)).json()).toMatchObject({ reviewMode: 'direct', title: 'Renamed' })
   })
 
   it('links the epic PR from the epic', async () => {

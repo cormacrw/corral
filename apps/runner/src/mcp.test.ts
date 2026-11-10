@@ -247,11 +247,11 @@ describe('ToolServer', () => {
   it('takes an optional review mode per epic in propose_plan and names the allowed values for an unknown one (D27)', async () => {
     const { client, calls } = await connect('pm')
     const propose = (await client.listTools()).tools.find(t => t.name === 'propose_plan')!
-    expect(propose.inputSchema).toMatchObject({ properties: { parents: { items: { properties: { reviewMode: { enum: ['parent', 'each_task', 'direct'] } } } } } })
+    expect(propose.inputSchema).toMatchObject({ properties: { parents: { items: { properties: { reviewMode: { enum: ['parent', 'direct'] } } } } } })
 
     const task = { key: 't1', parent: 'e1', title: 'Login', description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] }
-    await client.callTool({ name: 'propose_plan', arguments: { title: 'Login', parents: [{ key: 'e1', title: 'Login', reviewMode: 'each_task' }], tasks: [task] } })
-    expect(calls).toEqual([{ tool: 'propose_plan', input: expect.objectContaining({ parents: [expect.objectContaining({ reviewMode: 'each_task' })] }) }])
+    await client.callTool({ name: 'propose_plan', arguments: { title: 'Login', parents: [{ key: 'e1', title: 'Login', reviewMode: 'direct' }], tasks: [task] } })
+    expect(calls).toEqual([{ tool: 'propose_plan', input: expect.objectContaining({ parents: [expect.objectContaining({ reviewMode: 'direct' })] }) }])
 
     const unknown = await client.callTool({ name: 'propose_plan', arguments: { title: 'Login', parents: [{ key: 'e1', title: 'Login', reviewMode: 'later' }], tasks: [task] } })
     expect(unknown.isError).toBe(true)

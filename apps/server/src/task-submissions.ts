@@ -47,7 +47,7 @@ export async function recordTaskSubmission(db: Executor, input: {
     if (!task) throw new Error('Task not found')
     const [epic] = task.epicId ? await tx.select().from(epics).where(eq(epics.id, task.epicId)).for('update') : []
     if (!prFreeEligible(task, epic)) {
-      throw new Error('PR-free submissions require a build task in a task reviewed as a whole, with its own branch and no existing task PR. Keep existing PRs, direct, each_task, standalone, spike, design and task conflict tasks on their existing path.')
+      throw new Error('PR-free submissions require a build task in a task reviewed as a whole, with its own branch and no existing task PR. Keep existing PRs, direct, standalone, spike and design tasks on their existing path.')
     }
     if (!input.submittedHeadSha.trim() || !input.baseSha.trim()) throw new Error('Submission requires head and base commits')
     const [latest] = await tx.select({ sequence: max(taskSubmissions.sequence) }).from(taskSubmissions).where(eq(taskSubmissions.taskId, task.id))

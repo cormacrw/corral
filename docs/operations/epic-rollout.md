@@ -28,7 +28,7 @@ Every runner on the current build takes PR-free developer and reviewer runs, the
 
 | | Task PR (legacy) | PR-free (integrated) |
 |---|---|---|
-| Which tasks | Anything with a PR from before the rollout, or submitted from an old runner; all of `each_task`; `direct` tasks with subtasks; standalone tasks | New tasks and bugs in `epic` mode |
+| Which tasks | Anything with a PR from before the rollout, or submitted from an old runner; `direct` tasks with subtasks; standalone tasks | New tasks and bugs in `epic` mode |
 | In the task's properties | A link to the PR | Submitted, approved and integrated commits |
 | `tasks.integration_protocol` | `0` | `1` |
 | `GET /api/projects/<slug>/tasks/<number>` | `pr` is set, `submission` is null | `pr` is null, `submission` is set |

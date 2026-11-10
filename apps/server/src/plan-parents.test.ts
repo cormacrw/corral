@@ -40,11 +40,11 @@ describe('plans with tasks with subtasks', () => {
 
   it('makes a task of two or more subtasks, and takes no task for a single unit of work', async () => {
     const { project, propose, plans } = await start()
-    expect(await propose({ parents: [{ key: 'p', title: 'Search', summary: 'Find things', reviewMode: 'each_task' }], tasks: [item('a', { parent: 'p' }), item('b', { parent: 'p' }), item('c', { dependsOn: ['p'] })] })).toMatchObject({ ok: true })
+    expect(await propose({ parents: [{ key: 'p', title: 'Search', summary: 'Find things', reviewMode: 'direct' }], tasks: [item('a', { parent: 'p' }), item('b', { parent: 'p' }), item('c', { dependsOn: ['p'] })] })).toMatchObject({ ok: true })
     expect((await approve(plans)).status).toBe(200)
     const all = await listed(project.slug)
     const parent = all.find(task => task.status === 'parent')!
-    expect(parent).toMatchObject({ title: 'Search', rollup: { total: 2, reviewMode: 'each_task' } })
+    expect(parent).toMatchObject({ title: 'Search', rollup: { total: 2, reviewMode: 'direct' } })
     expect(all.filter(task => task.parentTask?.id === parent.id).map(task => task.title)).toEqual(['Task a', 'Task b'])
     // Waiting on a parent in the plan is waiting on its sub-tasks
     const a = all.find(task => task.title === 'Task a')!
@@ -104,7 +104,7 @@ describe('plans with tasks with subtasks', () => {
 
   it('can\'t lower an existing task\'s review mode by a plan', async () => {
     const { project, propose, plans, job } = await start()
-    await propose({ parents: [{ key: 'p', title: 'Search', reviewMode: 'each_task' }], tasks: [item('a', { parent: 'p' }), item('b', { parent: 'p' })] })
+    await propose({ parents: [{ key: 'p', title: 'Search', reviewMode: 'parent' }], tasks: [item('a', { parent: 'p' }), item('b', { parent: 'p' })] })
     await approve(plans)
     runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
     const parent = (await listed(project.slug)).find(task => task.status === 'parent')!

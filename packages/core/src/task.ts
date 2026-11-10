@@ -1,4 +1,3 @@
-import type { EpicReviewMode } from './project.ts'
 import type { TaskStatus } from './status.ts'
 
 // Task fields other than status (PRD §4.3, design/task.md)
@@ -34,12 +33,11 @@ export function isPrFree(task: { integrationProtocol: number }): boolean {
   return task.integrationProtocol > 0
 }
 
-// Whether the task's own flag asks for Human review once its task with
-// subtasks is counted (D27, D28): an each_task one sends every subtask to the
-// human, and a PR-free subtask's flag and human checks wait for its task's
-// approval instead. Designs and spikes go to Human review whatever this says.
-export function humanReviewFlag(task: { humanReview: boolean, integrationProtocol: number }, mode: EpicReviewMode | null): boolean {
-  return !isPrFree(task) && (mode === 'each_task' || task.humanReview)
+// Whether the task's own flag asks for Human review (D27, D28): a PR-free
+// subtask's flag and human checks wait for its task's approval instead.
+// Designs and spikes go to Human review whatever this says.
+export function humanReviewFlag(task: { humanReview: boolean, integrationProtocol: number }): boolean {
+  return !isPrFree(task) && task.humanReview
 }
 
 // The deliverable type is fixed once work is approved or awaiting merge. Spikes

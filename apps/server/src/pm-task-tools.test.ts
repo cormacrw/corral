@@ -363,7 +363,7 @@ describe('PM task and epic tools', () => {
         }).where(eq(schema.tasks.id, task.id))
       }
       const activity = (await request('GET', `/api/epics/${epic!.id}/activity`)).body
-      expect(await call('update_parent', { parentId: epic!.id, title: 'Rejected PM edit', reviewMode: 'each_task' })).toMatchObject({ ok: false })
+      expect(await call('update_parent', { parentId: epic!.id, title: 'Rejected PM edit', reviewMode: 'direct' })).toMatchObject({ ok: false })
       expect(await request('PATCH', `/api/epics/${epic!.id}`, { title: 'Rejected human edit', reviewMode: 'direct' })).toMatchObject({
         status: 409,
         body: { error: { code: 'invalid_input', issues: [{ message: expect.stringContaining('review mode') }] } }
@@ -374,13 +374,13 @@ describe('PM task and epic tools', () => {
       expect(await request('PATCH', `/api/epics/${epic!.id}`, { reviewMode: 'epic', title: 'Allowed human metadata' })).toMatchObject({ status: 200, body: { reviewMode: 'epic', title: 'Allowed human metadata' } })
     }
     const [editable] = await t.db.insert(schema.epics).values({ projectId, title: 'Before PR work', createdBy: t.actor }).returning()
-    expect(await request('PATCH', `/api/epics/${editable!.id}`, { reviewMode: 'epic' })).toMatchObject({ status: 200, body: { reviewMode: 'epic' } })
-    expect(await call('update_parent', { parentId: editable!.id, reviewMode: 'each_task' })).toMatchObject({ ok: true, result: { reviewMode: 'each_task' } })
+    expect(await request('PATCH', `/api/epics/${editable!.id}`, { reviewMode: 'direct' })).toMatchObject({ status: 200, body: { reviewMode: 'direct' } })
+    expect(await call('update_parent', { parentId: editable!.id, reviewMode: 'parent' })).toMatchObject({ ok: true, result: { reviewMode: 'epic' } })
   })
 
   it('edits task metadata and dependencies atomically, audits them and refuses foreign tasks with subtasks', async () => {
-    const [first, second] = await t.db.insert(schema.epics).values(['Foundation', 'Application'].map(title => ({ projectId, title, createdBy: t.actor }))).returning()
-    expect(await call('update_parent', { parentId: second!.id, title: 'Application delivery', summary: 'Build on the foundation', reviewMode: 'each_task', dependsOn: [first!.id] })).toMatchObject({ ok: true, result: { title: 'Application delivery', reviewMode: 'each_task', dependsOn: [first!.id] } })
+    const [first, second] = await t.db.insert(schema.epics).values(['Foundation', 'Application'].map(title => ({ projectId, title, createdBy: t.actor, reviewMode: 'direct' as const }))).returning()
+    expect(await call('update_parent', { parentId: second!.id, title: 'Application delivery', summary: 'Build on the foundation', reviewMode: 'parent', dependsOn: [first!.id] })).toMatchObject({ ok: true, result: { title: 'Application delivery', reviewMode: 'epic', dependsOn: [first!.id] } })
     const activity = (await request('GET', `/api/epics/${second!.id}/activity`)).body as AuditEntry[]
     expect(activity).toContainEqual(expect.objectContaining({ actor: actor(), action: 'epic.updated', detail: { epicId: second!.id, changed: expect.arrayContaining(['title', 'description', 'reviewMode']) } }))
     expect(activity).toContainEqual(expect.objectContaining({ actor: actor(), detail: { epicId: second!.id, changed: ['dependsOn'], dependsOn: [first!.id] } }))

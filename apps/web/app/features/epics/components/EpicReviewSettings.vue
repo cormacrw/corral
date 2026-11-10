@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import type { EpicDetail } from '@corral/contracts'
-import type { EpicReviewMode } from '@corral/core'
-import { EPIC_REVIEW_MODE } from '~/utils/labels'
+import type { ReviewModeChoice } from '@corral/core'
+import { EPIC_REVIEW_MODE, REVIEW_MODE_OPTIONS } from '~/utils/labels'
 
 // How an epic is reviewed: its PR once it has one, its review mode until then
 defineProps<{ epic: EpicDetail }>()
-defineEmits<{ change: [mode: EpicReviewMode] }>()
-const reviewModes = Object.entries(EPIC_REVIEW_MODE).map(([value, mode]) => ({ value, label: mode.label }))
+defineEmits<{ change: [mode: ReviewModeChoice] }>()
+const reviewModes = REVIEW_MODE_OPTIONS
 </script>
 
 <template>
@@ -26,7 +26,7 @@ const reviewModes = Object.entries(EPIC_REVIEW_MODE).map(([value, mode]) => ({ v
         aria-label="Subtask review mode"
         :aria-describedby="epic.reviewModeLocked ? 'epic-review-mode-note' : undefined"
         class="w-full"
-        @update:model-value="$emit('change', $event as EpicReviewMode)"
+        @update:model-value="$emit('change', $event as ReviewModeChoice)"
       />
       <p
         v-if="epic.reviewModeLocked"

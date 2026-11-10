@@ -1,5 +1,5 @@
 import { schema } from '@corral/db'
-import { and, eq, inArray, isNotNull } from 'drizzle-orm'
+import { eq, inArray, isNotNull } from 'drizzle-orm'
 import { writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
@@ -655,20 +655,6 @@ describe('developer runs on the epic', () => {
       return epic
     }
     const rebases = async (id: string) => (await ops(id)).filter(o => o.kind === 'rebase')
-    const developerRuns = (id: string) => t.db.select().from(schema.runs).where(and(eq(schema.runs.epicId, id), eq(schema.runs.role, 'developer')))
-
-    it('defers an each_task task until it is approved, then resolves it', async () => {
-      const epic = await underReview(await conflicted(), { reviewMode: 'each_task' })
-      await tick()
-      expect((await fixEpic(epic.id)).sync).toEqual({ state: 'conflict_pending', files: [epic.file] })
-      expect(await needsYou(epic.id)).toEqual([])
-      expect(await developerRuns(epic.id)).toEqual([])
-
-      await t.db.update(schema.epics).set({ reviewState: 'ready_to_merge', approvedHeadSha: epic.head }).where(eq(schema.epics.id, epic.id))
-      await t.mergePass()
-      expect((await rebases(epic.id)).at(-1)).toMatchObject({ state: 'running', fix: 'conflict' })
-      await fixJob(epic.id)
-    })
 
     it('starts no developer on an approved task whose head moved outside Corral', async () => {
       const epic = await humanApproved(await conflicted())

@@ -38,9 +38,9 @@ async function assigned(task: Created, role: RunJob['role']) {
   return (await runner.next('run.assign', m => 'taskId' in m.job && m.job.taskId === task.id && m.job.role === role)).job as RunJob & { branch: string }
 }
 
-async function createEpic(mode: 'epic' | 'each_task' = 'epic') {
+async function createEpic() {
   const project = await t.createProject()
-  const [epic] = await t.db.insert(schema.epics).values({ projectId: project.id, createdBy: t.actor, title: 'Feature', reviewMode: mode }).returning()
+  const [epic] = await t.db.insert(schema.epics).values({ projectId: project.id, createdBy: t.actor, title: 'Feature', reviewMode: 'epic' }).returning()
   return { project, epic: epic! }
 }
 
@@ -165,12 +165,10 @@ it('keeps a prior approval for Backlog-only work, and invalidates it for board w
   await capture('invalidation-new-head.json', { afterApproval: 'ready_to_merge', afterNewEpicHead: await epicRow(epic.id) })
 })
 
-it('keeps task-level human review for standalone work and each_task tasks with subtasks, each with its own PR', async () => {
+it('keeps task-level human review for standalone work, with its own PR', async () => {
   const project = await t.createProject()
   const standalone = await t.createTask(project.slug, { humanReview: true, acceptanceCriteria: ['Bug is fixed'] })
-  const { project: legacy, epic } = await createEpic('each_task')
-  const inEpic = await t.createTask(legacy.slug, { epicId: epic.id, humanReview: false, acceptanceCriteria: ['Works'] })
-  for (const [p, task] of [[project, standalone], [legacy, inEpic]] as const) {
+  for (const [p, task] of [[project, standalone]] as const) {
     await ready(p, task)
     const dev = await assigned(task, 'developer')
     t.github.setBranch(p.repository, dev.branch, `head-${task.id}`)
@@ -183,7 +181,7 @@ it('keeps task-level human review for standalone work and each_task tasks with s
     expect(await row(task.id)).toMatchObject({ status: 'human_review' })
     const inboxItem = (await inbox()).needsYou.find(i => i.taskId === task.id)
     expect(inboxItem).toMatchObject({ type: 'human_review', prUrl: opened.prUrl })
-    await capture(`task-level-review-${task === standalone ? 'standalone' : 'each-task'}.json`, { request: { method: 'GET', url: '/api/inbox' }, task: await row(task.id), response: inboxItem })
+    await capture('task-level-review-standalone.json', { request: { method: 'GET', url: '/api/inbox' }, task: await row(task.id), response: inboxItem })
     expect((await t.request('GET', `/api/projects/${p.slug}/tasks/${task.number}`).then(r => r.json()) as { submission: unknown }).submission).toBeNull()
   }
 })

@@ -32,10 +32,10 @@ async function capture(name: string, data: unknown) {
 }
 
 // An epic whose only task is Merged, with its PR approved by the human
-async function approved(mode: 'epic' | 'each_task' = 'epic') {
+async function approved() {
   const project = await t.createProject({ defaultBranch: 'develop' })
   await t.db.update(schema.projects).set({ requiredChecks: ['ci'] }).where(eq(schema.projects.id, project.id))
-  const [epic] = await t.db.insert(schema.epics).values({ projectId: project.id, createdBy: t.actor, title: `Saved searches · ${project.prefix}`, reviewMode: mode, branch: `corral/epic-${project.id}` }).returning()
+  const [epic] = await t.db.insert(schema.epics).values({ projectId: project.id, createdBy: t.actor, title: `Saved searches · ${project.prefix}`, reviewMode: 'epic', branch: `corral/epic-${project.id}` }).returning()
   const head = `head-${project.id}`
   t.github.setBranch(project.repository, epic!.branch!, head)
   t.github.setBranch(project.repository, 'develop', `target-${project.id}`)

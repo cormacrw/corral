@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { useMutation } from '@tanstack/vue-query'
 import type { Epic } from '@corral/contracts'
-import type { EpicReviewMode } from '@corral/core'
+import type { ReviewModeChoice } from '@corral/core'
 import { patchEpic } from '~/queries/epics'
-import { EPIC_REVIEW_MODE, epicReviewStatus } from '~/utils/labels'
+import { epicReviewStatus, REVIEW_MODE_OPTIONS } from '~/utils/labels'
 
 // The delivery state of a task in a collapsed one-task epic (D31): it has no
 // parent page, so its PR, sync state and review mode show on the task.
 const props = defineProps<{ epic: Epic }>()
 const toast = useToast()
 const patch = useMutation({ ...patchEpic, onError: (e: Error) => toast.add({ title: 'Could not change the review mode', description: e.message, color: 'error' }) })
-const modes = (Object.keys(EPIC_REVIEW_MODE) as EpicReviewMode[]).map(value => ({ value, label: EPIC_REVIEW_MODE[value].label }))
+const modes = REVIEW_MODE_OPTIONS
 const status = computed(() => epicReviewStatus(props.epic))
 </script>
 
@@ -40,7 +40,7 @@ const status = computed(() => epicReviewStatus(props.epic))
       :disabled="epic.reviewModeLocked"
       aria-label="Review mode"
       class="w-full"
-      @update:model-value="patch.mutate({ id: epic.id, input: { reviewMode: $event as EpicReviewMode } })"
+      @update:model-value="patch.mutate({ id: epic.id, input: { reviewMode: $event as ReviewModeChoice } })"
     />
   </section>
 </template>

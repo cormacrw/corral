@@ -52,7 +52,7 @@ commits and changed binding docs. Approval copies the approval at
 `approvedHeadSha`, including its criterion notes, onto the submitted head; missing
 or no-longer-applicable criteria reject carry-over. The recorded review summary
 identifies the reviewed rebase. The task returns to Ready to merge, even with
-`humanReview` set or in an `each_task` task (D24): the `approval_carried` event
+`humanReview` set (D24): the `approval_carried` event
 skips D5/D27's routing. A criterion checked by a human stays open across the
 rebase, so with one on the task the event goes to Human review instead (D28).
 `carryOverApproval` in `rebase-review.ts` is the one place that records the

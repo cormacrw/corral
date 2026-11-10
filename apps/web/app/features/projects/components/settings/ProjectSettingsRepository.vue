@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import type { Project } from '@corral/contracts'
 import type { ProjectSettings } from '~/features/projects/composables/useProjectSettings'
-import { EPIC_REVIEW_MODE, MERGE_METHOD } from '~/utils/labels'
+import { EPIC_REVIEW_MODE, MERGE_METHOD, REVIEW_MODE_OPTIONS } from '~/utils/labels'
 
 const props = defineProps<{ project: Project, settings: ProjectSettings }>()
 const { form } = props.settings
-const epicReviewModes = Object.entries(EPIC_REVIEW_MODE).map(([value, mode]) => ({ value, label: mode.label, description: mode.description }))
+const epicReviewModes = REVIEW_MODE_OPTIONS
 const mergeMethods = Object.entries(MERGE_METHOD).map(([value, label]) => ({ label, value }))
 const CHECK_CHOICES = ['lint', 'typecheck', 'test', 'build']
 

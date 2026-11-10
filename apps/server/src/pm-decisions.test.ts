@@ -154,8 +154,10 @@ describe('PM tools for the Inbox, designs and agents', () => {
       const { id: projectId } = await (await t.request('GET', `/api/projects/${slug}`)).json() as { id: string }
       const [epic] = await t.db.insert(schema.epics).values({ projectId, title: 'Gated', reviewMode: 'epic', createdBy: t.actor }).returning()
       await lowered('update_parent', { parentId: epic!.id, reviewMode: 'direct' }, 'direct')
-      expect(await call('update_parent', { parentId: epic!.id, reviewMode: 'each_task' })).toMatchObject({ ok: true, result: { reviewMode: 'each_task' } })
-      await lowered('update_parent', { parentId: epic!.id, reviewMode: 'parent' }, 'each_task')
+      // each_task is retired: nothing accepts it
+      expect(await call('update_parent', { parentId: epic!.id, reviewMode: 'each_task' })).toMatchObject({ ok: false })
+      await t.db.update(schema.epics).set({ reviewMode: 'direct' }).where(eq(schema.epics.id, epic!.id))
+      expect(await call('update_parent', { parentId: epic!.id, reviewMode: 'parent' })).toMatchObject({ ok: true, result: { reviewMode: 'epic' } })
     })
 
     it('takes a card to lower a project\'s gates, and applies them on Confirm', async () => {
@@ -185,8 +187,8 @@ describe('PM tools for the Inbox, designs and agents', () => {
 
     it('takes a card to move a task somewhere with less human review', async () => {
       const { id: projectId } = await (await t.request('GET', `/api/projects/${slug}`)).json() as { id: string }
-      const epicOf = async (reviewMode: 'each_task' | 'epic' | 'direct') => (await t.db.insert(schema.epics).values({ projectId, title: reviewMode, reviewMode, createdBy: t.actor }).returning())[0]!
-      const [strict, plain, direct] = [await epicOf('each_task'), await epicOf('epic'), await epicOf('direct')]
+      const epicOf = async (reviewMode: 'epic' | 'direct') => (await t.db.insert(schema.epics).values({ projectId, title: reviewMode, reviewMode, createdBy: t.actor }).returning())[0]!
+      const [strict, plain, direct] = [await epicOf('epic'), await epicOf('epic'), await epicOf('direct')]
       const inStrict = await task({ humanReview: false, epicId: strict.id })
       await lowered('update_task', { taskRef: inStrict.ref, parentId: null }, /human review/i)
       await lowered('update_task', { taskRef: inStrict.ref, parentId: direct.id }, /human review/i)

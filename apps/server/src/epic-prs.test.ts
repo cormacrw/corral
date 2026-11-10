@@ -31,7 +31,7 @@ const inbox = async () => (await fetch(`${t.server!.url}/api/inbox`)).json() as 
 async function capture(name: string, data: unknown) {
   if (process.env.CORRAL_EPIC_EVIDENCE_DIR) await writeFile(join(process.env.CORRAL_EPIC_EVIDENCE_DIR, name), JSON.stringify(data, null, 2))
 }
-async function setup(mode: 'epic' | 'each_task' | 'direct' = 'epic') {
+async function setup(mode: 'epic' | 'direct' = 'epic') {
   const project = await t.createProject({ defaultBranch: 'develop' })
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
   const [epic] = await t.db.insert(schema.epics).values({ projectId: project.id, createdBy: t.actor, title: `Saved searches · ${project.prefix}`, description: 'Search API and UI work together', reviewMode: mode, branch: `corral/epic-${project.id}` }).returning()
@@ -67,8 +67,8 @@ it('opens the task\'s PR when its board contains a merged task and an Approved d
   expect(await t.request('GET', `/api/epics/${epic.id}`).then(r => r.json())).toMatchObject({ taskCount: 2, mergedCount: 2 })
 })
 
-it.each(['epic', 'each_task'] as const)('opens %s PR only after the last board task merges; integration approval alone exposes all tasks and evidence', async (mode) => {
-  const { project, epic, task, other } = await setup(mode)
+it('opens the task\'s PR only after the last board task merges; integration approval alone exposes all tasks and evidence', async () => {
+  const { project, epic, task, other } = await setup()
   await t.createTask(project.slug, { epicId: epic.id, title: 'Future backlog work' })
   const removed = await t.createTask(project.slug, { epicId: epic.id, title: 'Deleted work' })
   await t.db.update(schema.tasks).set({ deletedAt: new Date(), status: 'ready' }).where(eq(schema.tasks.id, removed.id))
@@ -81,7 +81,7 @@ it.each(['epic', 'each_task'] as const)('opens %s PR only after the last board t
   expect(pr.body).toContain(other.ref)
   expect(pr.body).toContain(`http://corral.test/tasks/${task.ref}`)
   expect(pr.body).not.toContain('Future backlog work')
-  if (mode === 'epic') await capture('epic-open.json', { scope: 'Isolated server with simulated GitHub, no remote PR created', board: [task.ref, other.ref], githubRequest: t.github.calls.find(c => c.method === 'openPullRequest' && c.args[0] === project.repository), githubResponse: pr, reviewerAssignment: job })
+  await capture('epic-open.json', { scope: 'Isolated server with simulated GitHub, no remote PR created', board: [task.ref, other.ref], githubRequest: t.github.calls.find(c => c.method === 'openPullRequest' && c.args[0] === project.repository), githubResponse: pr, reviewerAssignment: job })
   expect(job).toMatchObject({ role: 'reviewer', taskId: null, branch: epic.branch, headSha: pr.headSha, baseBranch: 'develop' })
   expect((await t.db.select().from(schema.runs).where(eq(schema.runs.id, job.runId)))[0]?.runnerName).toBeTruthy()
   expect(job.prompt).toContain('origin/develop')
@@ -95,7 +95,7 @@ it.each(['epic', 'each_task'] as const)('opens %s PR only after the last board t
   expect(await report(job, 'approved')).toMatchObject({ ok: true })
   const item = (await inbox()).needsYou.find(i => i.id === epic.id) as EpicReviewItem
   expect(item.type).toBe('epic_review')
-  if (mode === 'epic') await capture('approved-inbox.json', { request: { method: 'GET', url: `${t.server!.url}/api/inbox` }, status: 200, response: await inbox(), project })
+  await capture('approved-inbox.json', { request: { method: 'GET', url: `${t.server!.url}/api/inbox` }, status: 200, response: await inbox(), project })
   expect(item.tasks.map(e => e.task.id)).toEqual([task.id, other.id])
   expect(item.tasks[0]!.evidence[0]!.note).toBe('Search API returns saved searches')
   // No duplicate PR or reviewer run while human review is pending.

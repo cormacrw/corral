@@ -27,7 +27,7 @@ afterAll(async () => {
 async function capture(name: string, data: unknown) {
   if (process.env.CORRAL_REBASE_EVIDENCE_DIR) await writeFile(join(process.env.CORRAL_REBASE_EVIDENCE_DIR, name), JSON.stringify(data, null, 2))
 }
-async function rebaseRound(humanReview: boolean, options: { epicMode?: 'each_task', humanCheck?: boolean }) {
+async function rebaseRound(humanReview: boolean, options: { epicMode?: 'epic', humanCheck?: boolean }) {
   await t.request('PATCH', `/api/projects/${project.slug}`, { paused: true, requiredChecks: ['lint'] })
   const task = await t.createTask(project.slug, { humanReview, acceptanceCriteria: ['Preserves validation', options.humanCheck ? { text: 'Preserves navigation', checkedByHuman: true } : 'Preserves navigation'] })
   const [agent] = await t.db.select().from(schema.agents).where(eq(schema.agents.role, 'reviewer'))
@@ -41,6 +41,13 @@ async function rebaseRound(humanReview: boolean, options: { epicMode?: 'each_tas
     : []
   await t.db.update(schema.tasks).set({ status: 'in_progress', branch, headSha: 'approved-head', approvedHeadSha: 'approved-head', rebaseOnly: true, epicId: epic?.id ?? null }).where(eq(schema.tasks.id, task.id))
   t.github.setBranch(project.repository, branch, 'approved-head')
+  if (epic) {
+    // A subtask PR from before PR-free delivery, into the task's branch, keeps
+    // its developer on the PR path
+    t.github.setBranch(project.repository, epic.branch!, 'epic-head')
+    const pr = await t.github.openPullRequest(project.repository, { head: branch, base: epic.branch!, title: task.title, body: '' })
+    await t.db.update(schema.tasks).set({ prNumber: pr.number, prUrl: pr.url }).where(eq(schema.tasks.id, task.id))
+  }
   await t.request('PATCH', `/api/projects/${project.slug}`, { paused: false })
   await t.orchestrator.scheduler.schedule()
   const dev = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'developer')).job
@@ -48,7 +55,7 @@ async function rebaseRound(humanReview: boolean, options: { epicMode?: 'each_tas
   t.github.setBranch(project.repository, branch, 'new-head')
   return { task, criteria, dev, epicBranch: epic?.branch ?? null }
 }
-async function submitted(humanReview = false, options: { epicMode?: 'each_task', checkFailures?: RebaseCheckFailure[], humanCheck?: boolean } = {}) {
+async function submitted(humanReview = false, options: { epicMode?: 'epic', checkFailures?: RebaseCheckFailure[], humanCheck?: boolean } = {}) {
   const { task, criteria, dev } = await rebaseRound(humanReview, options)
   const submission = { outcome: 'pr_rebased', behaviourChanged: false, review: humanReview ? 'trivial' : 'needs_review', conflictedFiles: ['app.ts'], headSha: 'new-head', summary: 'app.ts: retained main validation and task navigation', note: 'app.ts: retained both sides of the conflict' }
   const validation = []
@@ -117,7 +124,7 @@ async function reportAndRead(task: Task, job: RunJob, report: Record<string, unk
 it.each([
   { humanReview: false, epicMode: undefined },
   { humanReview: true, epicMode: undefined },
-  { humanReview: false, epicMode: 'each_task' as const }
+  { humanReview: false, epicMode: 'epic' as const }
 ])('carries approval and notes onto the new head and returns to Ready to merge ($humanReview, $epicMode)', async ({ humanReview, epicMode }) => {
   const { task, review, criteria, project } = await submitted(humanReview, epicMode ? { epicMode } : {})
   const result = await reportAndRead(task, review, { outcome: 'approved', summary: 'app.ts conflict resolution holds: both validation and navigation survive.' })
@@ -221,7 +228,7 @@ async function compareCalls(from: number) {
 it.each([
   { label: 'plain task', humanReview: false, epicMode: undefined },
   { label: 'humanReview task', humanReview: true, epicMode: undefined },
-  { label: 'each_task epic task', humanReview: false, epicMode: 'each_task' as const }
+  { label: 'task with subtasks task PR', humanReview: false, epicMode: 'epic' as const }
 ])('verifies a trivial rebase without a review: $label', async ({ label, humanReview, epicMode }) => {
   const { task, criteria, dev, epicBranch } = await rebaseRound(humanReview, epicMode ? { epicMode } : {})
   stubCompare(epicBranch ?? 'main')

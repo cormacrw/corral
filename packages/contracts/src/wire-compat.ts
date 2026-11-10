@@ -1,4 +1,4 @@
-import type { EpicReviewMode } from '@corral/core'
+import type { EpicReviewMode, ReviewModeChoice } from '@corral/core'
 import { z } from 'zod'
 
 // Names on the wire that differ from what the server stores
@@ -6,14 +6,15 @@ import { z } from 'zod'
 // The PM sees tasks with subtasks (D31); the server stores their delivery as an
 // epic. So the `epic` review mode is `parent` on the wire, `epicId` is
 // `parentId` and `epicReviewModeDefault` is `defaultReviewMode`.
-export const WIRE_REVIEW_MODES = ['parent', 'each_task', 'direct'] as const
+export const WIRE_REVIEW_MODES = ['parent', 'direct'] as const
 export type WireReviewMode = typeof WIRE_REVIEW_MODES[number]
 
-export function toStoredReviewMode(mode: WireReviewMode | EpicReviewMode): EpicReviewMode {
+export function toStoredReviewMode(mode: WireReviewMode | ReviewModeChoice): ReviewModeChoice {
   return mode === 'parent' ? 'epic' : mode
 }
 
-export function toWireReviewMode(mode: EpicReviewMode): WireReviewMode {
+// A retired `each_task` is only on merged history, and reads as itself
+export function toWireReviewMode(mode: EpicReviewMode): WireReviewMode | 'each_task' {
   return mode === 'epic' ? 'parent' : mode
 }
 
@@ -28,6 +29,6 @@ export const advertisedPlanReviewMode = z.enum(WIRE_REVIEW_MODES, { error: REVIE
 export const planReviewModeInput = advertisedPlanReviewMode.transform(mode => mode && toStoredReviewMode(mode))
 
 // The project's field, as the server stores it
-export function storedProjectFields<T extends { defaultReviewMode?: EpicReviewMode | undefined }>({ defaultReviewMode, ...fields }: T) {
+export function storedProjectFields<T extends { defaultReviewMode?: ReviewModeChoice | undefined }>({ defaultReviewMode, ...fields }: T) {
   return { ...fields, ...defaultReviewMode && { epicReviewModeDefault: defaultReviewMode } }
 }

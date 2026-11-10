@@ -9,7 +9,7 @@ submission and review; COR-288 added integration into the task's branch.
 modes. `recordTaskSubmission` in `apps/server/src/task-submissions.ts` selects
 protocol 1 only for ordinary task-mode build tasks without PRs, recording a
 versioned submission and its base/target atomically. It rejects direct,
-standalone, each_task, spike and design submissions.
+standalone, spike and design submissions.
 
 `task_submissions` records submitted, agent-approved and integrated commits
 without a PR FK. Approval must match the submitted head. Integration needs
@@ -63,7 +63,7 @@ merge. Approval or pending integration never means done.
 ## Human review at the task (COR-289)
 
 `applyTransition` clears the in-memory flag for a PR-free task (core
-`humanReviewFlag`, which also sets it in an `each_task` task), so
+`humanReviewFlag`), so
 `review_approved` always lands in Ready to merge; the row keeps `humanReview`
 and the criteria keep `checkedByHuman`. `humanObligations` in `epic-review.ts` turns
 those into the task approval's obligations, for PR-free tasks only. The Inbox gets

@@ -1,4 +1,4 @@
-import { EPIC_REVIEW_MODES, type EpicFixKind, type EpicReviewMode, type EpicReviewState } from '@corral/core'
+import { REVIEW_MODE_CHOICES, type EpicFixKind, type EpicReviewMode, type EpicReviewState } from '@corral/core'
 import { z } from 'zod'
 import type { Task } from './tasks.ts'
 
@@ -94,6 +94,6 @@ export const setEpicDependenciesInput = z.object({ dependsOn: z.array(z.uuid()) 
 export const patchEpicInput = z.object({
   title: z.string().trim().min(1).optional(),
   description: z.string().optional(),
-  reviewMode: z.enum(EPIC_REVIEW_MODES).optional()
+  reviewMode: z.enum(REVIEW_MODE_CHOICES).optional()
 })
 export type PatchEpicInput = z.infer<typeof patchEpicInput>

@@ -5,7 +5,7 @@ import { epicQuery } from '~/queries/epics'
 
 const props = defineProps<{ task: Task | null, prNumber: string | null, canAct: boolean }>()
 const epic = useQuery(computed(() => ({ ...epicQuery(props.task?.epicId ?? ''), enabled: Boolean(props.task?.epicId) })))
-const grouped = computed(() => epic.data.value && ['epic', 'each_task'].includes(epic.data.value.reviewMode) ? epic.data.value : null)
+const grouped = computed(() => epic.data.value?.reviewMode === 'epic' ? epic.data.value : null)
 const hasPr = computed(() => props.prNumber && props.task?.type !== 'spike' && props.task?.type !== 'design')
 const { openEpic } = useTaskFlyout()
 </script>

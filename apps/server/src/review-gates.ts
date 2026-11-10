@@ -4,9 +4,12 @@ import { requiresHumanReview, type EpicReviewMode, type TaskType } from '@corral
 // revisions so neither can take a route the other refuses. Each lowered gate
 // comes back in the words a confirm card and a refusal both use.
 
-// Most human review first: each_task sends every task to the human, epic only
-// its epic PR, and direct leaves it to each task's flag
+// Most human review first: epic sends its epic PR to the human, and direct
+// leaves it to each task's flag. A stored each_task, which also sent every task
+// to the human, is retired and ranks above both, so leaving one still lowers.
 const REVIEW_MODE_RANK: Record<EpicReviewMode, number> = { each_task: 2, epic: 1, direct: 0 }
+// A task whose own flag or type sends it to the human
+const OWN_HUMAN_REVIEW = 2
 
 export function lowersMode(from: EpicReviewMode, to: EpicReviewMode | undefined): boolean {
   return to !== undefined && REVIEW_MODE_RANK[to] < REVIEW_MODE_RANK[from]
@@ -14,7 +17,7 @@ export function lowersMode(from: EpicReviewMode, to: EpicReviewMode | undefined)
 
 // How much human review a task gets from its own flag and its epic
 export function taskReview(task: { type: TaskType, humanReview: boolean }, mode: EpicReviewMode | null): number {
-  return requiresHumanReview(task.type, task.humanReview) ? REVIEW_MODE_RANK.each_task : REVIEW_MODE_RANK[mode ?? 'direct']
+  return requiresHumanReview(task.type, task.humanReview) ? OWN_HUMAN_REVIEW : REVIEW_MODE_RANK[mode ?? 'direct']
 }
 
 interface HeldCriterion { id: string, text: string, checkedByHuman: boolean }
