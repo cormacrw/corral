@@ -23,7 +23,7 @@ beforeEach(() => {
 
 type Created = Awaited<ReturnType<TestApp['createTask']>>
 
-async function epicTask(mode: 'epic' | 'each_task' | 'direct' = 'epic', input: Record<string, unknown> = {}) {
+async function epicTask(mode: 'epic' | 'direct' = 'epic', input: Record<string, unknown> = {}) {
   const project = await t.createProject()
   const [epic] = await t.db.insert(schema.epics).values({ projectId: project.id, createdBy: t.actor, title: 'Feature', reviewMode: mode }).returning()
   const task = await t.createTask(project.slug, { epicId: epic!.id, humanReview: false, ...input })
@@ -192,8 +192,7 @@ it.each([
     await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/transitions`, { type: 'approve' })
     return { project, task }
   }],
-  ['direct', () => epicTask('direct')],
-  ['each_task', () => epicTask('each_task')]
+  ['direct', () => epicTask('direct')]
 ])('opens and updates a PR for a %s task, even on a supporting runner', async (_, setup) => {
   const { project, task } = await setup()
   const dev = await assigned(task, 'developer')

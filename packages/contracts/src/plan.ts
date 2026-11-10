@@ -22,7 +22,7 @@ const proposedTask = z.object({
   }).optional().describe('For a task that builds part of an approved design: the version and the screens it covers')
 })
 
-const REVIEW_MODE_HELP = 'How its subtasks reach the target branch: parent = human reviews the task\'s PR; each_task = human also reviews every subtask; direct = subtasks merge straight into the target branch. Leave it out for the project\'s default.'
+const REVIEW_MODE_HELP = 'How its subtasks reach the target branch: parent = human reviews the task\'s PR; direct = subtasks merge straight into the target branch. Leave it out for the project\'s default.'
 const parentFields = {
   key: z.string().trim().min(1).describe('A short handle referenced by each subtask’s `parent`, e.g. p1'),
   ref: z.string().trim().toUpperCase().optional().transform(ref => ref || undefined).describe('An existing task to add to, or a Draft, Backlog or unclaimed Ready task with no runs to turn into one, e.g. COR-4. It keeps its ref and comments, and its criteria move to its first subtask. Leave out for a new task'),

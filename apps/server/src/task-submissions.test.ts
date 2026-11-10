@@ -12,7 +12,7 @@ afterAll(async () => {
   await t?.close()
 })
 
-async function fixture(mode: 'epic' | 'each_task' | 'direct' = 'epic', type: 'task' | 'spike' | 'design' = 'task') {
+async function fixture(mode: 'epic' | 'direct' = 'epic', type: 'task' | 'spike' | 'design' = 'task') {
   const project = await t.createProject()
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
   const [epic] = await t.db.insert(schema.epics).values({ projectId: project.id, title: 'Feature', reviewMode: mode, branch: 'corral/epic-feature', createdBy: t.actor }).returning()
@@ -45,8 +45,8 @@ it('persists submitted, agent-approved and integrated commits without a PR, reta
   expect(await t.db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id))).toMatchObject([{ prNumber: null, prUrl: null, integrationProtocol: 1 }])
 })
 
-it.each(['direct', 'each_task', 'spike', 'design', 'existing-pr', 'standalone', 'epic-conflict'] as const)('keeps %s on its explicit existing path', async (path) => {
-  const { task } = await fixture(path === 'direct' || path === 'each_task' ? path : 'epic', path === 'spike' || path === 'design' ? path : 'task')
+it.each(['direct', 'spike', 'design', 'existing-pr', 'standalone', 'epic-conflict'] as const)('keeps %s on its explicit existing path', async (path) => {
+  const { task } = await fixture(path === 'direct' ? path : 'epic', path === 'spike' || path === 'design' ? path : 'task')
   if (path === 'existing-pr') await t.db.update(schema.tasks).set({ prNumber: 42, prUrl: 'https://github.com/cormacrw/test-app/pull/42' }).where(eq(schema.tasks.id, task.id))
   if (path === 'standalone') await t.db.update(schema.tasks).set({ epicId: null }).where(eq(schema.tasks.id, task.id))
   if (path === 'epic-conflict') await t.db.update(schema.tasks).set({ branch: 'corral/epic-feature' }).where(eq(schema.tasks.id, task.id))

@@ -7,7 +7,7 @@ import { ApiFailure } from './errors.ts'
 import { GitHubError, type GitHubClient } from './github.ts'
 import type { MergeOrchestrator } from './merge.ts'
 
-const { epics, reviews, tasks } = schema
+const { reviews, tasks } = schema
 
 // Gate checks run this many PRs at a time
 const CONCURRENT_PULL_REQUESTS = 5
@@ -34,8 +34,6 @@ export async function listPullRequests(db: Database, merges: Pick<MergeOrchestra
         .where(inArray(reviews.taskId, rows.map(t => t.id))).orderBy(reviews.taskId, desc(reviews.createdAt))
     : []
   const reviewOf = new Map(latestReviews.map(r => [r.taskId, r]))
-  const epicIds = [...new Set(rows.flatMap(t => t.epicId ? [t.epicId] : []))]
-  const modes = new Map(epicIds.length > 0 ? (await db.select({ id: epics.id, reviewMode: epics.reviewMode }).from(epics).where(inArray(epics.id, epicIds))).map(e => [e.id, e.reviewMode]) : [])
   const statuses = await mapLimit(rows, CONCURRENT_PULL_REQUESTS, async (task): Promise<PullRequestStatus | null> => {
     const report = await merges.gates(task, project, undefined, merges.displayReads)
     const { pr } = report
@@ -69,7 +67,7 @@ export async function listPullRequests(db: Database, merges: Pick<MergeOrchestra
       },
       evidenceComplete: report.facts.evidenceComplete,
       // Human review also covers tasks a human check sent there (D27)
-      humanReviewOutstanding: task.status === 'human_review' || (requiresHumanReview(task.type, humanReviewFlag(task, task.epicId ? modes.get(task.epicId) ?? null : null)) && task.status !== 'ready_to_merge'),
+      humanReviewOutstanding: task.status === 'human_review' || (requiresHumanReview(task.type, humanReviewFlag(task)) && task.status !== 'ready_to_merge'),
       merge: { eligible: failed.length === 0, failingGate: failed[0] ?? null, failedGates: failed }
     }
   })

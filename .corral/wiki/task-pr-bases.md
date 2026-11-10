@@ -1,6 +1,6 @@
 # Task PR bases
 
-Tasks in `epic` and `each_task` tasks with subtasks branch from and open PRs against the
+Tasks in `epic` tasks with subtasks branch from and open PRs against the
 stored task's branch (`corral/epic-<id>-<slug>`). The server creates that branch
 from the project's configured target tip before assigning the first developer.
 Concurrent claims tolerate an already-created GitHub ref without resetting it.
@@ -16,8 +16,8 @@ instructions use the same base. GitHub's PR rebase and squash merge therefore
 operate on the task's branch. Merging still marks the task Merged and wakes its
 dependants through the existing task flow.
 
-Every task in `each_task` mode requires human review, regardless of its own flag.
-In `epic` and `direct` modes the flag applies normally. Standalone tasks and
+In `epic` and `direct` modes a task's own flag applies normally. `each_task`,
+which sent every task to human review, is retired: nothing accepts it. Standalone tasks and
 `direct` task PRs use the target branch. Designs and spikes retain their separate
 non-merge workflows.
 
@@ -123,7 +123,7 @@ the repository's target branch.
 ## Task review context in the Inbox
 
 `InboxPanelEpicContext` loads the subtask's task through the shared task detail
-query. Human-review items in `epic` and `each_task` modes show **Part of
+query. Human-review items in `epic` mode show **Part of
 [task title]. You'll review it all together at the task's PR.** in the top block,
 including when actions and evidence are present. The title opens the task using
 the shared flyout navigation (the task page on a phone). Active task PR reviews

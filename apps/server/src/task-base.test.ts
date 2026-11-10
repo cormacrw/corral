@@ -93,7 +93,7 @@ it('uses the epic base throughout claim, review, merge and dependent claims on d
   await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
 })
 
-it.each(['each_task', 'epic', 'direct', null] as const)('routes review and conflicts correctly for %s', async (mode) => {
+it.each(['epic', 'direct', null] as const)('routes review and conflicts correctly for %s', async (mode) => {
   const project = await t.createProject({ defaultBranch: 'develop' })
   t.github.setBranch(project.repository, 'develop', 'target-tip')
   const [epic] = mode ? await t.db.insert(schema.epics).values({ projectId: project.id, createdBy: t.actor, title: 'Review', reviewMode: mode }).returning() : []
@@ -112,10 +112,10 @@ it.each(['each_task', 'epic', 'direct', null] as const)('routes review and confl
   const review = (await runner.next('run.assign', m => m.job.taskId === task.id && m.job.role === 'reviewer')).job
   expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Approved', headSha: `head-${task.id}`, criteria: task.acceptanceCriteria.map(c => ({ criterionId: c.id, met: true, note: '' })) })).toMatchObject({ ok: true })
   const get = async () => (await t.request('GET', `/api/projects/${project.slug}/tasks/${task.number}`)).json() as Promise<Task>
-  expect((await get()).status).toBe(mode === 'each_task' ? 'human_review' : 'ready_to_merge')
+  expect((await get()).status).toBe('ready_to_merge')
   const pr = [...t.github.pulls.values()].find(p => p.head === dev.branch)
   if (mode === 'epic') expect(pr).toBeUndefined()
-  else expect(pr!.base).toBe(mode === 'direct' || !mode ? 'develop' : dev.baseBranch)
+  else expect(pr!.base).toBe('develop')
   if (mode === 'epic') {
     // Its commit conflicts with the task's branch
     const restore = integrates('conflict')
@@ -127,7 +127,7 @@ it.each(['each_task', 'epic', 'direct', null] as const)('routes review and confl
     expect((await get()).status).toBe('in_progress')
     const notes = await t.db.select().from(schema.comments).where(eq(schema.comments.taskId, task.id))
     expect(notes.at(-1)!.body).toContain(dev.baseBranch!)
-  } else if (mode !== 'each_task') {
+  } else {
     await t.mergePass()
     expect((await get()).status).toBe('merged')
     expect(await t.github.branchHead(project.repository, 'develop')).toBe('merge-sha')

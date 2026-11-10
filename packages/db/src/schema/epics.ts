@@ -19,8 +19,8 @@ export const epics = pgTable('epics', {
   // Set from the plan or the project's default when the epic is created (D27).
   // Epics that had board tasks before review modes existed are `direct`.
   reviewMode: epicReviewMode().notNull().default('epic'),
-  // The epic branch and its PR into the target branch, in `epic` and
-  // `each_task` modes; null until Corral creates them (D27)
+  // The epic branch and its PR into the target branch, in `epic` mode (and
+  // the retired `each_task`); null until Corral creates them (D27)
   branch: text(),
   prNumber: integer(),
   prHeadSha: text(),

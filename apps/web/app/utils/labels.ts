@@ -1,6 +1,6 @@
 import { TONE_TEXT } from '~/lib/tone'
 import type { Tone } from '~/lib/tone'
-import { deliveryCounts, DONE_STATUS, isActiveRun, AGENT_RUNTIME_IDS, AGENT_RUNTIMES, parseTaskRef, ROLE_LABELS, TASK_STATUS_LABELS } from '@corral/core'
+import { deliveryCounts, DONE_STATUS, isActiveRun, AGENT_RUNTIME_IDS, AGENT_RUNTIMES, parseTaskRef, REVIEW_MODE_CHOICES, ROLE_LABELS, TASK_STATUS_LABELS } from '@corral/core'
 import { cacheWritesUnknown, EPIC_PR_ACTIVITY, weightedRunCost } from '@corral/contracts/client'
 import type { Agent, AuditEntry, CliStatus, Epic, EpicFixRun, EpicPrEvent, RunnerInfo, RunnerRole, RunnerStatus, InboxItem, Project, Run, Task } from '@corral/contracts'
 import type { AgentRuntime, CliId, MergeMethod, PlanStatus, RunSessionStart, DesignVersionStatus, EpicFixKind, EpicReviewMode, EpicReviewState, RunOutcome, RunState, TaskPriority, TaskStatus } from '@corral/core'
@@ -57,12 +57,15 @@ export const PLAN_STATUS: Record<PlanStatus, { label: string, color: Color }> = 
   discarded: { label: 'Discarded', color: 'neutral' }
 }
 
-// An epic's review mode (D27)
+// An epic's review mode (D27). `each_task` is retired and only names merged history.
 export const EPIC_REVIEW_MODE: Record<EpicReviewMode, { label: string, description: string }> = {
   epic: { label: 'The task\'s PR', description: 'Subtasks integrate into the task\'s branch on agent approval; you review them all, with any human checks, on the task\'s PR' },
-  each_task: { label: 'Each subtask', description: 'You review every subtask, then the task\'s PR' },
+  each_task: { label: 'Each subtask (retired)', description: 'You reviewed every subtask, then the task\'s PR' },
   direct: { label: 'Direct', description: 'Each subtask merges straight into the target branch' }
 }
+
+// The review modes on offer, with their labels
+export const REVIEW_MODE_OPTIONS = REVIEW_MODE_CHOICES.map(value => ({ value, ...EPIC_REVIEW_MODE[value] }))
 
 export const MERGE_METHOD: Record<MergeMethod, string> = {
   squash: 'Squash and merge',

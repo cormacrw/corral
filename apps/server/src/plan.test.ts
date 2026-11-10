@@ -716,7 +716,9 @@ describe('plan sessions', () => {
       }
       return runner.call(job.runId, job.leaseEpoch, 'propose_plan', input)
     }
-    expect(await propose('each_task')).toMatchObject({ ok: true })
+    // each_task is retired: a plan can't choose it
+    expect(await propose('each_task')).toMatchObject({ ok: false, error: expect.stringContaining('reviewMode') })
+    expect(await propose('direct')).toMatchObject({ ok: true })
     // A Draft revision with no PR work can still change the mode.
     expect(await propose('parent')).toMatchObject({ ok: true })
     const draft = await request('GET', `/api/plan/sessions/${created.id}`) as PlanSessionDetail
@@ -730,7 +732,7 @@ describe('plan sessions', () => {
     await request('POST', `/api/plan/sessions/${created.id}/messages`, { text: 'Revisit the plan' })
     job = (await runner.next('run.assign', m => m.job.planSessionId === created.id)).job
     const before = await request('GET', `/api/plan/sessions/${created.id}`) as PlanSessionDetail
-    for (const mode of ['direct', 'each_task']) {
+    for (const mode of ['direct']) {
       expect(await propose(mode, 'Must roll back')).toMatchObject({ ok: false, error: expect.stringContaining('review mode') })
       expect((await request('GET', `/api/plan/sessions/${created.id}`) as PlanSessionDetail).plans).toEqual(before.plans)
       expect(await request('GET', `/api/epics/${epicId}`)).toMatchObject({ reviewMode: 'epic', title: 'Login', tasks: [{ status: 'merged' }, { status: 'merged' }] })
@@ -757,25 +759,27 @@ describe('plan sessions', () => {
       tasks: parentsIn.flatMap((_, i) => ['a', 'b'].map(part => ({ key: `t${i + 1}${part}`, parent: `e${i + 1}`, title: `Task ${i + 1}${part}`, description: 'Build it', type: 'task', acceptanceCriteria: ['It works'] })))
     })
 
-    const bad = await propose([{ key: 'e1', title: 'Login', reviewMode: 'later' }])
-    expect(bad).toMatchObject({ ok: false, error: expect.stringContaining('reviewMode') })
+    for (const reviewMode of ['later', 'each_task']) {
+      const bad = await propose([{ key: 'e1', title: 'Login', reviewMode }])
+      expect(bad).toMatchObject({ ok: false, error: expect.stringContaining('reviewMode') })
+    }
     expect(await t.db.select().from(epics).where(eq(epics.projectId, project.id))).toEqual([])
 
-    expect(await propose([{ key: 'e1', title: 'Login' }, { key: 'e2', title: 'Logout', reviewMode: 'each_task' }])).toMatchObject({ ok: true })
+    expect(await propose([{ key: 'e1', title: 'Login' }, { key: 'e2', title: 'Logout', reviewMode: 'direct' }])).toMatchObject({ ok: true })
     const [v1] = (await session(created.id)).plans
-    expect(v1!.epics.map(e => [e.title, e.reviewMode])).toEqual([['Login', 'epic'], ['Logout', 'each_task']])
+    expect(v1!.epics.map(e => [e.title, e.reviewMode])).toEqual([['Login', 'epic'], ['Logout', 'direct']])
 
     // The next new epic takes the changed default; a revision that leaves
     // the mode out keeps each existing epic's
     expect((await t.request('PATCH', `/api/projects/${project.slug}`, { epicReviewModeDefault: 'direct' })).status).toBe(200)
     expect(await propose([{ key: 'e1', title: 'Login' }, { key: 'e2', title: 'Logout' }, { key: 'e3', title: 'Reset' }])).toMatchObject({ ok: true })
     const v2 = (await session(created.id)).plans[1]!
-    expect(v2.epics.map(e => [e.title, e.reviewMode])).toEqual([['Login', 'epic'], ['Logout', 'each_task'], ['Reset', 'direct']])
+    expect(v2.epics.map(e => [e.title, e.reviewMode])).toEqual([['Login', 'epic'], ['Logout', 'direct'], ['Reset', 'direct']])
 
     const approved = await t.request('POST', `/api/plan/plans/${v2.id}/approve`, { to: 'backlog' })
     expect(approved.status).toBe(200)
     const epic = await t.request('GET', `/api/epics/${v2.epics[1]!.id}`).then(r => r.json()) as EpicDetail
-    expect(epic).toMatchObject({ reviewMode: 'each_task', branch: null, prNumber: null, prHeadSha: null, reviewState: null })
+    expect(epic).toMatchObject({ reviewMode: 'direct', branch: null, prNumber: null, prHeadSha: null, reviewState: null })
     await endTurn(job, 'Proposed.')
   })
 

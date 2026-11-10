@@ -192,8 +192,7 @@ export async function applyTransition(
   }
   // PR-free epic work integrates on agent approval: its flag and human checks
   // become obligations of the epic's human approval, and the row keeps them
-  const [epic] = task.epicId ? await tx.select({ reviewMode: epics.reviewMode }).from(epics).where(eq(epics.id, task.epicId)) : []
-  state.humanReview = humanReviewFlag({ ...task, humanReview: state.humanReview }, epic?.reviewMode ?? null)
+  state.humanReview = humanReviewFlag({ ...task, humanReview: state.humanReview })
   const result = transition(state, event, actor, {
     reviewRoundCap: project.reviewRoundCap,
     failedRunCap: project.failedRunCap

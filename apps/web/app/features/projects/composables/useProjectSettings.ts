@@ -7,7 +7,8 @@ import { patchProject } from '~/queries/projects'
 
 type SettingsForm = Required<Omit<PatchProjectInput, 'paused'>>
 
-const formOf = (p: Project): SettingsForm => ({ name: p.name, prefix: p.prefix, thumbnailColor: p.thumbnailColor, defaultBranch: p.defaultBranch, mergeMethod: p.mergeMethod, requiredChecks: [...p.requiredChecks], humanReviewDefault: p.humanReviewDefault, epicReviewModeDefault: p.epicReviewModeDefault, reviewRoundCap: p.reviewRoundCap, failedRunCap: p.failedRunCap })
+// No project defaults to the retired each_task; one that did would show epic
+const formOf = (p: Project): SettingsForm => ({ name: p.name, prefix: p.prefix, thumbnailColor: p.thumbnailColor, defaultBranch: p.defaultBranch, mergeMethod: p.mergeMethod, requiredChecks: [...p.requiredChecks], humanReviewDefault: p.humanReviewDefault, epicReviewModeDefault: p.epicReviewModeDefault === 'direct' ? 'direct' : 'epic', reviewRoundCap: p.reviewRoundCap, failedRunCap: p.failedRunCap })
 
 // Project settings (design/project-settings.md): form fields save together;
 // pause applies immediately.

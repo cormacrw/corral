@@ -1,4 +1,4 @@
-import { EPIC_REVIEW_MODES, MERGE_METHODS, PROJECT_PREFIX_HINT, PROJECT_PREFIX_PATTERN, type EpicReviewMode, type MergeMethod } from '@corral/core'
+import { MERGE_METHODS, REVIEW_MODE_CHOICES, PROJECT_PREFIX_HINT, PROJECT_PREFIX_PATTERN, type EpicReviewMode, type MergeMethod } from '@corral/core'
 import { z } from 'zod'
 
 // A GitHub repository, owner/name
@@ -13,7 +13,7 @@ export const createProjectInput = z.object({
   defaultBranch: z.string().trim().min(1),
   mergeMethod: z.enum(MERGE_METHODS).optional(),
   humanReviewDefault: z.boolean().optional(),
-  epicReviewModeDefault: z.enum(EPIC_REVIEW_MODES).optional()
+  epicReviewModeDefault: z.enum(REVIEW_MODE_CHOICES).optional()
 })
 export type CreateProjectInput = z.infer<typeof createProjectInput>
 
@@ -27,7 +27,7 @@ export const patchProjectInput = z.object({
   requiredChecks: z.array(z.string().trim().min(1)).optional(),
   paused: z.boolean().optional(),
   humanReviewDefault: z.boolean().optional(),
-  epicReviewModeDefault: z.enum(EPIC_REVIEW_MODES).optional(),
+  epicReviewModeDefault: z.enum(REVIEW_MODE_CHOICES).optional(),
   reviewRoundCap: z.number().int().positive().optional(),
   failedRunCap: z.number().int().positive().optional()
 })

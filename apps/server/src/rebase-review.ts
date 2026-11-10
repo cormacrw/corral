@@ -46,7 +46,7 @@ type CarryOver = { ok: true } | { ok: false, problem: string }
 
 // D24: records a review on the new head with the last approval's criteria
 // verdicts, then returns the task to Ready to merge. The human approved before
-// the conflict, so humanReview and each_task epics don't send it back to them;
+// the conflict, so humanReview doesn't send it back to them;
 // a criterion checked by a human stays open and does (D28), unless it's a
 // PR-free task, whose open checks wait for the epic's approval (D27).
 // Call with the task locked and `headSha` on the new head; nothing is written

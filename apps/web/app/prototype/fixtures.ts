@@ -166,7 +166,7 @@ const epicRows: Omit<Epic, 'taskId' | 'taskRef' | 'mergedAt'>[] = [
     projectId: 'p-corral',
     title: 'Design tasks',
     description: 'Versioned, sandboxed prototypes the human approves before the build is planned (D20).',
-    reviewMode: 'each_task',
+    reviewMode: 'epic',
     branch: null,
     prNumber: null,
     prUrl: null,
@@ -760,7 +760,7 @@ function prDetail(ref: string, body: string, fields: Partial<PullRequestDetail> 
   const t = at(ref)
   return {
     ...t.pr!, title: t.title, body, headBranch: t.branch ?? `corral/${t.ref.toLowerCase()}`, headSha: 'a1b2c3d',
-    // In an `epic` or `each_task` epic, a task PR's base is the epic branch (D23)
+    // In an `epic` epic, a task PR's base is the epic branch (D27)
     baseBranch: epics.find(e => e.id === t.epicId)?.branch ?? 'main',
     files: approveFiles, totalFiles: approveFiles.length, truncated: false, ...fields
   }
@@ -965,7 +965,7 @@ export const plans: Record<string, Plan[]> = {
     {
       id: 'plan-1', sessionId: 's-1', projectId: 'p-corral', epicId: null, version: 1, title: 'Design tasks',
       summary: 'A design task type whose deliverable is an approved, versioned prototype.', status: 'proposed', approvedAt: null,
-      epics: [{ key: 'E1', id: 'e-design', title: 'Design tasks', reviewMode: 'each_task' }],
+      epics: [{ key: 'E1', id: 'e-design', title: 'Design tasks', reviewMode: 'epic' }],
       tasks: [
         { key: 'T1', change: 'added', revises: false, taskId: 't-cor-13', epicId: 'e-design', ref: 'COR-13', title: 'Design review screen', description: '', implementationPlan: '', status: 'draft', priority: 'high', humanReview: true, dependsOn: [] },
         { key: 'T2', change: 'added', revises: false, taskId: 't-cor-14', epicId: 'e-design', ref: 'COR-14', title: 'Approve a design version', description: '', implementationPlan: '', status: 'draft', priority: 'urgent', humanReview: false, dependsOn: ['T1'] },

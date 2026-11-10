@@ -33,8 +33,8 @@ async function show(task: Partial<Task>, reviewMode = 'epic') {
   return wrapper
 }
 
-it.each(['epic', 'each_task'])('names a parent reviewed as %s, with a link that opens it', async (reviewMode) => {
-  const wrapper = await show({ epicId: 'epic-1', type: 'task' }, reviewMode)
+it('names a parent reviewed as a whole, with a link that opens it', async () => {
+  const wrapper = await show({ epicId: 'epic-1', type: 'task' })
   expect(wrapper.text()).toContain('Saved searches')
   await wrapper.get('button').trigger('click')
   expect(openEpic).toHaveBeenCalledWith('epic-1')
