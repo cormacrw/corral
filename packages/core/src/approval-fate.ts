@@ -1,6 +1,6 @@
 import type { EpicReviewState } from './project.ts'
 import { shortSha } from './ids.ts'
-import type { EpicFixKind, EpicFixReport, EpicRebaseDecision, ResolutionReview } from './review.ts'
+import type { EpicFixKind, EpicFixReport, EpicRebaseDecision } from './review.ts'
 
 // The states in which a task's PR head carries an approval worth keeping.
 // Legacy `conflict` rows got there from one of the other two.
@@ -16,8 +16,6 @@ interface BranchOperation {
   expectedTargetSha: string
   fix: EpicFixKind | null
   fixReport: EpicFixReport | null
-  resolutionTaskId: string | null
-  resolutionReview: ResolutionReview | null
   decisions: readonly EpicRebaseDecision[]
 }
 
@@ -68,12 +66,6 @@ export function approvalFate(operation: BranchOperation, delivery: ApprovedDeliv
   if (!delivery.approvedHeadSha || delivery.prHeadSha !== operation.expectedTargetSha) {
     return { kept: false, reason: `The rebase started from ${shortSha(operation.expectedTargetSha)}, which isn't the approved head ${shortSha(delivery.prHeadSha)}.` }
   }
-  if (operation.fix) return fixFate(operation, commitSha)
-  if (!operation.resolutionTaskId) return { kept: true, reason: 'A clean rebase changes nothing that was approved; checks run again on the new head.' }
-  const review = operation.resolutionReview
-  if (review?.headSha !== commitSha) return { kept: false, reason: `No review of the resolution covers ${shortSha(commitSha)}.` }
-  const decided = decisionFate(operation)
-  if (decided) return decided
-  if (!review.preserved) return { kept: false, reason: `The reviewer found a behaviour change: ${review.summary}` }
-  return compareFate(review, commitSha) ?? { kept: true, reason: `The reviewer confirmed the resolution keeps the approved behaviour: ${review.summary}` }
+  if (!operation.fix) return { kept: true, reason: 'A clean rebase changes nothing that was approved; checks run again on the new head.' }
+  return fixFate(operation, commitSha)
 }

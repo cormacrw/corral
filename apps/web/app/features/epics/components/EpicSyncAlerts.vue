@@ -28,15 +28,7 @@ async function retrySync() {
     :title="`Waiting on ${waiting.map(e => e.title).join(', ')}`"
   />
   <AppAlert
-    v-if="sync?.state === 'resolving'"
-    class="shrink-0"
-    color="info"
-    variant="subtle"
-    title="Resolving a rebase conflict"
-    :description="`${sync.taskRef ?? 'A developer'} is rebasing this task in private${fileList(sync.files)}. The task's branch moves once a reviewer approves.`"
-  />
-  <AppAlert
-    v-else-if="sync?.state === 'conflict_pending'"
+    v-if="sync?.state === 'conflict_pending'"
     class="shrink-0"
     color="neutral"
     variant="subtle"
@@ -54,7 +46,7 @@ async function retrySync() {
     color="warning"
     variant="subtle"
     title="This rebase needs your decision"
-    :description="`${sync.question} It's in your Inbox${sync.taskRef ? ` on ${sync.taskRef}` : ''}. The rebase resumes when you answer.`"
+    :description="`${sync.question} It's in your Inbox. The rebase resumes when you answer.`"
   />
   <AppAlert
     v-else-if="sync?.state === 'failed'"

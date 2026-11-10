@@ -53,7 +53,7 @@ const round = { round: 1, verdict: 'approved', reviewer: { id: 'a', name: 'Rita'
 const details: EpicReview = {
   epicId: 'e', title: 'Feature', goal: 'Goal', reviewMode: 'epic', state: 'human_review', targetBranch: 'main', headSha: 'head', pr, gateChecks: [{ name: 'lint', conclusion: 'success', url: null }],
   targetMovedBy: 0, rounds: [round], tasks: [row('t1', { prNumber: 7, prUrl: 'https://github.com/o/r/pull/7' }), row('t2', { kind: 'fix', integratedCommit: { sha: 'abcdef1234', url: 'https://github.com/o/r/commit/abcdef1234' }, reviewedBy: 'human' })],
-  seenByHuman: 1, lastFeedback: null, conflictTaskRef: null, conflictPending: false, mergeCommitSha: null
+  seenByHuman: 1, lastFeedback: null, conflictPending: false, mergeCommitSha: null
 } as unknown as EpicReview
 const later = { ...details, lastFeedback: { text: 'Rename it', at: base.at, headSha: 'old', fixTasks: [{ id: 'f', ref: 'T9', title: 'Fix integration: rename' }], files: [{ path: 'since.ts', status: 'modified', additions: 1, deletions: 1, patch: '' }], totalFiles: 1, truncated: false, diffUrl: 'https://github.com/o/r/compare/old...head' } } as unknown as EpicReview
 
@@ -387,17 +387,6 @@ describe('InboxEpicPanel', () => {
     const wrapper = render(moment('merged'))
     await flushPromises()
     expect(wrapper.get('[data-testid="inbox-epic-squash"] a').attributes('href')).toBe('https://github.com/o/r/commit/5d4c3b2a1f0e')
-  })
-
-  it('links a conflict record\'s task with how many merged, only when it has one', async () => {
-    getReview.mockResolvedValue({ ...details, conflictTaskRef: 'T3', tasks: [row('t1', {}), row('t2', {}), row('t3', { merged: false })] })
-    const legacy = render(moment('conflict'))
-    await flushPromises()
-    expect(legacy.get('[data-testid="inbox-epic-conflict-task"]').text()).toContain('2 of 3 tasks merged')
-    getReview.mockResolvedValue(details)
-    const fixRun = render(moment('conflict'))
-    await flushPromises()
-    expect(fixRun.find('[data-testid="inbox-epic-conflict-task"]').exists()).toBe(false)
   })
 
   const conflict = (fields: object) => ({ ...base, type: 'epic_conflict', sender: { name: 'Corral', role: 'system' }, headSha: 'head', targetBranch: 'main', files: ['a.ts'], since: null, newArtifacts: [], ...fields }) as unknown as EpicConflictItem

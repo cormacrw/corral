@@ -792,7 +792,6 @@ const epicReviewExtras: Record<string, Partial<EpicReview>> = {
       diffUrl: 'https://github.com/cormacrw/corral/compare/b2c3d4e5f6...223c2ab94d'
     }
   },
-  'e-themes': { conflictTaskRef: 'COR-31' },
   // Approved on an older head, and the review of this one stopped retrying
   'e-capped': {
     rounds: [{ round: 1, verdict: 'approved', reviewer: { id: 'a-rita', name: 'Rita' }, headSha: 'older-head', summary: 'Moves work on the old board.', findings: [], at: ago(60 * 8) }]
@@ -842,7 +841,7 @@ export function epicReview(id: string): EpicReview | null {
     pr: epic.prNumber === null ? null : { number: epic.prNumber, url: epic.prUrl!, title: epic.title, body: `## What\n\n${epic.description}`, baseBranch: 'main', headBranch: epic.branch!, headSha: 'e7c2a91', files: approveFiles, totalFiles: approveFiles.length, truncated: false },
     gateChecks: [{ name: 'lint', conclusion: 'success', url: null }, { name: 'test', conclusion: 'success', url: null }],
     targetMovedBy: 0, rounds: [], tasks: rows, seenByHuman: rows.filter(r => r.reviewedBy === 'human').length,
-    lastFeedback: null, conflictTaskRef: board.find(t => t.kind === 'conflict' && t.status !== 'merged')?.ref ?? null, conflictPending: false,
+    lastFeedback: null, conflictPending: false,
     mergeCommitSha: null, ...epicReviewExtras[id]
   }
 }
@@ -1090,8 +1089,7 @@ export function inbox(): Inbox {
         at: t.updatedAt,
         prUrl: t.pr?.url ?? null,
         resolution: null,
-        unread: !readItems.has(t.id),
-        ...(t.ref === 'COR-42' && { decision: epicDecision })
+        unread: !readItems.has(t.id)
       }
     })
   // Threads waiting on a decision: a question, a plan needing approval or a failed turn
@@ -1137,7 +1135,7 @@ export function inbox(): Inbox {
       id: conflict.id, type: 'epic_conflict', epicId: conflict.id, taskId: null, taskRef: null, subject: conflict.title,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
       preview: body, body, message: body, sender: { name: 'Corral', role: 'system' }, at: conflict.updatedAt,
-      prUrl: conflict.prUrl!, resolution: null, headSha: conflict.prHeadSha!, targetBranch: 'main', files, since: null, newArtifacts: [], unread: !readItems.has(conflict.id)
+      prUrl: conflict.prUrl!, resolution: null, headSha: conflict.prHeadSha!, targetBranch: 'main', files, decision: epicDecision, since: null, newArtifacts: [], unread: !readItems.has(conflict.id)
     })
   }
   const completed = tasks.find(t => t.status === 'merged')!

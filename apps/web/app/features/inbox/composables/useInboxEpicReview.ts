@@ -54,12 +54,11 @@ export function useInboxEpicReview(props: { item: EpicInboxItem }) {
       ? `${name} has moved ${plural(moved, 'commit')}. Approving rebases onto it, runs CI and squash-merges.`
       : `Approving runs CI and squash-merges into ${name}.`
   })
-  const conflictTask = computed(() => props.item.type === 'epic_activity' && props.item.event === 'conflict' ? review.value?.conflictTaskRef ?? null : null)
 
   // Read-only moments are history, so what's changed since doesn't apply to them
   const feedback = computed(() => canAct.value ? review.value?.lastFeedback ?? null : null)
   const sinceUnavailable = computed(() => !!feedback.value && (!feedback.value.diffUrl || (feedback.value.truncated && feedback.value.files.length === 0)))
 
-  return { result, review, loading, refresh, rows, merged, rounds, canAct, viewedHead, kind, approvalNote, conflictTask, feedback, sinceUnavailable }
+  return { result, review, loading, refresh, rows, merged, rounds, canAct, viewedHead, kind, approvalNote, feedback, sinceUnavailable }
 }
 export type InboxEpicReview = ReturnType<typeof useInboxEpicReview>

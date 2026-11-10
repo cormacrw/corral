@@ -4,8 +4,8 @@ import type { InboxPanel, InboxPanelContext } from '~/features/inbox/composables
 import { evidenceCriterion } from '~/features/evidence/utils/evidenceFile'
 import InboxEvidenceCarousel from '~/features/inbox/components/InboxEvidenceCarousel.vue'
 
-// The panel's Overview tab: a decision's options, a review's evidence, or what
-// each action does when there's nothing else to show
+// The panel's Overview tab: a review's evidence, or what each action does
+// when there's nothing else to show
 const props = defineProps<{ ctx: InboxPanelContext, p: InboxPanel, mobile?: boolean }>()
 const viewing = ref<Evidence | null>(null)
 
@@ -18,10 +18,6 @@ const captions = computed(() => Object.fromEntries(files.value.map(f => [f.id, c
 const hasEvidence = computed(() => props.p.images.value.length > 0 || props.p.others.value.length > 0)
 // Approval can't be taken without its task, so there's nothing to explain
 const actionHelp = computed(() => props.ctx.actions.filter(a => !(a.value === 'approve' && props.ctx.taskLoadFailed)))
-const decisionItem = computed(() => {
-  const { item } = props.ctx
-  return 'decision' in item && item.decision ? { ...item, decision: item.decision } : null
-})
 const loading = computed(() => props.ctx.taskLoading || (props.p.isReview.value && props.ctx.evidenceLoading))
 </script>
 
@@ -41,10 +37,6 @@ const loading = computed(() => props.ctx.taskLoading || (props.p.isReview.value 
     v-else
     class="flex flex-col gap-4"
   >
-    <InboxEpicDecision
-      v-if="decisionItem && p.canAct.value"
-      :item="decisionItem"
-    />
     <p
       v-if="!p.canAct.value"
       class="text-sm text-muted-foreground"

@@ -297,10 +297,8 @@ describe('reviewer gates (D26)', () => {
 
 describe('how much a developer checks locally', () => {
   it('follows the project\'s required checks', () => {
-    expect(developerCheckScope([], false)).toBeNull()
-    expect(developerCheckScope([], true)).toBeNull()
-    expect(developerCheckScope(['ci'], false)).toBe('targeted')
-    expect(developerCheckScope(['ci'], true)).toBe('none')
+    expect(developerCheckScope([])).toBeNull()
+    expect(developerCheckScope(['ci'])).toBe('targeted')
     expect(epicFixCheckScope('conflict', ['ci'])).toBe('none')
     expect(epicFixCheckScope('ci', ['ci'])).toBe('targeted')
     expect(epicFixCheckScope('review', ['ci'])).toBe('targeted')
@@ -333,29 +331,10 @@ describe('how much a developer checks locally', () => {
 
   it('never names a repository\'s tools', () => {
     for (const checkScope of [null, 'targeted', 'none'] as const) {
-      for (const prompt of [developerPrompt({ ...task, checkScope }, 'Tam'), developerRevisionPrompt({ ...task, checkScope, reviewRounds: 1 }, []), developerPrompt({ ...task, checkScope, rebaseOnly: true }, 'Tam'), developerPrompt({ ...task, checkScope, squashRebase: true }, 'Tam')]) {
+      for (const prompt of [developerPrompt({ ...task, checkScope }, 'Tam'), developerRevisionPrompt({ ...task, checkScope, reviewRounds: 1 }, []), developerPrompt({ ...task, checkScope, rebaseOnly: true }, 'Tam')]) {
         expect(prompt).not.toMatch(/pnpm|Postgres|Turbo/)
       }
     }
-  })
-})
-
-describe('task rebase prompts', () => {
-  const parent: PromptTask = { ...task, ref: 'TA-9', title: 'Rebase task: Search', branch: 'corral/epic-1-search', defaultBranch: 'develop' }
-
-  it.each([
-    ['fresh', developerPrompt({ ...parent, squashRebase: true }, 'Tam')],
-    ['resumed', developerRevisionPrompt({ ...parent, squashRebase: true, reviewRounds: 1 }, [])]
-  ])('updates the task\'s PR from a %s session', (_name, prompt) => {
-    expect(prompt).toContain('corral/epic-1-search')
-    expect(prompt).toContain('"pr_updated"')
-    expect(prompt).not.toContain('pr_opened')
-  })
-
-  it('rebases onto the target, and names the submission trailers only on a task rebase', () => {
-    expect(developerPrompt({ ...parent, squashRebase: true }, 'Tam')).toContain('origin/develop')
-    expect(developerPrompt({ ...parent, squashRebase: true }, 'Tam')).toContain('Corral-Submission:')
-    expect(developerPrompt(parent, 'Tam')).not.toContain('Corral-Submission')
   })
 })
 
@@ -376,15 +355,6 @@ describe('rebase-only developer prompts', () => {
 
 describe('rebase review prompts', () => {
   const rebase = { ...review, ref: 'TA-2', branch: 'corral/ta-2', rebaseOnly: true, approvedHeadSha: 'approved-head', headSha: 'new-head', criteria: [] }
-
-  it('shows a resolution reviewer each target-only file, in a fence its diff can\'t close', () => {
-    const epicResolution = { oldHead: 'old', ontoSha: 'onto', conflictFiles: ['a.ts'], approvedHeadSha: null, decisions: [] }
-    const prompt = reviewerPrompt({ ...rebase, rebaseOnly: false, epicResolution: { ...epicResolution, targetFiles: [{ path: 'b.md', diff: '+```\n+`````', truncated: true }] } }, 'Rita')
-    expect(prompt).toContain('- `b.md`')
-    expect(prompt).toContain('``````diff\n+```\n+`````\n``````')
-    expect(prompt).toContain('`preservesApproval: false`')
-    expect(reviewerPrompt({ ...rebase, rebaseOnly: false, epicResolution: { ...epicResolution, targetFiles: [] } }, 'Rita')).not.toContain('b.md')
-  })
 
   it('gives the developer\'s choice and conflicted files', () => {
     const prompt = reviewerPrompt({ ...rebase, rebaseReport: { review: 'trivial', conflictedFiles: ['app.ts'] } }, 'Rita')
@@ -439,7 +409,6 @@ describe('human decisions contract (D11)', () => {
     ['developer', developerPrompt(decisions, 'Tam')],
     ['spike developer', developerPrompt({ ...decisions, spike: true, branch: null }, 'Tam')],
     ['designer', designerPrompt({ ...decisions, design: { version: null } }, 'Dee')],
-    ['task rebase developer', developerPrompt({ ...decisions, squashRebase: true }, 'Tam')],
     ['rebase developer', developerRevisionPrompt({ ...decisions, rebaseOnly: true }, [])],
     ['PR-free rebase developer', developerRevisionPrompt({ ...decisions, rebaseOnly: true, prFree: true }, [])],
     ['rebase reviewer', reviewerPrompt({ ...review, ...decisions, headSha: 'new-head', rebaseOnly: true }, 'Rae')]
@@ -468,6 +437,11 @@ describe('integration review prompts', () => {
     expect(adapted).toContain('+adapted')
     expect(adapted).toContain('src/main-only.ts')
     expect(epicReviewPrompt(input)).not.toContain('src/main-only.ts')
+  })
+
+  it('fences each target-only diff so the diff can\'t close it', () => {
+    const prompt = epicReviewPrompt({ ...input, targetFiles: [{ path: 'b.md', diff: '+```\n+`````', truncated: true }] })
+    expect(prompt).toContain('``````diff\n+```\n+`````\n``````')
   })
 
   it('reads CI for the head under review', () => {

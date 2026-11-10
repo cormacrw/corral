@@ -15,18 +15,15 @@ import { ToolError } from './tool-error.ts'
 
 const { designVersions } = schema
 
-type PmInboxAction = Exclude<InboxActionInput, { action: 'decide' }>
-
 interface PmDecisionsDeps {
   db: Database
   human: Pick<HumanActions, 'inboxAction' | 'approveDesign' | 'clarify'>
 }
 
 // Ignores the tool's taskRef, which the route has in its path
-function parseInboxAction(input: unknown): PmInboxAction {
+function parseInboxAction(input: unknown): InboxActionInput {
   const parsed = inboxActionInput.safeParse(input)
   if (!parsed.success) throw new ToolError(`Not done: ${z.prettifyError(parsed.error)}`)
-  if (parsed.data.action === 'decide') throw new ToolError('Rebase decisions must be answered by the human in the Inbox')
   return parsed.data
 }
 
@@ -37,7 +34,7 @@ export function resetNote(task: Pick<TaskRow, 'status' | 'failedRuns' | 'reviewR
   return ''
 }
 
-function inboxSummary(input: Exclude<PmInboxAction, { action: 'clarify' }>, ref: string, task: TaskRow): string {
+function inboxSummary(input: Exclude<InboxActionInput, { action: 'clarify' }>, ref: string, task: TaskRow): string {
   switch (input.action) {
     case 'approve': return `Approve and merge ${ref}: ${task.title}${task.prNumber ? ` (PR #${task.prNumber} at ${task.headSha ?? 'its head'})` : ''}${input.text ? `. Note: ${input.text}` : ''}`
     case 'request_changes': return `Request changes on ${ref} (${task.title}): ${input.text}`

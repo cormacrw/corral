@@ -110,7 +110,7 @@ export class Orchestrator implements RunnerHandlers {
     // branch (which the synchronizer keeps on its target), and tasks' own PRs
     const merges = this.merges = new MergeOrchestrator({ db, events, github, runner, gate, now, wake })
     const settled = (taskId: string) => merges.settled(taskId)
-    const sync = new EpicSynchronizer({ db, events, github, runner, gate, now, wake, settled })
+    const sync = new EpicSynchronizer({ db, events, github, runner, gate, now, wake })
     const integrations = this.integrations = new TaskIntegrator({ db, events, github, runner, gate, now, wake, sync, settled })
     const epicMerges = this.epicMerges = new EpicMerger({ db, events, github, runner, gate, now, wake, headMoved: id => epicPrs.headMoved(id) })
     // A redeploy waits for merges in flight in any of them

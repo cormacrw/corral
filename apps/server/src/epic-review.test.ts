@@ -96,7 +96,7 @@ it('returns the review with PR, gates, rounds and a row per board task', async (
   expect(status).toBe(200)
   expect(body).toMatchObject({
     epicId: epic.id, title: 'Saved searches', goal: 'Save a search and reopen it', reviewMode: 'epic', state: 'human_review',
-    targetBranch: 'develop', headSha: sha, targetMovedBy: 0, seenByHuman: 1, lastFeedback: null, conflictTaskRef: null, mergeCommitSha: null,
+    targetBranch: 'develop', headSha: sha, targetMovedBy: 0, seenByHuman: 1, lastFeedback: null, mergeCommitSha: null,
     pr: { title: 'Saved searches', body: 'The whole feature', baseBranch: 'develop', totalFiles: 1, truncated: false, files: [{ path: 'search.ts' }] },
     gateChecks: [{ name: 'lint', conclusion: 'success', url: 'https://ci/lint' }, { name: 'test', conclusion: 'missing', url: null }]
   })
@@ -192,13 +192,6 @@ it('caps the files since the reviewed head as a PR is capped', async () => {
   const { body } = await read(s.epic.id)
   expect(body.lastFeedback).toMatchObject({ totalFiles: 25, truncated: true })
   expect(body.lastFeedback!.files).toHaveLength(20)
-})
-
-it('names the open conflict task', async () => {
-  const s = await setup('head-conflict')
-  const conflict = await t.createTask(s.project.slug, { title: 'Rebase task', epicId: s.epic.id })
-  await t.db.update(tasks).set({ kind: 'conflict', status: 'ready' }).where(eq(tasks.id, conflict.id))
-  expect((await read(s.epic.id)).body.conflictTaskRef).toBe(conflict.ref)
 })
 
 it('answers for a task with subtasks with no PR yet and for a merged one', async () => {

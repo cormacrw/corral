@@ -1,10 +1,8 @@
 import { STOPPED_TASK_STATUSES, type Actor, type RetryStop, type TaskStatus } from '@corral/core'
 import { schema, type Database, type Executor, type RunRow, type ProjectRow, type TaskRow } from '@corral/db'
 import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm'
-import { publishEpic } from './epics.ts'
 import { readAudit } from './audit.ts'
 import type { EventBus } from './events.ts'
-import { answerDecision, waitingDecision } from './epic-rebase-approval.ts'
 import { isTransient, type GitHubClient } from './github.ts'
 import { taskBase } from './task-base.ts'
 import { applyTransition } from './tasks.ts'
@@ -118,21 +116,13 @@ export async function stuckQuestion(db: Executor, taskId: string): Promise<boole
 }
 
 // Only an explicitly retry-authorizing choice on a pending question resolves
-// a stop. Use D10's human transition and preserve D27's decision journal.
+// a stop, through D10's human transition.
 export async function answerRecovery(db: Database, events: EventBus, sessionId: string, text: string, actor: Actor, questionId: string | null): Promise<string[]> {
   if (actor.kind !== 'human' || !questionId) return []
   const stopped = await db.select().from(tasks).where(and(sql`${tasks.retryStop}->>'sessionId' = ${sessionId}`, isNull(tasks.deletedAt)))
   const released: string[] = []
   for (const task of stopped) {
     if (task.retryStop?.retryQuestion?.id !== questionId || !task.retryStop.retryQuestion.options.includes(text.trim())) continue
-    const decision = await waitingDecision(db, task.id)
-    if (decision) {
-      // Exact choice labels retain D27's behaviour-preservation semantics;
-      // other written answers conservatively require a fresh human review.
-      const alternative = decision.alternatives.findIndex(choice => choice.label === text.trim())
-      const epicId = await answerDecision(db, task.id, { action: 'decide', text, ...(alternative >= 0 ? { alternative } : {}) }, actor)
-      await publishEpic(db, events, epicId)
-    }
     const comment = await db.transaction(async (tx) => {
       const { task: current, project } = await lockTask(tx, task.id)
       if (current.retryStop?.sessionId !== sessionId || current.retryStop.retryQuestion?.id !== questionId || !current.retryStop.retryQuestion.options.includes(text.trim())) return null

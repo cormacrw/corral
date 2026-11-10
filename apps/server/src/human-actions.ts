@@ -6,8 +6,6 @@ import { appendAudit, auditEvent } from './audit.ts'
 import type { Commands } from './commands.ts'
 import { publishDependents } from './dependent-tasks.ts'
 import { approveDesign } from './design-approval.ts'
-import { answerDecision, waitingDecision } from './epic-rebase-approval.ts'
-import { publishEpic } from './epics.ts'
 import { ApiFailure, notFound, requireHuman } from './errors.ts'
 import { endStop, idleStop, releaseStop, stuckQuestion } from './retry-recovery.ts'
 import { applyTransition, deleteTaskRows, setTaskPaused, type TaskContentEdit } from './tasks.ts'
@@ -174,7 +172,7 @@ export class HumanActions {
   // design/inbox.md: what the tray does, all through D10 transitions.
   // Everything here is the human's; a PM answer goes through clarify.
   async inboxAction(taskId: string, input: InboxActionInput, actor: Actor): Promise<Task | null> {
-    const { db, events } = this.#d
+    const { db } = this.#d
     const [row] = await db.select({ status: tasks.status, type: tasks.type }).from(tasks).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
     if (!row) throw notFound()
     // These release a stop where there is one. A stop has no status to resolve
@@ -184,9 +182,6 @@ export class HumanActions {
     if (input.action === 'retry' && !released) throw new ApiFailure(409, { code: 'conflict', constraint: null })
     if (!released) {
       switch (input.action) {
-        case 'decide':
-          await publishEpic(db, events, await answerDecision(db, taskId, input, actor))
-          break
         case 'clarify':
           return this.clarify(taskId, input.text, actor)
         case 'send_back':
@@ -209,14 +204,12 @@ export class HumanActions {
 
   // An answer to a Blocked task's question: a pinned comment for the
   // developer, and the task goes back In progress. The PM may only answer a
-  // developer's own question (D30); a human's answer also lifts a stop or
-  // decides an epic rebase's question.
+  // developer's own question (D30); a human's answer also lifts a stop.
   async clarify(taskId: string, text: string, actor: Actor): Promise<Task> {
     const { db, events } = this.#d
     if (actor.kind !== 'human') {
       const comment = await db.transaction(async (tx) => {
         const { task, project } = await lockTask(tx, taskId)
-        if (await waitingDecision(tx, task.id)) throw new ToolError('Rebase decisions must be answered by the human in the Inbox')
         const label = taskRef(project.prefix, task.number)
         if (idleStop(task)) throw new ToolError(`${label} stopped repeating and isn't asking a question. Propose retry or resolve; those need the human.`)
         if (task.status === 'blocked' && !await stuckQuestion(tx, task.id)) throw new ToolError(`${label} is blocked by a cap, repeated review feedback or a human decision, not a developer's question, so that's the human's: propose resolve on a confirm card.`)
@@ -227,8 +220,6 @@ export class HumanActions {
         return added
       })
       events.publish({ type: 'comment.created', comment })
-    } else if (await waitingDecision(db, taskId)) {
-      await publishEpic(db, events, await answerDecision(db, taskId, { action: 'decide', text }, actor))
     } else if (!await releaseStop(db, taskId, actor, { comment: text })) {
       return this.#d.commands.transitionTask(taskId, { type: 'resolve', to: 'in_progress' }, actor, { comment: text })
     }

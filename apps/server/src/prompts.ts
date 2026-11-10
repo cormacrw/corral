@@ -25,9 +25,6 @@ export interface PromptTask {
   // D27: submits commits on its own branch for integration, with no task PR
   prFree?: boolean
   rebaseOnly?: boolean
-  // An epic PR's rebase on a project whose required CI verifies it after the
-  // push, so the developer squashes, resolves and reports
-  squashRebase?: boolean
   // What to check locally; absent means the full check
   checkScope?: CheckScope | null
   approvedHeadSha?: string | null
@@ -157,8 +154,6 @@ export interface ReviewTask extends PromptTask {
   requiredChecks: string[]
   // The D24 conditions the server check found broken, when it ran
   rebaseCheckFailures?: RebaseCheckFailure[]
-  // The epic rebase this task resolves a conflict for, from its journal
-  epicResolution?: { oldHead: string, ontoSha: string, conflictFiles: string[], approvedHeadSha: string | null, decisions: { question: string, answer: string }[], targetFiles: TargetFileChange[] } | null
 }
 
 export interface TaskSubmission {
@@ -196,7 +191,6 @@ export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderRev
     commentsSection(task, 'reviewer'),
     attachmentsSection(task),
     pinSection(task, 'reviewer'),
-    epicResolutionSection(task),
     gatesSection(task),
     section('How to review', `
 - You are in a read-only checkout of the commit under review. Do not edit, commit or push. ${submission
@@ -227,40 +221,6 @@ function submissionHistory(task: ReviewTask): string {
   const earlier = task.prFree ? task.submissions?.slice(0, -1) ?? [] : []
   if (earlier.length === 0) return ''
   return section('Earlier submissions', earlier.map(s => `- Submission ${s.sequence}: commit ${s.headSha} on base ${s.baseSha} (${s.createdAt.toISOString()})`).join('\n'))
-}
-
-// D24: review the resolution; the server carries the approved criteria forward.
-// COR-291: what lets approval cross a resolved conflict is this judgment, on
-// exactly this commit, so it spells out what to compare
-function epicResolutionSection(task: ReviewTask): string {
-  const r = task.epicResolution
-  if (!r) return ''
-  return section('Task rebase under review', `This resolves a conflict in the task's rebase onto \`${r.ontoSha}\` of \`${task.defaultBranch}\`. The task's head before it is \`${r.oldHead}\`. ${r.approvedHeadSha ? `Approval stands on that head (first given on \`${r.approvedHeadSha}\`), so your verdict decides whether it carries forward.` : 'The task has no approval to carry yet.'}
-Conflicted files: ${r.conflictFiles.join(', ') || '(not recorded)'}.
-${r.decisions.length ? `The human already decided:\n${r.decisions.map(d => `- ${d.question} ${d.answer}`).join('\n')}\nA change that follows these decisions isn't scope creep.\n` : ''}
-- Compare approved and candidate with \`git range-diff $(git merge-base ${r.oldHead} ${r.ontoSha})..${r.oldHead} ${r.ontoSha}..HEAD\`.
-- Check each conflict hunk against the \`${task.defaultBranch}\` commit that caused it, and read \`git log -p ${r.oldHead}...${r.ontoSha} --right-only\` for the target's changes.
-- Read any change to \`CORRAL.md\`, \`CLAUDE.md\`, \`docs/\` or \`.corral/wiki/\` in that range: a binding decision may have moved under the task.
-- If the two sides' intended behaviours can't both hold, or a changed binding decision affects the task, don't pick a side: report outcome "${outcome('blocked')}" with \`decision\`: one focused question, its alternatives and the changes affected.
-- Otherwise approve with \`preservesApproval: true\` only if every behaviour that was approved is unchanged. Approve with \`preservesApproval: false\` if the resolution is sound but behaviour changed: the task then returns to integration review and the human.
-- Request changes if the resolution is wrong.${targetFilesNote(r.targetFiles)}`) + '\n' + targetFilesSection(r.ontoSha, r.targetFiles, task.defaultBranch)
-}
-
-function targetFilesNote(files: TargetFileChange[]): string {
-  return files.length ? '\n- The candidate changes files the task never touched. Judge each one under "Files only the target changed".' : ''
-}
-
-// Corral refuses these changes on any candidate no reviewer approved, so this
-// section is the whole of their review (COR-434). They edit code the human never
-// saw in this epic, which is why approval can't carry across them.
-function targetFilesSection(ontoSha: string, files: TargetFileChange[], target: string): string {
-  if (files.length === 0) return ''
-  return section('Files only the target changed', `Only \`${target}\` changed these files, and the task never touched them, yet this candidate does:
-${files.map(f => `- \`${f.path}\``).join('\n')}
-
-Approve only if each change is an adaptation the task's changes require, such as a test following a type the task changed, and drops none of the target's work. Otherwise request changes. Approving any of these means \`preservesApproval: false\`, because the human never approved these edits.
-
-${targetFileDiffs(files, ontoSha)}`)
 }
 
 function targetFileDiffs(files: TargetFileChange[], base: string): string {
@@ -426,7 +386,7 @@ export function epicFixPrompt(input: EpicFixInput): string {
   const job = fix === 'conflict'
     ? section('The conflict', `Corral could not rebase this task onto \`${target}\` cleanly. Run \`git fetch origin && git rebase ${ontoSha}\`. Never merge \`${target}\` in. Resolve the conflicts in ${files.length ? files.join(', ') : 'the files git reports'}.
 
-${keepBothSides(target)} ${EPIC_SQUASH_KEEPS_TRAILERS}
+${keepBothSides(target)} Keep every \`Corral-Submission:\` trailer in the commit messages: Corral finds them on the task's branch to integrate each submission exactly once.
 
 If the two sides can't both be kept, or the target changed a binding decision this work relies on, report \`${outcome('stuck')}\` with \`decision\`: one focused question, its alternatives, each marked with whether it changes approved behaviour, and the changes affected. The human's answer brings this same fix back to a developer.`)
     : fix === 'ci'
@@ -623,12 +583,11 @@ function coldRevisionSection(task: PromptTask): string {
 
 // What a developer's run on the task reports when its work is done
 function workOutcome(task: PromptTask): string {
-  return outcome(task.spike ? 'findings_reported' : task.prFree ? 'commit_submitted' : task.reviewRounds > 0 || task.squashRebase ? 'pr_updated' : 'pr_opened')
+  return outcome(task.spike ? 'findings_reported' : task.prFree ? 'commit_submitted' : task.reviewRounds > 0 ? 'pr_updated' : 'pr_opened')
 }
 
 export function developerPrompt(task: PromptTask, agentName: string): string {
   if (task.rebaseOnly) return rebaseDeveloperPrompt(task, agentName)
-  if (task.squashRebase) return epicRebaseDeveloperPrompt(task, agentName)
   if (task.spike) return spikeDeveloperPrompt(task, agentName)
   const revision = task.reviewRounds > 0
   return [
@@ -651,7 +610,7 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
   ? `This is a subtask with no task PR. Stay on this branch: only Corral writes to the task's shared branch. ${NO_PUSH} Corral pushes your branch and starts review of your commit when you report your outcome.`
   : `${NO_PUSH} Corral pushes the branch and opens the PR when you report your outcome.`}
 - ${PROJECT_BRIEF} Update the wiki in the same branch when behaviour changes.
-- ${checksInstruction(scopeOf(task), !!task.ciFailures)}
+- ${checksInstruction(task.checkScope, !!task.ciFailures)}
 - ${EVIDENCE_RULE}
 - ${rereadTask()}
 - When the work is committed and evidenced, call \`${tool('report_outcome')}\` with outcome "${workOutcome(task)}" and a summary. If anything is missing, the call fails and tells you what to fix.
@@ -744,7 +703,7 @@ export function developerRevisionPrompt(task: PromptTask, feedback: PromptTask['
     ciFixSection(task),
     section('New comments', feedback.length > 0 ? commentLines(feedback) : `(none: re-read the task with \`${tool('get_task')}\`)`),
     section('What to do', `
-- Address every point of the feedback, and finish whatever the task still needs.${task.spike ? '' : `\n- ${checksInstruction(scopeOf(task), !!task.ciFailures)}`}
+- Address every point of the feedback, and finish whatever the task still needs.${task.spike ? '' : `\n- ${checksInstruction(task.checkScope, !!task.ciFailures)}`}
 - Re-read the task with \`${tool('get_task')}\` if anything may have changed, and attach evidence for every acceptance criterion again if the review round has moved on.
 - Then call \`${tool('report_outcome')}\` with outcome "${workOutcome(task)}" and a summary${task.spike ? ' of your findings' : ' of the change as a whole'}.`)
   ].join('\n')
@@ -804,7 +763,7 @@ function rebaseDeveloperPrompt(task: PromptTask, agentName: string): string {
     section('How to work', `
 - Fetch origin and rebase branch \`${task.branch}\` onto \`origin/${task.defaultBranch}\`.
 - Resolve the conflicts. ${keepBothSides(`origin/${task.defaultBranch}`)}
-- ${checksInstruction(scopeOf(task))}${scopeOf(task) ? '' : BUILD_TOO}
+- ${checksInstruction(task.checkScope)}${task.checkScope ? '' : BUILD_TOO}
 - Check that \`git merge-tree --write-tree HEAD origin/${task.defaultBranch}\` is clean.
 - ${NO_PUSH} Corral pushes with --force-with-lease.
 ${WORK_NOTE}
@@ -824,18 +783,15 @@ const EPIC_REBASE_NO_GATES = 'Required CI runs on the task\'s PR and enforces th
 
 // The project's required CI decides how much a developer checks locally: it
 // covers the full gates when there is any, and nothing else does when there's none
-export function developerCheckScope(requiredChecks: string[], epicRebase: boolean): CheckScope | null {
-  if (requiredChecks.length === 0) return null
-  return epicRebase ? 'none' : 'targeted'
+export function developerCheckScope(requiredChecks: string[]): CheckScope | null {
+  return requiredChecks.length === 0 ? null : 'targeted'
 }
 
-// A conflict fix is a rebase, which leaves the gates to CI like an epic rebase
+// A conflict fix is a rebase, which leaves the gates to CI
 export function epicFixCheckScope(fix: EpicFixInput['fix'], requiredChecks: string[]): CheckScope | null {
-  return developerCheckScope(requiredChecks, fix === 'conflict')
+  if (requiredChecks.length === 0) return null
+  return fix === 'conflict' ? 'none' : 'targeted'
 }
-
-// An epic PR's squash and rebase always leaves the gates to CI
-const scopeOf = (task: PromptTask) => task.squashRebase ? 'none' : task.checkScope
 
 // For a round that replaces approved work and has no required CI behind it
 const BUILD_TOO = ' Then run the project\'s build.'
@@ -848,44 +804,6 @@ function checksInstruction(scope: CheckScope | null | undefined, failing = false
     return `This project's required checks must pass before this work merges, so run only the fast checks and tests relevant to this change, with the project's own commands${start}. Don't run the full suite, whatever your general instructions say.`
   }
   return 'This project has no required CI, so nothing else verifies this work. Run its lint, type checks and tests before reporting, with the project\'s own commands.'
-}
-
-const EPIC_SQUASH_KEEPS_TRAILERS = 'Keep every `Corral-Submission:` trailer in the squashed commit\'s message: Corral finds them on the task\'s branch to integrate each submission exactly once.'
-const EPIC_SQUASH_KEEPS_MIGRATIONS = 'This squash doesn\'t conflict with the rule against squashing migrations: it squashes commits, not migration files. Migration files stay exactly as they are, with new ones renumbered only as a rebase already requires.'
-
-// The squash happens first so each conflict is resolved once. The epic PR
-// squashes on merge, so the individual commits aren't kept anyway.
-function epicRebaseDeveloperPrompt(task: PromptTask, agentName: string): string {
-  const target = `origin/${task.defaultBranch}`
-  return [
-    `You are ${agentName}, the developer agent in Corral, working on ${task.ref}: ${task.title}.`,
-    task.reviewRounds > 0
-      ? `This is a revision: review round ${task.reviewRounds} of ${task.reviewRoundCap} requested changes to this rebase. Address every piece of feedback below; the squash and rebase below are only for what isn't done yet.`
-      : 'Your only job is to squash the task\'s branch, rebase it, resolve the conflicts and report.',
-    '',
-    stoppedRunSection(task),
-    taskSections(task),
-    section('Acceptance criteria', criteriaList(task)),
-    commentsSection(task, 'author'),
-    attachmentsSection(task),
-    section('How to work', `
-- You are in a git worktree on the task's branch \`${task.branch}\`. Do not push and do not use \`gh\`. Corral force-pushes it with --force-with-lease when you report, and no separate PR is opened.
-- Squash the branch into one commit on its merge base with \`${target}\`, carrying every commit's message over:
-  \`\`\`
-  git fetch origin && base=$(git merge-base HEAD ${target}) && git reset --soft "$base" && git log --format=%B "$base..ORIG_HEAD" | git commit -F -
-  \`\`\`
-- ${EPIC_SQUASH_KEEPS_TRAILERS} Don't reword them out, here or when the rebase continues.
-- ${EPIC_SQUASH_KEEPS_MIGRATIONS}
-- Rebase that commit: \`git rebase ${target}\`. Never merge the target in.
-- Resolve the conflicts keeping both sides' intent, never reverting what the target merged. Make no feature changes. Continue with \`git add\` and \`GIT_EDITOR=true git rebase --continue\`.
-- ${EPIC_REBASE_NO_GATES}
-- Attach a \`note\` with \`${tool('attach_evidence')}\` for each acceptance criterion, naming the conflicted files and how each was resolved. There's nothing else to prove.
-- Then call \`${tool('report_outcome')}\` with outcome "${outcome('pr_updated')}" and a summary naming every conflicted file and how it was resolved.
-${WORK_NOTE}
-- ${HUMAN_DECISIONS_NOTE}
-- ${STUCK_RULE}
-- ${ALWAYS_REPORT}`)
-  ].join('\n')
 }
 
 // Human checks override the normal per-criterion evidence and verdict rules.

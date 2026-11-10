@@ -12,7 +12,7 @@ import { carryApproval, latestApproval } from './rebase-review.ts'
 import { Backoff, HeadAttempts, LONGEST_POLL_MS, MAX_MERGE_ATTEMPTS, RETRY_MAX_MS } from './retries.ts'
 import { triageCap } from './retry-recovery.ts'
 import type { RunnerHub } from './runner-hub.ts'
-import { evidenceState, isEpicResolution, taskBase } from './task-base.ts'
+import { evidenceState, taskBase } from './task-base.ts'
 import { lockLiveTask, lockTask } from './task-rows.ts'
 import { ciFailed, settleTask, type ServerChange } from './task-settle.ts'
 import { verdictForSubmission } from './task-submissions.ts'
@@ -20,7 +20,7 @@ import { loadTasks } from './task-views.ts'
 import { applyTransition, recordTaskMerged } from './tasks.ts'
 import { addCommentWithTransition } from './comments.ts'
 
-const { epics, reviews, tasks } = schema
+const { reviews, tasks } = schema
 
 const MERGED_OUTSIDE_FROM: readonly TaskStatus[] = TRANSITION_RULES.merged_outside.from
 
@@ -106,32 +106,15 @@ export class MergeOrchestrator {
   async tick(): Promise<void> {
     if (this.#d.gate.halted || !this.#d.runner.online) return
     await this.#promoteApproved()
-    const waiting = await this.#d.db.select({ task: tasks, project: schema.projects, epicBranch: epics.branch }).from(tasks)
+    const waiting = await this.#d.db.select({ task: tasks, project: schema.projects }).from(tasks)
       .innerJoin(schema.projects, eq(schema.projects.id, tasks.projectId))
-      .leftJoin(epics, eq(epics.id, tasks.epicId))
       .where(and(eq(tasks.status, 'ready_to_merge'), isNull(tasks.leaseRunId), isNull(tasks.deletedAt), eq(tasks.paused, false), eq(schema.projects.paused, false)))
       .orderBy(asc(tasks.updatedAt))
-    for (const { task, project, epicBranch } of waiting) {
+    for (const { task, project } of waiting) {
       if (this.#d.gate.halted) return
       if (task.type === 'design') continue
-      // The synchronizer publishes a resolution and settles its task
-      if (isEpicResolution(task)) continue
-      // A rebase task (D27): its branch is the epic branch
-      if (task.branch && task.branch === epicBranch) await this.#once(task.id, () => this.#settleEpicRebase(task))
-      else if (task.prNumber && task.headSha && this.#retry.due(task.id) && this.#ciPoll.due(task.id)) await this.#advanceOnce(task, project)
+      if (task.prNumber && task.headSha && this.#retry.due(task.id) && this.#ciPoll.due(task.id)) await this.#advanceOnce(task, project)
     }
-  }
-
-  // A handed-off rebase task's work reached the epic branch when the runner pushed it;
-  // nothing is left to merge, and the epic PR goes back to integration review
-  async #settleEpicRebase(task: TaskRow): Promise<void> {
-    await this.#d.db.transaction(async (tx) => {
-      const locked = await lockTask(tx, task.id)
-      if (locked.task.status !== 'ready_to_merge') return
-      await recordTaskMerged(tx, locked, { type: 'merged_outside' }, { event: 'merged', headSha: task.headSha }, { at: this.#now() })
-    })
-    await this.#publish(task.id)
-    await this.cleanup(task.id)
   }
 
   // Approvals recorded before Ready to merge existed left the task in Agent

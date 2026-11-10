@@ -148,7 +148,7 @@ export const pmActionTools = {
     description: 'Act on a task item from list_inbox, by its taskRef. `clarify` answers a developer\'s question on a Blocked task, and acts straight away: the text is pinned for the developer and the task goes back In progress. Every other action is a decision: it posts a confirm card and nothing happens until the human clicks Confirm. `retry` releases a Stopped item, which `resolve`, `send_back` and `delete` also apply to. `approve` and `request_changes` (with text) are for Human review; `resolve` (with `to`) moves a Blocked or Failed task, as Retry does with in_progress; `send_back` returns it to the Backlog; `delete` deletes it. For a design, use approve_design to approve. Plan threads and integration reviews are separate Inbox items: this tool doesn\'t act on them.',
     input: {
       taskRef: z.string().trim().min(1),
-      action: z.enum(INBOX_ACTIONS).exclude(['decide']),
+      action: z.enum(INBOX_ACTIONS),
       text: z.string().trim().min(1).optional().describe('Required for clarify and request_changes; an optional note for resolve, or the reason for delete'),
       to: z.enum(RESOLVE_TARGETS).optional().describe('Required for resolve: the status to move the task to')
     }

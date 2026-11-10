@@ -9,7 +9,7 @@ submission and review; COR-288 added integration into the task's branch.
 modes. `recordTaskSubmission` in `apps/server/src/task-submissions.ts` selects
 protocol 1 only for ordinary task-mode build tasks without PRs, recording a
 versioned submission and its base/target atomically. It rejects direct,
-standalone, each_task, spike, design and task conflict submissions.
+standalone, each_task, spike and design submissions.
 
 `task_submissions` records submitted, agent-approved and integrated commits
 without a PR FK. Approval must match the submitted head. Integration needs

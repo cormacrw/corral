@@ -1,11 +1,9 @@
 import type { RunJob } from '@corral/contracts'
 import { actorLabel, AUTHORING_ROLES, isPrFree, taskRef } from '@corral/core'
 import { schema, type Database, type Executor, type AgentRow, type TaskRow } from '@corral/db'
-import { and, asc, desc, eq, gt, inArray, isNotNull, ne, or } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, ne, or } from 'drizzle-orm'
 import { listTaskAttachments } from './attachments.ts'
 import { readCiFailures } from './ci-output.ts'
-import { resolutionContext } from './epic-rebase-approval.ts'
-import { targetFileChanges } from './epic-sync.ts'
 import type { GitHubClient } from './github.ts'
 import { feedbackComment } from './outcome-text.ts'
 import { describeRunner } from './placement.ts'
@@ -17,7 +15,7 @@ import type { RunEnding } from './run-ending.ts'
 import { workerJob } from './run-job.ts'
 import type { RunnerHub } from './runner-hub.ts'
 import { listEvidence } from './runs.ts'
-import { isEpicRebaseTask, isEpicResolution, taskBase } from './task-base.ts'
+import { taskBase } from './task-base.ts'
 import { listTaskSubmissions, selectPrFreeProtocol } from './task-submissions.ts'
 import { taskCriteria } from './criteria.ts'
 
@@ -95,8 +93,7 @@ export class RunJobs {
       : null
     // The server reads what developers can't (D8, D29). This never fails a job.
     const ciFailures = task.ciFix ? await readCiFailures(this.#d.github, ctx.project!.repository, task.ciFix) : null
-    const epicRebase = await isEpicRebaseTask(db, task)
-    const checkScope = ctx.run.role === 'developer' ? developerCheckScope(ctx.project!.requiredChecks, epicRebase) : null
+    const checkScope = ctx.run.role === 'developer' ? developerCheckScope(ctx.project!.requiredChecks) : null
     const promptTask = {
       ref,
       title: task.title,
@@ -110,8 +107,6 @@ export class RunJobs {
       prFree: isPrFree(task),
       reviewRounds: task.reviewRounds,
       rebaseOnly: task.rebaseOnly,
-      // A resolution has a brief of its own, on a candidate branch
-      squashRebase: ctx.project!.requiredChecks.length > 0 && !isEpicResolution(task) && epicRebase,
       checkScope,
       approvedHeadSha: task.approvedHeadSha,
       reviewRoundCap: ctx.project!.reviewRoundCap,
@@ -137,9 +132,8 @@ export class RunJobs {
     // developer's revision starts fresh instead. Rebase rounds and designers
     // keep their session whatever its age: it holds what they need. So does a
     // run that never reported, whose uncommitted work only the session knows.
-    const rebaseRound = task.rebaseOnly || await isEpicRebaseTask(db, task)
     const reported = previous?.state === 'completed' && previous.outcome !== null && previous.outcome !== 'rate_limited'
-    const expired = local && !warm && ctx.run.role === 'developer' && !rebaseRound && reported
+    const expired = local && !warm && ctx.run.role === 'developer' && !task.rebaseOnly && reported
     const resume = local && !expired ? previous.agentSessionId : null
     const fresh = expired ? author.prompt({ ...promptTask, coldRevision: { feedback, diff: spike ? null : await this.#branchDiff(ctx, task, baseBranch) } }, ctx.agent.name) : prompt
     if (resume) {
@@ -198,15 +192,8 @@ export class RunJobs {
   // This agent's last run in the same authoring role on the task that started a session: its
   // runner holds the worktree and session a revision resumes
   async previousAuthorRun(db: Executor, taskId: string, agentId: string, role: AgentRow['role'], exclude?: string) {
-    // A developer-authored design is a session boundary (D23), including
-    // when this agent had an older designer session before that developer run.
-    const [legacy] = role === 'designer'
-      ? await db.select({ number: runs.number }).from(runs)
-          .where(and(eq(runs.taskId, taskId), eq(runs.role, 'developer')))
-          .orderBy(desc(runs.number)).limit(1)
-      : []
     const [previous] = await db.select({ number: runs.number, runnerId: runs.runnerId, agentSessionId: runs.agentSessionId, queuedAt: runs.queuedAt, startedAt: runs.startedAt, endedAt: runs.endedAt, state: runs.state, outcome: runs.outcome }).from(runs)
-      .where(and(eq(runs.taskId, taskId), eq(runs.role, role), eq(runs.agentId, agentId), legacy ? gt(runs.number, legacy.number) : undefined, exclude ? ne(runs.id, exclude) : undefined, isNotNull(runs.agentSessionId)))
+      .where(and(eq(runs.taskId, taskId), eq(runs.role, role), eq(runs.agentId, agentId), exclude ? ne(runs.id, exclude) : undefined, isNotNull(runs.agentSessionId)))
       .orderBy(desc(runs.number)).limit(1)
     return previous ?? null
   }
@@ -240,11 +227,6 @@ export class RunJobs {
       : []
     const pin = await this.#pinnedDesign(ctx.project!.prefix, task.id)
     const rebaseCheckFailures = task.rebaseOnly ? await latestRebaseCheckFailures(db, task.id) : []
-    const resolution = isEpicResolution(task) && task.epicId ? await resolutionContext(db, task.id, task.epicId) : null
-    const epicResolution = resolution && {
-      ...resolution,
-      targetFiles: await targetFileChanges(this.#d.runner, { repository: ctx.project!.repository, targetBranch: ctx.project!.defaultBranch, expectedHeadSha: resolution.oldHead, candidateSha: task.headSha! })
-    }
     const prFree = isPrFree(task)
     const submissions = prFree ? await listTaskSubmissions(db, task.id) : []
     return {
@@ -276,7 +258,6 @@ export class RunJobs {
         rebaseOnly: task.rebaseOnly,
         approvedHeadSha: task.approvedHeadSha,
         rebaseCheckFailures,
-        epicResolution,
         reviewRounds: task.reviewRounds,
         reviewRoundCap: ctx.project!.reviewRoundCap,
         criteria: criteria.map(c => ({ id: c.id, text: c.text, checkedByHuman: c.checkedByHuman })),

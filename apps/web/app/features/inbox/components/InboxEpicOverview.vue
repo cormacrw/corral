@@ -18,8 +18,6 @@ const props = defineProps<{
   rounds: EpicReviewRound[]
   feedback: EpicReviewFeedback | null
   sinceUnavailable: boolean
-  // The unfinished task resolving a conflict this item is the record of
-  conflictTask: string | null
   mobile?: boolean
 }>()
 defineEmits<{ seeChanges: [] }>()
@@ -30,7 +28,6 @@ const screenshots = computed(() => props.rows.flatMap(row => currentEvidence(row
   .filter(e => e.url && e.contentType?.startsWith('image/'))
   .map(evidence => ({ evidence, caption: `${row.ref} · ${evidenceCriterion(evidence, row.criteria)}` }))))
 const conflict = computed(() => props.item.type === 'epic_conflict' ? props.item : null)
-const merged = computed(() => props.rows.filter(r => r.merged).length)
 const size = computed(() => [
   plural(props.rows.length, 'task'),
   ...(props.review?.pr ? [plural(props.review.pr.totalFiles, 'file')] : [])
@@ -107,7 +104,7 @@ const next = computed(() => event.value === 'human_approved' && props.review?.st
       </p>
       <InboxEpicDecision
         v-if="conflict.decision"
-        :item="{ taskId: null, epicId: conflict.epicId, headSha: conflict.headSha, decision: conflict.decision }"
+        :item="{ epicId: conflict.epicId, headSha: conflict.headSha, decision: conflict.decision }"
       />
       <section
         v-if="conflict.files.length"
@@ -133,13 +130,6 @@ const next = computed(() => event.value === 'human_approved' && props.review?.st
       </section>
     </template>
 
-    <p
-      v-if="conflictTask"
-      class="text-sm"
-      data-testid="inbox-epic-conflict-task"
-    >
-      <TaskLink :task-ref="conflictTask" /> is resolving it. {{ merged }} of {{ plural(rows.length, 'task') }} merged.
-    </p>
     <p
       v-if="next"
       class="text-sm"

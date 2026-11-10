@@ -162,7 +162,7 @@ On the mobile layout ([mobile.md](mobile.md#inbox)), a Plan thread opens as its 
 
 ### Task items (D27)
 
-A task rebase's question (D27, COR-291) is a task question whose Overview leads with the question, any binding decision, each alternative with its effect and a **Choose** button, and the affected changes. Choosing resumes the rebase; **Answer** writes a free-form answer, which counts as a behaviour change.
+A task fix's question (D29) is an `epic_conflict` item whose Overview leads with the question, any binding decision, each alternative with its effect and a **Choose** button, and the affected changes. Choosing resumes the fix; **Answer** writes a free-form answer, which counts as a behaviour change.
 
 Every task item uses `InboxEpicPanel`, Option D for a task, on desktop and mobile: a task's PR waiting on the human, what stopped a task, and the read-only moments in Activity and Resolved. It reads `GET /api/epics/:id/review`. The top block shows at once, from the item, with skeletons in the tab body until the review arrives.
 
@@ -176,7 +176,7 @@ Every task item uses `InboxEpicPanel`, Option D for a task, on desktop and mobil
 - **Request changes:** opens the composer, and its text becomes a fix task in Ready in the task, titled by `feedbackFixTitle`.
 - **The head moved while open:** the action carries the head the human was looking at, so it fails with a message, the feedback text is kept and the panel refreshes. If the item leaves the Inbox while open, the panel stays on it with the message and nothing can be sent.
 - **What stopped a task:** an `epic_conflict` item shows the failure, the conflicting files or the rebase's question. **Retry** goes round the automatic path again; a question is answered with a **Choose** button or in the composer.
-- **Read-only:** opened, conflict, approved and merged items show *For your information. Nothing to do.* in place of the actions, and Resolved items show the resolution. A merged task shows its squash commit, and an approved one says what happens next. The Activity record of a conflict links its task and shows tasks merged, such as 2 of 3, only when a task exists.
+- **Read-only:** opened, conflict, approved and merged items show *For your information. Nothing to do.* in place of the actions, and Resolved items show the resolution. A merged task shows its squash commit, and an approved one says what happens next.
 
 ## What each action does (D10)
 

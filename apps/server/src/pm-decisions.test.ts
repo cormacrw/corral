@@ -66,22 +66,6 @@ describe('PM tools for the Inbox, designs and agents', () => {
     expect(response.result.find(i => i.id === question.id)).toMatchObject({ type: 'question', taskRef: question.ref, asking: 'Which provider?' })
   })
 
-  it('keeps an epic rebase product decision waiting for the human', async () => {
-    const question = 'Which behaviour should the rebase preserve?'
-    const blocked = await task({ status: 'blocked', statusReason: question })
-    const [epic] = await t.db.insert(schema.epics).values({ projectId: blocked.projectId, title: 'Rebase', createdBy: t.actor }).returning()
-    const [operation] = await t.db.insert(schema.taskIntegrationOperations).values({
-      epicId: epic!.id, kind: 'rebase', expectedTargetSha: 'old-head', ontoSha: 'new-base',
-      resolutionTaskId: blocked.id, leaseEpoch: 0,
-      decisions: [{ id: 'decision', runId: job.runId, raisedAt: new Date().toISOString(), question, alternatives: [], affectedChanges: ['app.ts'], answer: null }]
-    }).returning()
-    expect(await call('act_on_inbox', { taskRef: blocked.ref, action: 'clarify', text: 'Choose for me' })).toMatchObject({ ok: false })
-    expect(await statusOf(blocked.id)).toMatchObject({ status: 'blocked', statusReason: question })
-    expect(await t.db.select().from(comments).where(eq(comments.taskId, blocked.id))).toEqual([])
-    const [unchanged] = await t.db.select().from(schema.taskIntegrationOperations).where(eq(schema.taskIntegrationOperations.id, operation!.id))
-    expect(unchanged!.decisions).toEqual(operation!.decisions)
-  })
-
   it('answers a Blocked task straight away, attributed to the PM session', async () => {
     const blocked = await blockedBy('stuck')
     await t.db.update(tasks).set({ reviewRounds: 2 }).where(eq(tasks.id, blocked.id))

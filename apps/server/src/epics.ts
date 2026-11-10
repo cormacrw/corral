@@ -9,7 +9,7 @@ import type { InvalidatedEpics } from './epic-review-state.ts'
 import type { EventBus } from './events.ts'
 import { getRun } from './runs.ts'
 import { pullRequestUrl } from './github-urls.ts'
-import { deferredConflicts, openDecision, waitingOn } from './operations.ts'
+import { deferredConflicts, openDecision } from './operations.ts'
 import { checkParentCycles, deliveredAt, syncParentContent } from './parents.ts'
 import { toTasks } from './task-views.ts'
 
@@ -29,7 +29,7 @@ export async function listEpics(db: Executor, project: ProjectRow): Promise<Epic
   const tasksOf = Map.groupBy(taskRows, t => t.epicId!)
   const dependsOn = Map.groupBy(edges, e => e.epicId)
   const blocks = Map.groupBy(edges, e => e.dependsOnEpicId)
-  const syncs = await epicSyncs(db, project, rows)
+  const syncs = await epicSyncs(db, rows)
   const parents = await parentRefs(db, project, rows)
   return rows.map(row => toEpic(row, project, tasksOf.get(row.id) ?? [], [...dependsOn.get(row.id) ?? [], ...blocks.get(row.id) ?? []], syncs.get(row.id) ?? null, parents))
 }
@@ -40,7 +40,7 @@ export async function loadEpic(db: Executor, epicId: string): Promise<Epic> {
   const [taskRows, edges, syncs] = await Promise.all([
     db.select({ status: tasks.status, type: tasks.type, prNumber: tasks.prNumber, integrationProtocol: tasks.integrationProtocol, deletedAt: tasks.deletedAt }).from(tasks).where(eq(tasks.epicId, epicId)),
     db.select().from(epicDependencies).where(or(eq(epicDependencies.epicId, epicId), eq(epicDependencies.dependsOnEpicId, epicId))),
-    epicSyncs(db, project, [row])
+    epicSyncs(db, [row])
   ])
   return toEpic(row, project, taskRows, edges, syncs.get(row.id) ?? null, await parentRefs(db, project, [row]))
 }
@@ -72,7 +72,7 @@ export async function getEpic(db: Executor, epicId: string): Promise<EpicDetail>
   const taskRows = await db.select().from(tasks).where(eq(tasks.epicId, epicId)).orderBy(asc(tasks.number))
   const edges = await db.select().from(epicDependencies)
     .where(or(eq(epicDependencies.epicId, epicId), eq(epicDependencies.dependsOnEpicId, epicId)))
-  const syncs = await epicSyncs(db, project, [row])
+  const syncs = await epicSyncs(db, [row])
   return { ...toEpic(row, project, taskRows, edges, syncs.get(row.id) ?? null, await parentRefs(db, project, [row])), tasks: await toTasks(db, project, taskRows.filter(t => !t.deletedAt)), fixes: await epicFixRuns(db, epicId) }
 }
 
@@ -96,28 +96,22 @@ export async function patchEpic(db: Executor, epicId: string, input: PatchEpicIn
 }
 
 // What the writer lock says about each epic, or the stop a human has to clear
-async function epicSyncs(db: Executor, project: ProjectRow, rows: EpicRow[]): Promise<Map<string, EpicSync>> {
+async function epicSyncs(db: Executor, rows: EpicRow[]): Promise<Map<string, EpicSync>> {
   const syncs = new Map<string, EpicSync>()
   const ids = rows.filter(r => r.branch).map(r => r.id)
   if (ids.length === 0) return syncs
-  const active = await db.select({ operation: taskIntegrationOperations, number: tasks.number, status: tasks.status, statusReason: tasks.statusReason }).from(taskIntegrationOperations)
-    .leftJoin(tasks, eq(tasks.id, taskIntegrationOperations.resolutionTaskId))
+  const active = await db.select({ operation: taskIntegrationOperations }).from(taskIntegrationOperations)
     .where(and(inArray(taskIntegrationOperations.epicId, ids), eq(taskIntegrationOperations.kind, 'rebase'), inArray(taskIntegrationOperations.state, [...ACTIVE_OPERATION_STATES])))
   const working = await db.select({ epicId: runs.epicId, agentId: runs.agentId, name: agents.name, runId: runs.id, runNumber: runs.number }).from(runs).innerJoin(agents, eq(agents.id, runs.agentId))
     .where(and(inArray(runs.epicId, ids), eq(runs.role, 'developer'), inArray(runs.state, [...ACTIVE_RUN_STATES])))
   const developers = new Map(working.map(({ epicId, ...developer }): [string, EpicFixDeveloper] => [epicId!, developer]))
-  for (const { operation, number, status, statusReason } of active) {
-    const deciding = status ? waitingOn(operation, { status, statusReason }) : null
+  for (const { operation } of active) {
     const asking = operation.fix ? openDecision(operation) : null
     syncs.set(operation.epicId, asking
-      ? { state: 'deciding', question: asking.question, taskId: null, taskRef: null }
+      ? { state: 'deciding', question: asking.question }
       : operation.fix
         ? { state: 'fixing', fix: operation.fix, reason: operation.fixBrief ?? '', files: operation.conflictFiles ?? [], developer: developers.get(operation.epicId) ?? null, attempts: operation.fixAttempts }
-        : operation.resolutionTaskId
-          ? deciding
-            ? { state: 'deciding', question: deciding.question, taskId: operation.resolutionTaskId, taskRef: number === null ? null : taskRef(project.prefix, number) }
-            : { state: 'resolving', files: operation.conflictFiles ?? [], taskId: operation.resolutionTaskId, taskRef: number === null ? null : taskRef(project.prefix, number) }
-          : { state: 'rebasing' })
+        : { state: 'rebasing' })
   }
   const deferred = await deferredConflicts(db, ids.filter(id => !syncs.has(id)))
   for (const row of rows) {

@@ -8,6 +8,6 @@ The panel builds its own `InboxPanelContext` so `InboxPanelTray` and `InboxPanel
 
 Task history has its own `epic_activity` type with no task, so a task with no subtasks left still has a history. `ActionableInboxItem` excludes it, so it never counts in Needs you.
 
-`getEpicReview` reports `conflictPending` from the deferred rebase row (D27); it isn't a Needs you item. `conflictTaskRef` is only ever set by a task from before D29, since conflicts now run with no separate subtask.
+`getEpicReview` reports `conflictPending` from the deferred rebase row (D27); it isn't a Needs you item.
 
 Review rounds live in `epic_review_rounds`, one per reporting run, with structured findings. A review from before that table has a summary in the item and no rounds, so its Review tab is absent.
