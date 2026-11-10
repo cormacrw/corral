@@ -603,7 +603,7 @@ The approved groups have all merged. Everything above is the inventory as it was
 | #383 | G4 | Resolution tasks (L6), COR-166 hand-off conflict tasks (L7) and developer-authored design sessions (L9), with their prompts, labels and tests |
 | #384 | G5 | The `conflict` review state, `epics.conflict_files` and `epics.rebase_requested` (L8), and the run states `starting`, `waiting_for_input` and `stopping` (D1), in migration `0068_kind_shinobi_shaw.sql` |
 | #385 | G8 | The `each_task` review mode as input (L11). The default review mode is `epic`, as the schema always said |
-| This PR | G9 | `decisions.md` rewritten as current state (1,037 → 697 lines), with history moved to [decisions-history.md](decisions-history.md) |
+| #387 | G9 | `decisions.md` rewritten as current state (1,037 → 697 lines), with history moved to [decisions-history.md](decisions-history.md) |
 
 ### Deliberately kept
 
