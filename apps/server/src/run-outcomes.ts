@@ -39,7 +39,7 @@ function findingsMarker(runId: string): string {
   return `findings-${runId}`
 }
 
-export interface RunOutcomesDeps {
+interface RunOutcomesDeps {
   db: Database
   events: EventBus
   github: GitHubClient

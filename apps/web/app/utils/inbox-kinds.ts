@@ -14,7 +14,7 @@ export interface InboxItemKind {
 
 // Which pane shows the item. Task items share the task panel; the rest have
 // panes of their own.
-export type InboxPane = 'task' | 'epic' | 'plan_thread' | 'release_notes' | 'runner_update'
+type InboxPane = 'task' | 'epic' | 'plan_thread' | 'release_notes' | 'runner_update'
 
 interface KindEntry {
   // Before the subject in the list; empty when the subject says it already

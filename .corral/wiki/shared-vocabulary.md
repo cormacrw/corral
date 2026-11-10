@@ -16,7 +16,7 @@ core.
 | Task statuses, board and "not started" sets | `status.ts`: `TASK_STATUSES`, `PRE_BOARD_STATUSES`/`isOnBoard`, `NOT_STARTED_STATUSES`/`isNotStarted` |
 | Task types, priorities, refs | `task.ts`: `TASK_TYPES`, `deliversCode`, `isPrFree`, `taskRef`, `parseTaskRef`, `TASK_REF_PATTERN` |
 | Done and delivery rules | `completion.ts` (`isTaskDone`, `deliveryCounts`), `parent.ts` (`deliveryInProgress`, `parentStage`) |
-| Runs: states, outcomes, roles | `run.ts`: `ACTIVE_RUN_STATES`/`isActiveRun`, `LIVE_RUN_STATES`, `*_RUN_OUTCOMES`, `COMMIT_OUTCOMES`, `AUTHORING_ROLES`/`isAuthoringRole`, `authorRoleFor`, `ROLES_TAKING_MESSAGES`, `EPIC_RUN_ROLES` |
+| Runs: states, outcomes, roles | `run.ts`: `ACTIVE_RUN_STATES`/`isActiveRun`, `*_RUN_OUTCOMES`, `COMMIT_OUTCOMES`, `AUTHORING_ROLES`/`isAuthoringRole`, `authorRoleFor`, `ROLES_TAKING_MESSAGES`, `EPIC_RUN_ROLES` |
 | Runtimes and CLIs | `runtime.ts`: `AGENT_RUNTIMES`, `AGENT_RUNTIME_IDS`, `DEFAULT_AGENT_RUNTIME`, `CLI_IDS`, `runtimeOfCli` |
 | Roles and actors | `actor.ts`: `AGENT_ROLES`, `SERVER_ACTOR`, `isAgentPaused`, `isViaPm` |
 | Ids and error text | `ids.ts`: `isUuid`, `errorText`, `shortSha` |

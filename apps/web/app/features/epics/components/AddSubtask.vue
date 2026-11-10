@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { errorMessage } from '~/lib/errors'
+import { errorText } from '@corral/core'
 import { useMutation } from '@tanstack/vue-query'
 import { addSubtask } from '~/queries/tasks'
 
@@ -19,7 +19,7 @@ async function submit() {
     title.value = ''
     open.value = false
   } catch (e) {
-    toast.add({ title: 'Could not add the subtask', description: errorMessage(e), color: 'error' })
+    toast.add({ title: 'Could not add the subtask', description: errorText(e), color: 'error' })
   }
 }
 </script>

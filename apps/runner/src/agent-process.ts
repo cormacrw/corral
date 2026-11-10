@@ -99,7 +99,7 @@ export class LineSplitter {
 
 type ProcessOptions = Pick<SessionOptions, 'cwd' | 'gitAuthor' | 'checkScope' | 'turboCacheDir' | 'onLine'>
 
-export interface StartOptions {
+interface StartOptions {
   bin: string
   args: string[]
   stdin: 'ignore' | 'pipe'

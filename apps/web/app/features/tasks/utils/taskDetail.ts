@@ -4,7 +4,7 @@ import { canGainSubtasks, RESOLVE_TARGETS } from '@corral/core'
 import { boardMove } from '~/features/board/utils/board'
 import { STATUS } from '~/utils/labels'
 
-export interface StatusOption { label: string, value: string, status: TaskStatus }
+interface StatusOption { label: string, value: string, status: TaskStatus }
 
 // Status: only the moves a human may make under D10, the same ones as dragging
 // on the Board. A human only moves a task to the statuses resolve can reach.

@@ -1,8 +1,8 @@
+import { errorText } from '@corral/core'
 import { taskNumber, epicWithLiveCounts } from '~/utils/labels'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import type { PatchEpicInput } from '@corral/contracts'
 import { useSavedNote } from '~/composables/useSavedNote'
-import { errorMessage } from '~/lib/errors'
 import { epicActivityQuery, epicQuery, patchEpic } from '~/queries/epics'
 import { taskHistoryQuery } from '~/queries/tasks'
 
@@ -47,7 +47,7 @@ export function useEpicDetail(epicId: () => string) {
       flashSaved()
       return true
     } catch (e) {
-      toast.add({ title: 'Not saved', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Not saved', description: errorText(e), color: 'error' })
       return false
     }
   }

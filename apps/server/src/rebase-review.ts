@@ -42,7 +42,7 @@ export async function carryApproval(tx: Executor, task: Pick<TaskRow, 'id'>, app
   })
 }
 
-export type CarryOver = { ok: true } | { ok: false, problem: string }
+type CarryOver = { ok: true } | { ok: false, problem: string }
 
 // D24: records a review on the new head with the last approval's criteria
 // verdicts, then returns the task to Ready to merge. The human approved before

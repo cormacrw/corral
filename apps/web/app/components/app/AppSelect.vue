@@ -5,7 +5,7 @@ import { cn } from 'cn'
 import { FIELD_ID } from '~/lib/field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '~/components/ui/select'
 
-export type SelectOption = string | { label: string, value: string, disabled?: boolean }
+type SelectOption = string | { label: string, value: string, disabled?: boolean }
 
 defineOptions({ inheritAttrs: false })
 const fieldId = inject(FIELD_ID, undefined)

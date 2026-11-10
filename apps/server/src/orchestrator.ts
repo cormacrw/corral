@@ -39,7 +39,7 @@ import { TaskIntegrator } from './task-integration.ts'
 import type { Transcripts } from './transcripts.ts'
 import { WorktreeSweep } from './worktree-sweep.ts'
 
-export interface OrchestratorDeps {
+interface OrchestratorDeps {
   db: Database
   events: EventBus
   runner: RunnerHub

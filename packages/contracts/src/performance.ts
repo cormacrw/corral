@@ -14,7 +14,7 @@ export type ClientPerfSample = z.infer<typeof clientPerfInput>['samples'][number
 
 export const perfSummaryQuery = z.object({ window: z.enum(PERF_WINDOWS).default('24h') })
 
-export interface PerfRouteSummary {
+interface PerfRouteSummary {
   name: string
   count: number
   p50Ms: number
@@ -25,7 +25,7 @@ export interface PerfRouteSummary {
   avgQueries: number | null
 }
 
-export interface PerfPageSummary {
+interface PerfPageSummary {
   name: string
   count: number
   p50Ms: number

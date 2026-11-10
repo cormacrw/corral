@@ -1,11 +1,5 @@
 // A design version's static bundle (D20) is stored as one tar archive
-// (ustar, as `tar -cf` writes it). These read and write it in memory.
-
-export interface BundleFile {
-  // Relative to the bundle folder, with forward slashes: `assets/app.js`
-  path: string
-  data: Uint8Array
-}
+// (ustar, as `tar -cf` writes it on the runner). This reads it in memory.
 
 export function designPreviewUrl(versionId: string): string {
   return `/api/designs/${versionId}/files/`
@@ -16,7 +10,6 @@ export class BundleError extends Error {}
 
 const BLOCK = 512
 const decoder = new TextDecoder()
-const encoder = new TextEncoder()
 
 // A path inside a bundle, normalised, or null when it could point outside
 // it: `..` or `.` segments, absolute paths, drive letters, backslashes,
@@ -168,51 +161,4 @@ export function unpackBundle(archive: Uint8Array): Map<string, Uint8Array> {
     seen.set(path, where)
     files.set(path, data.slice())
   }
-}
-
-function writeField(header: Uint8Array, offset: number, length: number, value: string) {
-  header.set(encoder.encode(value).subarray(0, length), offset)
-}
-
-function writeOctal(header: Uint8Array, offset: number, length: number, value: number) {
-  writeField(header, offset, length, `${value.toString(8).padStart(length - 1, '0')}\0`)
-}
-
-// A tar archive of the files. Long paths get a pax header.
-export function packBundle(files: readonly BundleFile[]): Uint8Array {
-  const blocks: Uint8Array[] = []
-  const entry = (name: string, type: string, data: Uint8Array) => {
-    const header = new Uint8Array(BLOCK)
-    writeField(header, 0, 100, name)
-    writeOctal(header, 100, 8, 0o644)
-    writeOctal(header, 108, 8, 0)
-    writeOctal(header, 116, 8, 0)
-    writeOctal(header, 124, 12, data.byteLength)
-    writeOctal(header, 136, 12, 0)
-    header.fill(0x20, 148, 156)
-    header[156] = type.charCodeAt(0)
-    writeField(header, 257, 6, 'ustar')
-    writeField(header, 263, 2, '00')
-    writeOctal(header, 148, 8, header.reduce((sum, b) => sum + b, 0))
-    blocks.push(header, data, new Uint8Array((BLOCK - (data.byteLength % BLOCK)) % BLOCK))
-  }
-  for (const file of files) {
-    const name = encoder.encode(file.path)
-    if (name.byteLength > 100) {
-      // The length prefix counts itself
-      const body = ` path=${file.path}\n`
-      let length = encoder.encode(body).byteLength
-      length += String(length + String(length).length).length
-      entry('PaxHeader', 'x', encoder.encode(`${length}${body}`))
-    }
-    entry(file.path, '0', file.data)
-  }
-  blocks.push(new Uint8Array(BLOCK * 2))
-  const out = new Uint8Array(blocks.reduce((sum, b) => sum + b.byteLength, 0))
-  let at = 0
-  for (const b of blocks) {
-    out.set(b, at)
-    at += b.byteLength
-  }
-  return out
 }

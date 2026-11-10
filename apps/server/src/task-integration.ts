@@ -24,7 +24,7 @@ const MAX_OPERATIONS_PER_PASS = 5
 const CHECK_APPEAR_MS = 3 * 60_000
 const CHECK_FINISH_MS = 60 * 60_000
 
-export interface IntegrationDeps extends BranchWriterDeps {
+interface IntegrationDeps extends BranchWriterDeps {
   // Rebases the epic branch between integrations, at its checkpoint
   sync: Pick<EpicSynchronizer, 'due' | 'begin' | 'step'>
   // Told about every task whose status this changed

@@ -13,7 +13,7 @@ import type { Scheduler } from './scheduler.ts'
 
 const { runs, settings } = schema
 
-export interface ControlsDeps {
+interface ControlsDeps {
   db: Database
   events: EventBus
   gate: RunGate

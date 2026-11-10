@@ -36,7 +36,7 @@ async function unreviewedTargetFiles(tx: Executor, epicId: string): Promise<Targ
   return [...files.values()]
 }
 
-export interface EpicReviewRunsDeps {
+interface EpicReviewRunsDeps {
   db: Database
   events: EventBus
   github: GitHubClient

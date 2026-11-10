@@ -43,5 +43,3 @@ export function useAgentActivity(agentId: MaybeRefOrGetter<string | null | undef
     })
   }
 }
-
-export type AgentActivity = ReturnType<typeof useAgentActivity>

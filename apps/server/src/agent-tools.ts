@@ -35,7 +35,7 @@ function parseReport<T>(schema: z.ZodType<T>, input: unknown): T {
 // Text evidence is returned inline up to this size
 const MAX_INLINE_TEXT = 64 * 1024
 
-export interface AgentToolsDeps {
+interface AgentToolsDeps {
   db: Database
   blobs: BlobStore
   // Where people open Corral, for links to evidence

@@ -1,10 +1,11 @@
+import { clip } from '@corral/core'
 import { markdownToPlainText } from '~/utils/markdown'
 
 // Items with no stored message: the first paragraph of the body, plain
 export function inboxTldr(body: string) {
   const first = body.split(/\n\s*\n/).find(p => p.trim() && !p.trim().startsWith('#')) ?? body
   const plain = markdownToPlainText(first).replace(/\s+/g, ' ').trim()
-  return plain.length > 180 ? `${plain.slice(0, 177).trimEnd()}…` : plain
+  return clip(plain, 180)
 }
 
 export const verdictMark = (approved: boolean) => approved

@@ -7,9 +7,9 @@ import type { Evidence, Task, TaskCommit } from './tasks.ts'
 
 // ── Inbox (D11, design/inbox.md) ───────────────────────────────────────────
 
-export const TASK_INBOX_ITEM_TYPES = ['human_review', 'question', 'blocked', 'failed', 'stopped', 'activity'] as const
+const TASK_INBOX_ITEM_TYPES = ['human_review', 'question', 'blocked', 'failed', 'stopped', 'activity'] as const
 export type TaskInboxItemType = typeof TASK_INBOX_ITEM_TYPES[number]
-export const INBOX_ITEM_TYPES = [...TASK_INBOX_ITEM_TYPES, 'plan_thread', 'epic_review', 'release_notes', 'epic_conflict', 'runner_update', 'epic_activity'] as const
+const INBOX_ITEM_TYPES = [...TASK_INBOX_ITEM_TYPES, 'plan_thread', 'epic_review', 'release_notes', 'epic_conflict', 'runner_update', 'epic_activity'] as const
 
 interface InboxItemBase {
   project: { id: string, slug: string, name: string, thumbnailColor: string | null, thumbnailUrl: string | null }
@@ -125,7 +125,7 @@ interface PlanThreadBase extends Omit<InboxItemBase, 'project'> {
   activeRunId: string | null
 }
 
-export type PlanThreadPlan = Pick<Plan, 'id' | 'version' | 'title' | 'summary'> & { epicCount: number, taskCount: number }
+type PlanThreadPlan = Pick<Plan, 'id' | 'version' | 'title' | 'summary'> & { epicCount: number, taskCount: number }
 
 // What the thread waits on: its status always comes with what that status
 // needs. 'failed' carries the error the PM's last turn ended with.

@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { errorMessage } from '~/lib/errors'
 import { useMutation } from '@tanstack/vue-query'
-import { attachmentUrl } from '@corral/core'
+import { attachmentUrl, errorText } from '@corral/core'
 import { uploadAttachment } from '~/queries/attachments'
 import { readDraft, writeDraft } from '~/composables/useDraft'
 import { useDevice } from '~/composables/useDevice'
@@ -112,7 +111,7 @@ function attach(files: Iterable<File>) {
       saveImages()
     }, (e: unknown) => {
       image.status = 'failed'
-      image.error = errorMessage(e)
+      image.error = errorText(e)
       toast.add({ title: `Couldn't upload ${name}`, description: image.error, color: 'error' })
     })
   }

@@ -78,7 +78,7 @@ export function feedbackPoints(feedback: string): string[] {
   return points.length > 0 ? points : [feedback.trim()]
 }
 
-export const FIX_TITLE_PREFIX = 'Fix integration: '
+const FIX_TITLE_PREFIX = 'Fix integration: '
 
 // A fix task's title: the first sentence of the feedback's first point
 export function feedbackFixTitle(feedback: string): string {

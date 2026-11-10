@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { errorMessage } from '~/lib/errors'
+import { errorText } from '@corral/core'
 import { squareImage } from '~/utils/image'
 import { IMAGE_ACCEPT } from '~/utils/attachments'
 
@@ -26,7 +26,7 @@ async function upload(event: Event) {
   try {
     await props.save(await squareImage(file))
   } catch (e) {
-    toast.add({ title: 'Picture not saved', description: errorMessage(e), color: 'error' })
+    toast.add({ title: 'Picture not saved', description: errorText(e), color: 'error' })
   } finally {
     busy.value = false
   }
@@ -36,7 +36,7 @@ async function clear() {
   try {
     await props.remove()
   } catch (e) {
-    toast.add({ title: 'Picture not removed', description: errorMessage(e), color: 'error' })
+    toast.add({ title: 'Picture not removed', description: errorText(e), color: 'error' })
   } finally {
     busy.value = false
   }

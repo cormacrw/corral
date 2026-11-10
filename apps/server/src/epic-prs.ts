@@ -33,7 +33,7 @@ function refuseUnlessHuman(epicId: string, actor: Actor): void {
   requireHuman(actor, () => new ApiFailure(409, { code: 'conflict', constraint: 'human_only' }))
 }
 
-export interface EpicPullRequestsDeps {
+interface EpicPullRequestsDeps {
   db: Database
   events: EventBus
   github: GitHubClient

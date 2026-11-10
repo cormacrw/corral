@@ -1,5 +1,6 @@
 import type { RunEvent } from '@corral/contracts'
 import { corralToolName } from '@corral/contracts/client'
+import { plural } from '~/utils/labels'
 
 // Turns a run's events into the transcript's entries (design/agent.md):
 // consecutive tool calls collapse into one group of plain-English steps
@@ -219,10 +220,6 @@ function firstLine(text: string): string {
 
 function lowerFirst(text: string): string {
   return text.charAt(0).toLowerCase() + text.slice(1)
-}
-
-function plural(n: number, noun: string): string {
-  return `${n} ${noun}${n === 1 ? '' : 's'}`
 }
 
 // How many tool steps a transcript shows, for a turn's "N steps" disclosure

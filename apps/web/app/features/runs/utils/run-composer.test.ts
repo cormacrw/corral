@@ -7,8 +7,7 @@ const codex = { name: 'Dana', runtime: 'codex' as const }
 describe('runComposer', () => {
   it('opens on a live Claude developer or reviewer run', () => {
     expect(runComposer({ state: 'running', role: 'developer' }, claude, true)).toEqual({ kind: 'open' })
-    expect(runComposer({ state: 'waiting_for_input', role: 'reviewer' }, claude, true)).toEqual({ kind: 'open' })
-    expect(runComposer({ state: 'starting', role: 'developer' }, claude, true)).toEqual({ kind: 'open' })
+    expect(runComposer({ state: 'running', role: 'reviewer' }, claude, true)).toEqual({ kind: 'open' })
   })
 
   it('keeps finished runs read-only', () => {
@@ -30,7 +29,6 @@ describe('runComposer', () => {
 
   it('disables the composer when the message has nowhere to go', () => {
     expect(runComposer({ state: 'queued', role: 'developer' }, claude, true).kind).toBe('disabled')
-    expect(runComposer({ state: 'stopping', role: 'developer' }, claude, true).kind).toBe('disabled')
     expect(runComposer({ state: 'running', role: 'developer' }, claude, false).kind).toBe('disabled')
   })
 })

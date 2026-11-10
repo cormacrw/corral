@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { errorMessage } from '~/lib/errors'
+import { errorText } from '@corral/core'
 import type { Evidence } from '@corral/contracts'
 import { computed, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
@@ -45,7 +45,7 @@ watch(open, async (item) => {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     if (open.value?.id === item.id) text.value = await res.text()
   } catch (e) {
-    if (open.value?.id === item.id) textError.value = `Couldn't load the file: ${errorMessage(e)}`
+    if (open.value?.id === item.id) textError.value = `Couldn't load the file: ${errorText(e)}`
   }
 })
 </script>

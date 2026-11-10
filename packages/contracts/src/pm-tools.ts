@@ -33,8 +33,8 @@ const runId = z.uuid().describe('The run\'s id, from list_runs')
 
 export const PM_RUN_LIST_MAX = 50
 export const PM_PROJECT_LIST_MAX = 100
-export const PM_TRANSCRIPT_DEFAULT_CHARS = 4_000
-export const PM_TRANSCRIPT_MAX_CHARS = 20_000
+const PM_TRANSCRIPT_DEFAULT_CHARS = 4_000
+const PM_TRANSCRIPT_MAX_CHARS = 20_000
 const version = z.number().int().positive()
 
 // The PM's ask_question: a question, optionally with a suggested answer

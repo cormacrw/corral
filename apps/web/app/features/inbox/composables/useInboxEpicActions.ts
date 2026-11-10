@@ -1,4 +1,4 @@
-import { errorMessage } from '~/lib/errors'
+import { errorText } from '@corral/core'
 import type { EpicReviewActionInput, InboxActionInput } from '@corral/contracts'
 import { useMutation } from '@tanstack/vue-query'
 import { reactive } from 'vue'
@@ -63,7 +63,7 @@ export function useInboxEpicActions(
     } catch (e) {
       const stale = e instanceof ApiError && e.status === 409
       const constraint = stale ? (e.body as { constraint?: string } | null)?.constraint : undefined
-      refused.value = (constraint && REFUSED[constraint]) ?? (errorMessage(e))
+      refused.value = (constraint && REFUSED[constraint]) ?? (errorText(e))
       if (constraint === 'human_checks_unconfirmed') showTasks()
       return false
     }

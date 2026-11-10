@@ -13,7 +13,7 @@ import {
   uuid,
   type AnyPgColumn
 } from 'drizzle-orm/pg-core'
-import { ACTIVE_RUN_STATES, DEFAULT_AGENT_RUNTIME, DESIGNER_RUN_OUTCOMES, DEVELOPER_RUN_OUTCOMES, EPIC_RUN_ROLES, PM_RUN_OUTCOMES, REVIEWER_RUN_OUTCOMES, TERMINAL_RUN_STATES, type EpicFixKind, type RebaseReview, type RetryContext, type RunSessionStart, type RunTimings } from '@corral/core'
+import { DEFAULT_AGENT_RUNTIME, DESIGNER_RUN_OUTCOMES, DEVELOPER_RUN_OUTCOMES, EPIC_RUN_ROLES, PM_RUN_OUTCOMES, REVIEWER_RUN_OUTCOMES, TERMINAL_RUN_STATES, type EpicFixKind, type RebaseReview, type RetryContext, type RunSessionStart, type RunState, type RunTimings } from '@corral/core'
 import { createdAt, sqlList, updatedAt } from './columns.ts'
 import { agentRole, runOutcome, runState } from './enums.ts'
 import { epics } from './epics.ts'
@@ -66,7 +66,7 @@ export const runs = pgTable('runs', {
   epicId: uuid().references(() => epics.id, { onDelete: 'cascade' }),
   leaseExpiresAt: timestamp({ withTimezone: true }),
   role: agentRole().notNull(),
-  state: runState().notNull().default('queued'),
+  state: runState().$type<RunState>().notNull().default('queued'),
   outcome: runOutcome(),
   // The lease epoch this run was given; writes carrying another epoch are stale
   leaseEpoch: integer(),
@@ -117,9 +117,10 @@ export const runs = pgTable('runs', {
   index().on(t.agentId, t.queuedAt),
   index().on(t.planSessionId),
   index().on(t.projectId),
-  // The few live runs among many finished ones
+  // The few live runs among many finished ones. As migrated: the retired run
+  // states (see enums.ts) go from here with the enum values
   index('runs_active_number_index').on(t.number)
-    .where(sql`${t.state} in ${sqlList(ACTIVE_RUN_STATES)}`),
+    .where(sql`${t.state} in ${sqlList(['queued', 'starting', 'running', 'waiting_for_input', 'stopping'])}`),
   check('runs_task_unless_pm', sql`${t.taskId} is not null or ${t.role} = 'pm' or (${t.epicId} is not null and ${t.role} in ${sqlList(EPIC_RUN_ROLES)})`),
   // A PM turn may link to its recovery task, but never an epic; a designer never
   // to an epic, and a reviewer or developer to one or the other. planSessionId isn't checked: it

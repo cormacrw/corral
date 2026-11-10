@@ -13,7 +13,7 @@ type Update<T> = (current: T | undefined) => T | undefined
 
 // How an event reaches the cache. Every read goes through here so `write` and
 // `invalidates` stay declarative.
-export interface EventCache {
+interface EventCache {
   // Changes a cached entry. Returning undefined leaves it uncached.
   set: <T>(key: QueryKey, update: Update<T>) => void
   get: <T>(key: QueryKey) => T | undefined
@@ -383,7 +383,7 @@ export function applyEvent(client: QueryClient, event: ServerEvent): readonly Qu
 
 type Stale<TData, TVariables> = readonly QueryKey[] | ((data: TData, variables: TVariables) => readonly QueryKey[])
 
-export interface MutationDefinition<TData, TVariables> {
+interface MutationDefinition<TData, TVariables> {
   mutationFn: (variables: TVariables) => Promise<TData>
   // Puts in the cache what a refetch can't get, before anything is invalidated
   write?: (client: QueryClient, data: TData, variables: TVariables) => void

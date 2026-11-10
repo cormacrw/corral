@@ -57,7 +57,7 @@ type StageEpic = Pick<Epic, 'reviewMode' | 'branch' | 'reviewState' | 'taskCount
 
 // Overview filters overlap deliberately: started, unfinished epics are also Open.
 // Pass epicWithLiveCounts so task events can move an epic between filters.
-export type OverviewEpicFilter = 'open' | 'in-progress' | 'closed'
+type OverviewEpicFilter = 'open' | 'in-progress' | 'closed'
 
 export function matchesOverviewEpicFilter(epic: StageEpic, tasks: Pick<Task, 'status'>[], filter: OverviewEpicFilter): boolean {
   const finished = parentStage(epic, tasks) === 'done'

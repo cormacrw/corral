@@ -1,6 +1,6 @@
 <script setup lang="ts">
+import { errorText } from '@corral/core'
 import { taskNumber } from '~/utils/labels'
-import { errorMessage } from '~/lib/errors'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import type { Comment } from '@corral/contracts'
 import { commentOnTask, taskCommentsQuery } from '~/queries/tasks'
@@ -23,7 +23,7 @@ async function submit(body: string): Promise<boolean> {
     return true
   } catch (e) {
     draft.value = text
-    toast.add({ title: 'Could not comment', description: errorMessage(e), color: 'error' })
+    toast.add({ title: 'Could not comment', description: errorText(e), color: 'error' })
     return false
   }
 }

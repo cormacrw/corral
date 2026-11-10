@@ -67,7 +67,7 @@ export async function updateDeploymentInbox(db: Executor, events: EventBus, id: 
   return deployment
 }
 
-export interface ReleaseNotesDeps {
+interface ReleaseNotesDeps {
   db: Database
   events: EventBus
   runner: RunnerHub

@@ -11,7 +11,7 @@ import { ToolError } from './tool-error.ts'
 
 const { acceptanceCriteria, evidence } = schema
 
-export type EvidenceInput = z.infer<typeof evidenceInputSchema>
+type EvidenceInput = z.infer<typeof evidenceInputSchema>
 
 export function parseEvidence(input: unknown): EvidenceInput {
   const parsed = evidenceInputSchema.safeParse(input)

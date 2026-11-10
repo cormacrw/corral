@@ -1,4 +1,4 @@
-import { errorMessage } from '~/lib/errors'
+import { errorText } from '@corral/core'
 import { useMutation } from '@tanstack/vue-query'
 import type { Task } from '@corral/contracts'
 import type { TaskStatus } from '@corral/core'
@@ -41,7 +41,7 @@ export function useBoardDrag() {
     try {
       await move.mutateAsync({ task: { ...task, slug: slug.value }, input, status })
     } catch (e) {
-      toast.add({ title: `Could not move ${task.ref}`, description: errorMessage(e), color: 'error' })
+      toast.add({ title: `Could not move ${task.ref}`, description: errorText(e), color: 'error' })
     } finally {
       moving.value.delete(task.id)
     }

@@ -43,7 +43,7 @@ async function lostByDeleting(db: Database, task: TaskRow): Promise<string> {
   return lost.length ? `. This drops ${lost.join(', ')}` : ''
 }
 
-export interface PmCallsDeps {
+interface PmCallsDeps {
   db: Database
   runs: Pick<RunContexts, 'load'>
   human: Pick<HumanActions, 'deleteTask' | 'deleteProject' | 'stopRun'>

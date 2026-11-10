@@ -1,8 +1,8 @@
-import { errorMessage } from '~/lib/errors'
 // Delete thread (design/inbox.md#delete-thread): the row goes at once and the
 // close waits out a 5 second Undo toast. The state lives
 // outside any page, so leaving the Inbox doesn't cancel a delete, and one
 // still pending when the tab closes or reloads is sent as it unloads.
+import { errorText } from '@corral/core'
 import { useMutation } from '@tanstack/vue-query'
 import { closePlanThread, closePlanThreadOnExit } from '~/queries/plan'
 import { readonly, ref } from 'vue'
@@ -53,7 +53,7 @@ export function usePlanThreadDelete() {
         await closing.mutateAsync(id)
         threads.remove(id)
       } catch (e) {
-        toast.add({ title: 'Could not delete the thread', description: errorMessage(e), color: 'error' })
+        toast.add({ title: 'Could not delete the thread', description: errorText(e), color: 'error' })
       } finally {
         pending.value = pending.value.filter(x => x !== id)
       }

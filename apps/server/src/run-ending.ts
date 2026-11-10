@@ -38,7 +38,7 @@ export async function failAttempt(tx: Executor, locked: { task: TaskRow, project
   await stopRepeated(tx, ctx.run, ctx.task!.status, failed!, head)
 }
 
-export interface RunEndingDeps {
+interface RunEndingDeps {
   db: Database
   events: EventBus
   runner: Pick<RunnerHub, 'send' | 'setInUse'>

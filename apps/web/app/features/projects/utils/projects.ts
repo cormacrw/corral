@@ -3,7 +3,7 @@ import { onBoard } from '~/features/board/utils/board.ts'
 import { isTaskDone } from '@corral/core'
 
 // What a project's card on the mobile Projects tab shows (design/mobile.md)
-export interface ProjectCardSummary {
+interface ProjectCardSummary {
   board: number
   backlog: number
   // One line under the name: who is working, or why nothing is

@@ -18,7 +18,7 @@ import { ToolError } from './tool-error.ts'
 
 const { agents, epics, projects, runs, taskIntegrationOperations: operations } = schema
 
-export interface EpicFixesDeps {
+interface EpicFixesDeps {
   db: Database
   github: GitHubClient
   now(): Date

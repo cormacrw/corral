@@ -5,7 +5,7 @@ import type { Evidence } from '@corral/contracts'
 // round: changes requested advances the round before the developer attaches
 // again, and a resubmission can reuse the round.
 
-export interface EarlierRound { round: number, items: Evidence[] }
+interface EarlierRound { round: number, items: Evidence[] }
 export interface EvidenceGroupRounds {
   // What the group shows by default: the items of the newest run that
   // attached anything to it

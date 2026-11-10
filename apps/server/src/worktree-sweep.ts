@@ -12,7 +12,7 @@ export const PM_WORKTREE_TTL = 24 * 60 * 60 * 1000
 
 const SWEEP_INTERVAL_MS = 60 * 60 * 1000
 
-export interface WorktreeSweepDeps {
+interface WorktreeSweepDeps {
   db: Database
   runner: RunnerHub
   now: () => Date

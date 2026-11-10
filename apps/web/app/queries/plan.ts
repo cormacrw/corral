@@ -1,9 +1,9 @@
+import { errorText } from '@corral/core'
 import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { QueryClient } from '@tanstack/vue-query'
 import type { Plan, PlanMessage, PlanSessionDetail, PmActionDecision } from '@corral/contracts'
 import type { AgentRuntime, PlanApprovalTarget } from '@corral/core'
 import { computed, watch } from 'vue'
-import { errorMessage } from '~/lib/errors'
 import { api } from './api'
 import { defineMutation, writeQuery, type PlanStart, type PlanStarts } from './dependencies'
 import { markRead } from './inbox'
@@ -108,7 +108,7 @@ export function usePlanStarts() {
       accept(id, await api.plan.start(entry.session.projectId, entry.message, entry.taskRef, entry.session.runtime, id))
     } catch (error) {
       // A live message or session proves acceptance even if the response was lost
-      update(id, start => start.state === 'accepted' ? {} : { state: 'failed', error: errorMessage(error) })
+      update(id, start => start.state === 'accepted' ? {} : { state: 'failed', error: errorText(error) })
     } finally {
       update(id, () => ({ sending: false }))
     }

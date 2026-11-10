@@ -5,8 +5,7 @@ import { deliversCode, type TaskType } from './task.ts'
 
 // A parent task's stage, computed on read from its sub-tasks and delivery
 // state (D31). It's never stored and never goes through transition().
-export const PARENT_STAGES = ['ready', 'in_progress', 'agent_review', 'human_review', 'ready_to_merge', 'blocked', 'done'] as const
-export type ParentStage = typeof PARENT_STAGES[number]
+export type ParentStage = 'ready' | 'in_progress' | 'agent_review' | 'human_review' | 'ready_to_merge' | 'blocked' | 'done'
 
 // A task's delivery record: how its subtasks' work reaches the target branch
 export interface DeliveryRecord {
@@ -15,14 +14,14 @@ export interface DeliveryRecord {
   reviewState: EpicReviewState | null
 }
 
-export interface ParentDelivery extends DeliveryRecord {
+interface ParentDelivery extends DeliveryRecord {
   taskCount: number
   mergedCount: number
 }
 
 // The subtasks' work lands through the task's own PR, which hasn't merged yet
 // (D22, D27). A `direct` task merges each subtask straight to the target.
-export function deliversThroughPr(delivery: Pick<DeliveryRecord, 'reviewMode' | 'reviewState'>): boolean {
+function deliversThroughPr(delivery: Pick<DeliveryRecord, 'reviewMode' | 'reviewState'>): boolean {
   return delivery.reviewMode !== 'direct' && delivery.reviewState !== 'merged'
 }
 

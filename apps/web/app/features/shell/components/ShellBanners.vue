@@ -1,6 +1,6 @@
 <script setup lang="ts">
+import { errorText } from '@corral/core'
 import { settingsPath } from '~/utils/routes'
-import { errorMessage } from '~/lib/errors'
 import type AppAlert from '~/components/app/AppAlert.vue'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import { patchProject, projectsQuery } from '~/queries/projects'
@@ -37,7 +37,7 @@ async function attempt(failure: string, action: () => Promise<unknown>) {
   try {
     await action()
   } catch (error) {
-    toast.add({ title: failure, description: errorMessage(error), color: 'error' })
+    toast.add({ title: failure, description: errorText(error), color: 'error' })
   }
 }
 

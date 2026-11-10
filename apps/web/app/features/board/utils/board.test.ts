@@ -448,7 +448,7 @@ describe('epicWorkingAgents', () => {
   })
 
   it('includes every active state and excludes finished runs and unleased tasks', () => {
-    for (const state of ['queued', 'starting', 'running', 'waiting_for_input', 'stopping']) {
+    for (const state of ['queued', 'running']) {
       expect(epicWorkingAgents('epic', [], [run('epic', 'b', state)], agents)).toEqual([agents[1]])
     }
     expect(epicWorkingAgents('epic', [task('epic', null)], [run('epic', 'b', 'completed')], agents)).toEqual([])

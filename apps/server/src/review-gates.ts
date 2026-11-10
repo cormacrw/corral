@@ -17,15 +17,15 @@ export function taskReview(task: { type: TaskType, humanReview: boolean }, mode:
   return requiresHumanReview(task.type, task.humanReview) ? REVIEW_MODE_RANK.each_task : REVIEW_MODE_RANK[mode ?? 'direct']
 }
 
-export interface HeldCriterion { id: string, text: string, checkedByHuman: boolean }
-export interface NextCriterion { id?: string | undefined, text: string, checkedByHuman?: boolean | undefined }
+interface HeldCriterion { id: string, text: string, checkedByHuman: boolean }
+interface NextCriterion { id?: string | undefined, text: string, checkedByHuman?: boolean | undefined }
 
 // The stored mode `epic` is review at the level of the task with subtasks
 export function reviewModeName(mode: EpicReviewMode | undefined): string | undefined {
   return mode === 'epic' ? 'task' : mode
 }
 
-export interface TaskGates {
+interface TaskGates {
   type: TaskType
   humanReview: boolean
   paused: boolean
@@ -34,7 +34,7 @@ export interface TaskGates {
   criteria: readonly HeldCriterion[]
 }
 
-export interface TaskGateChange {
+interface TaskGateChange {
   type?: TaskType | undefined
   humanReview?: boolean | undefined
   paused?: boolean | undefined

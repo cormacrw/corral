@@ -17,7 +17,7 @@ export type RunEnd =
   | { state: 'failed', outcome: 'failed', error: string }
   | { state: 'interrupted', outcome?: undefined, error: string, headSha?: string | null | undefined }
 
-export interface EndingRun {
+interface EndingRun {
   id: string
   number: number
   projectId: string | null

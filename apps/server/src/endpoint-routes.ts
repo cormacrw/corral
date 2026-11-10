@@ -5,7 +5,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { z, ZodType } from 'zod'
 
 // What a handler gets, already checked against the endpoint's schemas
-export interface EndpointRequest<K extends EndpointKey> {
+interface EndpointRequest<K extends EndpointKey> {
   params: EndpointParams<K>
   body: Endpoints[K] extends { body: infer Schema extends ZodType } ? z.output<Schema> : undefined
   query: Endpoints[K] extends { query: infer Schema extends ZodType } ? z.output<Schema> : undefined
@@ -13,11 +13,11 @@ export interface EndpointRequest<K extends EndpointKey> {
 
 // The endpoint's JSON, sent with its status; or a whole response (a file, a stream)
 type Answer<K extends EndpointKey> = EndpointResponse<K> | Response
-export type EndpointHandler<K extends EndpointKey> = (request: EndpointRequest<K>, c: Context) => Answer<K> | Promise<Answer<K>>
-export type EndpointRoute<K extends EndpointKey> = EndpointHandler<K> | { use: MiddlewareHandler[], handle: EndpointHandler<K> }
+type EndpointHandler<K extends EndpointKey> = (request: EndpointRequest<K>, c: Context) => Answer<K> | Promise<Answer<K>>
+type EndpointRoute<K extends EndpointKey> = EndpointHandler<K> | { use: MiddlewareHandler[], handle: EndpointHandler<K> }
 
 // One route per endpoint: a missing or unknown one doesn't typecheck
-export type EndpointRoutes = { [K in EndpointKey]: EndpointRoute<K> }
+type EndpointRoutes = { [K in EndpointKey]: EndpointRoute<K> }
 
 // Validation failures get the same error shape as every other API error
 function validate<Target extends keyof ValidationTargets>(target: Target, schema: ZodType): MiddlewareHandler {

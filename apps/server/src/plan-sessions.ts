@@ -1,5 +1,5 @@
 import { planMessageFields, type NewPlanMessageFields, type PlanMessage, type PlanSession } from '@corral/contracts'
-import { LIVE_RUN_STATES, type AgentRuntime, type PmAction } from '@corral/core'
+import { ACTIVE_RUN_STATES, type AgentRuntime, type PmAction } from '@corral/core'
 import { schema, type Database, type Executor, type PlanSessionRow } from '@corral/db'
 import { and, desc, eq, inArray, notInArray, or } from 'drizzle-orm'
 import { notFound } from './errors.ts'
@@ -88,7 +88,7 @@ export async function sessionStates(db: Executor, rows: PlanSessionRow[], active
     db.select().from(plans).where(and(inArray(plans.sessionId, ids), eq(plans.status, 'proposed'))),
     activeRunId === undefined
       ? db.select({ id: runs.id, sessionId: runs.planSessionId }).from(runs)
-          .where(and(eq(runs.role, 'pm'), inArray(runs.planSessionId, ids), inArray(runs.state, [...LIVE_RUN_STATES])))
+          .where(and(eq(runs.role, 'pm'), inArray(runs.planSessionId, ids), inArray(runs.state, [...ACTIVE_RUN_STATES])))
       : []
   ])
   const lastOf = new Map(lastMessages.map(m => [m.sessionId, m]))

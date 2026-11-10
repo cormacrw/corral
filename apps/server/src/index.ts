@@ -1,6 +1,7 @@
 import { databaseLocation, openDatabase, schema } from '@corral/db'
 import { join } from 'node:path'
-import { formatDuration, printReady, redactUrl, shortenHome } from './banner.ts'
+import { printReady, shortenHome } from '@corral/contracts/banner'
+import { formatDuration, redactUrl } from './banner.ts'
 import { boot } from './boot.ts'
 import { loadConfig } from './config.ts'
 import { EventBus } from './events.ts'

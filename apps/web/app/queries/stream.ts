@@ -5,7 +5,7 @@ import { serverEventTypes } from './dependencies'
 // The app's one connection to the server's SSE stream, and its status
 // (design/app-shell.md). Reconnects after drops (D12). Only app/queries
 // listens to it: pages read its data with a query.
-export type LiveConnection = 'connecting' | 'open' | 'reconnecting'
+type LiveConnection = 'connecting' | 'open' | 'reconnecting'
 
 type Listener = (event: ServerEvent) => void
 

@@ -1,4 +1,4 @@
-import { errorMessage } from '~/lib/errors'
+import { errorText } from '@corral/core'
 import { useMutation } from '@tanstack/vue-query'
 import type { Project } from '@corral/contracts'
 import { IMAGE_CONTENT_TYPES, imageTooLarge, THUMBNAIL_MAX_BYTES } from '@corral/contracts/client'
@@ -17,7 +17,7 @@ export function useProjectThumbnailUpload(project: () => Project) {
     try {
       await thumbnail.mutateAsync({ slug: project().slug, image })
     } catch (e) {
-      toast.add({ title: image ? 'Image not uploaded' : 'Image not removed', description: errorMessage(e), color: 'error' })
+      toast.add({ title: image ? 'Image not uploaded' : 'Image not removed', description: errorText(e), color: 'error' })
     } finally {
       busy.value = false
     }

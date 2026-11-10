@@ -3,7 +3,7 @@
 export const PULL_REQUEST_GUIDE_STATUSES = ['generating', 'ready', 'failed'] as const
 export type PullRequestGuideStatus = typeof PULL_REQUEST_GUIDE_STATUSES[number]
 
-export interface PullRequestGuideHunk {
+interface PullRequestGuideHunk {
   path: string
   // The hunk's position in the file's patch: the nth `@@` block, from 0
   hunk: number

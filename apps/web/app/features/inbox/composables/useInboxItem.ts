@@ -1,4 +1,4 @@
-import { errorMessage } from '~/lib/errors'
+import { errorText } from '@corral/core'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import type { InboxActionInput } from '@corral/contracts'
 import { reactive } from 'vue'
@@ -131,7 +131,7 @@ export function useInboxItem() {
       } else await moveToNext()
       return true
     } catch (e) {
-      if (selectedId.value === actedOn.id) failedAction.value = errorMessage(e)
+      if (selectedId.value === actedOn.id) failedAction.value = errorText(e)
       return false
     } finally {
       if (selectedId.value === actedOn.id) busy.value = false

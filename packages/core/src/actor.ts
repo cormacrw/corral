@@ -13,7 +13,7 @@ export type AgentRole = typeof AGENT_ROLES[number]
 export const ROLE_LABELS: Record<AgentRole, string> = { pm: 'PM', developer: 'Developer', designer: 'Designer', reviewer: 'Reviewer' }
 
 // Both live in apps/server; they're told apart so the audit log shows which loop acted
-export type SystemComponent = 'scheduler' | 'server'
+type SystemComponent = 'scheduler' | 'server'
 
 // The server acting on its own, e.g. after a merge or an integration
 export const SERVER_ACTOR: Actor = { kind: 'system', component: 'server' }

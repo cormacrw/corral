@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { errorMessage } from '~/lib/errors'
+import { errorText } from '@corral/core'
 import type { PlanMessage, PmActionDecision } from '@corral/contracts'
 import { useMutation } from '@tanstack/vue-query'
 import { resolvePlanAction } from '~/queries/plan'
@@ -16,7 +16,7 @@ async function decide(decision: PmActionDecision) {
   try {
     await resolve.mutateAsync({ sessionId: props.message.sessionId, messageId: props.message.id, decision })
   } catch (e) {
-    error.value = errorMessage(e)
+    error.value = errorText(e)
   } finally {
     busy.value = false
   }

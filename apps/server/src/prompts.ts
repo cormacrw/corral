@@ -62,7 +62,20 @@ export interface PinnedDesign {
 }
 
 const ALWAYS_REPORT = `Always finish by calling \`${tool('report_outcome')}\`.`
-const CHANGES_REQUESTED_SUMMARY = 'When you request changes, the summary is posted to the developer as a comment: make every point specific and actionable.'
+const NO_PUSH = 'Do not push and do not use `gh`.'
+const PROJECT_BRIEF = 'Use the supplied project brief and open relevant pages from its wiki file list when needed.'
+
+// How every task review ends
+const REPORT_VERDICTS = `Call \`${tool('report_outcome')}\` with outcome "${outcome('approved')}" or "${outcome('changes_requested')}" and a \`criteria\` verdict for every criterion ID above (met true/false with a note).`
+const VERDICT_SUMMARY_RULES = `- When you approve, keep it short: the summary is one or two sentences, and each criterion note must explain concretely why it is met or not, because the human reads it next to the evidence.
+- When you request changes, the summary is posted to the developer as a comment: make every point specific and actionable.
+- ${ALWAYS_REPORT}`
+
+// How a developer resolves a conflict, whichever side it's on
+const keepBothSides = (target: string) => `Keep both sides' intent. What landed on \`${target}\` stands: never remove or revert it to make this work fit, and adapt this work's change around it instead. Make no feature changes.`
+
+// For authors: get_task and add_comment, with any tools in between
+const rereadTask = (also = '') => `Use \`${tool('get_task')}\` to re-read the task, comments and evidence at any time,${also} and \`${tool('add_comment')}\` to leave notes for the human or reviewer.`
 
 function section(title: string, body: string): string {
   return `## ${title}\n\n${body.trim()}\n`
@@ -189,14 +202,12 @@ export function reviewerPrompt(task: ReviewTask & { underReview?: DesignUnderRev
 - You are in a read-only checkout of the commit under review. Do not edit, commit or push. ${submission
   ? `Run \`git diff ${submission.baseSha}...HEAD\` or \`git log ${submission.baseSha}..HEAD\` to see the change. Your verdict applies to exactly this commit: Corral rejects it if your checkout or the task branch has moved.`
   : `Run \`git diff ${task.defaultBranch}...HEAD\` or \`git log\` to see the change; \`origin/${task.defaultBranch}\` is available locally.`}
-- Use the supplied project brief and wiki file list, and check the wiki was updated where behaviour changed.
+- ${PROJECT_BRIEF} Check the wiki was updated where behaviour changed.
 - Judge every acceptance criterion: is it implemented, and does the evidence actually show it? Use \`${tool('get_evidence')}\` to list items and fetch screenshots by ID. Reproduce at least one criterion yourself when you can (a targeted test, the app).
 - Review the diff for security, efficiency and logic problems, and raise each one as specific, actionable feedback with the file and line. ${CACHED_RESULT_IS_NOT_VERIFICATION}
 - ${CRITERION_NOTES}
-- Call \`${tool('report_outcome')}\` with outcome "${outcome('approved')}" or "${outcome('changes_requested')}" and a \`criteria\` verdict for every criterion ID above (met true/false with a note).
-- When you approve, keep it short: the summary is one or two sentences (what you checked and anything worth knowing), and each criterion note must explain concretely why it is met or not, because the human reads it next to the evidence. Don't restate the task or the developer's summary.
-- ${CHANGES_REQUESTED_SUMMARY}
-- ${ALWAYS_REPORT}`)
+- ${REPORT_VERDICTS} An approval's summary says what you checked and anything worth knowing; don't restate the task or the developer's summary.
+${VERDICT_SUMMARY_RULES}`)
   ].join('\n')
 }
 
@@ -277,8 +288,7 @@ Conflicted files: ${task.rebaseReport?.conflictedFiles?.join(', ') ?? '(not reco
 - You are in a read-only checkout of the new head. Do not edit, commit or push.
 - Identify old-base and new-base, the base commits of the approved and rebased work (use git merge-base against origin/${task.defaultBranch}; inspect history to confirm them). Run \`git range-diff <old-base>..<approved> <new-base>..<new-head>\`, substituting the approved and new head SHAs above. Compare rewritten commits with the approved work; no feature changes are allowed.
 - Read the developer's conflict report. Check each conflicted hunk against the specific main/base commit that caused it, preserving both sides' intent without reverting newly merged work.
-- Inspect binding docs changed on the base since approval and check this branch against them. If a changed binding decision affects the criteria, report outcome "${outcome('blocked')}" with the changed decision, affected criteria, reason, the decision the human needs to make and your recommendation (or why none is safe). Do not choose a side or rewrite the criteria: a recommendation is advice to the human, not a resolution.
-- If the rebase changed something substantial, report outcome "${outcome('blocked')}", explaining the substantial change, the affected criteria, the decision the human needs to make and your recommendation (or why none is safe).
+- Inspect binding docs changed on the base since approval and check this branch against them. If a changed binding decision affects the criteria, or the rebase changed something substantial, report outcome "${outcome('blocked')}" with what changed, the affected criteria, the reason, the decision the human needs to make and your recommendation (or why none is safe). Do not choose a side or rewrite the criteria: a recommendation is advice to the human, not a resolution.
 - ${HUMAN_DECISIONS_NOTE}
 - If the resolution holds, report "${outcome('approved')}" without criteria verdicts: the server copies the earlier approval's verdicts and notes onto the new head and the task returns to Ready to merge, because the human approved before the conflict.
 - If the resolution needs changes, report "${outcome('changes_requested')}" with actionable feedback and a verdict for every criterion. This starts a normal counted revision.
@@ -369,7 +379,7 @@ export function epicReviewPrompt(input: EpicReviewInput): string {
     section('Scope', scope),
     gatesSection({ requiredChecks: input.requiredChecks, prFree: false }),
     epicTargetFilesSection(input.targetFiles, target),
-    section('How to review', `This is a read-only checkout: do not edit, commit or push. The evidence is context; do not re-judge individual task evidence. Criteria checked by a human and tasks flagged humanReview wait for the human at this task's approval: do not attempt them, produce evidence or verdicts for them, or request changes over them. Use ${tool('get_task')} for the whole task and ${tool('get_evidence')} to fetch any listed evidence ID. Always finish with ${tool('report_outcome')}, outcome approved or ${outcome('changes_requested')}, specific reasoning in summary, and any integration problems in findings, each with level blocking or non_blocking, its text and the taskRefs it concerns. No per-task criteria verdicts are required. Changes requested go to a developer as a brief, with no separate subtask, and the task comes back to you; approval sends the task's PR to human review.`)
+    section('How to review', `This is a read-only checkout: do not edit, commit or push. The evidence is context; do not re-judge individual task evidence. Criteria checked by a human and tasks flagged humanReview wait for the human at this task's approval: do not attempt them, produce evidence or verdicts for them, or request changes over them. Use ${tool('get_task')} for the whole task and ${tool('get_evidence')} to fetch any listed evidence ID. Report outcome ${outcome('approved')} or ${outcome('changes_requested')}, with specific reasoning in summary, and any integration problems in findings, each with level blocking or non_blocking, its text and the taskRefs it concerns. No per-task criteria verdicts are required. Changes requested go to a developer as a brief, with no separate subtask, and the task comes back to you; approval sends the task's PR to human review. ${ALWAYS_REPORT}`)
   ].join('\n')
 }
 
@@ -416,7 +426,7 @@ export function epicFixPrompt(input: EpicFixInput): string {
   const job = fix === 'conflict'
     ? section('The conflict', `Corral could not rebase this task onto \`${target}\` cleanly. Run \`git fetch origin && git rebase ${ontoSha}\`. Never merge \`${target}\` in. Resolve the conflicts in ${files.length ? files.join(', ') : 'the files git reports'}.
 
-Keep both sides' intent. What landed on \`${target}\` stands: never remove or revert it to make the old task work, and adapt the task's change around it instead. Make no feature changes. ${EPIC_SQUASH_KEEPS_TRAILERS}
+${keepBothSides(target)} ${EPIC_SQUASH_KEEPS_TRAILERS}
 
 If the two sides can't both be kept, or the target changed a binding decision this work relies on, report \`${outcome('stuck')}\` with \`decision\`: one focused question, its alternatives, each marked with whether it changes approved behaviour, and the changes affected. The human's answer brings this same fix back to a developer.`)
     : fix === 'ci'
@@ -435,7 +445,7 @@ If the two sides can't both be kept, or the target changed a binding decision th
     input.decisions.length ? section('The human already decided', input.decisions.map(d => `- ${d.question} ${d.answer}`).join('\n')) : '',
     input.brief.includes(REFUSED) ? section('Refused', input.brief.slice(input.brief.indexOf(REFUSED))) : '',
     section('How to work', `
-- You are in a git worktree on \`${branch}\`, a private candidate holding the task's commits. The task's branch \`${input.epicBranch}\` stays untouched until Corral publishes your commit with a compare-and-swap, and it refuses merge commits or changes to files only the target touched. If the task's changes force an edit to such a file, such as a test following a type the task changed, make the smallest edit and report \`behaviourChanged: true\`, so the task is reviewed again; with \`false\` it's refused. Do not push, and do not use \`gh\`.
+- You are in a git worktree on \`${branch}\`, a private candidate holding the task's commits. The task's branch \`${input.epicBranch}\` stays untouched until Corral publishes your commit with a compare-and-swap, and it refuses merge commits or changes to files only the target touched. If the task's changes force an edit to such a file, such as a test following a type the task changed, make the smallest edit and report \`behaviourChanged: true\`, so the task is reviewed again; with \`false\` it's refused. ${NO_PUSH}
 - ${fix === 'conflict' ? 'Commit nothing but the rebase.' : 'Add commits on top. Don\'t rebase, and keep the change as small as the fix allows.'}
 - ${gates}
 - ${report}
@@ -474,10 +484,8 @@ function spikeReviewerPrompt(task: ReviewTask, agentName: string): string {
 - Judge every acceptance criterion: do the findings answer it, clearly and specifically, and is the answer backed by evidence? Use \`${tool('get_evidence')}\` to list items and fetch them by ID. Check at least one claim yourself against the code or by running something.
 - ${CRITERION_NOTES}
 - Good findings give an answer, the evidence for it, a recommendation and suggested follow-up tasks. Request changes when a criterion isn't answered, a claim isn't backed by evidence, or the recommendation doesn't follow from the evidence.
-- Call \`${tool('report_outcome')}\` with outcome "${outcome('approved')}" or "${outcome('changes_requested')}" and a \`criteria\` verdict for every criterion ID above (met true/false with a note). Approving sends the findings to Human review: a human reviews the findings next.
-- When you approve, keep it short: the summary is one or two sentences, and each criterion note must explain concretely why it is met or not, because the human reads it next to the evidence.
-- ${CHANGES_REQUESTED_SUMMARY}
-- ${ALWAYS_REPORT}`)
+- ${REPORT_VERDICTS} Approving sends the findings to Human review: a human reviews the findings next.
+${VERDICT_SUMMARY_RULES}`)
   ].join('\n')
 }
 
@@ -639,12 +647,12 @@ export function developerPrompt(task: PromptTask, agentName: string): string {
     section('How to work', `
 - You are in a git worktree on branch \`${task.branch}\`, based on \`${task.defaultBranch}\`. Commit your work on this branch.
 - ${task.prFree
-  ? `This is a subtask with no task PR. Stay on this branch: only Corral writes to the task's shared branch. Do not push and do not use \`gh\`. Corral pushes your branch and starts review of your commit when you report your outcome.`
-  : 'Do not push and do not use `gh`. Corral pushes the branch and opens the PR when you report your outcome.'}
-- Use the supplied project brief and open relevant pages from its wiki file list when needed. Update the wiki in the same branch when behaviour changes.
+  ? `This is a subtask with no task PR. Stay on this branch: only Corral writes to the task's shared branch. ${NO_PUSH} Corral pushes your branch and starts review of your commit when you report your outcome.`
+  : `${NO_PUSH} Corral pushes the branch and opens the PR when you report your outcome.`}
+- ${PROJECT_BRIEF} Update the wiki in the same branch when behaviour changes.
 - ${checksInstruction(scopeOf(task), !!task.ciFailures)}
 - ${EVIDENCE_RULE}
-- Use \`${tool('get_task')}\` to re-read the task, comments and evidence at any time, and \`${tool('add_comment')}\` to leave notes for the human or reviewer.
+- ${rereadTask()}
 - When the work is committed and evidenced, call \`${tool('report_outcome')}\` with outcome "${workOutcome(task)}" and a summary. If anything is missing, the call fails and tells you what to fix.
 - The summary ${task.prFree ? 'describes your commits for' : 'becomes the pull request description, read by'} someone reviewing the code. Write it in markdown: one or two sentences on what changed and why, then a short bulleted list of how you verified it. Describe the change as a whole, not this run: don't mention comments, run numbers or earlier attempts, and don't list commit hashes.
 ${WORK_NOTE}
@@ -672,9 +680,9 @@ function spikeDeveloperPrompt(task: PromptTask, agentName: string): string {
     attachmentsSection(task),
     section('How to work', `
 - Investigate; don't change code, so there's nothing to lint, typecheck or test, whatever your general instructions say. You are in a checkout of \`${task.defaultBranch}\` with no branch: don't commit or push, and no PR is opened. Put experiments and notes in your scratch folder, outside the repository.
-- Use the supplied project brief and open relevant pages from its wiki file list when needed.
+- ${PROJECT_BRIEF}
 - Back your answer with evidence: attach it for every acceptance criterion with \`${tool('attach_evidence')}\`, using the criterion ID in brackets above (measurements, screenshots, notes with file and line references). Findings may cite command output: attach it as a note with the relevant excerpt rather than a full log where possible.
-- Use \`${tool('get_task')}\` to re-read the task, comments and evidence at any time, and \`${tool('add_comment')}\` to leave notes for the human or reviewer.
+- ${rereadTask()}
 - When you're done, call \`${tool('report_outcome')}\` with outcome "${outcome('findings_reported')}" and your findings as the summary. If anything is missing, the call fails and tells you what to fix.
 - Write the findings in markdown with these sections: **Answer** (the answer to the question, criterion by criterion), **Evidence** (what you checked and what it showed), **Recommendation**, and **Suggested follow-up tasks** (each with a title, a line on what it would do, and its acceptance criteria). They're posted on the task for the human, and the PM can turn them into a plan.${revision ? ' Report the complete findings again, not just what changed: they replace the earlier ones.' : ''}
 ${WORK_NOTE}
@@ -688,15 +696,15 @@ ${WORK_NOTE}
 // submitted as a new design version. Nothing is merged and no PR is opened.
 const DESIGN_HOW_TO = (task: PromptTask) => `
 - You are in a git worktree on branch \`${task.branch}\`, based on \`${task.defaultBranch}\`. Commit your work on this branch. It is pushed but never merged, and no PR is opened.
-- Do not push and do not use \`gh\`. Corral pushes the branch when you call \`${tool('submit_design')}\`.
-- Use the supplied project brief and relevant pages from its wiki file list. The project docs say how this project builds a prototype: the command that produces its static bundle and the folder it writes. If they don't say, call \`${tool('report_outcome')}\` with outcome "${outcome('stuck')}" and ask how; don't guess.
+- ${NO_PUSH} Corral pushes the branch when you call \`${tool('submit_design')}\`.
+- ${PROJECT_BRIEF} The project docs say how this project builds a prototype: the command that produces its static bundle and the folder it writes. If they don't say, call \`${tool('report_outcome')}\` with outcome "${outcome('stuck')}" and ask how; don't guess.
 - Build the prototype from the project's real components and styles, so it looks like what will ship. Don't restyle or copy them into a separate mockup.
 - Use mock data only: no calls to the project's backend or any other service. The bundle must work as static files on their own, with an \`index.html\` at its root and relative paths to its assets.
 - Write \`design.md\` (in your scratch folder or the bundle) with: the screens, each with a stable id (e.g. \`login\`, \`login-error\`); their states; the interactions; the components used; the shape of the mock data; and open questions.
 - Capture screenshots of every screen at a desktop width (1280 px) and a mobile width (390 px) with agent-browser, from the built bundle. Save them in your scratch folder.
 - Commit, then call \`${tool('submit_design')}\` with the bundle folder, the path of \`design.md\` and the screenshot paths. Corral pushes the branch and records a new design version at that commit. A bundle without \`index.html\` at its root is rejected.
 - Attach evidence for every acceptance criterion with \`${tool('attach_evidence')}\`, using the criterion ID in brackets above. The screenshots can be that evidence.
-- Use \`${tool('get_task')}\` to re-read the task, comments and evidence at any time, \`${tool('get_design')}\` to read a version you submitted, and \`${tool('add_comment')}\` to leave notes for the human or reviewer.
+- ${rereadTask(` \`${tool('get_design')}\` to read a version you submitted,`)}
 - When the version is submitted and evidenced, call \`${tool('report_outcome')}\` with outcome "${outcome('design_submitted')}" and a summary of the design: the screens and the decisions worth the human's attention. If you committed after \`${tool('submit_design')}\`, submit again first: the outcome is accepted only for a version at your branch's latest commit.
 ${WORK_NOTE}
 - ${HUMAN_DECISIONS_NOTE}
@@ -782,10 +790,8 @@ function designReviewerPrompt(task: ReviewTask, underReview: DesignUnderReview |
 - ${CRITERION_NOTES}
 - Check that the spec gives each screen a stable id, its states, the interactions, the components used, the mock data's shape and open questions, and that there are desktop and mobile screenshots.
 - Check that the prototype uses the project's real components and styles (compare with the code in your checkout) and mock data only, with no calls to a backend.
-- Call \`${tool('report_outcome')}\` with outcome "${outcome('approved')}" or "${outcome('changes_requested')}" and a \`criteria\` verdict for every criterion ID above (met true/false with a note). Approving sends the design to the human, who approves it or requests changes.
-- When you approve, keep it short: the summary is one or two sentences, and each criterion note must explain concretely why it is met or not, because the human reads it next to the evidence.
-- ${CHANGES_REQUESTED_SUMMARY}
-- ${ALWAYS_REPORT}`)
+- ${REPORT_VERDICTS} Approving sends the design to the human, who approves it or requests changes.
+${VERDICT_SUMMARY_RULES}`)
   ].join('\n')
 }
 
@@ -796,15 +802,17 @@ function rebaseDeveloperPrompt(task: PromptTask, agentName: string): string {
     `This is a rebase-only round from approved head ${task.approvedHeadSha ?? '(unknown)'}. It does not consume a review round.`,
     section('How to work', `
 - Fetch origin and rebase branch \`${task.branch}\` onto \`origin/${task.defaultBranch}\`.
-- Resolve conflicts keeping the base branch's (main's) changes and the approved branch's intent. Make no other changes; do not undo newly merged work.
+- Resolve the conflicts. ${keepBothSides(`origin/${task.defaultBranch}`)}
 - ${checksInstruction(scopeOf(task))}${scopeOf(task) ? '' : BUILD_TOO}
 - Check that \`git merge-tree --write-tree HEAD origin/${task.defaultBranch}\` is clean.
-- Do not push or use gh. Corral pushes with --force-with-lease.
+- ${NO_PUSH} Corral pushes with --force-with-lease.
 ${WORK_NOTE}
 - ${HUMAN_DECISIONS_NOTE}
 - ${task.prFree
-  ? `Report \`${outcome('commit_submitted')}\` with a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions. If a human decision is needed, report stuck instead, with the question in the summary.`
-  : `Report \`${outcome('pr_rebased')}\` with \`conflictedFiles\`: a non-empty list of every file in which you resolved a conflict, \`behaviourChanged\`: \`true\` if the resolution changes what the code does, otherwise \`false\`, and \`review\`: \`trivial\` only if the resolution just combines both sides with no new logic, renames or behaviour changes; otherwise choose \`needs_review\`. The server checks a \`trivial\` choice with \`behaviourChanged: false\`: if only the conflicted files changed and no project doc moved on the base, the approval carries over without a review. Anything else goes to Agent review. Include a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions. If a human decision is needed, report stuck instead, with the question in the summary.`}
+  ? `Report \`${outcome('commit_submitted')}\`.`
+  : `Report \`${outcome('pr_rebased')}\` with \`conflictedFiles\`: a non-empty list of every file in which you resolved a conflict, \`behaviourChanged\`: \`true\` if the resolution changes what the code does, otherwise \`false\`, and \`review\`: \`trivial\` only if the resolution just combines both sides with no new logic, renames or behaviour changes; otherwise choose \`needs_review\`. The server checks a \`trivial\` choice with \`behaviourChanged: false\`: if only the conflicted files changed and no project doc moved on the base, the approval carries over without a review. Anything else goes to Agent review.`}
+- Include a summary naming every conflicted file and how each was resolved, and a one-line note naming the conflicted files and their resolutions.
+- ${STUCK_RULE}
 - ${ALWAYS_REPORT}`),
     commentsSection(task, 'author')
   ].join('\n')

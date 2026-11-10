@@ -3,7 +3,7 @@ import type { Agent, Project } from '@corral/contracts'
 import { agentPath, PROJECT_PAGES, projectPath, SECTIONS, settingsPath, type ProjectPage } from '~/utils/routes'
 
 // What the command palette lists (design/app-shell.md)
-export interface SearchPage {
+interface SearchPage {
   label: string
   icon: string
   to: string

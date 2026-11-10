@@ -173,11 +173,10 @@ describe('server reliability', () => {
       await expect.poll(async () => (await run(job.runId)).state).toBe('running')
       const { startedAt } = await run(job.runId)
       later(60_000)
-      await t.db.update(runs).set({ state: 'stopping' }).where(eq(runs.id, job.runId))
       const replayed = t.runner.handled(job.runId, 'run.started')
       started()
       await replayed
-      expect(await run(job.runId)).toMatchObject({ state: 'stopping', startedAt })
+      expect(await run(job.runId)).toMatchObject({ state: 'running', startedAt })
       await t.db.update(projects).set({ paused: true }).where(eq(projects.id, project.id))
     })
   })

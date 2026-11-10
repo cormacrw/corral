@@ -14,7 +14,7 @@ import { requireRuntimeCli } from './setup.ts'
 import { loadTask } from './task-views.ts'
 import { addSubtask, createTask, patchTask, transitionTask, type TaskContentEdit } from './tasks.ts'
 
-export interface CommandsDeps {
+interface CommandsDeps {
   db: Database
   events: EventBus
   blobs: BlobStore

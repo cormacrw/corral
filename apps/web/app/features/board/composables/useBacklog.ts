@@ -1,4 +1,4 @@
-import { errorMessage } from '~/lib/errors'
+import { errorText } from '@corral/core'
 import { refusedNotReady } from '~/queries/client'
 import { useMutation } from '@tanstack/vue-query'
 import type { Task } from '@corral/contracts'
@@ -50,7 +50,7 @@ export function useBacklog() {
         if (refusedNotReady(e)) {
           notReady.push(`${task.ref}: ${e.message}`)
         } else {
-          toast.add({ title: `Could not move ${task.ref}`, description: errorMessage(e), color: 'error' })
+          toast.add({ title: `Could not move ${task.ref}`, description: errorText(e), color: 'error' })
         }
       } finally {
         moving.value.delete(task.id)
@@ -84,7 +84,7 @@ export function useBacklog() {
       if (device.isMobile.value) void router.push(taskPath(task.ref))
       else flyout.open(task.ref)
     } catch (e) {
-      toast.add({ title: 'Could not create the task', description: errorMessage(e), color: 'error' })
+      toast.add({ title: 'Could not create the task', description: errorText(e), color: 'error' })
     }
   }
 

@@ -1,5 +1,4 @@
 import type { DesignVersion, Inbox } from '@corral/contracts'
-import { packBundle } from '@corral/core'
 import { schema } from '@corral/db'
 import { eq } from 'drizzle-orm'
 import { request as httpRequest } from 'node:http'
@@ -7,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { bundleContentType, DESIGN_BUNDLE_CSP, readDesignFile } from './designs.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './fake-runner.ts'
+import { packBundle } from './test-bundle.ts'
 
 const text = (s: string) => new TextEncoder().encode(s)
 

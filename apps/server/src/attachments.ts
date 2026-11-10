@@ -59,7 +59,7 @@ export async function readProjectAttachment(db: Executor, blobs: BlobStore, proj
   return data ? { id: row.id, fileName: row.fileName, mimeType, byteSize: row.byteSize, data } : null
 }
 
-export interface TaskAttachment {
+interface TaskAttachment {
   id: string
   fileName: string
   // Where the task text references it: "the description", "a comment by …"

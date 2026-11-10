@@ -1,6 +1,6 @@
 <script setup lang="ts">
+import { errorText } from '@corral/core'
 import { epicPath } from '~/utils/routes'
-import { errorMessage } from '~/lib/errors'
 import type { Epic } from '@corral/contracts'
 import { useMutation } from '@tanstack/vue-query'
 import { setEpicDependencies } from '~/queries/epics'
@@ -26,7 +26,7 @@ async function setDependencies(ids: string[]) {
     await dependencies.mutateAsync({ id: props.epicId, dependsOn: ids })
     selected.value = ''
   } catch (e) {
-    error.value = errorMessage(e)
+    error.value = errorText(e)
   } finally {
     saving.value = false
   }

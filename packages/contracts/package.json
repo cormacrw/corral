@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./agent-tools": "./src/agent-tools.ts",
+    "./banner": "./src/banner.ts",
     "./client": "./src/client.ts"
   },
   "scripts": {

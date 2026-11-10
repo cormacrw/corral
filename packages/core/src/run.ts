@@ -8,10 +8,7 @@ export type RebaseReview = typeof REBASE_REVIEWS[number]
 // Agent runs (PRD §4.5, §8.6). A run is one agent session; a task can have many.
 export const RUN_STATES = [
   'queued',
-  'starting',
   'running',
-  'waiting_for_input',
-  'stopping',
   'completed',
   'failed',
   'interrupted'
@@ -19,10 +16,7 @@ export const RUN_STATES = [
 export type RunState = typeof RUN_STATES[number]
 
 // Runs in these states count against their agent's concurrency
-export const ACTIVE_RUN_STATES = ['queued', 'starting', 'running', 'waiting_for_input', 'stopping'] as const satisfies readonly RunState[]
-
-// Active runs still at their work: a stopping run has been told to end
-export const LIVE_RUN_STATES = ['queued', 'starting', 'running', 'waiting_for_input'] as const satisfies readonly RunState[]
+export const ACTIVE_RUN_STATES = ['queued', 'running'] as const satisfies readonly RunState[]
 
 export function isActiveRun(state: RunState): boolean {
   return (ACTIVE_RUN_STATES as readonly RunState[]).includes(state)
@@ -70,7 +64,7 @@ export function isCommitOutcome(outcome: string): outcome is typeof COMMIT_OUTCO
 
 // Roles that write to a task's branch
 export const AUTHORING_ROLES = ['developer', 'designer'] as const satisfies readonly AgentRole[]
-export type AuthoringRole = typeof AUTHORING_ROLES[number]
+type AuthoringRole = typeof AUTHORING_ROLES[number]
 
 export function isAuthoringRole(role: AgentRole): role is AuthoringRole {
   return (AUTHORING_ROLES as readonly AgentRole[]).includes(role)
@@ -93,8 +87,7 @@ export function roleTakesMessages(role: AgentRole): boolean {
 }
 
 // How an author run's session began: a warm resume still has the prompt cache
-export const RUN_SESSION_STARTS = ['fresh', 'resumed_warm', 'resumed_cold'] as const
-export type RunSessionStart = typeof RUN_SESSION_STARTS[number]
+export type RunSessionStart = 'fresh' | 'resumed_warm' | 'resumed_cold'
 
 // Where a run's time went. An `agent_*` phase is one agent process or turn,
 // less any phase nested in it: a push or design pack inside a tool call

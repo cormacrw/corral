@@ -12,7 +12,7 @@ import { fixOperationState } from './epic-fixes.ts'
 
 const { runs } = schema
 
-export interface LeaseReconcileDeps {
+interface LeaseReconcileDeps {
   db: Database
   runner: Pick<RunnerHub, 'send'>
   transcripts: Pick<Transcripts, 'spooled' | 'discard' | 'finish'>

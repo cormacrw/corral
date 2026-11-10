@@ -73,7 +73,7 @@ const TASK_FOLDER = new RegExp(`^(${UUID_SOURCE})(-review)?$`)
 const EPIC_FOLDER = new RegExp(`^epic-(${UUID_SOURCE})(-review)?$`)
 const PM_FOLDER = new RegExp(`^pm-${UUID_SOURCE}-(${UUID_SOURCE})$`)
 
-export type WorktreeFolder =
+type WorktreeFolder =
   | { kind: 'task', taskId: string, review: boolean }
   | { kind: 'epic', epicId: string, review: boolean }
   | { kind: 'pm', planSessionId: string }

@@ -105,7 +105,7 @@ export const runLifecycleSchema = z.union([
   ...lifecycleOf('designer', DESIGNER_RUN_OUTCOMES),
   ...lifecycleOf('reviewer', REVIEWER_RUN_OUTCOMES)
 ])
-export type RunLifecycle = z.infer<typeof runLifecycleSchema>
+type RunLifecycle = z.infer<typeof runLifecycleSchema>
 
 export type Run = RunFields & RunLifecycle
 

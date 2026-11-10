@@ -30,7 +30,7 @@ const RETRY_MS = 30_000
 // one, then waits for its gates and squash-merges: one commit on the target
 // branch, whatever the project's method for task PRs. `mergeable_state` only
 // says `behind` when branch protection requires it, so this compares commits.
-export interface EpicMergeDeps {
+interface EpicMergeDeps {
   db: Database
   events: EventBus
   github: GitHubClient

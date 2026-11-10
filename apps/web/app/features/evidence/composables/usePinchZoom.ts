@@ -10,7 +10,7 @@ const DOUBLE_TAP_MS = 300
 const SWIPE_PX = 50
 const TAP_PX = 10
 
-export interface Zoom { scale: number, x: number, y: number }
+interface Zoom { scale: number, x: number, y: number }
 interface Point { x: number, y: number }
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)

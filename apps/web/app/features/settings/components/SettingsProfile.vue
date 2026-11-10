@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { errorMessage } from '~/lib/errors'
+import { errorText } from '@corral/core'
 import { useMutation, useQuery } from '@tanstack/vue-query'
 import { patchProfile, profileQuery, setProfileAvatar } from '~/queries/system'
 
@@ -19,7 +19,7 @@ async function saveName() {
     await profilePatch.mutateAsync({ name })
     toast.add({ title: 'Saved', color: 'success' })
   } catch (e) {
-    toast.add({ title: 'Not saved', description: errorMessage(e), color: 'error' })
+    toast.add({ title: 'Not saved', description: errorText(e), color: 'error' })
   }
 }
 async function saveAvatar(image: Blob | null) {

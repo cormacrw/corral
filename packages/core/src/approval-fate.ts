@@ -12,7 +12,7 @@ export interface ApprovalFate {
 }
 
 // A journaled rebase or fix of the task's branch, as approval reads it (D27, D29)
-export interface BranchOperation {
+interface BranchOperation {
   expectedTargetSha: string
   fix: EpicFixKind | null
   fixReport: EpicFixReport | null
@@ -21,7 +21,7 @@ export interface BranchOperation {
   decisions: readonly EpicRebaseDecision[]
 }
 
-export interface ApprovedDelivery {
+interface ApprovedDelivery {
   reviewState: EpicReviewState | null
   approvedHeadSha: string | null
   prHeadSha: string | null
