@@ -77,7 +77,6 @@ export const EPIC_REVIEW_STATE: Record<EpicReviewState, { label: string, color: 
   human_review: { label: 'Awaiting your review', color: 'warning' },
   changes_requested: { label: 'Changes requested', color: 'warning' },
   ready_to_merge: { label: 'Ready to merge', color: 'success' },
-  conflict: { label: 'Rebase conflict', color: 'warning' },
   merged: { label: 'Merged', color: 'success' }
 }
 
@@ -135,7 +134,6 @@ export function epicReviewStatus(epic: Pick<Epic, 'reviewMode' | 'branch' | 'rev
     case 'human_review': return { label: 'All tasks complete, awaiting your review', color: 'warning' }
     case 'changes_requested': return { label: 'Changes requested, fixes in progress', color: 'warning' }
     case 'ready_to_merge': return { label: 'Approved, waiting to merge', color: 'success' }
-    case 'conflict': return { label: 'Rebase conflict, rebasing again', color: 'info' }
     case 'merged': return { label: 'Task\'s PR merged', color: 'success' }
   }
 }

@@ -10,6 +10,7 @@ import {
   PLAN_STATUSES,
   REVIEW_VERDICTS,
   RUN_OUTCOMES,
+  RUN_STATES,
   TASK_KINDS,
   TASK_PRIORITIES,
   TASK_STATUSES,
@@ -24,10 +25,7 @@ export const taskPriority = pgEnum('task_priority', TASK_PRIORITIES)
 export const taskType = pgEnum('task_type', TASK_TYPES)
 export const taskKind = pgEnum('task_kind', TASK_KINDS)
 export const agentRole = pgEnum('agent_role', AGENT_ROLES)
-// starting, waiting_for_input and stopping were never written, and the code
-// doesn't model them (runs.state is typed as RunState). They stay in the pg
-// enum, as migrated, until a migration drops them
-export const runState = pgEnum('run_state', ['queued', 'starting', 'running', 'waiting_for_input', 'stopping', 'completed', 'failed', 'interrupted'])
+export const runState = pgEnum('run_state', RUN_STATES)
 export const runOutcome = pgEnum('run_outcome', RUN_OUTCOMES)
 export const mergeMethod = pgEnum('merge_method', MERGE_METHODS)
 export const epicReviewMode = pgEnum('epic_review_mode', EPIC_REVIEW_MODES)

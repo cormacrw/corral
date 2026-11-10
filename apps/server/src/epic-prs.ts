@@ -121,7 +121,7 @@ export class EpicPullRequests {
       // A moved epic head invalidates approval, even if board membership
       // didn't change. Active runs on the old head are fenced by state.
       await endActiveRuns(tx, eq(runs.epicId, epic.id), { state: 'interrupted', error: 'The task\'s PR changed' }, this.#now())
-      await tx.update(epics).set({ prNumber: pr.number, prHeadSha: pr.headSha, approvedHeadSha: null, approvedBaseSha: null, reviewState: 'in_review', conflictFiles: null, updatedAt: this.#now() }).where(eq(epics.id, epic.id))
+      await tx.update(epics).set({ prNumber: pr.number, prHeadSha: pr.headSha, approvedHeadSha: null, approvedBaseSha: null, reviewState: 'in_review', updatedAt: this.#now() }).where(eq(epics.id, epic.id))
       await appendAudit(tx, { projectId: project.id, actor: SERVER_ACTOR }, auditEvent('epic.pr', { epicId: epic.id, event: epic.prNumber ? 'review_started' : 'opened', prNumber: pr.number }))
       return true
     })

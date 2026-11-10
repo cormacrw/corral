@@ -38,6 +38,8 @@ async function migrationsBefore(tag: string): Promise<string> {
 const TASK_KIND_MIGRATION = '0062_gorgeous_expediter'
 // The migration that adds parent tasks
 const PARENT_MIGRATION = '0063_fresh_red_wolf'
+// The first of the two that recreate run_state and epic_review_state
+const STATE_TYPES_MIGRATION = '0067_nice_chronomancer'
 
 describe('migrations', () => {
   const cleanup: (() => Promise<unknown>)[] = []
@@ -133,6 +135,31 @@ describe('migrations', () => {
       { number: 4, kind: 'fix' }, { number: 5, kind: 'fix' }, { number: 6, kind: 'normal' }, { number: 7, kind: 'normal' }
     ])
     await expect(db.execute(sql`update tasks set kind = 'unknown'`)).rejects.toThrow()
+  })
+
+  it.for([
+    { driver: 'pglite' as const },
+    { driver: 'postgres' as const }
+  ])('recreates the run and review state types, keeping rows and the rules on run state, on $driver', { timeout: 60_000 }, async ({ driver }, context) => {
+    requireDatabase(driver, context)
+    const before = await migrationsBefore(STATE_TYPES_MIGRATION)
+    cleanup.push(() => rm(before, { recursive: true, force: true }))
+    const { db } = await startServerOn(driver, before, async (seeded) => {
+      await seeded.execute(sql`insert into projects (name, slug, prefix, repository, default_branch) values ('Test app', 'test-app', 'TA', 'cormacrw/test-app', 'main')`)
+      await seeded.execute(sql`insert into epics (project_id, title, review_state, created_by) select id, 'Approved', 'ready_to_merge', '{"kind":"system","component":"server"}'::jsonb from projects`)
+      await seeded.execute(sql`insert into agents (name, role) values ('Juno', 'pm')`)
+      await seeded.execute(sql`insert into runs (project_id, agent_id, role, state, ended_at)
+        select p.id, a.id, 'pm', s.state::run_state, case when s.state = 'completed' then now() end
+        from projects p, agents a, (values ('queued'), ('running'), ('completed')) s(state)`)
+    })
+    expect((await db.execute(sql`select review_state::text from epics`)).rows).toEqual([{ review_state: 'ready_to_merge' }])
+    expect((await db.execute(sql`select state::text from runs order by number`)).rows).toEqual([{ state: 'queued' }, { state: 'running' }, { state: 'completed' }])
+    await expect(db.execute(sql`update epics set review_state = 'conflict'`)).rejects.toThrow()
+    await expect(db.execute(sql`update runs set state = 'stopping' where state = 'running'`)).rejects.toThrow()
+    // A finished run still needs its end time, and only a finished run has one
+    await expect(db.execute(sql`update runs set state = 'completed' where state = 'running'`)).rejects.toThrow()
+    await expect(db.execute(sql`update runs set ended_at = now() where state = 'queued'`)).rejects.toThrow()
+    expect((await db.execute(sql`select column_name from information_schema.columns where table_name = 'epics' and column_name in ('conflict_files', 'rebase_requested')`)).rows).toEqual([])
   })
 
   it.for([
@@ -772,7 +799,9 @@ describe('migrations', () => {
     })
     const original = await snapshot()
     await migrate(migrationsFolder)
-    expect(await snapshot()).toEqual({ ...original, epics: original.epics.map(epic => ({ ...epic, approved_head_sha: null, approved_base_sha: null, sync_error: null, sync_retried_at: null, task_id: null, merged_at: null })) })
+    // Later migrations dropped these columns, unused by then
+    const kept = (epic: Record<string, unknown>) => Object.fromEntries(Object.entries(epic).filter(([column]) => column !== 'rebase_requested' && column !== 'conflict_files'))
+    expect(await snapshot()).toEqual({ ...original, epics: original.epics.map(epic => ({ ...kept(epic), approved_head_sha: null, approved_base_sha: null, sync_error: null, sync_retried_at: null, task_id: null, merged_at: null })) })
     expect((await db.execute(sql`select integration_protocol from tasks`)).rows).toEqual([{ integration_protocol: 0 }])
     expect((await db.execute(sql`select * from task_submissions`)).rows).toEqual([])
   })

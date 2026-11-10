@@ -137,7 +137,7 @@ It creates a run (Queued) and a 15-minute lease, then sends `job.assign` (RunJob
 
 Keep criterion evidence separate from agent artifacts (D21): logs, test output and other raw files are retained for review and debugging, collapsed in the UI.
 
-Run: Starting → Running. A heartbeat every 2 minutes renews the lease, and every heartbeat carries the lease epoch.
+Run: Queued → Running. A heartbeat every 2 minutes renews the lease, and every heartbeat carries the lease epoch.
 
 ### Step 4 — Developer works (agent)
 

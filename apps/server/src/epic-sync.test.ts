@@ -670,12 +670,6 @@ describe('developer runs on the epic', () => {
       await fixJob(epic.id)
     })
 
-    it('resolves a task with subtasks left in the old conflict state at once', async () => {
-      const epic = await underReview(await conflicted(), { reviewState: 'conflict' })
-      await tick()
-      expect((await rebases(epic.id)).at(-1)).toMatchObject({ state: 'running', fix: 'conflict' })
-    })
-
     it('starts no developer on an approved task whose head moved outside Corral', async () => {
       const epic = await humanApproved(await conflicted())
       await t.db.update(schema.epics).set({ prHeadSha: 'a-foreign-head' }).where(eq(schema.epics.id, epic.id))

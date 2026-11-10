@@ -151,8 +151,8 @@ const epicRows: Omit<Epic, 'taskId' | 'taskRef' | 'mergedAt'>[] = [
     prHeadSha: '6f1c2ab94d',
     approvedHeadSha: null,
     approvedBaseSha: null,
-    reviewState: 'conflict',
-    sync: null,
+    reviewState: 'ready_to_merge',
+    sync: { state: 'deciding', question: 'Should a CSV export keep filtered rows only, now that main exports everything?' },
     reviewModeLocked: true,
     taskCount: 3,
     mergedCount: 3,
@@ -1126,16 +1126,15 @@ export function inbox(): Inbox {
       since: null, newArtifacts: [], unread: !readItems.has(review.id)
     })
   }
-  const conflict = epics.find(e => e.reviewState === 'conflict')
+  const conflict = epics.find(e => e.sync?.state === 'deciding')
   if (conflict) {
     const project = projects.find(p => p.id === conflict.projectId)!
-    const files = ['apps/server/src/routes/search.ts', 'apps/web/app/pages/search.vue', 'apps/web/app/components/saved-searches/SavedSearchShareDialogWithExpiryOptions.vue']
-    const body = `The task's PR can't rebase onto main. Conflicting files: ${files.join(', ')}.`
+    const body = epicDecision.question
     needsYou.push({
       id: conflict.id, type: 'epic_conflict', epicId: conflict.id, taskId: null, taskRef: null, subject: conflict.title,
       project: { id: project.id, slug: project.slug, name: project.name, thumbnailColor: project.thumbnailColor, thumbnailUrl: project.thumbnailUrl },
       preview: body, body, message: body, sender: { name: 'Corral', role: 'system' }, at: conflict.updatedAt,
-      prUrl: conflict.prUrl!, resolution: null, headSha: conflict.prHeadSha!, targetBranch: 'main', files, decision: epicDecision, since: null, newArtifacts: [], unread: !readItems.has(conflict.id)
+      prUrl: conflict.prUrl!, resolution: null, headSha: conflict.prHeadSha!, targetBranch: 'main', decision: epicDecision, since: null, newArtifacts: [], unread: !readItems.has(conflict.id)
     })
   }
   const completed = tasks.find(t => t.status === 'merged')!

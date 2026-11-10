@@ -175,7 +175,7 @@ Every task item uses `InboxEpicPanel`, Option D for a task, on desktop and mobil
 - **Approve task:** one click when nothing is owed, and the Inbox moves on. A non-blocking note doesn't ask for confirmation. With checks owed it opens Tasks, says what's left, and sends only once all are ticked.
 - **Request changes:** opens the composer, and its text becomes a fix task in Ready in the task, titled by `feedbackFixTitle`.
 - **The head moved while open:** the action carries the head the human was looking at, so it fails with a message, the feedback text is kept and the panel refreshes. If the item leaves the Inbox while open, the panel stays on it with the message and nothing can be sent.
-- **What stopped a task:** an `epic_conflict` item shows the failure, the conflicting files or the rebase's question. **Retry** goes round the automatic path again; a question is answered with a **Choose** button or in the composer.
+- **What stopped a task:** an `epic_conflict` item shows the failure or the fix's question. **Retry** goes round the automatic path again; a question is answered with a **Choose** button or in the composer.
 - **Read-only:** opened, conflict, approved and merged items show *For your information. Nothing to do.* in place of the actions, and Resolved items show the resolution. A merged task shows its squash commit, and an approved one says what happens next.
 
 ## What each action does (D10)

@@ -133,10 +133,10 @@ describe.each(['pglite', 'postgres'] as const)('the data layer on %s', (driver) 
   })
 
   it('keeps the task arrival key, and counts Needs you as the Inbox lists it', async () => {
-    const [conflict] = await t.db.insert(epics).values({ projectId: project.id, title: 'Conflicted', description: '', createdBy: t.actor, reviewState: 'conflict', prNumber: 3, prHeadSha: 'abc' }).returning()
+    const [conflict] = await t.db.insert(epics).values({ projectId: project.id, title: 'Conflicted', description: '', createdBy: t.actor, reviewState: 'ready_to_merge', syncError: 'Rebasing failed 3 times', prNumber: 3, prHeadSha: 'abc' }).returning()
     // Waiting for its reviewer's approval, so not listed
     await t.db.insert(epics).values({ projectId: project.id, title: 'Unreviewed', description: '', createdBy: t.actor, reviewState: 'human_review', prNumber: 4, prHeadSha: 'abc' })
-    await appendAudit(t.db, { projectId: project.id, actor: system }, auditEvent('epic.pr', { epicId: conflict!.id, event: 'conflict', summary: '', files: [] }))
+    await appendAudit(t.db, { projectId: project.id, actor: system }, auditEvent('epic.pr', { epicId: conflict!.id, event: 'sync_failed', summary: 'Rebasing failed 3 times' }))
     const [entry] = await t.db.select({ id: auditLog.id }).from(auditLog).where(eq(auditLog.action, 'epic.pr')).orderBy(sql`${auditLog.id} desc`).limit(1)
     expect((await unclaimedEpicItems(t.db, conflict!.id)).map(p => p.arrival)).toEqual([`${conflict!.id}:epic_conflict:audit-${entry!.id}`])
     expect((await epicInboxItems(t.db)).map(i => i.subject)).toEqual(['Conflicted'])
