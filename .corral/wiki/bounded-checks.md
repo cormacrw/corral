@@ -19,7 +19,7 @@ agent's environment, the only `CORRAL_*` variable an agent sees:
 | Run | Required checks | `CORRAL_CHECK_SCOPE` | Prompt asks for |
 |---|---|---|---|
 | First attempt, review round, CI fix, task rebase | Yes | `targeted` | Fast, relevant checks; a CI fix starts from what failed |
-| Task conflict fix, task rebase or resolution task | Yes | `none` | No checks at all |
+| Task conflict fix | Yes | `none` | No checks at all |
 | Any | No | unset | The full local check |
 
 Lint, typecheck and build replay from the project's Turbo cache, which the

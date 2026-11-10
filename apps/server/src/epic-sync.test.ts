@@ -1,6 +1,6 @@
 import { schema } from '@corral/db'
 import { and, eq, inArray, isNotNull } from 'drizzle-orm'
-import { readFile, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { inspectEpicRebase, prepareEpicRebase, pushEpicRebase } from '../../runner/src/epic-rebase.ts'
@@ -9,12 +9,9 @@ import { GitHubError } from './github.ts'
 import { inspectIntegration, prepareIntegration, pushIntegration } from '../../runner/src/integration.ts'
 import { createTestDataDir, TEST_REPOSITORY } from '../../runner/src/test-repo.ts'
 import { readAudit } from './audit.ts'
-import { approvalFate } from '@corral/core'
-import { EpicSynchronizer } from './epic-sync.ts'
 import { createTestApp, type TestApp } from './test-app.ts'
 import { FakeRunner } from './fake-runner.ts'
 import { recordTaskSubmission } from './task-submissions.ts'
-import { passBeforeD29 } from './test-resolution-task.ts'
 
 // Real git processes, so these need more time than the default on a busy machine
 vi.setConfig({ testTimeout: 30_000 })
@@ -140,7 +137,7 @@ async function captureEpic(name: string, epicId: string, extra: Record<string, u
   await capture(name, { ...extra, responses })
 }
 
-const journal = async (epicId: string) => (await ops(epicId)).map(o => ({ kind: o.kind, state: o.state, expectedEpicHead: o.expectedTargetSha, ontoSha: o.ontoSha, result: o.resultHeadSha, resolutionTaskId: o.resolutionTaskId, conflictFiles: o.conflictFiles, error: o.error }))
+const journal = async (epicId: string) => (await ops(epicId)).map(o => ({ kind: o.kind, state: o.state, expectedEpicHead: o.expectedTargetSha, ontoSha: o.ontoSha, result: o.resultHeadSha, fix: o.fix, conflictFiles: o.conflictFiles, error: o.error }))
 
 async function commitOn(branch: string, file: string, text: string): Promise<string> {
   await git('checkout', '--quiet', branch)
@@ -177,8 +174,7 @@ async function approved(epic: { id: string, branch: string }, file: string) {
   return task
 }
 
-// This file proves a resolution task from before D29 still finishes
-const tick = () => passBeforeD29(t.db, t.github, () => t.orchestrator.mergePass())
+const tick = () => t.orchestrator.mergePass()
 const ops = (epicId: string) => t.db.select().from(schema.taskIntegrationOperations).where(eq(schema.taskIntegrationOperations.epicId, epicId)).orderBy(schema.taskIntegrationOperations.leaseEpoch)
 const reload = async (id: string) => (await t.db.select().from(schema.epics).where(eq(schema.epics.id, id)))[0]!
 const epicApi = async (id: string) => (await t.request('GET', `/api/epics/${id}`)).json() as Promise<{ sync: unknown, reviewState: string | null }>
@@ -207,23 +203,6 @@ async function resolve(branch: string, onto: string, file: string, text: string)
   const head = await git('rev-parse', 'HEAD')
   await git('checkout', '--quiet', 'main')
   return head
-}
-
-async function developerSubmits(taskId: string, head: string) {
-  await t.orchestrator.scheduler.schedule()
-  const dev = (await runner.next('run.assign', m => m.job.role === 'developer' && m.job.taskId === taskId)).job
-  const criteria = await t.db.select().from(schema.acceptanceCriteria).where(eq(schema.acceptanceCriteria.taskId, taskId))
-  for (const c of criteria) await runner.call(dev.runId, dev.leaseEpoch, 'attach_evidence', { criterionId: c.id, kind: 'note', note: 'Kept both sides' })
-  expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'pr_updated', note: 'Resolved', summary: 'Rebased', headSha: head })).toMatchObject({ ok: true })
-  return { dev, criteria }
-}
-
-async function reviewerApproves(taskId: string, head: string, criteria: { id: string }[], extra: Record<string, unknown> = {}) {
-  await t.orchestrator.scheduler.schedule()
-  const review = (await runner.next('run.assign', m => m.job.role === 'reviewer' && m.job.taskId === taskId)).job
-  expect(review.headSha).toBe(head)
-  expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Both sides kept', criteria: criteria.map(c => ({ criterionId: c.id, met: true, note: '' })), ...extra })).toMatchObject({ ok: true })
-  return review
 }
 
 it('rebases an active task at the next task integration, with no hand-off and no task PR', async () => {
@@ -297,40 +276,7 @@ it('rebases before review, and keeps approval over a clean rebase before merge',
   expect(t.github.calls.filter(c => c.method === 'updateBranch')).toEqual([])
 })
 
-it('sends a conflict to a developer and a reviewer on a candidate, then publishes it with the task showing progress', async () => {
-  const epic = await humanApproved(await conflicted())
-  await approved(epic, 'waiting.txt')
-  await tick()
-
-  const [operation] = await ops(epic.id)
-  expect(operation).toMatchObject({ kind: 'rebase', state: 'running', conflictFiles: [epic.file] })
-  const fix = await taskRow(operation!.resolutionTaskId!)
-  expect(fix).toMatchObject({ integrationProtocol: 0, branch: `corral/epic-rebase/${operation!.id}` })
-  expect(await git('rev-parse', fix.branch!)).toBe(epic.head)
-  expect(await git('rev-parse', epic.branch)).toBe(epic.head)
-  expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'resolving', files: [epic.file], taskId: fix.id })
-  expect(await needsYou(epic.id)).toEqual([])
-  await capture('conflict-in-progress.json', { epicApi: { status: 200, sync: (await epicApi(epic.id)).sync, reviewState: (await epicApi(epic.id)).reviewState }, inboxNeedsYou: await needsYou(epic.id), epicBranchHeadUnchanged: await git('rev-parse', epic.branch) === epic.head, resolutionTask: { title: fix.title, status: fix.status, branch: fix.branch, description: fix.description }, operations: await journal(epic.id) })
-
-  const prs = t.github.pulls.size
-  const resolved = await resolve(fix.branch!, epic.onto, epic.file, 'target version\nepic version\n')
-  const { dev, criteria } = await developerSubmits(fix.id, resolved)
-  expect(dev.baseBranch).toBe('main')
-  expect(t.github.pulls.size).toBe(prs)
-  expect(await git('rev-parse', epic.branch)).toBe(epic.head)
-
-  await reviewerApproves(fix.id, resolved, criteria)
-  await tick()
-  expect(await git('rev-parse', epic.branch).then(async h => isAncestor(resolved, h))).toBe(true)
-  expect(await taskRow(fix.id)).toMatchObject({ status: 'merged', mergeCommitSha: resolved })
-  expect(await git('show', `${epic.branch}:${epic.file}`)).toBe('target version\nepic version')
-  expect((await ops(epic.id)).map(o => [o.kind, o.state])).toEqual([['rebase', 'succeeded'], ['integrate', 'succeeded']])
-  await expect(git('rev-parse', '--verify', fix.branch!)).rejects.toThrow()
-  expect((await epicApi(epic.id)).sync).toBeNull()
-  await capture('conflict-resolved.json', { developerPromptExcerpt: dev.prompt.split('\n').filter(l => /never remove|git rebase/.test(l)), resolvedFile: await git('show', `${epic.branch}:${epic.file}`), resolutionTask: { status: 'merged', mergeCommitSha: resolved }, candidateBranchDeleted: true, operations: await journal(epic.id) })
-})
-
-it('keeps task integration off the task\'s branch while a resolution holds the lock', async () => {
+it('keeps task integration off the task\'s branch while a fix holds the lock', async () => {
   const epic = await humanApproved(await conflicted())
   await tick()
   const task = await approved(epic, 'late.txt')
@@ -343,7 +289,7 @@ it('keeps task integration off the task\'s branch while a resolution holds the l
   const [submission] = await t.db.select().from(schema.taskSubmissions).where(eq(schema.taskSubmissions.taskId, task.id))
   const refused = await t.db.insert(schema.taskIntegrationOperations).values({ submissionId: submission!.id, epicId: epic.id, kind: 'integrate', expectedTargetSha: epic.head, leaseEpoch: 9 }).then(() => null, (error: Error) => error.cause instanceof Error ? error.cause.message : error.message)
   expect(refused).not.toBeNull()
-  await capture('writer-lock.json', { scenario: 'A resolution holds the lock; a task reaches Ready to merge; two passes run; then a second operation is inserted directly.', taskStatusAfterTwoPasses: (await taskRow(task.id)).status, epicBranchHeadUnchanged: await git('rev-parse', epic.branch) === epic.head, operations: await journal(epic.id), directInsertRefusedBy: refused })
+  await capture('writer-lock.json', { scenario: 'A conflict fix holds the lock; a task reaches Ready to merge; two passes run; then a second operation is inserted directly.', taskStatusAfterTwoPasses: (await taskRow(task.id)).status, epicBranchHeadUnchanged: await git('rev-parse', epic.branch) === epic.head, operations: await journal(epic.id), directInsertRefusedBy: refused })
 })
 
 it('never pushes over a write that beat the rebase to the branch', async () => {
@@ -363,18 +309,6 @@ it('never pushes over a write that beat the rebase to the branch', async () => {
   expect((await ops(epic.id))[0]).toMatchObject({ kind: 'rebase', state: 'failed', error: 'The task\'s branch moved' })
   await capture('compare-and-swap.json', { scenario: 'A commit reached the task\'s branch just before the rebase push.', racedCommitKept: (await git('ls-tree', '--name-only', epic.branch)).includes('sneaked.txt'), operations: await journal(epic.id) })
   expect(await isAncestor('main', await git('rev-parse', epic.branch))).toBe(true)
-})
-
-it('starts one resolution for the same commits, however often it is polled or reported', async () => {
-  const epic = await humanApproved(await conflicted())
-  await Promise.all([tick(), tick(), tick()])
-  await tick()
-  await t.orchestrator.scheduler.schedule()
-  await tick()
-  expect(await ops(epic.id)).toHaveLength(1)
-  const board = await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))
-  expect(board.filter(row => row.id !== epic.done.id)).toHaveLength(1)
-  await capture('one-resolution.json', { scenario: 'Three concurrent passes, then a further pass, a schedule and another pass on the same conflicting commits.', operations: await journal(epic.id), resolutionTasks: board.filter(row => row.id !== epic.done.id).map(row => ({ title: row.title, branch: row.branch })) })
 })
 
 it('writes nothing while paused or stopped, and resumes afterwards', async () => {
@@ -438,7 +372,7 @@ it('holds a candidate when the project is paused while it was being prepared', a
   await capture('pause-during-prepare.json', { scenario: 'The project is paused while the runner prepares a clean candidate.', whilePaused: { operation: held[0], jobsSent: [], epicBranchMoved: false }, afterUnpause: { jobsSent: sent, epicBranchMoved: true } })
 })
 
-it('starts no resolution when paused or stopped during the prepare that found the conflict', async () => {
+it('starts no fix when paused or stopped during the prepare that found the conflict', async () => {
   const epic = await humanApproved(await conflicted())
   for (const stop of [
     () => t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id)),
@@ -451,7 +385,7 @@ it('starts no resolution when paused or stopped during the prepare that found th
       return real()
     }
     await tick()
-    expect((await ops(epic.id)).map(o => [o.state, o.resolutionTaskId])).toEqual([['pending', null]])
+    expect((await ops(epic.id)).map(o => [o.state, o.fix])).toEqual([['pending', null]])
     expect(await git('branch', '--list', 'corral/epic-rebase/*')).not.toContain((await ops(epic.id))[0]!.id)
     faults = null
     await t.db.update(schema.projects).set({ paused: false }).where(eq(schema.projects.id, project.id))
@@ -459,7 +393,7 @@ it('starts no resolution when paused or stopped during the prepare that found th
   }
   await tick()
   expect((await ops(epic.id))).toHaveLength(1)
-  expect((await ops(epic.id))[0]!.resolutionTaskId).toEqual(expect.any(String))
+  expect((await ops(epic.id))[0]!.fix).toBe('conflict')
 })
 
 it('holds a human-approved task PR while a rebase has the lock, then merges it', async () => {
@@ -485,7 +419,7 @@ it('holds a human-approved task PR while a rebase has the lock, then merges it',
   await tick()
   expect(merges()).toEqual([])
   expect(await taskRow(task.id)).toMatchObject({ status: 'ready_to_merge' })
-  await capture('task-pr-held.json', { scenario: 'A human approves a task PR into the task\'s branch while a resolution holds the lock.', githubMergeCalls: merges().length, taskStatus: 'ready_to_merge', operations: await journal(epic.id) })
+  await capture('task-pr-held.json', { scenario: 'A human approves a task PR into the task\'s branch while a conflict fix holds the lock.', githubMergeCalls: merges().length, taskStatus: 'ready_to_merge', operations: await journal(epic.id) })
 
   // GitHub refuses it: recording a merge isn't what this is about, and it reads
   // outside its transaction, which PGlite's one connection can't do
@@ -493,46 +427,6 @@ it('holds a human-approved task PR while a rebase has the lock, then merges it',
   await t.db.update(schema.taskIntegrationOperations).set({ state: 'failed', error: 'Done with' }).where(eq(schema.taskIntegrationOperations.epicId, epic.id))
   await tick()
   expect(merges()).toHaveLength(1)
-})
-
-it('retires a resolution whose task\'s branch moved, and starts again without a human', async () => {
-  const epic = await humanApproved(await conflicted())
-  await tick()
-  const [operation] = await ops(epic.id)
-  const fix = await taskRow(operation!.resolutionTaskId!)
-  const resolved = await resolve(fix.branch!, epic.onto, epic.file, 'target version\nepic version\n')
-  const { criteria } = await developerSubmits(fix.id, resolved)
-  await reviewerApproves(fix.id, resolved, criteria)
-  faults = async (job, real) => {
-    if (job.kind === 'epic_rebase_push') {
-      faults = null
-      const moved = await commitOn(epic.branch, `outside-${++branches}.txt`, 'x\n')
-      await t.db.update(schema.epics).set({ prHeadSha: moved }).where(eq(schema.epics.id, epic.id))
-    }
-    return real()
-  }
-  await tick()
-
-  expect(await taskRow(fix.id)).toMatchObject({ status: 'ready_to_merge', deletedAt: expect.any(Date), leaseRunId: null })
-  await expect(git('rev-parse', '--verify', fix.branch!)).rejects.toThrow()
-  const [first, second] = await ops(epic.id)
-  expect(first).toMatchObject({ state: 'failed', error: 'The task\'s branch moved' })
-  expect(second).toMatchObject({ kind: 'rebase', state: 'running', expectedTargetSha: await git('rev-parse', epic.branch), conflictFiles: [epic.file] })
-  const next = await taskRow(second!.resolutionTaskId!)
-  expect(next.id).not.toBe(fix.id)
-  expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'resolving', taskId: next.id })
-  expect(await needsYou(epic.id)).toEqual([])
-  await capture('moved-branch-recovery.json', { scenario: 'The task\'s branch moved outside Corral while an approved resolution was being pushed. One pass later:', retiredTask: { deleted: true, candidateBranchDeleted: true }, newTask: { branch: next.branch }, operations: await journal(epic.id), inboxNeedsYou: await needsYou(epic.id) })
-})
-
-it('retires a live resolution when the task\'s PR merges first', async () => {
-  const epic = await humanApproved(await conflicted())
-  await tick()
-  const [operation] = await ops(epic.id)
-  await t.db.update(schema.epics).set({ reviewState: 'merged' }).where(eq(schema.epics.id, epic.id))
-  await tick()
-  expect((await ops(epic.id))[0]).toMatchObject({ state: 'failed', error: 'The task\'s PR merged' })
-  expect(await taskRow(operation!.resolutionTaskId!)).toMatchObject({ deletedAt: expect.any(Date), leaseRunId: null })
 })
 
 it('bounds infrastructure failures, then shows a recoverable failure and asks the human for no approval', async () => {
@@ -564,58 +458,6 @@ it('bounds infrastructure failures, then shows a recoverable failure and asks th
   expect((await t.request('POST', `/api/epics/${epic.id}/sync/retry`)).status).toBe(409)
 })
 
-it('keeps a reviewed resolution through failed pushes, and pushes it again on retry', async () => {
-  const epic = await humanApproved(await conflicted())
-  await tick()
-  const [operation] = await ops(epic.id)
-  const fix = await taskRow(operation!.resolutionTaskId!)
-  const resolved = await resolve(fix.branch!, epic.onto, epic.file, 'target version\nepic version\n')
-  const { criteria } = await developerSubmits(fix.id, resolved)
-  await reviewerApproves(fix.id, resolved, criteria)
-  faults = async (job, real) => {
-    if (job.kind === 'epic_rebase_push') throw new Error('push timed out')
-    return real()
-  }
-  for (let n = 0; n < 6; n++) await tick()
-  expect((await ops(epic.id))[0]).toMatchObject({ state: 'running', pushAttempts: 3 })
-  expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'failed', error: expect.stringContaining('push timed out') })
-  expect(await taskRow(fix.id)).toMatchObject({ status: 'ready_to_merge' })
-
-  faults = null
-  expect((await t.request('POST', `/api/epics/${epic.id}/sync/retry`)).status).toBe(200)
-  await tick()
-  expect(await taskRow(fix.id)).toMatchObject({ status: 'merged' })
-  expect(await isAncestor(resolved, await git('rev-parse', epic.branch))).toBe(true)
-})
-
-it('sends back a resolution no reviewer approved that changes target work, and leaves the task\'s branch alone', async () => {
-  const epic = await humanApproved(await conflicted())
-  const onto = await commitOn('main', 'landed.txt', 'landed\n')
-  await tick()
-  const [operation] = await ops(epic.id)
-  const fix = await taskRow(operation!.resolutionTaskId!)
-  // Rebased, then quietly deletes what just landed
-  await resolve(fix.branch!, onto, epic.file, 'task version\n')
-  await git('checkout', '--quiet', fix.branch!)
-  await git('rm', '--quiet', 'landed.txt')
-  await git('commit', '--quiet', '-m', 'Remove the file that got in the way')
-  const bad = await git('rev-parse', 'HEAD')
-  await git('checkout', '--quiet', 'main')
-  await developerSubmits(fix.id, bad)
-  // At Ready to merge with no approved review on record for this commit
-  await t.db.update(schema.tasks).set({ status: 'ready_to_merge', headSha: bad, leaseRunId: null, leaseRole: null, leaseExpiresAt: null, leaseHeartbeatAt: null }).where(eq(schema.tasks.id, fix.id))
-  await tick()
-
-  expect(await git('rev-parse', epic.branch)).toBe(epic.head)
-  expect(await taskRow(fix.id)).toMatchObject({ status: 'in_progress' })
-  const notes = await t.db.select().from(schema.comments).where(eq(schema.comments.taskId, fix.id))
-  expect(notes.map(n => n.body).join('\n')).toContain('landed.txt')
-  expect((await ops(epic.id))[0]).toMatchObject({ state: 'running', resultHeadSha: null })
-  expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'resolving' })
-  expect(await readFile(join(origin, 'landed.txt'), 'utf8')).toBe('landed\n')
-  await capture('target-work-protected.json', { scenario: 'A candidate no reviewer approved deleted landed.txt, which only the target changed.', epicBranchHeadUnchanged: await git('rev-parse', epic.branch) === epic.head, taskStatus: (await taskRow(fix.id)).status, commentToDeveloper: notes.map(n => n.body).filter(b => b.includes('landed.txt')) })
-})
-
 // ── Approval across rebases (COR-291) ───────────────────────────────────────
 
 const inbox = async () => (await t.request('GET', '/api/inbox')).json() as Promise<{ needsYou: { id: string, type: string, decision?: { question: string, alternatives: { label: string }[], affectedChanges: string[] } }[] }>
@@ -639,14 +481,6 @@ async function humanApproved<E extends { id: string, branch: string, head: strin
   return epic
 }
 
-async function resolutionOf(epic: { id: string, onto: string, file: string }, text = 'target version\nepic version\n') {
-  await tick()
-  const [operation] = await ops(epic.id)
-  const fix = await taskRow(operation!.resolutionTaskId!)
-  const resolved = await resolve(fix.branch!, epic.onto, epic.file, text)
-  return { operation: operation!, fix, resolved }
-}
-
 it('keeps the human approval over a clean rebase and waits for checks on the new head', async () => {
   await t.db.update(schema.projects).set({ requiredChecks: ['ci'] }).where(eq(schema.projects.id, project.id))
   try {
@@ -668,263 +502,11 @@ it('keeps the human approval over a clean rebase and waits for checks on the new
     await t.mergePass()
     expect(t.github.calls.filter(c => c.method === 'merge' && c.args[3] === head)).not.toEqual([])
     const [retained] = await approvalEvents(epic.id)
-    expect(retained).toMatchObject({ event: 'approval_retained', detail: { approvedHeadSha: epic.head, from: epic.head, to: head, ontoSha: onto, resolutionTaskId: null } })
+    expect(retained).toMatchObject({ event: 'approval_retained', detail: { approvedHeadSha: epic.head, from: epic.head, to: head, ontoSha: onto } })
     await capture('clean-rebase.json', { scenario: 'A human-approved task is rebased cleanly, then waits for ci on the new head.', approvedCommit: epic.head, rebasedCommit: head, stateBeforeChecks: 'ready_to_merge, no merge call', stateAfterChecks: 'merge requested for the new head', history: await history(epic.id) })
   } finally {
     await t.db.update(schema.projects).set({ requiredChecks: [] }).where(eq(schema.projects.id, project.id))
   }
-})
-
-it('carries approval over a reviewed resolution that preserves behaviour, with no new human approval', async () => {
-  // Required checks that haven't reported hold the epic where the test reads it
-  await t.db.update(schema.projects).set({ requiredChecks: ['ci'] }).where(eq(schema.projects.id, project.id))
-  onTestFinished(async () => void await t.db.update(schema.projects).set({ requiredChecks: [] }).where(eq(schema.projects.id, project.id)))
-  const epic = await humanApproved(await conflicted())
-  const { fix, resolved, operation } = await resolutionOf(epic)
-  const { criteria } = await developerSubmits(fix.id, resolved)
-  const review = await reviewerApproves(fix.id, resolved, criteria, { preservesApproval: true })
-  expect(review.prompt).toContain(epic.head)
-  expect(review.prompt).toContain(epic.onto)
-  await tick()
-
-  expect(await reload(epic.id)).toMatchObject({ reviewState: 'ready_to_merge', prHeadSha: resolved, approvedHeadSha: epic.head, approvedBaseSha: epic.onto })
-  await t.orchestrator.scheduler.schedule()
-  expect((await reload(epic.id)).reviewState).toBe('ready_to_merge')
-  expect(await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id))).toHaveLength(0)
-  expect(await needsYou(epic.id)).toEqual([])
-  const [retained] = await approvalEvents(epic.id)
-  expect(retained).toMatchObject({ event: 'approval_retained', detail: { approvedHeadSha: epic.head, from: epic.head, to: resolved, operationId: operation.id, resolutionTaskId: fix.id, resolutionReview: { runId: review.runId, preserved: true, summary: 'Both sides kept' } } })
-  await capture('preserved-resolution.json', { scenario: 'A conflict on a human-approved task, resolved and reviewed as preserving behaviour.', epicAfter: { reviewState: 'ready_to_merge', approvedHeadSha: epic.head, prHeadSha: resolved }, newEpicReviewRuns: 0, inboxNeedsYou: await needsYou(epic.id), history: await history(epic.id) })
-})
-
-it('restarts normal review when the reviewer finds a behaviour change, however clean the resolution', async () => {
-  const epic = await humanApproved(await conflicted())
-  const { fix, resolved } = await resolutionOf(epic)
-  const { criteria } = await developerSubmits(fix.id, resolved)
-  await reviewerApproves(fix.id, resolved, criteria, { preservesApproval: false })
-  await tick()
-
-  expect(await reload(epic.id)).toMatchObject({ approvedHeadSha: null })
-  await t.orchestrator.scheduler.schedule()
-  expect(await reload(epic.id)).toMatchObject({ reviewState: 'in_review', prHeadSha: await git('rev-parse', epic.branch) })
-  expect((await approvalEvents(epic.id))[0]).toMatchObject({ event: 'approval_invalidated', detail: { reason: expect.stringContaining('Both sides kept') } })
-})
-
-it('refuses to carry approval when the resolution changed files outside its conflicts, whatever the reviewer said', async () => {
-  const epic = await humanApproved(await conflicted())
-  await tick()
-  const [operation] = await ops(epic.id)
-  const fix = await taskRow(operation!.resolutionTaskId!)
-  await resolve(fix.branch!, epic.onto, epic.file, 'target version\nepic version\n')
-  const resolved = await commitOn(fix.branch!, `${epic.branch}.txt`, 'something else\n')
-  const { criteria } = await developerSubmits(fix.id, resolved)
-  await reviewerApproves(fix.id, resolved, criteria, { preservesApproval: true })
-  await tick()
-
-  expect((await approvalEvents(epic.id))[0]).toMatchObject({ event: 'approval_invalidated', detail: { reason: expect.stringContaining(`${epic.branch}.txt`) } })
-})
-
-it('compares a resolution whose review landed after the pass read the operation', async () => {
-  const epic = await humanApproved(await conflicted())
-  const { fix, resolved } = await resolutionOf(epic)
-  const { criteria } = await developerSubmits(fix.id, resolved)
-  await reviewerApproves(fix.id, resolved, criteria, { preservesApproval: true })
-  const step = EpicSynchronizer.prototype.step
-  const stale = vi.spyOn(EpicSynchronizer.prototype, 'step').mockImplementation(function (this: EpicSynchronizer, operation) {
-    return step.call(this, { ...operation, resolutionReview: null })
-  })
-  onTestFinished(() => stale.mockRestore())
-  await tick()
-
-  expect((await ops(epic.id))[0]!.resolutionReview).toMatchObject({ outsideConflicts: [] })
-  expect((await approvalEvents(epic.id))[0]).toMatchObject({ event: 'approval_retained' })
-})
-
-it('refuses to carry approval with no compare on record, and when the compare fails', async () => {
-  const epic = await humanApproved(await conflicted())
-  const { fix, resolved } = await resolutionOf(epic)
-  const { criteria } = await developerSubmits(fix.id, resolved)
-  await reviewerApproves(fix.id, resolved, criteria, { preservesApproval: true })
-  const compare = vi.spyOn(t.github, 'compare').mockRejectedValue(new Error('GitHub is down'))
-  onTestFinished(() => compare.mockRestore())
-  await tick()
-  expect((await approvalEvents(epic.id))[0]).toMatchObject({ event: 'approval_invalidated', detail: { reason: expect.stringContaining('GitHub is down') } })
-
-  const [operation] = await ops(epic.id)
-  const { runId, headSha, preserved, summary } = operation!.resolutionReview!
-  const uncompared = { runId, headSha, preserved, summary }
-  const [row] = await t.db.select().from(schema.epics).where(eq(schema.epics.id, epic.id))
-  const approvedEpic = { ...row!, reviewState: 'ready_to_merge' as const, prHeadSha: operation!.expectedTargetSha, approvedHeadSha: operation!.expectedTargetSha }
-  expect(approvalFate({ ...operation!, resolutionReview: uncompared }, approvedEpic, headSha)).toMatchObject({ kept: false, reason: expect.stringContaining('never compared') })
-})
-
-it('restores a task with subtasks decision to Needs you after comment-only PM triage', async () => {
-  const epic = await humanApproved(await conflicted())
-  const { fix } = await resolutionOf(epic)
-  await t.orchestrator.scheduler.schedule()
-  const dev = (await runner.next('run.assign', m => m.job.role === 'developer' && m.job.taskId === fix.id)).job
-  expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Need a binding decision', summary: decision.question, decision })).toMatchObject({ ok: true })
-  await t.orchestrator.scheduler.schedule()
-  const recovery = (await taskRow(fix.id)).retryStop!
-  const pm = (await runner.next('run.assign', m => m.job.planSessionId === recovery.sessionId)).job
-  expect((await inbox()).needsYou.filter(i => i.id === fix.id)).toEqual([])
-  const findings = 'The target and approved implementation disagree. The binding decision still needs the human.'
-  expect(await runner.call(pm.runId, pm.leaseEpoch, 'add_comment', { taskRef: `${project.prefix}-${fix.number}`, body: findings })).toMatchObject({ ok: true })
-  runner.send({ type: 'run.events', runId: pm.runId, leaseEpoch: pm.leaseEpoch, events: [{ type: 'message', text: findings }] })
-  runner.send({ type: 'run.ended', runId: pm.runId, leaseEpoch: pm.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
-  await expect.poll(async () => (await t.db.select().from(schema.runs).where(eq(schema.runs.id, pm.runId)))[0]!.state).toBe('completed')
-  for (let i = 0; i < 2; i++) {
-    await t.orchestrator.scheduler.schedule()
-    expect((await inbox()).needsYou.filter(i => i.id === fix.id)).toMatchObject([{ id: fix.id, type: 'question', body: expect.stringContaining(findings), decision: { question: decision.question, alternatives: decision.alternatives } }])
-  }
-  expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'deciding', question: decision.question })
-})
-
-it('asks the newest question after an earlier one was closed from the board', async () => {
-  const epic = await humanApproved(await conflicted())
-  const { fix, resolved } = await resolutionOf(epic)
-  await t.orchestrator.scheduler.schedule()
-  const dev = (await runner.next('run.assign', m => m.job.role === 'developer' && m.job.taskId === fix.id)).job
-  await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Needs a decision', summary: 'Which side?', decision })
-
-  // Closed without an answer: nothing waits on the human any more
-  expect((await t.request('POST', `/api/inbox/${fix.id}/actions`, { action: 'resolve', to: 'in_progress' })).status).toBe(200)
-  expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'resolving' })
-  expect((await inbox()).needsYou.filter(i => i.id === fix.id)).toEqual([])
-  expect((await t.request('POST', `/api/inbox/${fix.id}/actions`, { action: 'decide', alternative: 0 })).status).toBe(409)
-
-  const second = { ...decision, question: 'Which default sort?' }
-  await t.orchestrator.scheduler.schedule()
-  const again = (await runner.next('run.assign', m => m.job.role === 'developer' && m.job.taskId === fix.id)).job
-  await runner.call(again.runId, again.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Another decision', summary: 'Which sort?', decision: second })
-  // PM triage owns the stop before any human decision is shown.
-  await t.orchestrator.scheduler.schedule()
-  expect((await taskRow(fix.id)).retryStop?.sessionId).toEqual(expect.any(String))
-  expect((await inbox()).needsYou.filter(i => i.id === fix.id)).toEqual([])
-  expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'deciding', question: second.question })
-
-  expect((await t.request('POST', `/api/inbox/${fix.id}/actions`, { action: 'decide', alternative: 0 })).status).toBe(200)
-  const [operation] = await ops(epic.id)
-  expect(operation!.decisions.map(d => [d.question, d.answer?.label ?? null])).toEqual([[decision.question, null], [second.question, 'Keep filtering']])
-
-  // The first stays closed without an answer, so approval can't carry past it
-  const { criteria } = await developerSubmits(fix.id, resolved)
-  await reviewerApproves(fix.id, resolved, criteria, { preservesApproval: true })
-  await tick()
-  expect((await approvalEvents(epic.id))[0]).toMatchObject({ event: 'approval_invalidated', detail: { reason: expect.stringContaining(decision.question) } })
-})
-
-it('asks one focused question for a changed binding decision, and resumes the same operation on a behaviour-keeping answer', async () => {
-  const epic = await humanApproved(await conflicted())
-  const { fix, resolved, operation } = await resolutionOf(epic)
-  await t.orchestrator.scheduler.schedule()
-  const dev = (await runner.next('run.assign', m => m.job.role === 'developer' && m.job.taskId === fix.id)).job
-
-  expect(await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Needs a decision', summary: 'Which side?', decision })).toMatchObject({ ok: true })
-
-  // The decision journal remains intact, but PM triage goes first.
-  await t.orchestrator.scheduler.schedule()
-  const items = (await inbox()).needsYou.filter(i => i.id === fix.id)
-  expect((await taskRow(fix.id)).retryStop?.sessionId).toEqual(expect.any(String))
-  expect(items).toEqual([])
-  expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'deciding', question: decision.question, taskId: fix.id })
-  expect(await git('rev-parse', epic.branch)).toBe(epic.head)
-  await capture('decision-question.json', { scenario: 'A resolution developer finds the target changed a binding decision.', inboxItem: items[0], epicSync: (await epicApi(epic.id)).sync })
-
-  const answer = await t.request('POST', `/api/inbox/${fix.id}/actions`, { action: 'decide', alternative: 0 })
-  expect(answer.status).toBe(200)
-  expect((await t.request('POST', `/api/inbox/${fix.id}/actions`, { action: 'decide', alternative: 0 })).status).toBe(409)
-  expect(await taskRow(fix.id)).toMatchObject({ status: 'in_progress' })
-  expect((await ops(epic.id)).map(o => [o.id, o.state])).toEqual([[operation.id, 'running']])
-  const notes = await t.db.select().from(schema.comments).where(eq(schema.comments.taskId, fix.id))
-  expect(notes.some(n => n.pinned && n.body.includes('Keep filtering'))).toBe(true)
-
-  const { criteria } = await developerSubmits(fix.id, resolved)
-  await reviewerApproves(fix.id, resolved, criteria, { preservesApproval: true })
-  await tick()
-  expect(await reload(epic.id)).toMatchObject({ prHeadSha: resolved, approvedHeadSha: epic.head })
-  expect((await approvalEvents(epic.id)).map(e => e.event)).toEqual(['approval_retained'])
-  expect((await history(epic.id)).map(e => e.event)).toEqual(expect.arrayContaining(['decision_requested', 'decision_answered']))
-})
-
-it.each(['developer', 'reviewer'] as const)('asks a %s report with no structured decision from its summary, and starts no run until a written answer', async (role) => {
-  const epic = await humanApproved(await conflicted())
-  const { fix, resolved, operation } = await resolutionOf(epic)
-  if (role === 'reviewer') await developerSubmits(fix.id, resolved)
-  await t.orchestrator.scheduler.schedule()
-  const job = (await runner.next('run.assign', m => m.job.role === role && m.job.taskId === fix.id)).job
-  const summary = 'The push guard and the typecheck want opposite things. Which should give way?'
-  const report = role === 'developer' ? { outcome: 'stuck', note: 'Asked which rule gives way', summary } : { outcome: 'blocked', summary }
-  expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', report)).toMatchObject({ ok: true })
-  runner.send({ type: 'run.ended', runId: job.runId, leaseEpoch: job.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
-
-  // The PM diagnoses it first, and the question returns when triage leaves it open
-  await t.orchestrator.scheduler.schedule()
-  const recovery = (await taskRow(fix.id)).retryStop!
-  const pm = (await runner.next('run.assign', m => m.job.planSessionId === recovery.sessionId)).job
-  expect((await inbox()).needsYou.filter(i => i.id === fix.id)).toEqual([])
-  runner.send({ type: 'run.events', runId: pm.runId, leaseEpoch: pm.leaseEpoch, events: [{ type: 'message', text: 'Nothing to add.' }] })
-  runner.send({ type: 'run.ended', runId: pm.runId, leaseEpoch: pm.leaseEpoch, exit: { kind: 'exited', code: 0 }, headSha: null })
-  await expect.poll(async () => (await t.db.select().from(schema.runs).where(eq(schema.runs.id, pm.runId)))[0]!.state).toBe('completed')
-
-  const items = (await inbox()).needsYou.filter(i => i.id === fix.id)
-  expect(items).toMatchObject([{ type: 'question', body: expect.stringContaining(summary), decision: { question: summary, alternatives: [], affectedChanges: [], answer: null } }])
-  expect(await taskRow(fix.id)).toMatchObject({ status: 'blocked', statusReason: summary })
-  expect((await epicApi(epic.id)).sync).toMatchObject({ state: 'deciding', question: summary, taskId: fix.id })
-  await capture(`summary-question-${role}.json`, { scenario: `A resolution ${role} reports with no structured decision.`, report, inboxItem: items[0], epicSync: (await epicApi(epic.id)).sync })
-
-  const assigned = () => t.db.select({ id: schema.runs.id }).from(schema.runs).where(eq(schema.runs.taskId, fix.id))
-  const before = await assigned()
-  await tick()
-  await t.orchestrator.scheduler.schedule()
-  await tick()
-  expect(await assigned()).toHaveLength(before.length)
-
-  // A written answer resumes the same operation, and can't keep approval
-  expect((await t.request('POST', `/api/inbox/${fix.id}/actions`, { action: 'clarify', text: 'Change the guard' })).status).toBe(200)
-  expect(await taskRow(fix.id)).toMatchObject({ status: 'in_progress' })
-  expect((await ops(epic.id)).map(o => [o.id, o.decisions.at(-1)?.answer?.changesBehaviour])).toEqual([[operation.id, true]])
-})
-
-it('sends a behaviour-changing decision back through review and the human, on the same operation', async () => {
-  const epic = await humanApproved(await conflicted())
-  const { fix, resolved, operation } = await resolutionOf(epic, 'target version\n')
-  const { criteria } = await developerSubmits(fix.id, resolved)
-  await t.orchestrator.scheduler.schedule()
-  const review = (await runner.next('run.assign', m => m.job.role === 'reviewer' && m.job.taskId === fix.id)).job
-  expect(await runner.call(review.runId, review.leaseEpoch, 'report_outcome', { outcome: 'blocked', summary: 'Which side?', decision })).toMatchObject({ ok: true })
-  await t.orchestrator.scheduler.schedule()
-  expect((await taskRow(fix.id)).retryStop?.sessionId).toEqual(expect.any(String))
-  expect((await inbox()).needsYou.filter(i => i.id === fix.id)).toEqual([])
-
-  expect((await t.request('POST', `/api/inbox/${fix.id}/actions`, { action: 'decide', alternative: 1 })).status).toBe(200)
-  await developerSubmits(fix.id, resolved)
-  await reviewerApproves(fix.id, resolved, criteria, { preservesApproval: true })
-  await tick()
-
-  expect((await ops(epic.id))[0]).toMatchObject({ id: operation.id, state: 'succeeded', resultHeadSha: resolved })
-  expect((await approvalEvents(epic.id))[0]).toMatchObject({ event: 'approval_invalidated', detail: { reason: expect.stringContaining('Follow the target') } })
-  await t.orchestrator.scheduler.schedule()
-  expect(await reload(epic.id)).toMatchObject({ reviewState: 'in_review', prHeadSha: resolved, approvedHeadSha: null })
-  await t.orchestrator.scheduler.schedule()
-  const integration = (await runner.next('run.assign', m => m.job.epicId === epic.id)).job
-  expect(await runner.call(integration.runId, integration.leaseEpoch, 'report_outcome', { outcome: 'approved', summary: 'Fits' })).toMatchObject({ ok: true })
-  expect(await reload(epic.id)).toMatchObject({ reviewState: 'human_review', approvedHeadSha: resolved })
-  expect(await needsYou(epic.id)).toHaveLength(1)
-  await capture('decision-changes-behaviour.json', { scenario: 'The human picks the alternative that changes approved behaviour.', sameOperation: operation.id, epicAfter: 'human_review after a fresh integration review', history: await history(epic.id) })
-})
-
-it('treats a written answer as a behaviour change, and a question closed another way as unanswered', async () => {
-  const epic = await humanApproved(await conflicted())
-  const { fix, resolved } = await resolutionOf(epic)
-  await t.orchestrator.scheduler.schedule()
-  const dev = (await runner.next('run.assign', m => m.job.role === 'developer' && m.job.taskId === fix.id)).job
-  await runner.call(dev.runId, dev.leaseEpoch, 'report_outcome', { outcome: 'stuck', note: 'Needs a decision', summary: 'Which side?', decision })
-  expect((await t.request('POST', `/api/inbox/${fix.id}/actions`, { action: 'clarify', text: 'Something else entirely' })).status).toBe(200)
-  const { criteria } = await developerSubmits(fix.id, resolved)
-  await reviewerApproves(fix.id, resolved, criteria, { preservesApproval: true })
-  await tick()
-  expect((await approvalEvents(epic.id))[0]).toMatchObject({ event: 'approval_invalidated' })
 })
 
 it('never lets an external head inherit approval', async () => {
@@ -999,29 +581,6 @@ it('starts no rebase when the merge pass has not seen the close yet', async () =
   expect(await ops(epic.id)).toEqual([])
 })
 
-it('holds a reviewed resolution while the task\'s PR is closed, then publishes it on reopening', async () => {
-  const epic = await humanApproved(await conflicted())
-  const { fix, resolved } = await resolutionOf(epic)
-  const { criteria } = await developerSubmits(fix.id, resolved)
-  await reviewerApproves(fix.id, resolved, criteria, { preservesApproval: true })
-  await closePr(epic, 'closed')
-  const compare = vi.spyOn(t.github, 'compare')
-  onTestFinished(() => compare.mockRestore())
-
-  await tick()
-  await tick()
-  await t.mergePass()
-  expect(await git('rev-parse', epic.branch)).toBe(epic.head)
-  expect(await taskRow(fix.id)).toMatchObject({ status: 'ready_to_merge' })
-  expect((await ops(epic.id))[0]).toMatchObject({ state: 'running', pushAttempts: 0 })
-  expect(compare).not.toHaveBeenCalled()
-
-  await closePr(epic, 'open')
-  await t.mergePass()
-  expect(await git('rev-parse', epic.branch)).toBe(resolved)
-  expect(await taskRow(fix.id)).toMatchObject({ status: 'merged' })
-})
-
 it('reads GitHub on a backoff for a task with subtasks idling at a checkpoint, however often the pass runs', async () => {
   const epic = await finished(await createEpic())
   await t.db.update(schema.epics).set({ reviewState: 'human_review', prHeadSha: epic.head }).where(eq(schema.epics.id, epic.id))
@@ -1064,10 +623,8 @@ it('looks again soon after a target move once the wait is over', async () => {
   expect(await isAncestor(landed, await git('rev-parse', epic.branch))).toBe(true)
 })
 
-// ── Developer runs on the epic (D29). These use the pass itself, with no
-// conversion to a resolution task.
+// ── Developer runs on the epic (D29)
 
-const pass = () => t.orchestrator.mergePass()
 const fixJob = async (epicId: string) => {
   await t.orchestrator.scheduler.schedule()
   return (await runner.next('run.assign', m => m.job.role === 'developer' && m.job.epicId === epicId && m.job.taskId === null)).job
@@ -1076,7 +633,7 @@ const fixReport = (job: { runId: string, leaseEpoch: number }, report: Record<st
 const fixEpic = async (id: string) => (await t.request('GET', `/api/epics/${id}`)).json() as Promise<{ sync: Record<string, unknown> | null, reviewState: string, fixes: { runId: string, fix: string, reason: string, behaviourChanged: boolean | null, reReviewed: boolean | null }[], tasks: unknown[] }>
 
 async function conflictFix<E extends { id: string, onto: string, file: string }>(epic: E, text = 'target version\nepic version\n') {
-  await pass()
+  await tick()
   const [operation] = await ops(epic.id)
   const job = await fixJob(epic.id)
   const resolved = await resolve(job.branch!, epic.onto, epic.file, text)
@@ -1102,7 +659,7 @@ describe('developer runs on the epic', () => {
 
     it('defers an each_task task until it is approved, then resolves it', async () => {
       const epic = await underReview(await conflicted(), { reviewMode: 'each_task' })
-      await pass()
+      await tick()
       expect((await fixEpic(epic.id)).sync).toEqual({ state: 'conflict_pending', files: [epic.file] })
       expect(await needsYou(epic.id)).toEqual([])
       expect(await developerRuns(epic.id)).toEqual([])
@@ -1115,20 +672,20 @@ describe('developer runs on the epic', () => {
 
     it('resolves a task with subtasks left in the old conflict state at once', async () => {
       const epic = await underReview(await conflicted(), { reviewState: 'conflict' })
-      await pass()
+      await tick()
       expect((await rebases(epic.id)).at(-1)).toMatchObject({ state: 'running', fix: 'conflict' })
     })
 
     it('starts no developer on an approved task whose head moved outside Corral', async () => {
       const epic = await humanApproved(await conflicted())
       await t.db.update(schema.epics).set({ prHeadSha: 'a-foreign-head' }).where(eq(schema.epics.id, epic.id))
-      await pass()
+      await tick()
       expect(await rebases(epic.id)).toMatchObject([{ state: 'failed', fix: null }])
     })
 
     it('holds review back when the target has moved since the conflict was found', async () => {
       const epic = await underReview(await conflicted())
-      await pass()
+      await tick()
       expect((await reload(epic.id)).reviewState).toBe('human_review')
       await t.db.update(schema.epics).set({ reviewState: 'open' }).where(eq(schema.epics.id, epic.id))
       await commitOn('main', 'unrelated.txt', 'moved\n')
@@ -1138,7 +695,7 @@ describe('developer runs on the epic', () => {
 
     it('clears a pending conflict when the branch reaches the target outside Corral', async () => {
       const epic = await underReview(await conflicted())
-      await pass()
+      await tick()
       expect((await fixEpic(epic.id)).sync).toMatchObject({ state: 'conflict_pending' })
 
       const handMade = await resolve(epic.branch, epic.onto, epic.file, 'target version\nepic version\n')
@@ -1154,7 +711,7 @@ describe('developer runs on the epic', () => {
     const boardBefore = (await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id))).length
     const { operation, job, resolved } = await conflictFix(epic)
 
-    expect(operation).toMatchObject({ kind: 'rebase', state: 'running', fix: 'conflict', conflictFiles: [epic.file], resolutionTaskId: null })
+    expect(operation).toMatchObject({ kind: 'rebase', state: 'running', fix: 'conflict', conflictFiles: [epic.file] })
     expect(job).toMatchObject({ checkScope: null }) // No required checks here
     expect(job).toMatchObject({ taskId: null, branch: `corral/epic-rebase/${operation.id}`, epicId: epic.id, baseBranch: 'main' })
     expect(job.prompt).toContain(epic.onto)
@@ -1179,7 +736,7 @@ describe('developer runs on the epic', () => {
     expect(await fixReport(job, { headSha: resolved, conflictedFiles: [epic.file] })).toMatchObject({ ok: false, error: expect.stringContaining('behaviourChanged') })
     expect(await fixReport(job, { behaviourChanged: false, headSha: resolved, conflictedFiles: [epic.file] })).toMatchObject({ ok: true })
     expect(await git('rev-parse', epic.branch)).toBe(epic.head)
-    await pass()
+    await tick()
 
     expect(await git('rev-parse', epic.branch)).toBe(resolved)
     expect(await reload(epic.id)).toMatchObject({ reviewState: 'ready_to_merge', prHeadSha: resolved, approvedHeadSha: epic.head })
@@ -1199,11 +756,11 @@ describe('developer runs on the epic', () => {
     const { job } = await conflictFix(epic)
     const adapted = await commitOn(job.branch!, 'target-only.md', 'adapted\n')
     expect(await fixReport(job, { behaviourChanged: false, headSha: adapted, conflictedFiles: [epic.file] })).toMatchObject({ ok: true })
-    await pass()
+    await tick()
     expect(await git('rev-parse', epic.branch)).toBe(epic.head)
     const retry = await fixJob(epic.id)
     expect(await fixReport(retry, { behaviourChanged: true, headSha: adapted, conflictedFiles: [epic.file] })).toMatchObject({ ok: true })
-    await pass()
+    await tick()
     expect(await git('rev-parse', epic.branch)).toBe(adapted)
     expect(await reload(epic.id)).toMatchObject({ reviewState: 'open', approvedHeadSha: null })
     await t.db.update(schema.epics).set({ reviewState: 'in_review', prHeadSha: adapted }).where(eq(schema.epics.id, epic.id))
@@ -1223,7 +780,7 @@ describe('developer runs on the epic', () => {
     onTestFinished(() => {
       t.github.createBranch = createBranch
     })
-    await pass()
+    await tick()
     await t.orchestrator.scheduler.schedule()
     await t.orchestrator.scheduler.schedule()
     const started = await t.db.select().from(schema.runs).where(eq(schema.runs.epicId, epic.id))
@@ -1241,7 +798,7 @@ describe('developer runs on the epic', () => {
     // PR closes
     const developers = eq(schema.agents.role, 'developer')
     await t.db.update(schema.agents).set({ paused: true }).where(developers)
-    await pass()
+    await tick()
     const { prNumber } = await reload(epic.id)
     t.github.pulls.get(prNumber!)!.state = 'closed'
     await t.db.update(schema.agents).set({ paused: false }).where(developers)
@@ -1255,7 +812,7 @@ describe('developer runs on the epic', () => {
     const epic = await humanApproved(await conflicted())
     const { job, resolved } = await conflictFix(epic)
     expect(await fixReport(job, { behaviourChanged: true, headSha: resolved, conflictedFiles: [epic.file] })).toMatchObject({ ok: true })
-    await pass()
+    await tick()
     expect(await git('rev-parse', epic.branch)).toBe(resolved)
     expect(await reload(epic.id)).toMatchObject({ reviewState: 'open', approvedHeadSha: null })
     expect((await approvalEvents(epic.id)).at(-1)).toMatchObject({ event: 'approval_invalidated', detail: { reason: expect.stringContaining('behaviour change') } })
@@ -1270,7 +827,7 @@ describe('developer runs on the epic', () => {
     expect(resolved).not.toBe(extra)
     // The server knows what conflicted: the developer's list can't widen it
     expect(await fixReport(job, { behaviourChanged: false, headSha: extra, conflictedFiles: [epic.file, 'unrelated.txt'] })).toMatchObject({ ok: true })
-    await pass()
+    await tick()
     expect(await reload(epic.id)).toMatchObject({ reviewState: 'open', approvedHeadSha: null })
     expect((await approvalEvents(epic.id)).at(-1)).toMatchObject({ detail: { reason: expect.stringContaining('unrelated.txt') } })
 
@@ -1284,17 +841,17 @@ describe('developer runs on the epic', () => {
       t.github.compare = compare
     })
     expect(await fixReport(fix.job, { behaviourChanged: false, headSha: fix.resolved, conflictedFiles: [second.file] })).toMatchObject({ ok: true })
-    await pass()
+    await tick()
     expect(await reload(second.id)).toMatchObject({ reviewState: 'open', approvedHeadSha: null })
     expect((await approvalEvents(second.id)).at(-1)).toMatchObject({ detail: { reason: expect.stringContaining('could not compare') } })
   })
 
   it('starts one developer run however often it is polled or the runner reconnects', async () => {
     const epic = await humanApproved(await conflicted())
-    for (let n = 0; n < 3; n++) await pass()
+    for (let n = 0; n < 3; n++) await tick()
     const job = await fixJob(epic.id)
     for (let n = 0; n < 3; n++) {
-      await pass()
+      await tick()
       await t.orchestrator.scheduler.schedule()
     }
     await t.orchestrator.onConnected([{ runId: job.runId, leaseEpoch: job.leaseEpoch }], 'r1')
@@ -1306,13 +863,13 @@ describe('developer runs on the epic', () => {
 
   it('holds a human-stopped task fix until Retry and preserves saving work through heartbeats and reconnects', async () => {
     const epic = await humanApproved(await conflicted())
-    await pass()
+    await tick()
     const job = await fixJob(epic.id)
     await t.orchestrator.onRunMessage({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'epic-saving' }, 'r1')
     expect((await t.request('POST', `/api/runs/${job.runId}/stop`)).status).toBe(200)
     expect(await runner.next('run.stop', m => m.runId === job.runId)).toMatchObject({ keepWork: true })
     for (let n = 0; n < 5; n++) {
-      await pass()
+      await tick()
       await t.orchestrator.scheduler.schedule()
       expect((await t.request('POST', `/api/runs/${job.runId}/stop`)).status).toBe(409)
     }
@@ -1334,7 +891,7 @@ describe('developer runs on the epic', () => {
 
   it('preserves saving work during the kill switch without spending an attempt', async () => {
     const epic = await humanApproved(await conflicted())
-    await pass()
+    await tick()
     const job = await fixJob(epic.id)
     await t.orchestrator.onRunMessage({ type: 'run.started', runId: job.runId, leaseEpoch: job.leaseEpoch, agentSessionId: 'epic-kill-saving' }, 'r1')
     await t.orchestrator.controls.stopAll(t.actor)
@@ -1351,7 +908,7 @@ describe('developer runs on the epic', () => {
 
   it.each(['lease expiry', 'runner shutdown', 'reconciled failure'] as const)('bounds task fixes lost to %s, counting each run once', async (cause) => {
     const epic = await humanApproved(await conflicted())
-    await pass()
+    await tick()
     for (let n = 0; n < 3; n++) {
       const job = await fixJob(epic.id)
       if (cause === 'lease expiry') {
@@ -1385,7 +942,7 @@ describe('developer runs on the epic', () => {
       if (job.kind === 'epic_rebase_push') publishResults.push({ request: job, response: result })
       return result
     }
-    await pass()
+    await tick()
     let job = await fixJob(epic.id)
     const resolved = await resolve(job.branch!, epic.onto, epic.file, 'target version\nepic version\n')
     // A real merge commit passes branch existence checks but the runner refuses it.
@@ -1399,7 +956,7 @@ describe('developer runs on the epic', () => {
     for (let n = 0; n < 3; n++) {
       seen.push(job.runId)
       expect(await fixReport(job, { behaviourChanged: false, headSha: refused, conflictedFiles: [epic.file] })).toMatchObject({ ok: true })
-      await pass()
+      await tick()
       expect(await git('rev-parse', epic.branch)).toBe(epic.head)
       if (n < 2) {
         job = await fixJob(epic.id)
@@ -1422,14 +979,14 @@ describe('developer runs on the epic', () => {
     await git('branch', '-f', again.branch!, resolved)
     expect(await needsYou(epic.id)).toEqual([])
     expect(await fixReport(again, { behaviourChanged: false, headSha: resolved, conflictedFiles: [epic.file] })).toMatchObject({ ok: true })
-    await pass()
+    await tick()
     expect(await git('rev-parse', epic.branch)).toBe(resolved)
     await captureEpic('publish-retry-completed.json', epic.id, { resolved, actualEpicHead: await git('rev-parse', epic.branch) })
   })
 
   it('stops a task with subtasks after three failed developer runs, with the failure shown and a Retry that starts another', async () => {
     const epic = await humanApproved(await conflicted())
-    await pass()
+    await tick()
     for (let n = 0; n < 3; n++) {
       const job = await fixJob(epic.id)
       expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'failed', summary: 'Could not do it', note: 'Gave up' })).toMatchObject({ ok: true })
@@ -1442,12 +999,12 @@ describe('developer runs on the epic', () => {
 
   it('escalates a product decision to the human on the same operation, and approval falls with a behaviour-changing answer', async () => {
     const epic = await humanApproved(await conflicted())
-    await pass()
+    await tick()
     const job = await fixJob(epic.id)
     expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'stuck', summary: 'The sides disagree', note: 'Needs a decision' })).toMatchObject({ ok: false, error: expect.stringContaining('decision') })
     expect(await runner.call(job.runId, job.leaseEpoch, 'report_outcome', { outcome: 'stuck', summary: 'The sides disagree', note: 'Needs a decision', decision })).toMatchObject({ ok: true })
     await t.orchestrator.scheduler.schedule()
-    expect((await fixEpic(epic.id)).sync).toMatchObject({ state: 'deciding', question: decision.question, taskId: null })
+    expect((await fixEpic(epic.id)).sync).toMatchObject({ state: 'deciding', question: decision.question })
     expect((await inbox()).needsYou).toEqual(expect.arrayContaining([expect.objectContaining({ id: epic.id, type: 'epic_conflict', decision: expect.objectContaining({ question: decision.question }) })]))
 
     const answered = await t.request('POST', `/api/epics/${epic.id}/review`, { action: 'decide', headSha: epic.head, alternative: 1 })
@@ -1456,7 +1013,7 @@ describe('developer runs on the epic', () => {
     expect(next.prompt).toContain('Follow the target')
     const resolved = await resolve(next.branch!, epic.onto, epic.file, 'target version\n')
     expect(await fixReport(next, { behaviourChanged: false, headSha: resolved, conflictedFiles: [epic.file] })).toMatchObject({ ok: true })
-    await pass()
+    await tick()
     expect(await reload(epic.id)).toMatchObject({ reviewState: 'open', approvedHeadSha: null })
   })
 
@@ -1489,7 +1046,7 @@ describe('developer runs on the epic', () => {
       t.github.setBranch(TEST_REPOSITORY, job.branch!, gutted)
       expect(await fixReport(job, { behaviourChanged: false, headSha: gutted })).toMatchObject({ ok: true })
       t.clock.now = new Date(t.clock.now.getTime() + 5 * 60_000)
-      await pass()
+      await tick()
       expect(await git('rev-parse', epic.branch)).toBe(epic.head)
       expect((await ops(epic.id)).find(o => o.fix === 'ci')).toMatchObject({ fixAttempts: 1, fixReport: null })
       const retry = await fixJob(epic.id)
@@ -1498,7 +1055,7 @@ describe('developer runs on the epic', () => {
       expect(retry.continueFrom).toBe(gutted)
       expect(await fixReport(retry, { behaviourChanged: true, headSha: gutted })).toMatchObject({ ok: true })
       t.clock.now = new Date(t.clock.now.getTime() + 5 * 60_000)
-      await pass()
+      await tick()
       expect(await git('rev-parse', epic.branch)).toBe(gutted)
       expect((await ops(epic.id)).find(o => o.fix === 'ci')!.fixReport).toMatchObject({ targetFiles: [{ path: shared, diff: expect.stringContaining('+gutted') }] })
     })
@@ -1517,7 +1074,7 @@ describe('developer runs on the epic', () => {
       const head = await committed(job, `fix-${++branches}.txt`)
       expect(await fixReport(job, { behaviourChanged: false, headSha: head })).toMatchObject({ ok: true })
       t.clock.now = new Date(t.clock.now.getTime() + 5 * 60_000)
-      await pass()
+      await tick()
       expect(await reload(epic.id)).toMatchObject({ reviewState: 'ready_to_merge', prHeadSha: head, approvedHeadSha: epic.head })
       expect(await git('rev-parse', epic.branch)).toBe(head)
       await t.mergePass()
@@ -1536,7 +1093,7 @@ describe('developer runs on the epic', () => {
       const head = await committed(job, `fix-${++branches}.txt`)
       expect(await fixReport(job, { behaviourChanged: true, headSha: head })).toMatchObject({ ok: true })
       t.clock.now = new Date(t.clock.now.getTime() + 5 * 60_000)
-      await pass()
+      await tick()
       expect(await reload(epic.id)).toMatchObject({ reviewState: 'open', approvedHeadSha: null })
     })
 
@@ -1556,7 +1113,7 @@ describe('developer runs on the epic', () => {
         const head = await committed(job, `fix-${++branches}.txt`)
         t.github.setChecks(head, [{ name: 'ci', conclusion: 'failure', url: null }])
         expect(await fixReport(job, { behaviourChanged: false, headSha: head })).toMatchObject({ ok: true })
-        await pass()
+        await tick()
         t.clock.now = new Date(t.clock.now.getTime() + 10 * 60_000)
       }
       await t.mergePass()
@@ -1597,7 +1154,7 @@ describe('developer runs on the epic', () => {
     expect((await t.db.select().from(schema.tasks).where(eq(schema.tasks.epicId, epic.id)))).toHaveLength(1)
     const head = await commitOn(job.branch!, `fix-${++branches}.txt`, 'fixed\n')
     expect(await fixReport(job, { behaviourChanged: false, headSha: head })).toMatchObject({ ok: true })
-    await pass()
+    await tick()
     expect(await git('rev-parse', epic.branch)).toBe(head)
     await t.orchestrator.scheduler.schedule()
     const repeat = (await runner.next('run.assign', m => m.job.role === 'reviewer' && m.job.epicId === epic.id && m.job.runId !== first.runId)).job

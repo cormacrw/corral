@@ -78,29 +78,6 @@ requires it, and CI doesn't run on a conflicting PR, so this can't wait for CI.
 A moved target waits for the synchronizer, which runs earlier in the same pass
 ([task-rebases.md](epic-rebases.md)); `EpicMerger` never rebases.
 
-A conflict task handed off before rebases were automatic has the task's branch
-as its `branch`, and `isEpicRebaseTask`
-is how the rest of the code recognises it: `taskBase` answers the target branch,
-`#submit` opens no PR, and once approved the merge pass marks it Merged, since
-the push already put the work on the task's branch. The moved head then restarts
-integration review.
-
-With required CI checks, the task text and `epicRebaseDeveloperPrompt` have the
-developer squash the task's branch into one commit on its merge base with the
-target, rebase that, resolve the conflicts and report. The squash means each
-conflict is resolved once, and task PRs squash on merge anyway. The squashed
-message carries every commit's message, because `findIntegrated` greps the task
-branch for `Corral-Submission:` trailers to keep integration exactly-once. It
-squashes commits, not migration files, so the rule against squashing migrations
-still holds.
-
-That prompt forbids the gates and any second fetch, overruling the role
-instructions. CI failures after the push come back through the task CI failure
-path, and a moved target is the task merge pass's job. With no required checks
-the task gets the ordinary developer prompt and text, which run the gates. The
-two are chosen separately, from `requiredChecks` when the task is created and
-when each run is assigned.
-
 Task PRs always squash, so `project.mergeMethod` applies only to task PRs. An
 task is done for D22 once its PR merges (`holdsEpicOpen`); an `epic`-mode task
 with no branch, such as one holding only spikes, is done when its tasks are.

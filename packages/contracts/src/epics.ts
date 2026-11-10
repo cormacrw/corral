@@ -8,9 +8,8 @@ import type { Task } from './tasks.ts'
 export type EpicSync =
   | { state: 'rebasing' }
   | { state: 'conflict_pending', files: string[] }
-  | { state: 'resolving', files: string[], taskId: string | null, taskRef: string | null }
   | { state: 'fixing', fix: EpicFixKind, reason: string, files: string[], developer: EpicFixDeveloper | null, attempts: number }
-  | { state: 'deciding', question: string, taskId: string | null, taskRef: string | null }
+  | { state: 'deciding', question: string }
   | { state: 'failed', error: string, fix?: EpicFixKind | null }
 
 // A developer run on an epic, with no task (D29)

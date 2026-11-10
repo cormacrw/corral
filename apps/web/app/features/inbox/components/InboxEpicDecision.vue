@@ -3,23 +3,19 @@ import type { EpicRebaseDecision } from '@corral/core'
 import { useMutation } from '@tanstack/vue-query'
 import { computed, ref } from 'vue'
 import { reviewEpic } from '~/queries/epics'
-import { actOnInboxItem } from '~/queries/inbox'
 
-// An epic rebase's question (COR-291): what to choose between and what it
-// touches. Picking one resumes the same rebase; the composer answers in words.
-// An epic fix has no task, so its answer goes to the epic (D29).
-const props = defineProps<{ item: { taskId: string | null, epicId?: string | undefined, headSha?: string | undefined, decision: EpicRebaseDecision } }>()
-const deciding = useMutation(actOnInboxItem)
-const decidingEpic = useMutation(reviewEpic)
-const pending = computed(() => deciding.isPending.value || decidingEpic.isPending.value)
+// A task fix's question (D29): what to choose between and what it touches.
+// Picking one resumes the same fix; the composer answers in words.
+const props = defineProps<{ item: { epicId: string, headSha: string, decision: EpicRebaseDecision } }>()
+const deciding = useMutation(reviewEpic)
+const pending = computed(() => deciding.isPending.value)
 const chosen = ref<number | null>(null)
-const error = computed(() => deciding.error.value?.message ?? decidingEpic.error.value?.message ?? null)
+const error = computed(() => deciding.error.value?.message ?? null)
 const toast = useToast()
 async function choose(alternative: number) {
   chosen.value = alternative
-  const { taskId, epicId, headSha } = props.item
-  if (taskId) await deciding.mutateAsync({ taskId, input: { action: 'decide', alternative } })
-  else await decidingEpic.mutateAsync({ id: epicId!, input: { action: 'decide', alternative, headSha: headSha! } })
+  const { epicId, headSha } = props.item
+  await deciding.mutateAsync({ id: epicId, input: { action: 'decide', alternative, headSha } })
   toast.add({ title: 'Done', description: 'Decision sent; the rebase carries on', color: 'success' })
 }
 </script>

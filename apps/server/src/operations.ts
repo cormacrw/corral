@@ -40,8 +40,7 @@ const ENDINGS = {
   conflictDeferred: { text: 'Conflict left for the final checkpoint', legacy: [] },
   // The branch reached the target some other way, with no rebase of ours to be newer
   conflictGone: { text: 'The task\'s branch no longer conflicts', legacy: ['The epic branch no longer conflicts', 'The parent branch no longer conflicts'] },
-  cancelled: { text: 'The task left Ready to merge', legacy: [] },
-  resolutionFailed: { text: 'The conflict resolution failed and the target has moved on', legacy: [] }
+  cancelled: { text: 'The task left Ready to merge', legacy: [] }
 } as const satisfies Record<string, { text: string, legacy: readonly string[] }>
 
 export type OperationEnding = keyof typeof ENDINGS
@@ -115,8 +114,8 @@ export async function recordSyncFailure(db: Executor, project: Pick<ProjectRow, 
   await appendAudit(db, { projectId: project.id, actor: SERVER_ACTOR }, auditEvent('epic.pr', { epicId, event: 'sync_failed', summary: error, ...(fix && { fix }) }))
 }
 
-// A human asks for another go, which counts failures afresh. A resolution or
-// fix that failed to publish keeps its candidate and just pushes again; a fix
+// A human asks for another go, which counts failures afresh. A fix that
+// failed to publish keeps its candidate and just pushes again; a fix
 // with no report left starts another developer run.
 export async function retrySync(db: Database, epicId: string, actor: Actor, now: Date): Promise<void> {
   await db.transaction(async (tx) => {
@@ -135,14 +134,6 @@ export async function retrySync(db: Database, epicId: string, actor: Actor, now:
 export function openDecision(operation: Pick<OperationRow, 'decisions'>): EpicRebaseDecision | null {
   const newest = operation.decisions.at(-1)
   return newest && !newest.answer ? newest : null
-}
-
-// The question a resolution task is Blocked on, if it is. Only the newest can
-// be: an older one without an answer was closed from the board, and one still
-// unanswered no longer describes the task once it's moved on or blocked anew.
-export function waitingOn(operation: Pick<OperationRow, 'decisions'>, task: { status: string, statusReason: string | null }): EpicRebaseDecision | null {
-  const newest = openDecision(operation)
-  return newest && task.status === 'blocked' && task.statusReason === newest.question ? newest : null
 }
 
 // The human's answers, as an agent working on the operation is told them

@@ -138,31 +138,6 @@ describe('design tasks submit versions instead of a PR', () => {
     await t.db.update(schema.projects).set({ paused: true }).where(eq(schema.projects.id, project.id))
   }
 
-  it('starts a fresh designer session after a developer authored the design, preserving the branch and feedback', async () => {
-    const project = await t.createProject()
-    await pause(project)
-    const task = await t.createTask(project.slug, { type: 'design' })
-    // This is a historical developer run; the designer must not resume it,
-    // even if the agent has since been reconfigured as a designer.
-    const [designer] = await t.db.select().from(agents).where(eq(agents.role, 'designer')).limit(1)
-    await t.db.update(tasks).set({ status: 'in_progress', branch: `design/${task.ref}`, headSha: 'old-design' }).where(eq(tasks.id, task.id))
-    await t.db.insert(runs).values({
-      agentId: designer!.id, projectId: project.id, taskId: task.id, role: 'designer',
-      state: 'completed', endedAt: new Date(), agentSessionId: 'older-designer-session', runnerId: 'r1'
-    })
-    await t.db.insert(runs).values({
-      agentId: designer!.id, projectId: project.id, taskId: task.id, role: 'developer',
-      state: 'completed', endedAt: new Date(), agentSessionId: 'old-developer-session', runnerId: 'r1'
-    })
-    await t.request('POST', `/api/projects/${project.slug}/tasks/${task.number}/comments`, { body: 'Keep the existing error screen' })
-    await t.request('PATCH', `/api/projects/${project.slug}`, { paused: false })
-    const job = await nextJob(task, 'designer')
-    expect(job).toMatchObject({ role: 'designer', branch: `design/${task.ref}`, headSha: 'old-design', agentSessionId: null, fallbackPrompt: null })
-    expect(job.prompt).toContain('Keep the existing error screen')
-    expect((await full(project, task)).developer).toEqual({ id: designer!.id, name: designer!.name })
-    await pause(project)
-  })
-
   it('runs a design end to end on design/<ref> and ends in Human review with v1 stored, without a PR', async () => {
     const { project, task } = await approved()
 

@@ -22,12 +22,11 @@ publishes their branch work. New design authoring runs go only to designers; nor
 contain no design authoring instructions. Only designers get `submit_design`
 and `design_submitted` (COR-158): the runner's tool server, its tool handler
 and the server all refuse a developer's call, naming the role, including on a
-task pinned to a design. Updates drain active runs first, so no
-developer-authored design is live when this applies. Build tasks pinned to
-approved designs still receive read-only reference context.
+task pinned to a design. Build tasks pinned to approved designs still receive
+read-only reference context.
 
 Coverage: claim.test.ts exercises exclusive task types, paused designers and
-both dependency gates in Ready/In progress. design.test.ts exercises fresh
-sessions after historical developer runs and designer revisions producing v2.
+both dependency gates in Ready/In progress. design.test.ts exercises designer
+revisions producing v2.
 run-messages.test.ts and runner run-manager-messages.test.ts cover delivery
 through the server socket and into an agent process, respectively.

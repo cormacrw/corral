@@ -1,7 +1,7 @@
 import type { TaskStatus } from './status.ts'
 import { TRANSITION_RULES } from './task-machine.ts'
 
-export const INBOX_ACTIONS = ['clarify', 'decide', 'send_back', 'resolve', 'retry', 'approve', 'request_changes', 'delete'] as const
+export const INBOX_ACTIONS = ['clarify', 'send_back', 'resolve', 'retry', 'approve', 'request_changes', 'delete'] as const
 export type InboxAction = typeof INBOX_ACTIONS[number]
 
 // Which statuses each Inbox action applies to: only what's waiting on the
@@ -10,7 +10,6 @@ const INBOX_ACTION_STATUSES: Readonly<Record<InboxAction, readonly TaskStatus[]>
   approve: ['human_review'],
   request_changes: ['human_review'],
   clarify: ['blocked'],
-  decide: ['blocked'],
   resolve: ['blocked', 'failed'],
   send_back: ['blocked', 'failed'],
   retry: [],

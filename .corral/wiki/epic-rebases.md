@@ -46,24 +46,6 @@ no attempt. A checkpoint needs a waiting task or a complete task, and
 While a conflict is being resolved the operation stays `running` with `fix` set
 to `conflict` and a developer run on the task (D29, [task fixes](epic-fix-tasks.md)).
 
-A resolution task from before D29 keeps its old path: `resolutionTaskId` is set,
-and nothing creates one any more. The task's branch prefix (`corral/epic-rebase/`) is how
-the rest of the server recognises it: `isEpicResolution`, which keeps it off the
-PR-free path and out of the merge pass. `MergeOrchestrator` must not settle it,
-because only the synchronizer's publish makes it Merged.
-
-A resolution task never outlives its operation. `#fail` deletes it and its
-candidate branch, ending any run on it, because a Ready to merge resolution with
-no operation would hold the board with nothing to publish it.
-
-A resolution that hits the failed-run cap stays on Failed for a human, whose
-**Retry** resumes it, and it keeps the writer lock. Nobody retries an old problem
-for ever, though, so once the target has moved past its `ontoSha`,
-`#outdateFailed` ends the operation and the next checkpoint rebases onto the
-current target with a new task and a fresh run count. Failures are counted per
-commits, so each target only pays for itself. The Failed task and its candidate go,
-as with any `#fail`.
-
 The clock for pause is the moment of the write, not the start of the step:
 preparing can take minutes, so `#publish` and the conflict path read the project
 again. A conflict found while stopped goes back to `pending` and prepares again.
@@ -71,12 +53,12 @@ again. A conflict found while stopped goes back to `pending` and prepares again.
 A closed PR sits at `reviewState` `open`, the same as an open one that lost its
 approval, so only GitHub can tell them apart. `begin` reads the PR, after the
 behind check so an up-to-date task pays nothing, and `#publish` reads it again
-because a resolution can take hours. Nothing is recorded: `closedPoll` keeps
+because a fix can take hours. Nothing is recorded: `closedPoll` keeps
 watching for a reopen in `EpicPullRequests.reconcile`, and the next look finds
 the PR open and carries on. A plain integration is still allowed, since a
 fast-forward doesn't stop a reopen.
-A resolution run already going when the PR closes is left to finish: its result
-just can't be pushed until the PR reopens.
+A fix run already going when the PR closes is left to finish: its result just
+can't be pushed until the PR reopens.
 
 `begin` reads GitHub three times, so the `due()` list goes through a `Backoff`
 per task, doubling from 30 seconds to 2 minutes. Only `due()` obeys it: a task
@@ -92,33 +74,28 @@ retry.
 A task can force an edit to a file only the target changed: main adds a test
 reading `i.project.id`, the task makes `project` nullable, and no candidate can
 pass the gates without `i.project?.id` (COR-431). So `candidateProblem` refuses
-such a change outright only when `reviewed` isn't set on the push. `#awaitResolution`
-sets it when `resolutionReview` is on this exact commit, so clean candidates
-and anything no reviewer approved stay refused, as do merge commits, a wrong base
-and an undone rename, whatever the review said. Git never touches these
-files by itself, so a clean candidate refused here is a Corral bug.
+such a change outright only when `reviewed` isn't set on the push. `#awaitFix`
+sets it for a review fix or a fix reported with `behaviourChanged: true`, because
+both go back to integration review, so clean candidates and fixes that keep
+approval stay refused, as do merge commits, a wrong base and an undone rename.
+Git never touches these files by itself, so a clean candidate refused here is a
+Corral bug.
 
-What makes `reviewed` mean something is that the reviewer saw the changes.
-`reviewerJob` asks the runner with `epic_rebase_inspect`, which runs the same
-`targetChanges` as the guard, so the prompt lists exactly what the guard would
-refuse, with diffs cut at 20,000 characters. It can't come from GitHub's compare,
-which gives up at 300 files and detects renames its own way. A runner that can't
-answer raises a transient `EpicBranchError`, so the review waits instead of
-failing a run; no review means no approval, so nothing is skipped.
-
-The prompt says approving such a change means `preservesApproval: false`. If a
-reviewer says true anyway, `approvalFate` still drops approval, since the file is
-outside the conflicts.
-The mixed-workflow case "drops approval for a target-only edit even when the
-reviewer says it preserves approval" exercises that safety check through publish
-and asserts the recorded outside-conflicts reason.
+What makes `reviewed` mean something is that the integration reviewer sees the
+changes. `#keepTargetFiles` asks the runner with `epic_rebase_inspect`, which
+runs the same `targetChanges` as the guard, before the push, and records them on
+the fix report, so the review prompt lists exactly what the guard let through,
+with diffs cut at 20,000 characters. It can't come from GitHub's compare, which
+gives up at 300 files and detects renames its own way. A runner that can't answer
+raises a transient `EpicBranchError`, so the push waits for a later pass instead
+of going through unseen.
 
 `step` works from the journal alone after a restart. `running` with a result and
 its runner online pushes again; `running` with neither was cut off, and that
 retries at once; `reconciling` reads the branch.
 
 A clean candidate exists only in the runner's bare clone, so its push goes to
-`operation.runnerId`. A resolution's is on the remote, so any runner will do.
+`operation.runnerId`. A fix's candidate is on the remote, so any runner will do.
 
 Rebasing takes a task's recorded `baseSha` out of the task's history. Integration
 copes by merging against a synthetic commit parented on that base
@@ -141,28 +118,19 @@ name it after several rebases; `prHeadSha` is what approval is on now. Every
 path out of an approved state must clear the snapshot.
 
 A fix's verdict is `behaviourChanged` on the operation's report, bound to the
-reported commit like `resolutionReview`. `approvalFate` reads it for an operation
-with `fix` set; the review path below is for old resolution tasks.
+reported commit. `approvalFate` reads it for an operation with `fix` set; one
+without `fix` is a clean rebase, which keeps approval.
 
-A resolution task never invalidated review (`asResolutionTasks` in
-`test-resolution-task.ts` builds one the same way). Any other new board task
-does, and it would otherwise wipe the approval the rebase protects.
+The server's compare of a conflict fix runs in `#checkFix`, before the push,
+because the old head may not be reachable afterwards. It goes onto the fix
+report, which is bound to the reported commit, so a later revision can't reuse
+it. `approvalFate` fails closed: a conflict fix with no compare on record doesn't
+carry.
 
-The server's compare runs in `#checkResolution`, before the push, because the
-old head may not be reachable afterwards. It goes onto `resolutionReview`, which
-is bound to the reviewed commit, so a later revision can't reuse it.
-
-`approvalFate` fails closed: a review with no compare on record doesn't carry.
-`#checkResolution` reads the operation itself, because the pass's copy can
-predate the review that made the task Ready to merge.
-
-Decisions live on `operations.decisions`. A task fix has no separate subtask to block, so its
-question is an `epic_conflict` Inbox item. For a resolution task `waitingOn` is the
-only reading of "open": the newest, unanswered, and what the task is Blocked on now. A resolution's `stuck` or `blocked`
-is refused without one. `waitingDecision` makes it a `question` in the Inbox,
-and `clarify` on one becomes a written decision. An answer that isn't an
-alternative keeping behaviour, or a question closed from the board, never
-carries approval.
+Decisions live on `operations.decisions`. A task fix has no separate subtask to
+block, so its question is an `epic_conflict` Inbox item, and `openDecision` is
+the newest unanswered one. An answer that isn't an alternative keeping
+behaviour, or a question closed some other way, never carries approval.
 
 `rebaseRequested` is dead: it stays only because dropping a column needs a human.
 

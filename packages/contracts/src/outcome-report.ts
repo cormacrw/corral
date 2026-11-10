@@ -44,15 +44,14 @@ export const reportOutcomeInput = z.object({
   behaviourChanged: z.boolean().optional().describe('Required for pr_rebased, for a round started by a CI failure, and on a task fix: true if this changes what the code does; false only if approved behaviour is unchanged, so no reviewer looks at it again'),
   note: z.string().trim().optional().describe(`Developer only, required: one line of at most ${MAX_NOTE_LENGTH} characters saying what this run did, posted as a comment on the task, e.g. "Addressed review: dropped idle-thread fixture"`),
   criteria: z.array(criterionVerdict).optional().describe('Reviewer only: a verdict per acceptance criterion'),
-  preservesApproval: z.boolean().optional().describe('Reviewer of a task rebase resolution only, when approving: true only if the approved behaviour is unchanged; false restarts the task\'s normal review'),
-  decision: epicDecisionInput.optional().describe('A task\'s conflicts only (its conflict fix, or a review of its rebase resolution), with stuck or blocked: the question for the human, with alternatives and the changes affected. Without it the summary is asked as the question and the human can only answer in words'),
+  decision: epicDecisionInput.optional().describe('A developer fixing a task\'s PR only, with stuck: the question for the human, with alternatives and the changes affected. A conflict fix needs it; any other fix without it stops for a human to retry'),
   findings: z.array(epicReviewFindingSchema).optional().describe('Task reviewer only: integration problems, marked blocking or non_blocking, with the task refs they concern')
 })
 
 // Set by the runner, never the agent. headSha: the commit a developer's run
 // pushed, or the one a reviewer's checkout is at. baseSha: where a submitted
 // commit forked from its epic branch.
-const reportFields = { summary: reportOutcomeInput.shape.summary, note: reportOutcomeInput.shape.note, review: reportOutcomeInput.shape.review, conflictedFiles: reportOutcomeInput.shape.conflictedFiles, behaviourChanged: reportOutcomeInput.shape.behaviourChanged, preservesApproval: reportOutcomeInput.shape.preservesApproval, decision: reportOutcomeInput.shape.decision, headSha: z.string().optional(), baseSha: z.string().optional() }
+const reportFields = { summary: reportOutcomeInput.shape.summary, note: reportOutcomeInput.shape.note, review: reportOutcomeInput.shape.review, conflictedFiles: reportOutcomeInput.shape.conflictedFiles, behaviourChanged: reportOutcomeInput.shape.behaviourChanged, decision: reportOutcomeInput.shape.decision, headSha: z.string().optional(), baseSha: z.string().optional() }
 const taskReview = <Outcome extends z.ZodType<ReviewVerdict>>(outcome: Outcome) => z.object({ ...reportFields, outcome, criteria: z.array(criterionVerdict, { error: missingCriteria }) })
 const nonReview = z.object({ ...reportFields, outcome: NON_REVIEW_OUTCOMES })
 

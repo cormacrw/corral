@@ -1,18 +1,17 @@
 import { DESIGN_TOO_LARGE, DESIGN_VERSION_MAX_BYTES, outcomeName, SPIKE_OPENS_NO_PR, toolName, type Comment, type OutcomeReport } from '@corral/contracts'
-import { errorText, feedbackSimilarity, humanCheckTally, isAuthoringRole, isPrFree, nextDesignVersion, reviewFeedbackText, SERVER_ACTOR, shortSha, taskRef, transition, type EpicDecisionRequest, type ReviewVerdict } from '@corral/core'
+import { errorText, feedbackSimilarity, humanCheckTally, isAuthoringRole, isPrFree, nextDesignVersion, reviewFeedbackText, SERVER_ACTOR, shortSha, taskRef, transition, type ReviewVerdict } from '@corral/core'
 import { schema, type Database, type Executor, type ProjectRow, type TaskRow } from '@corral/db'
 import { and, desc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { appendAudit, auditEvent } from './audit.ts'
 import { bundleProblem } from './designs.ts'
-import { raiseDecision, recordResolutionReview } from './epic-rebase-approval.ts'
 import type { GitHubClient, PullRequest } from './github.ts'
 import type { BlobStore } from './blob-store.ts'
 import type { EventBus } from './events.ts'
 import { feedbackComment, findingsComment, noteProblem, WORK_NOTE_RULE } from './outcome-text.ts'
 import { carryOverApproval } from './rebase-review.ts'
 import { triageBlocked } from './retry-recovery.ts'
-import { evidenceState, isEpicRebaseTask, isEpicResolution, taskBase } from './task-base.ts'
+import { evidenceState, taskBase } from './task-base.ts'
 import { recordTaskSubmission } from './task-submissions.ts'
 import { applyTransition } from './tasks.ts'
 import { runActor, type RunContext, type RunContexts } from './run-context.ts'
@@ -64,8 +63,8 @@ export class RunOutcomes {
         case 'changes_requested':
           return this.#review(ctx, report, report.outcome)
         case 'blocked':
-          if (!ctx.task?.rebaseOnly && !(ctx.task && isEpicResolution(ctx.task))) throw new ToolError('Only a rebase review can report blocked.')
-          return this.#blockedRebaseReview(ctx, report.summary, report.decision)
+          if (!ctx.task?.rebaseOnly) throw new ToolError('Only a rebase review can report blocked.')
+          return this.#blockedRebaseReview(ctx, report.summary)
         case 'failed':
           await this.#d.ending.failRun(ctx, report.summary, { summary: report.summary, headSha: report.headSha })
           this.#d.ending.finished(ctx, 'Reported failed')
@@ -106,7 +105,7 @@ export class RunOutcomes {
           if (!design) throw new ToolError(`Not submitted. Only a design task reports design_submitted; this task reports ${expected}.`)
           return this.#reportDesign(ctx, report)
         case 'stuck':
-          return this.#stuck(ctx, report.summary, report.note!, report.decision)
+          return this.#stuck(ctx, report.summary, report.note!)
         case 'failed':
           await this.#d.ending.failRun(ctx, report.summary, { summary: report.summary, headSha: report.headSha }, report.note)
           this.#d.ending.finished(ctx, 'Reported failed')
@@ -167,7 +166,6 @@ export class RunOutcomes {
       const locked = await this.#d.runs.lockHeld(tx, ctx)
       const headSha = locked.task.headSha!
       await this.#bindVerdict(tx, locked.task, report, verdict, branchHead)
-      if (verdict === 'approved' && isEpicResolution(locked.task)) await recordResolutionReview(tx, task.id, { runId: ctx.run.id, headSha, preserved: report.preservesApproval === true, summary: report.summary })
       // A change request is compared with the previous round's, if that
       // one requested changes too; near-identical feedback blocks the task
       const similarity = verdict === 'changes_requested' ? await this.#feedbackSimilarity(tx, task.id, locked.task.reviewRounds, report.summary, kept) : undefined
@@ -246,14 +244,12 @@ export class RunOutcomes {
   }
 
   // D24: a substantial change or a changed binding decision is the human's call.
-  async #blockedRebaseReview(ctx: RunContext, reason: string, structured?: EpicDecisionRequest) {
+  async #blockedRebaseReview(ctx: RunContext, reason: string) {
     if (!reason.trim()) throw new ToolError('Explain the substantial change and the affected criteria for the human.')
-    const decision = this.#decisionFor(ctx, reason, structured)
     await this.#d.db.transaction(async (tx) => {
       const { task, project } = await this.#d.runs.lockHeld(tx, ctx)
       await addCommentWithTransition(tx, task.id, { body: `Rebase review blocked: ${reason.trim()}` }, runActor(ctx))
-      if (decision) await raiseDecision(tx, task, project, decision, ctx.run.id, runActor(ctx))
-      await applyTransition(tx, task, project, { type: 'block', reason: decision?.question ?? reason }, SERVER_ACTOR, { event: 'blocked', runId: ctx.run.id })
+      await applyTransition(tx, task, project, { type: 'block', reason }, SERVER_ACTOR, { event: 'blocked', runId: ctx.run.id })
       await triageBlocked(tx, ctx.run, task)
       await this.#d.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'blocked', summary: reason })
     })
@@ -261,24 +257,12 @@ export class RunOutcomes {
     return { ok: true, message: 'The task is Blocked for PM triage. You can stop now.' }
   }
 
-  // An epic rebase holds its writer lock until the human answers on the
-  // operation, so a question always goes there. Refusing a report that lacks
-  // `decision` would lose the question: an agent with no way to supply one can
-  // only fail, and the task retries with nobody asked. Without alternatives the
-  // human answers in words, which counts as changing approved behaviour.
-  #decisionFor(ctx: RunContext, summary: string, decision?: EpicDecisionRequest): EpicDecisionRequest | undefined {
-    if (decision || !ctx.task || !isEpicResolution(ctx.task)) return decision
-    return { question: summary.trim(), alternatives: [], affectedChanges: [] }
-  }
-
   // Holds the task for PM diagnosis before any human question (D11).
-  async #stuck(ctx: RunContext, question: string, note: string, structured?: EpicDecisionRequest) {
-    const decision = this.#decisionFor(ctx, question, structured)
+  async #stuck(ctx: RunContext, question: string, note: string) {
     const comment = await this.#d.db.transaction(async (tx) => {
       const { task, project } = await this.#d.runs.lockHeld(tx, ctx)
       const comment = await this.#d.ending.postNote(tx, ctx, note)
-      if (decision) await raiseDecision(tx, task, project, decision, ctx.run.id, runActor(ctx))
-      await applyTransition(tx, task, project, { type: 'block', reason: decision?.question ?? question }, SERVER_ACTOR, { event: 'stuck', runId: ctx.run.id })
+      await applyTransition(tx, task, project, { type: 'block', reason: question }, SERVER_ACTOR, { event: 'stuck', runId: ctx.run.id })
       await triageBlocked(tx, ctx.run, task)
       await this.#d.ending.endRunIn(tx, ctx, { state: 'completed', outcome: 'stuck', summary: question })
       return comment
@@ -360,16 +344,12 @@ export class RunOutcomes {
 
     const ref = taskRef(ctx.project!.prefix, task.number)
     const body = this.#prBody(ref, task.title, report.summary, criteria, attached)
-    // A rebase task's commits are already on the epic PR; it has no PR of its own
-    let pr: PullRequest | null = null
-    if (!await isEpicRebaseTask(db, task)) {
-      const existing = task.prNumber
-        ? await github.getPullRequest(ctx.project!.repository, task.prNumber)
-        : await github.findOpenPullRequest(ctx.project!.repository, task.branch!)
-      pr = existing && existing.state === 'open' ? existing : null
-      if (pr) await github.updatePullRequest(ctx.project!.repository, pr.number, { body })
-      else pr = await github.openPullRequest(ctx.project!.repository, { head: task.branch!, base: await taskBase(db, task, ctx.project!, github), title: `${ref}: ${task.title}`, body })
-    }
+    const existing = task.prNumber
+      ? await github.getPullRequest(ctx.project!.repository, task.prNumber)
+      : await github.findOpenPullRequest(ctx.project!.repository, task.branch!)
+    const open = existing?.state === 'open' ? existing : null
+    if (open) await github.updatePullRequest(ctx.project!.repository, open.number, { body })
+    const pr: PullRequest = open ?? await github.openPullRequest(ctx.project!.repository, { head: task.branch!, base: await taskBase(db, task, ctx.project!, github), title: `${ref}: ${task.title}`, body })
 
     // D24: a trivial rebase goes to the reviewer unless the server can confirm
     // it. GitHub failing proves nothing, so that also means a review.
@@ -384,13 +364,13 @@ export class RunOutcomes {
 
     const { posted, verified, ciCarried } = await db.transaction(async (tx) => {
       const locked = await this.#d.runs.lockHeld(tx, ctx, 'This run lost its lease while submitting. Stop working.')
-      await tx.update(tasks).set({ headSha: report.headSha, ...(pr && { prNumber: pr.number, prUrl: pr.url }) }).where(eq(tasks.id, task.id))
+      await tx.update(tasks).set({ headSha: report.headSha, prNumber: pr.number, prUrl: pr.url }).where(eq(tasks.id, task.id))
       const carried = rebaseCheck && !rebaseCheck.error && rebaseCheck.failures.length === 0
-        ? await this.#carryVerifiedRebase(tx, ctx, { task: { ...locked.task, headSha: report.headSha!, prNumber: pr?.number ?? locked.task.prNumber }, project: locked.project }, report)
+        ? await this.#carryVerifiedRebase(tx, ctx, { task: { ...locked.task, headSha: report.headSha!, prNumber: pr.number }, project: locked.project }, report)
         : null
       const ciFix = locked.task.ciFix !== null && !task.rebaseOnly
       const ciCarried = ciFix && report.behaviourChanged === false && locked.task.approvedHeadSha
-        ? await this.#carryCiFix(tx, ctx, { task: { ...locked.task, headSha: report.headSha!, prNumber: pr?.number ?? locked.task.prNumber }, project: locked.project }, report)
+        ? await this.#carryCiFix(tx, ctx, { task: { ...locked.task, headSha: report.headSha!, prNumber: pr.number }, project: locked.project }, report)
         : false
       await tx.update(tasks).set({ ciFix: null }).where(eq(tasks.id, task.id))
       if (!carried?.comment && !ciCarried) {
@@ -398,7 +378,7 @@ export class RunOutcomes {
         const checkResult = rebaseCheck && { checkFailures: rebaseCheck.failures, ...(checkError && { checkError }) }
         await applyTransition(tx, locked.task, locked.project, {
           type: 'submit', branchAtExpectedCommit: true, evidenceComplete: true
-        }, SERVER_ACTOR, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr?.number ?? null, ...checkResult })
+        }, SERVER_ACTOR, { event: report.outcome, runId: ctx.run.id, headSha: report.headSha, pr: pr.number, ...checkResult })
       }
       const note = await this.#d.ending.postNote(tx, ctx, report.note!)
       const skipped = Boolean(carried?.comment) || ciCarried
@@ -408,7 +388,6 @@ export class RunOutcomes {
     })
     for (const comment of posted) this.#d.events.publish({ type: 'comment.created', comment })
     this.#d.ending.finished(ctx, 'Outcome accepted', { handoff: true })
-    if (!pr) return { ok: true, message: 'The rebased task\'s branch is ready for review. You can stop now.' }
     if (ciCarried) return { ok: true, pr: pr.url, message: 'The approval carried over. CI runs on your new head, and Corral merges once it passes. You can stop now.' }
     if (verified) return { ok: true, pr: pr.url, message: 'The server verified your trivial rebase, so the approval carried over. Corral handles any human check, CI and the merge from here. You can stop now.' }
     return { ok: true, pr: pr.url, message: `PR #${pr.number} is ready for review. You can stop now.` }

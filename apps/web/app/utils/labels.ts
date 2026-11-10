@@ -125,7 +125,6 @@ export function epicReviewStatus(epic: Pick<Epic, 'reviewMode' | 'branch' | 'rev
   if (epic.reviewMode === 'direct') return null
   if (epic.sync?.state === 'rebasing') return { label: 'Rebasing onto the target branch', color: 'info' }
   if (epic.sync?.state === 'deciding') return { label: 'Rebase needs your decision', color: 'warning' }
-  if (epic.sync?.state === 'resolving') return { label: 'Resolving a rebase conflict', color: 'info' }
   if (epic.sync?.state === 'fixing') return { label: EPIC_FIX[epic.sync.fix].active, color: 'info' }
   if (epic.sync?.state === 'failed') return { label: `${epicStoppedLabel(epic.sync.fix)}, retry to carry on`, color: 'error' }
   const allMerged = epic.taskCount > 0 && epic.mergedCount === epic.taskCount

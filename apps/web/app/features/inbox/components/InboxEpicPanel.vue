@@ -137,7 +137,6 @@ const skeleton = computed(() => loading.value && (['pr', 'diff'].includes(openTa
         :rounds="rounds"
         :feedback="feedback"
         :since-unavailable="r.sinceUnavailable.value"
-        :conflict-task="r.conflictTask.value"
         :mobile="mobile"
         @see-changes="seeChanges"
       />

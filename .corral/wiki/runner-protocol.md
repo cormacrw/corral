@@ -39,11 +39,9 @@ verdict. Integration reviews use
 failed parse comes back as `Not reported. <field>: <problem>`. Whether the
 role and task type may report that outcome is still checked after parsing.
 
-A task resolution's `stuck` or `blocked` with no `decision` isn't refused:
-`#decisionFor` raises a question from the summary with no alternatives, so the
-operation still holds and the human answers in words. That counts as changing
-approved behaviour, like any written answer. A refusal here loses the question,
-because an agent that can't supply the field can only report `failed`.
+A task fix's `stuck` (D29) is refused without `decision` on a conflict fix,
+because the operation holds the writer lock until a human answers and nothing
+else could ask. Any other fix without one stops the task for a human to retry.
 
 ## Run lifecycle
 

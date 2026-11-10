@@ -3,7 +3,6 @@ import { runnerItemId, runnerUpdateProblem } from '@corral/contracts/client'
 import { auditText, readAudit, type AuditView } from './audit.ts'
 import { epicEventText } from './epic-history.ts'
 import { epicInboxItems } from './inbox-epics.ts'
-import { waitingDecisions } from './epic-rebase-approval.ts'
 import { fileArtifacts, isNew, workNotes } from './inbox-changes.ts'
 import type { ActionableInboxItem, Comment, Evidence, Inbox, InboxItem, InboxReadInput, PlanThreadAttention, PlanThreadItem, TaskInboxItem, TaskInboxItemType } from '@corral/contracts'
 import { arrivalKey, storedMessages, withMessages, type PreparedItem } from './inbox-message.ts'
@@ -278,7 +277,6 @@ async function openTasks(db: Executor, taskId?: string) {
     return !state || state.session.closed || (!triaging.has(`${task.id}:${sessionId}`) && !['question', 'needs_approval'].includes(state.attention.status))
   })
   const histories = await taskTransitions(db, open.map(o => o.task.id))
-  const decisions = await waitingDecisions(db, open.filter(o => o.task.status === 'blocked').map(o => o.task.id))
   // No status change marks a stop's arrival: it arrived when its last run ended.
   const stopRuns = open.flatMap(o => idleStop(o.task) ? stopOf(o.task)!.runId ?? [] : [])
   const stoppedAt = new Map(stopRuns.length ? (await db.select({ id: runs.id, endedAt: runs.endedAt }).from(runs).where(inArray(runs.id, stopRuns))).map(r => [r.id, r.endedAt]) : [])
@@ -292,17 +290,15 @@ async function openTasks(db: Executor, taskId?: string) {
     const entered = arrivals[0]
     // A Blocked task whose reason came from the agent's own report is a question
     const stuck = task.status === 'blocked' && readAudit(entered?.detail).event === 'stuck'
-    // An epic rebase's decision is a question too, whoever raised it
-    const decision = decisions.get(task.id) ?? null
     const idle = idleStop(task)
-    const type: TaskInboxItemType = task.status === 'human_review' ? 'human_review' : task.status === 'failed' ? 'failed' : idle ? 'stopped' : stuck || decision ? 'question' : 'blocked'
+    const type: TaskInboxItemType = task.status === 'human_review' ? 'human_review' : task.status === 'failed' ? 'failed' : idle ? 'stopped' : stuck ? 'question' : 'blocked'
     const at = ((idle ? stoppedAt.get(stop!.runId ?? '') : entered?.createdAt) ?? task.updatedAt).toISOString()
     const arrival = arrivalKey({ id: task.id, type, at }, arrivals)
     // The post-triage decision needs fresh findings, not a pre-triage summary.
     const triaged = stop?.sessionId && !waiting.has(`${task.id}:${stop.sessionId}`)
     // Triage began when its conversation did
     const triageStart = stop?.sessionId ? recovery.get(stop.sessionId)?.session.createdAt ?? null : null
-    return { task, project, history, type, decision, at, triageStart, arrival: triaged ? `${arrival}:recovery-${stop.sessionId}` : arrival }
+    return { task, project, history, type, at, triageStart, arrival: triaged ? `${arrival}:recovery-${stop.sessionId}` : arrival }
   })
 }
 
@@ -350,7 +346,7 @@ async function prepareTaskItems(db: Executor, open: Open[]): Promise<PreparedIte
   const versionsOf = Map.groupBy(versions, v => v.taskId)
   const approvalOf = new Map(approvals.map(r => [r.taskId, r]))
   const humanCriteriaOf = Map.groupBy(humanCriteria, c => c.taskId)
-  return open.map(({ task, project, type, decision, at, triageStart, arrival }) => {
+  return open.map(({ task, project, type, at, triageStart, arrival }) => {
     const notes = comments.get(task.id) ?? []
     const taskVersions = versionsOf.get(task.id) ?? []
     // PR reviews get a short note; spikes show their findings. The
@@ -374,7 +370,6 @@ async function prepareTaskItems(db: Executor, open: Open[]): Promise<PreparedIte
       prUrl: task.prUrl,
       resolution: null,
       unread: true,
-      ...decision && { decision },
       ...taskChanges(task, actions.get(task.id) ?? null, evidence.get(task.id) ?? [], notes, taskVersions)
     }
     return { item, arrival }

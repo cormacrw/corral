@@ -204,7 +204,6 @@ export async function getEpicReview(db: Executor, github: GitHubClient, epicId: 
     }),
     seenByHuman: ids.filter(id => seen.has(id)).length,
     lastFeedback: feedback,
-    conflictTaskRef: board.find(({ task }) => task.kind === 'conflict' && !isTaskDone(task))?.task.ref ?? null,
     conflictPending: deferred.has(epic.id) && epic.reviewState !== 'merged',
     mergeCommitSha: epic.mergeCommitSha
   }
