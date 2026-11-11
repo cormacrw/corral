@@ -7,7 +7,7 @@ const CACHE = 'corral-shell-v1'
 
 // Fetched when the worker installs. Paths are relative to the origin, since
 // Corral runs behind whatever hostname the tunnel gives it (D12).
-const SHELL = ['/', '/manifest.webmanifest', '/favicon.ico', '/favicon.svg', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/apple-touch-icon.png']
+const SHELL = ['/', '/manifest.webmanifest', '/favicon.ico', '/icon-192.png', '/icon-512.png', '/icon-maskable-512.png', '/apple-touch-icon.png']
 
 // How a request is served: 'page' (network first, falling back to the cached
 // shell), 'asset' (a content-hashed build file: cache first), 'shell' (a

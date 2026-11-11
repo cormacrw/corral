@@ -1,1 +1,1 @@
-Corral app icon assets. SVG is a scalable vector recreation, not an exact trace of the generated raster. PNGs have transparent rounded-square corners. Includes favicon and mobile icon exports.
+Corral app icon assets. corral.webp is the source artwork; the rest are exports of it. PNGs have transparent rounded-square corners. Includes favicon and mobile icon exports.
