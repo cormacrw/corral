@@ -8,7 +8,7 @@ A snapshot of the whole workspace: what's moving, what's merged and who's workin
 
 A title, then a three-column grid (one column below `lg`):
 
-1. **Stat tiles**, five across on wide screens:
+1. **Stat tiles**, five across on wide screens, all the same height. Each tile's label and icon sit at the top and its number and hint line at the bottom, so the numbers and hints line up across the row; the hint runs the full width, under any sparkline:
    - **Needs you:** the Inbox count, with how many tasks are blocked or failed. Links to the Inbox.
    - **In flight:** tasks In progress, Agent review, Human review or Ready to merge, with how many agents are working.
    - **Merged this week:** tasks merged (and designs approved) in the last 7 days, the change against the 7 before, and a 14-day sparkline.
