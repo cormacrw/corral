@@ -4,6 +4,9 @@ import { cn } from 'cn'
 
 // A stat tile: label, hero number, change against the previous period, and
 // an optional sparkline. `goodWhen` says which direction is an improvement.
+// The label stays at the top and the number with its delta/hint line sits on
+// the bottom, so the numbers and hints of tiles in a row line up whatever
+// each tile shows. The hint runs the full width, under any sparkline.
 const props = withDefaults(defineProps<{
   label: string
   value: string | number
@@ -30,34 +33,34 @@ const good = computed(() => props.delta === undefined || props.delta === 0 ? nul
       />
       <span class="truncate">{{ label }}</span>
     </div>
-    <div class="flex items-end justify-between gap-3">
-      <div class="min-w-0">
-        <div class="text-2xl font-semibold tracking-tight tabular-nums">
+    <div class="mt-auto min-w-0">
+      <div class="flex items-end justify-between gap-3">
+        <div class="min-w-0 text-2xl font-semibold tracking-tight tabular-nums">
           {{ value }}
         </div>
-        <div
-          v-if="delta !== undefined || hint"
-          class="mt-0.5 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground"
-        >
-          <span
-            v-if="delta !== undefined"
-            :class="cn('flex items-center gap-0.5 font-medium', good === true && 'text-success', good === false && 'text-destructive')"
-          >
-            <Icon
-              :name="delta >= 0 ? 'i-hugeicons-arrow-up-right-01' : 'i-hugeicons-arrow-down-right-01'"
-              class="size-3.5"
-            />
-            {{ deltaLabel ?? `${delta > 0 ? '+' : ''}${delta}` }}
-          </span>
-          <span>{{ hint }}</span>
-        </div>
+        <TrendSparkline
+          v-if="spark"
+          :values="spark"
+          :color="sparkColor"
+          class="w-16 shrink-0"
+        />
       </div>
-      <TrendSparkline
-        v-if="spark"
-        :values="spark"
-        :color="sparkColor"
-        class="w-16 shrink-0"
-      />
+      <div
+        v-if="delta !== undefined || hint"
+        class="mt-0.5 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground"
+      >
+        <span
+          v-if="delta !== undefined"
+          :class="cn('flex items-center gap-0.5 font-medium', good === true && 'text-success', good === false && 'text-destructive')"
+        >
+          <Icon
+            :name="delta >= 0 ? 'i-hugeicons-arrow-up-right-01' : 'i-hugeicons-arrow-down-right-01'"
+            class="size-3.5"
+          />
+          {{ deltaLabel ?? `${delta > 0 ? '+' : ''}${delta}` }}
+        </span>
+        <span v-if="hint">{{ hint }}</span>
+      </div>
     </div>
   </div>
 </template>

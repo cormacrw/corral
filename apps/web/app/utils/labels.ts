@@ -132,9 +132,9 @@ export function epicReviewStatus(epic: Pick<Epic, 'reviewMode' | 'branch' | 'rev
   const allMerged = epic.taskCount > 0 && epic.mergedCount === epic.taskCount
   switch (epic.reviewState) {
     case null: return allMerged && epic.branch ? { label: 'All subtasks complete, the task\'s PR opening', color: 'neutral' } : null
-    case 'open': return allMerged ? { label: 'All tasks complete, waiting for agent review', color: 'neutral' } : { label: 'Task\'s PR open, subtasks still to merge', color: 'neutral' }
-    case 'in_review': return { label: 'All tasks complete, agent reviewing', color: 'info' }
-    case 'human_review': return { label: 'All tasks complete, awaiting your review', color: 'warning' }
+    case 'open': return allMerged ? { label: 'All subtasks complete, waiting for agent review', color: 'neutral' } : { label: 'Task\'s PR open, subtasks still to merge', color: 'neutral' }
+    case 'in_review': return { label: 'All subtasks complete, agent reviewing', color: 'info' }
+    case 'human_review': return { label: 'All subtasks complete, awaiting your review', color: 'warning' }
     case 'changes_requested': return { label: 'Changes requested, fixes in progress', color: 'warning' }
     case 'ready_to_merge': return { label: 'Approved, waiting to merge', color: 'success' }
     case 'merged': return { label: 'Task\'s PR merged', color: 'success' }

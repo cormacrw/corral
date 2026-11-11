@@ -22,7 +22,7 @@ defineProps<{ id: string, title: string, merged: number, total: number, epic?: E
     </div>
     <div
       role="meter"
-      :aria-label="`${title}: ${merged} of ${total} tasks done`"
+      :aria-label="`${title}: ${merged} of ${total} subtasks done`"
       :aria-valuenow="merged"
       aria-valuemin="0"
       :aria-valuemax="total"
